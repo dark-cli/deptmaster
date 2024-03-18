@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- General -->
+    <string name="error_message_database_access">Fehler beim Datenbankzugriff, bitte erneut versuchen!
+\n%1$s</string>
+    <string name="button_label_save">Speichern</string>
+    <string name="delete_dialog_confirm">Löschen</string>
+    <string name="dialog_cancel">Abbrechen</string>
+    <string name="required_helper_text">* erforderlich</string>
+    <string name="actionmode_return_item">Gegenstand zurückgegeben</string>
+    <string name="actionmode_return_money">Rückzahlung anlegen</string>
+    <string name="actionmode_edit">Bearbeiten</string>
+    <string name="actionmode_delete">Löschen</string>
+    <plurals name="actionmode_selected">
+        <item quantity="one">%d ausgewählt</item>
+        <item quantity="other">%d ausgewählt</item>
+    </plurals>
+    <string name="actionmode_sum">Summe: %1$s</string>
+    <!-- MainActivity -->
+    <string name="fab_content_description">Transaktion erstellen</string>
+    <string name="bottom_nav_people">@string/title_fragment_person_sum_list</string>
+    <string name="bottom_nav_money">@string/title_fragment_transaction_list_money</string>
+    <string name="bottom_nav_items">@string/title_fragment_transaction_list_items</string>
+    <string name="bottom_nav_settings">@string/title_fragment_settings</string>
+    <string name="dismiss_filter">Filter verwerfen</string>
+    <string name="database_empty">Du hast noch nichts aufgezeichnet.
+\nErstelle eine neue Transaktion mit der +-Schaltfläche ganz unten.</string>
+    <!-- PersonSumListFragment -->
+    <string name="title_fragment_person_sum_list">Personen</string>
+    <string name="person_sum_list_you_owe">du schuldest</string>
+    <string name="person_sum_list_no_debt">keine Schulden</string>
+    <string name="person_sum_list_you_lent">du bekommst</string>
+    <string name="toolbar_create_person">Person erstellen</string>
+    <plurals name="person_sum_list_snackbar_deleted">
+        <item quantity="one">%d Person gelöscht</item>
+        <item quantity="other">%d Personen gelöscht</item>
+    </plurals>
+    <plurals name="person_sum_list_dialog_delete_title">
+        <item quantity="one">%d Person löschen\?</item>
+        <item quantity="other">%d Personen löschen\?</item>
+    </plurals>
+    <string name="person_sum_list_dialog_delete_text">Das kann nicht rückgängig gemacht werden. Alle Transaktionen der Person werden ebenfalls gelöscht.</string>
+    <!-- TransactionListFragment -->
+    <string name="title_fragment_transaction_list_money">Geld</string>
+    <string name="title_fragment_transaction_list_items">Dinge</string>
+    <string name="transaction_list_gave">gab</string>
+    <string name="transaction_list_received">bekam</string>
+    <string name="toolbar_edit_person">Person bearbeiten</string>
+    <string name="header_label">Summe</string>
+    <string name="item_filter">Filter Rückgabestatus</string>
+    <string name="item_filter_all">Alle anzeigen</string>
+    <string name="item_filter_unreturned">Ausstehende anzeigen</string>
+    <string name="item_filter_returned">Zurückgegebene anzeigen</string>
+    <plurals name="transaction_list_snackbar_deleted">
+        <item quantity="one">%d Transaktion gelöscht</item>
+        <item quantity="other">%d Transaktionen gelöscht</item>
+    </plurals>
+    <plurals name="transaction_list_dialog_delete_title">
+        <item quantity="one">%d Transaktion löschen\?</item>
+        <item quantity="other">%d Transaktionen löschen\?</item>
+    </plurals>
+    <string name="transaction_list_dialog_delete_text">Das kann nicht rückgängig gemacht werden.</string>
+    <!-- EditTransactionFragment -->
+    <string name="title_fragment_edit_transaction_create">Transaktion erstellen</string>
+    <string name="title_fragment_edit_transaction">Transaktion bearbeiten</string>
+    <string name="edit_transaction_hint_person">Person *</string>
+    <string name="edit_transaction_error_select_name">Bitte Person auswählen!</string>
+    <string name="edit_transaction_hint_amount_money">Betrag *</string>
+    <string name="edit_transaction_hint_amount_item">Anzahl *</string>
+    <string name="edit_transaction_error_enter_amount">Bitte Betrag angeben!</string>
+    <string name="edit_transaction_error_enter_description">Bitte Beschreibung angeben!</string>
+    <string name="edit_transaction_hint_desc">Beschreibung</string>
+    <string name="edit_transaction_hint_desc_item">Beschreibung *</string>
+    <string name="edit_transaction_wrong_amount_format">Irgendetwas stimmt mit dem Format des Betrages nicht.</string>
+    <string name="edit_transaction_date_dialog_title">Datum wählen</string>
+    <string name="edit_transaction_hint_date">Datum</string>
+    <string name="edit_transaction_hint_returndate">Rückgabedatum</string>
+    <string name="edit_transaction_gave">gab</string>
+    <string name="edit_transaction_received">bekam</string>
+    <string name="edit_transaction_snackbar_max_amount">Max. 9 Ziffern zulässig</string>
+    <string name="debt_settlement_money_description">Rückzahlung für „%1$s“ vom %2$s</string>
+    <string name="edit_transaction_suspicious_return_date_title">Unerwartetes Rückgabedatum</string>
+    <string name="edit_transaction_suspicious_return_date_message">Das ausgewählte Rückgabedatum (%1$s) liegt vor dem Datum der usrprünglichen Transaktion. Trotzdem verwenden\?</string>
+    <string name="edit_transaction_use_suspicious_return_date">Datum verwenden</string>
+    <!-- EditPersonFragment -->
+    <string name="title_fragment_edit_person">Person bearbeiten</string>
+    <string name="title_fragment_edit_person_create">Person erstellen</string>
+    <string name="edit_person_name">Name</string>
+    <string name="error_message_enter_name">Bitte Namen angeben!</string>
+    <string name="error_message_name_exists">%1$s existiert bereits, bitte anderen Namen angeben!</string>
+    <string name="edit_person_note">Notiz</string>
+    <string name="edit_person_hint_linked_contact">Verknüpfter Kontakt</string>
+    <string name="edit_person_hint_no_linked_contact">Kein Kontakt verknüpft</string>
+    <string name="edit_person_helper_linked_contact">Nicht verfügbar wegen fehlender Berechtigung</string>
+    <!-- SettingsFragment -->
+    <string name="title_fragment_settings">Einstellungen</string>
+    <string name="pref_general_header">Allgemein</string>
+    <string name="pref_dismiss_filter_title">Beim Verwerfen des Personenfilters …</string>
+    <string name="pref_dismiss_filter_summary_true">zurück zur Personenliste</string>
+    <string name="pref_dismiss_filter_summary_false">in der aktuellen Liste bleiben</string>
+    <string name="pref_item_returned_filter_title">Standardfilter für Dinge</string>
+    <string name="pref_maintenance_header">Wartung</string>
+    <string name="backup_successful">Daten an ausgewählten Ort exportiert</string>
+    <string name="backup_failed">Sicherung fehlgeschlagen! %1$s</string>
+    <string name="restore_failed">Wiederherstellung fehlgeschlagen! %1$s</string>
+    <string name="pref_backup_title">Daten sichern</string>
+    <string name="pref_restore_title">Daten wiederherstellen</string>
+    <string name="pref_restore_summary">aus einer zuvor gesicherten Zip-Datei</string>
+    <string name="pref_restore_file_not_found">Sicherungsdatei nicht gefunden</string>
+    <string name="pref_info_header">Info</string>
+    <string name="pref_faq_title">Häufige Fragen</string>
+    <string name="pref_github_title">GitHub</string>
+    <string name="pref_github_summary">Quellcode ansehen und verbessern, Fehler und Ideen melden</string>
+    <string name="restore_confirm">Ersetzen</string>
+    <string name="restore_confirm_text">Sollen die bestehenden Daten wirklich mit denen aus der Sicherung ersetzt werden\?
+\nDie App wird nach der Wiederherstellung neu gestartet.</string>
+    <string name="restore_confirm_title">Aus Sicherung wiederherstellen</string>
+    <string name="pref_version">Version %1$s</string>
+    <string name="pref_licenses_title">Drittanbieterlizenzen</string>
+    <!--3rd party license-->
+    <string name="pref_date_format_systemdefault_long">Systemstandard (lang)</string>
+    <string name="pref_date_format_systemdefault_medium">Systemstandard (mittel)</string>
+    <string name="pref_date_format_systemdefault_short">Systemstandard (kurz)</string>
+    <string name="pref_date_format_title">Datumsformat</string>
+    <string name="dialog_gotit">Verstanden</string>
+    <string name="edit_person_contact_deleted">Der verknüpfte Kontakt ist nicht mehr verfügbar. Die Verknüpfung wurde entfernt.</string>
+    <string name="restore_failed_tmpdir">Konnte kein temporäres Verzeichnis anlegen oder nicht hineinschreiben. %1$s</string>
+    <string name="restore_failed_dbFileMissing">Datenbank-Sicherungsdatei \'debitum.db\' fehlt oder ist nicht lesbar.</string>
+    <string name="restore_not_all_images_restored">Achtung: es konnten nicht alle Bilder aus der Sicherungs-Zip wiederhergestellt werden. %1$s</string>
+    <string name="edit_transaction_actionmode_title">Bild ausgewählt</string>
+    <string name="edit_transaction_image_error_app_not_found">Auf deinem Gerät konnte keine App zum Öffnen von Bildern gefunden werden.</string>
+    <string name="edit_transaction_image_error_copying">Das Bild konnte nicht ins Anwendungsverzeichnis kopiert werden! %1$s</string>
+    <string name="edit_transaction_image_add_title">Bild hinzufügen</string>
+    <string name="edit_transaction_image_delete_desc">Bild löschen</string>
+    <string name="pref_nr_decimals_title">Anzahl Nachkommastellen</string>
+    <string name="pref_nr_decimals_two">2</string>
+    <string name="pref_nr_decimals_three">3</string>
+    <string name="decrease_decimals_dialog_confirm">Anzahl Nachkommastellen verringern</string>
+    <string name="decrease_decimals_dialog_title">Warnung</string>
+    <string name="decrease_decimals_dialog_text">Die Beträge von Transaktionen werden möglicherweise gerundet, wenn Nachkommastellen entfallen. Dieser Informationsverlust kann nicht rückgängig gemacht werden, indem die Einstellung auf den vorherigen Wert zurückgesetzt wird.</string>
+    <string name="pref_nr_decimals_zero">0</string>
+    <string name="pref_nr_decimals_one">1</string>
+    <string name="restore_preferences_not_restored">Warnung: die App-Einstellungen konnten nicht wiederhergestellt werden. Prüfe deine Beträge! %1$s</string>
+    <string name="header_desc_items_returned">Dinge zurückgegeben</string>
+    <string name="header_desc_items_lent">Dinge ver-/entliehen</string>
+    <string name="header_desc_items_all">Dinge</string>
+    <string name="pref_invert_colors_summary_off">geliehen: grün, verliehen: rot</string>
+    <string name="pref_invert_colors_title">Ver-/Geliehen-Farben tauschen</string>
+    <string name="pref_invert_colors_summary_on">geliehen: rot, verliehen: grün</string>
+    <string name="toolbar_sort">Sortieren nach</string>
+    <string name="toolbar_sort_name_asc">Name (aufsteigend)</string>
+    <string name="toolbar_sort_name_desc">Name (absteigend)</string>
+    <string name="toolbar_sort_date_asc">Datum (aufsteigend)</string>
+    <string name="toolbar_sort_date_desc">Datum (absteigend)</string>
+    <string name="toolbar_sort_amount_desc">Du schuldest viel</string>
+    <string name="toolbar_sort_amount_asc">Du schuldest wenig</string>
+    <string name="pref_changelog_title">Änderungsprotokoll</string>
+</resources>

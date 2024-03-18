@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--The FrameLayout here is only needed so that the root layout of the PersonSumListFragment is not
+  a CoordinatorLayout. This would cause the snackbar.make(requireView, ...) to attach the snackbar
+  to the (inner) fragment's CoordinatorLayout and not the (outer) Activity's CoordinatorLayout
+  which holds the FAB. Thus the snackbar would be behind the FAB, some way above the bottom of the
+  screen and the FAB would not move out of the way -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:transitionGroup="true"
+    android:transitionName="not needed but transition group is only respected if name set"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <include
+            layout="@layout/header_total" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@id/recyclerview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingBottom="@dimen/bottom_nav_height"
+            android:clipToPadding="false"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior"
+            tools:listitem="@layout/item_person_sum_list"/>
+
+        <include
+            layout="@layout/view_empty_database"/>
+
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+</FrameLayout>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--Top level DayNight theme to be used in AndroidManifest.xml-->
+    <style name="Theme.Debitum" parent="Base.Theme.Debitum">
+        <!--Material color attributes (dark theme) -->
+        <item name="colorPrimary">@color/grey_fjord</item>
+        <item name="colorPrimaryVariant">@color/grey_aztec</item>
+        <item name="colorSecondary">@color/red_coral</item>
+        <item name="colorSecondaryVariant">@color/red_coral</item>
+        <item name="android:colorBackground">@color/black_900</item>
+        <item name="colorSurface">@color/black_800</item>
+        <item name="colorOnPrimary">@color/white_50</item>
+        <item name="colorOnSecondary">@color/black_900</item>
+        <item name="colorOnBackground">@color/white_50</item>
+        <item name="colorOnSurface">@color/white_50</item>
+        <item name="toolbarStyle">@style/Widget.MaterialComponents.Toolbar.Primary</item>
+    </style>
+</resources>

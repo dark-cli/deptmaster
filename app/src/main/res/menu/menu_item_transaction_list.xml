@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:title="@string/item_filter"
+        android:icon="@drawable/ic_outline_filter_alt_24_onprimary"
+        app:showAsAction="always">
+        <menu>
+            <group android:checkableBehavior="single" >
+                <item
+                    android:id="@+id/miFilterAll"
+                    android:icon="@drawable/ic_outline_local_offer_24_controlnormal"
+                    android:title="@string/item_filter_all"
+                    app:showAsAction="never" />
+                <item
+                    android:id="@+id/miFilterUnreturned"
+                    android:icon="@drawable/ic_item_unreturned_24"
+                    android:title="@string/item_filter_unreturned"
+                    app:showAsAction="never" />
+                <item
+                    android:id="@+id/miFilterReturned"
+                    android:icon="@drawable/ic_item_returned_24"
+                    android:title="@string/item_filter_returned" />
+            </group>
+        </menu>
+    </item>
+</menu>

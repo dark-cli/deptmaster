@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/miReturned"
+        android:icon="@drawable/ic_money_returned_24"
+        android:title="@string/actionmode_return_money"
+        android:visible="false"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/miEdit"
+        android:icon="@drawable/ic_baseline_edit_24"
+        android:title="@string/actionmode_edit"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/miDelete"
+        android:icon="@drawable/ic_baseline_delete_onsurface_24"
+        android:title="@string/actionmode_delete"
+        app:showAsAction="ifRoom" />
+</menu>

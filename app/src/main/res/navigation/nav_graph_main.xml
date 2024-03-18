@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    app:startDestination="@id/people_dest">
+
+    <fragment
+        android:id="@+id/people_dest"
+        android:name="org.ebur.debitum.ui.list.PersonSumListFragment"
+        android:label="@string/title_fragment_person_sum_list"
+        tools:layout="@layout/fragment_person_sum_list">
+        <action
+            android:id="@+id/action_personSumList_to_transactionList_on_filter"
+            app:destination="@id/money_dest" />
+        <action
+            android:id="@+id/action_addPerson"
+            app:destination="@id/editPerson_dest" >
+            <argument
+                android:name="editedPerson"
+                android:defaultValue="@null" />
+        </action>
+    </fragment>
+    <fragment
+        android:id="@+id/money_dest"
+        android:name="org.ebur.debitum.ui.list.TransactionListFragment"
+        android:label="@string/title_fragment_transaction_list_money"
+        tools:layout="@layout/fragment_transaction_list">
+        <argument
+            android:name="filterBy"
+            app:argType="integer"
+            android:defaultValue="0" />
+    </fragment>
+    <fragment
+        android:id="@+id/item_dest"
+        android:name="org.ebur.debitum.ui.list.ItemTransactionListFragment"
+        android:label="@string/title_fragment_transaction_list_items"
+        tools:layout="@layout/fragment_transaction_list" >
+        <argument
+            android:name="filterBy"
+            app:argType="integer"
+            android:defaultValue="0" />
+        <action
+            android:id="@+id/action_add_item_transaction"
+            app:destination="@id/editTransaction_dest">
+            <argument
+                android:name="presetType"
+                android:defaultValue="1" />
+        </action>
+    </fragment>
+    <dialog
+        android:id="@+id/editPerson_dest"
+        android:name="org.ebur.debitum.ui.EditPersonFragment"
+        android:label="@string/title_fragment_edit_person"
+        tools:layout="@layout/fragment_edit_person">
+        <argument
+            android:name="editedPerson"
+            android:defaultValue="@null"
+            app:argType="org.ebur.debitum.database.Person"
+            app:nullable="true" />
+        <argument
+            android:name="newPersonRequested"
+            android:defaultValue="false"
+            app:argType="boolean" />
+    </dialog>
+    <dialog
+        android:id="@+id/editTransaction_dest"
+        android:name="org.ebur.debitum.ui.edit_transaction.EditTransactionFragment"
+        android:label="@string/title_fragment_edit_transaction"
+        tools:layout="@layout/fragment_edit_transaction" >
+        <argument
+            android:name="idTransaction"
+            app:argType="integer"
+            android:defaultValue="-1"/>
+        <action
+            android:id="@+id/action_requestNewPerson"
+            app:destination="@id/editPerson_dest" >
+            <argument
+                android:name="editedPerson"
+                android:defaultValue="@null" />
+            <argument
+                android:name="newPersonRequested"
+                android:defaultValue="true" />
+        </action>
+        <argument
+            android:name="presetType"
+            app:argType="integer"
+            android:defaultValue="0" />
+        <argument
+            android:name="presetDescription"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+        <argument
+            android:name="presetAmount"
+            app:argType="integer"
+            android:defaultValue="0" />
+        <argument
+            android:name="presetName"
+            app:argType="string"
+            app:nullable="true"
+            android:defaultValue="@null" />
+    </dialog>
+
+    <fragment
+        android:id="@+id/settings_dest"
+        android:name="org.ebur.debitum.ui.SettingsFragment"
+        android:label="@string/title_fragment_settings">
+        <action
+            android:id="@+id/action_settings_to_licenses"
+            app:destination="@id/licenses_dest" >
+        </action>
+    </fragment>
+    <dialog
+        android:id="@+id/licenses_dest"
+        android:name="org.ebur.debitum.ui.HtmlFragment"
+        android:label="@string/pref_licenses_title" >
+        <argument
+            android:name="html_asset_uri"
+            app:argType="reference"
+            android:defaultValue="@string/licenses_uri" />
+    </dialog>
+
+    <dialog
+        android:id="@+id/changelog_dest"
+        android:name="org.ebur.debitum.ui.HtmlFragment"
+        android:label="@string/pref_changelog_title">
+        <argument
+            android:name="html_asset_uri"
+            android:defaultValue="@string/changelog_uri"
+            app:argType="reference" />
+    </dialog>
+    <action
+        android:id="@+id/action_global_add_money_transaction"
+        app:destination="@id/editTransaction_dest">
+        <argument
+            android:name="idTransaction"
+            android:defaultValue="-1" />
+        <argument
+            android:name="presetType"
+            android:defaultValue="0" />
+    </action>
+    <action
+        android:id="@+id/action_global_editPerson"
+        app:destination="@id/editPerson_dest" >
+        <argument
+            android:name="newPersonRequested"
+            android:defaultValue="false" />
+    </action>
+    <action
+        android:id="@+id/action_global_editTransaction"
+        app:destination="@id/editTransaction_dest" >
+    </action>
+    <action
+        android:id="@+id/action_global_changelog"
+        app:destination="@id/changelog_dest" >
+    </action>
+</navigation>

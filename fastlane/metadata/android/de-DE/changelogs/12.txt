@@ -1,0 +1,5 @@
+v1.4.1
+- Übersetzungen aktualisiert (neu: französisch, italienisch von [@Edanas](https://hosted.weblate.org/user/Edanas/))
+- neu: das generierte Kontaktbild im Dialog zum Editieren von Personen entspricht immer dem eingegebenen Namen
+- neu: Benachrichtigung, wenn eine Person editiert wird, die mit einem gelöschten Kontakt verknüpft ist
+- behoben: Rundungsfehler bei bestimmten Beträgen

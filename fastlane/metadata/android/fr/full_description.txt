@@ -1,0 +1,9 @@
+Avec Debitum, vous pouvez suivre toutes sortes de reconnaissances de dette, qu’il s’agisse d’argent ou d’objets prêtés. Ainsi, vous n’oublierez plus jamais si votre ami vous a déjà rendu ce livre ou vous ne vous disputerez plus sur la somme que vous devez à votre collègue pour le café.
+
+Le cas d’usage prévu est de gérer de (petites) dettes personnelles ainsi que les objets prêtés. Pour garder les choses simples, les choses telles que les intérêts, les échéances, les frais, etc. ne seront pas parties intégrantes de l’appli (bien que la description puisse en quelque sorte être utilisée pour cela, mais je recommanderai généralement d’utiliser des applis plus spécialisées dans ce cas).
+
+Vous pouvez sauvegarder et restaurer la base de données où les personnes et les transactions sont stockées.
+
+Aucun service en ligne n’est impliqué, vos données sont donc enregistrées uniquement sur votre appareil (en ce qui concerne cette application).
+
+<i>Keywords: IOU, debt, lend, dette, prêt, argent</i>
