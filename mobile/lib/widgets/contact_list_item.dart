@@ -75,54 +75,57 @@ class ContactListItem extends StatelessWidget {
     final avatarColor = _getAvatarColor(balance, flipColorsValue, context);
     final isSelected = this.isSelected ?? false;
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: isSelected
-          ? Checkbox(
-              value: true,
-              onChanged: (value) => onSelectionChanged?.call(),
-            )
-          : CircleAvatar(
-              backgroundColor: avatarColor.withOpacity(0.2),
-              child: Text(
-                contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
-                style: TextStyle(
-                  color: avatarColor,
-                  fontWeight: FontWeight.bold,
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        leading: isSelected
+            ? Checkbox(
+                value: true,
+                onChanged: (value) => onSelectionChanged?.call(),
+              )
+            : CircleAvatar(
+                backgroundColor: avatarColor.withOpacity(0.2),
+                child: Text(
+                  contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
+                  style: TextStyle(
+                    color: avatarColor,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-      title: Text(
-        contact.name,
-        semanticsLabel: 'Contact ${contact.name}',
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            status,
-            style: TextStyle(
-              color: ThemeColors.gray(context, shade: 600),
-            ),
-          ),
-          if (balance != 0) ...[
-            const SizedBox(height: 2),
+        title: Text(
+          contact.name,
+          semanticsLabel: 'Contact ${contact.name}',
+        ),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
             Text(
-              '${_formatAmount(balance)} IQD',
+              status,
               style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: avatarColor,
+                color: ThemeColors.gray(context, shade: 600),
               ),
             ),
+            if (balance != 0) ...[
+              const SizedBox(height: 2),
+              Text(
+                '${_formatAmount(balance)} IQD',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: avatarColor,
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
+        onTap: onTap,
+        onLongPress: onSelectionChanged != null ? () {
+          onSelectionChanged?.call();
+        } : null,
       ),
-      onTap: onTap,
-      onLongPress: onSelectionChanged != null ? () {
-        onSelectionChanged?.call();
-      } : null,
     );
   }
 }
