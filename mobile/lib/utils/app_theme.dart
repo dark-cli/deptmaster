@@ -82,7 +82,7 @@ class AppTheme {
           color: AppColors.lightOnSurface,
           size: 24,
         ),
-        backgroundColor: AppColors.lightBackgroundEnd.withOpacity(0.8), // Peach with 80% opacity
+        backgroundColor: AppColors.lightSurface, // Material 3 default
         foregroundColor: AppColors.lightOnSurface,
         surfaceTintColor: Colors.transparent,
         shadowColor: Colors.black.withOpacity(0.08),
@@ -251,7 +251,7 @@ class AppTheme {
       // Navigation bar theme (Material 3) - Semi-transparent peach (Kaleem.dev)
       navigationBarTheme: NavigationBarThemeData(
         elevation: 0,
-        backgroundColor: AppColors.lightBackgroundEnd.withOpacity(0.8), // Peach with 80% opacity
+        backgroundColor: AppColors.lightSurface, // Material 3 default
         indicatorColor: AppColors.lightSurfaceVariant,
         labelTextStyle: MaterialStateProperty.resolveWith((states) {
           if (states.contains(MaterialState.selected)) {
