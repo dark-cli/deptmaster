@@ -9,7 +9,6 @@ import 'settings_screen.dart';
 import 'add_contact_screen.dart';
 import 'add_transaction_screen.dart';
 import '../services/auth_service.dart';
-import '../widgets/gradient_background.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -54,16 +53,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: GradientBackground(
-        child: IndexedStack(
-          index: _selectedIndex,
-          children: const [
-            DashboardScreen(), // Dashboard tab
-            ContactsScreen(), // Contacts tab
-            TransactionsScreen(), // Transactions tab
-            SettingsScreen(), // Settings tab
-          ],
-        ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: const [
+          DashboardScreen(), // Dashboard tab
+          ContactsScreen(), // Contacts tab
+          TransactionsScreen(), // Transactions tab
+          SettingsScreen(), // Settings tab
+        ],
       ),
       floatingActionButton: _buildFloatingActionButton(),
       floatingActionButtonLocation: FloatingActionButtonLocation.endDocked,
