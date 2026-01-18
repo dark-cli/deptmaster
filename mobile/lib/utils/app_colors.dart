@@ -30,8 +30,10 @@ class AppColors {
 
   // Dark Mode Colors - Exact Kaleem.dev Palette
   static const Color darkPrimary = Color(0xFF4CAF50); // Green accent
+  static const Color darkPrimaryLight = Color(0xFF66BB6A); // Lighter green
   static const Color darkPrimaryDark = Color(0xFF388E3C); // Darker green
   static const Color darkSecondary = Color(0xFF4CAF50); // Same as accent
+  static const Color darkSecondaryLight = Color(0xFF66BB6A); // Lighter green
   static const Color darkSecondaryDark = Color(0xFF388E3C); // Darker variant
   static const Color darkTertiary = Color(0xFF4CAF50); // Accent color
   static const Color darkTertiaryLight = Color(0xFF66BB6A); // Lighter green

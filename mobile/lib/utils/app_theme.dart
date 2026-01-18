@@ -313,13 +313,13 @@ class AppTheme {
       // Primary colors
       primary: AppColors.darkPrimary,
       onPrimary: AppColors.darkOnPrimary,
-      primaryContainer: AppColors.darkTertiaryLight,
+      primaryContainer: AppColors.darkPrimaryLight,
       onPrimaryContainer: AppColors.darkOnPrimary,
       
       // Secondary colors
       secondary: AppColors.darkSecondary,
       onSecondary: AppColors.darkOnSecondary,
-      secondaryContainer: AppColors.darkTertiaryLight,
+      secondaryContainer: AppColors.darkSecondaryLight,
       onSecondaryContainer: AppColors.darkOnSecondary,
       
       // Tertiary colors
