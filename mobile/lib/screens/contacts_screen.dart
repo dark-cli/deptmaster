@@ -15,6 +15,8 @@ import 'add_transaction_screen.dart';
 import '../services/realtime_service.dart';
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../utils/app_colors.dart';
+import '../utils/theme_colors.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   const ContactsScreen({super.key});
