@@ -65,16 +65,16 @@ class AppTheme {
       colorScheme: colorScheme,
       brightness: Brightness.light,
       
-      // Typography with Google Fonts
-      textTheme: _buildTextTheme(GoogleFonts.interTextTheme(), false),
+      // Typography with Tajawal font (Kaleem.dev)
+      textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), false),
       
       // AppBar theme
       appBarTheme: AppBarTheme(
         elevation: 0,
         centerTitle: false,
-        titleTextStyle: GoogleFonts.inter(
-          fontSize: 20,
-          fontWeight: FontWeight.w500,
+        titleTextStyle: GoogleFonts.tajawal(
+          fontSize: 22, // Nav links: 1.375rem (22px)
+          fontWeight: FontWeight.w700, // Bold
           color: AppColors.lightOnSurface,
         ),
         iconTheme: IconThemeData(
@@ -109,9 +109,9 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: AppShapes.buttonRadius,
           ),
-          textStyle: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+          textStyle: GoogleFonts.tajawal(
+            fontSize: 16, // Body text: 1rem (16px)
+            fontWeight: FontWeight.w400, // Regular
           ),
         ).copyWith(
           elevation: MaterialStateProperty.resolveWith<double>(
@@ -134,9 +134,9 @@ class AppTheme {
             borderRadius: AppShapes.buttonRadius,
           ),
           side: BorderSide(width: 1, color: colorScheme.outline),
-          textStyle: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+          textStyle: GoogleFonts.tajawal(
+            fontSize: 16, // Body text: 1rem (16px)
+            fontWeight: FontWeight.w400, // Regular
           ),
         ),
       ),
@@ -151,9 +151,9 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: AppShapes.smallRadius,
           ),
-          textStyle: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+          textStyle: GoogleFonts.tajawal(
+            fontSize: 16, // Body text: 1rem (16px)
+            fontWeight: FontWeight.w400, // Regular
           ),
         ),
       ),
@@ -192,9 +192,9 @@ class AppTheme {
           borderSide: BorderSide(color: colorScheme.error, width: 2),
         ),
         contentPadding: EdgeInsets.all(AppSpacing.md),
-        labelStyle: GoogleFonts.inter(fontSize: 16),
-        helperStyle: GoogleFonts.inter(fontSize: 12),
-        errorStyle: GoogleFonts.inter(fontSize: 12),
+        labelStyle: GoogleFonts.tajawal(fontSize: 16), // Input: 16px
+        helperStyle: GoogleFonts.tajawal(fontSize: 12),
+        errorStyle: GoogleFonts.tajawal(fontSize: 12),
       ),
       
       // Chip theme
@@ -206,9 +206,9 @@ class AppTheme {
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm,
         ),
-        labelStyle: GoogleFonts.inter(
+        labelStyle: GoogleFonts.tajawal(
           fontSize: 12,
-          fontWeight: FontWeight.w500,
+          fontWeight: FontWeight.w400, // Regular
         ),
       ),
       
@@ -218,9 +218,9 @@ class AppTheme {
           borderRadius: AppShapes.dialogRadius,
         ),
         elevation: 3,
-        titleTextStyle: GoogleFonts.inter(
-          fontSize: 20,
-          fontWeight: FontWeight.w500,
+        titleTextStyle: GoogleFonts.tajawal(
+          fontSize: 22, // Nav links: 1.375rem (22px)
+          fontWeight: FontWeight.w700, // Bold
           color: AppColors.lightOnSurface,
         ),
         contentTextStyle: GoogleFonts.inter(
@@ -275,11 +275,14 @@ class AppTheme {
           vertical: AppSpacing.sm,
         ),
         minVerticalPadding: AppSpacing.sm,
-        titleTextStyle: GoogleFonts.inter(
-          fontSize: 16,
-          fontWeight: FontWeight.w500,
+        titleTextStyle: GoogleFonts.tajawal(
+          fontSize: 16, // Body: 1rem (16px)
+          fontWeight: FontWeight.w700, // Bold
         ),
-        subtitleTextStyle: GoogleFonts.inter(fontSize: 14),
+        subtitleTextStyle: GoogleFonts.tajawal(
+          fontSize: 14,
+          fontWeight: FontWeight.w400, // Regular
+        ),
       ),
       
       // Switch theme
@@ -356,8 +359,8 @@ class AppTheme {
       colorScheme: colorScheme,
       brightness: Brightness.dark,
       
-      // Typography with Google Fonts
-      textTheme: _buildTextTheme(GoogleFonts.interTextTheme(), true),
+      // Typography with Tajawal font (Kaleem.dev)
+      textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), true),
       
       // AppBar theme
       appBarTheme: AppBarTheme(
@@ -405,9 +408,9 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: AppShapes.buttonRadius,
           ),
-          textStyle: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+          textStyle: GoogleFonts.tajawal(
+            fontSize: 16, // Body text: 1rem (16px)
+            fontWeight: FontWeight.w400, // Regular
           ),
         ).copyWith(
           elevation: MaterialStateProperty.resolveWith<double>(
@@ -430,9 +433,9 @@ class AppTheme {
             borderRadius: AppShapes.buttonRadius,
           ),
           side: BorderSide(width: 1, color: colorScheme.outline),
-          textStyle: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+          textStyle: GoogleFonts.tajawal(
+            fontSize: 16, // Body text: 1rem (16px)
+            fontWeight: FontWeight.w400, // Regular
           ),
         ),
       ),
@@ -447,9 +450,9 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: AppShapes.smallRadius,
           ),
-          textStyle: GoogleFonts.inter(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+          textStyle: GoogleFonts.tajawal(
+            fontSize: 16, // Body text: 1rem (16px)
+            fontWeight: FontWeight.w400, // Regular
           ),
         ),
       ),
@@ -488,9 +491,9 @@ class AppTheme {
           borderSide: BorderSide(color: colorScheme.error, width: 2),
         ),
         contentPadding: EdgeInsets.all(AppSpacing.md),
-        labelStyle: GoogleFonts.inter(fontSize: 16),
-        helperStyle: GoogleFonts.inter(fontSize: 12),
-        errorStyle: GoogleFonts.inter(fontSize: 12),
+        labelStyle: GoogleFonts.tajawal(fontSize: 16), // Input: 16px
+        helperStyle: GoogleFonts.tajawal(fontSize: 12),
+        errorStyle: GoogleFonts.tajawal(fontSize: 12),
       ),
       
       // Chip theme
@@ -502,9 +505,9 @@ class AppTheme {
           horizontal: AppSpacing.md,
           vertical: AppSpacing.sm,
         ),
-        labelStyle: GoogleFonts.inter(
+        labelStyle: GoogleFonts.tajawal(
           fontSize: 12,
-          fontWeight: FontWeight.w500,
+          fontWeight: FontWeight.w400, // Regular
         ),
       ),
       
@@ -572,11 +575,14 @@ class AppTheme {
           vertical: AppSpacing.sm,
         ),
         minVerticalPadding: AppSpacing.sm,
-        titleTextStyle: GoogleFonts.inter(
-          fontSize: 16,
-          fontWeight: FontWeight.w500,
+        titleTextStyle: GoogleFonts.tajawal(
+          fontSize: 16, // Body: 1rem (16px)
+          fontWeight: FontWeight.w700, // Bold
         ),
-        subtitleTextStyle: GoogleFonts.inter(fontSize: 14),
+        subtitleTextStyle: GoogleFonts.tajawal(
+          fontSize: 14,
+          fontWeight: FontWeight.w400, // Regular
+        ),
       ),
       
       // Switch theme
@@ -605,109 +611,101 @@ class AppTheme {
         : AppColors.lightOnSurface; // Dark charcoal for clean contrast
     
     return base.copyWith(
-      displayLarge: GoogleFonts.poppins(
+      // H1: 3.5625rem (57px)
+      displayLarge: GoogleFonts.tajawal(
         fontSize: 57,
-        fontWeight: FontWeight.w400,
-        letterSpacing: -0.25,
-        height: 1.12,
+        fontWeight: FontWeight.w700, // Bold
+        height: 1.5, // Line height 1.5
         color: onSurface,
       ),
-      displayMedium: GoogleFonts.poppins(
+      // H2: 2.8125rem (45px)
+      displayMedium: GoogleFonts.tajawal(
         fontSize: 45,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0,
-        height: 1.16,
+        fontWeight: FontWeight.w700, // Bold
+        height: 1.5,
         color: onSurface,
       ),
-      displaySmall: GoogleFonts.poppins(
+      // H3: 2.25rem (36px)
+      displaySmall: GoogleFonts.tajawal(
         fontSize: 36,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0,
-        height: 1.22,
+        fontWeight: FontWeight.w700, // Bold
+        height: 1.5,
         color: onSurface,
       ),
-      headlineLarge: GoogleFonts.poppins(
+      // H4: 2rem (32px)
+      headlineLarge: GoogleFonts.tajawal(
         fontSize: 32,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0,
-        height: 1.25,
+        fontWeight: FontWeight.w700, // Bold
+        height: 1.5,
         color: onSurface,
       ),
-      headlineMedium: GoogleFonts.poppins(
+      headlineMedium: GoogleFonts.tajawal(
         fontSize: 28,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0,
-        height: 1.29,
+        fontWeight: FontWeight.w700, // Bold
+        height: 1.5,
         color: onSurface,
       ),
-      headlineSmall: GoogleFonts.poppins(
+      headlineSmall: GoogleFonts.tajawal(
         fontSize: 24,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0,
-        height: 1.33,
+        fontWeight: FontWeight.w700, // Bold
+        height: 1.5,
         color: onSurface,
       ),
-      titleLarge: GoogleFonts.inter(
+      // Nav links: 1.375rem (22px)
+      titleLarge: GoogleFonts.tajawal(
         fontSize: 22,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0,
-        height: 1.27,
-        color: onSurface,
-      ),
-      titleMedium: GoogleFonts.inter(
-        fontSize: 16,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.15,
+        fontWeight: FontWeight.w700, // Bold
         height: 1.5,
         color: onSurface,
       ),
-      titleSmall: GoogleFonts.inter(
-        fontSize: 14,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.1,
-        height: 1.43,
-        color: onSurface,
-      ),
-      bodyLarge: GoogleFonts.inter(
-        fontSize: 16,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0.5,
+      // Blockquote: 1.333em (~21.3px)
+      titleMedium: GoogleFonts.tajawal(
+        fontSize: 21.3,
+        fontWeight: FontWeight.w400, // Regular
         height: 1.5,
         color: onSurface,
       ),
-      bodyMedium: GoogleFonts.inter(
+      titleSmall: GoogleFonts.tajawal(
+        fontSize: 18,
+        fontWeight: FontWeight.w400, // Regular
+        height: 1.5,
+        color: onSurface,
+      ),
+      // Body text: 1rem (16px), line height 1.5
+      bodyLarge: GoogleFonts.tajawal(
+        fontSize: 16,
+        fontWeight: FontWeight.w400, // Regular
+        height: 1.5, // Line height 1.5
+        color: onSurface,
+      ),
+      bodyMedium: GoogleFonts.tajawal(
+        fontSize: 16,
+        fontWeight: FontWeight.w400, // Regular
+        height: 1.5,
+        color: onSurface,
+      ),
+      bodySmall: GoogleFonts.tajawal(
         fontSize: 14,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0.25,
-        height: 1.43,
+        fontWeight: FontWeight.w400, // Regular
+        height: 1.5,
         color: onSurface,
       ),
-      bodySmall: GoogleFonts.inter(
-        fontSize: 12,
-        fontWeight: FontWeight.w400,
-        letterSpacing: 0.4,
-        height: 1.33,
+      labelLarge: GoogleFonts.tajawal(
+        fontSize: 16,
+        fontWeight: FontWeight.w400, // Regular
+        height: 1.5,
         color: onSurface,
       ),
-      labelLarge: GoogleFonts.inter(
+      labelMedium: GoogleFonts.tajawal(
         fontSize: 14,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.1,
-        height: 1.43,
+        fontWeight: FontWeight.w400, // Regular
+        height: 1.5,
         color: onSurface,
       ),
-      labelMedium: GoogleFonts.inter(
+      labelSmall: GoogleFonts.tajawal(
         fontSize: 12,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.5,
-        height: 1.33,
-        color: onSurface,
-      ),
-      labelSmall: GoogleFonts.inter(
-        fontSize: 11,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.5,
-        height: 1.45,
+        fontWeight: FontWeight.w400, // Regular
+        height: 1.5,
         color: onSurface,
       ),
     );

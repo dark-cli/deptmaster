@@ -5,41 +5,51 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._(); // Private constructor to prevent instantiation
 
-  // Light Mode Colors - Kaleem.dev Inspired Theme
-  static const Color lightPrimary = Color(0xFFE65F1E); // Deep orange/red - Kaleem accent
-  static const Color lightPrimaryDark = Color(0xFFD35400); // Darker orange - Rich accent
-  static const Color lightSecondary = Color(0xFFF97316); // Orange 500 - Secondary accent
-  static const Color lightSecondaryDark = Color(0xFFEA580C); // Orange 600
-  static const Color lightTertiary = Color(0xFFF59E0B); // Amber 500 - Tertiary
-  static const Color lightTertiaryDark = Color(0xFFD97706); // Amber 600
+  // Light Mode Colors - Exact Kaleem.dev Palette
+  static const Color lightPrimary = Color(0xFF964A4A); // Reddish-brown accent
+  static const Color lightPrimaryDark = Color(0xFF7A3B3B); // Darker reddish-brown
+  static const Color lightSecondary = Color(0xFF964A4A); // Same as accent
+  static const Color lightSecondaryDark = Color(0xFF7A3B3B); // Darker variant
+  static const Color lightTertiary = Color(0xFF964A4A); // Accent color
+  static const Color lightTertiaryDark = Color(0xFF7A3B3B); // Darker accent
   static const Color lightError = Color(0xFFDC2626); // Red 600
   static const Color lightSuccess = Color(0xFF16A34A); // Green 600
   static const Color lightWarning = Color(0xFFF59E0B); // Amber 500
-  static const Color lightBackground = Color(0xFFFAFAFA); // Clean off-white - Kaleem style
-  static const Color lightSurface = Color(0xFFFFFFFF); // Pure white
-  static const Color lightSurfaceVariant = Color(0xFFF5F5F5); // Light gray variant
+  // Background: Gradient from #F5E7DE → #F2BFA4 (beige to peach)
+  static const Color lightBackground = Color(0xFFF5E7DE); // Beige/cream - start of gradient
+  static const Color lightBackgroundEnd = Color(0xFFF2BFA4); // Peach - end of gradient
+  static const Color lightSurface = Color(0xFFFFFFFF); // White header background
+  static const Color lightSurfaceVariant = Color(0xFFF5F5F5); // Very light gray
   static const Color lightOnPrimary = Color(0xFFFFFFFF); // White
   static const Color lightOnSecondary = Color(0xFFFFFFFF); // White
-  static const Color lightOnSurface = Color(0xFF2B2B2B); // Dark charcoal - Kaleem text
-  static const Color lightOnBackground = Color(0xFF2B2B2B); // Dark charcoal
+  static const Color lightOnSurface = Color(0xFF34495E); // Dark blue-gray - header text
+  static const Color lightOnBackground = Color(0xFF34495E); // Dark blue-gray - black
+  static const Color lightGray = Color(0xFFDCDCDC); // Light gray (220, 220, 220)
+  static const Color lightGrayLight = Color(0xFFF5F5F5); // Very light gray (245, 245, 245)
+  static const Color lightGrayDark = Color(0xFF212529); // Dark gray (33, 37, 41)
 
-  // Dark Mode Colors - Kaleem.dev Inspired Theme
-  static const Color darkPrimary = Color(0xFFFF8147); // Lighter orange - Better contrast on dark
-  static const Color darkPrimaryLight = Color(0xFFFF9D6B); // Light orange - Highlight
-  static const Color darkSecondary = Color(0xFFF28C38); // Orange - Secondary accent
-  static const Color darkSecondaryLight = Color(0xFFFFA366); // Light orange
-  static const Color darkTertiary = Color(0xFFFBBF24); // Amber 400 - Tertiary
-  static const Color darkTertiaryLight = Color(0xFFFCD34D); // Amber 300
+  // Dark Mode Colors - Exact Kaleem.dev Palette
+  static const Color darkPrimary = Color(0xFF4CAF50); // Green accent
+  static const Color darkPrimaryDark = Color(0xFF388E3C); // Darker green
+  static const Color darkSecondary = Color(0xFF4CAF50); // Same as accent
+  static const Color darkSecondaryDark = Color(0xFF388E3C); // Darker variant
+  static const Color darkTertiary = Color(0xFF4CAF50); // Accent color
+  static const Color darkTertiaryLight = Color(0xFF66BB6A); // Lighter green
   static const Color darkError = Color(0xFFF87171); // Red 400
-  static const Color darkSuccess = Color(0xFF4ADE80); // Green 400
+  static const Color darkSuccess = Color(0xFF4CAF50); // Green accent
   static const Color darkWarning = Color(0xFFFBBF24); // Amber 400
-  static const Color darkBackground = Color(0xFF0F0F0F); // Near-black - Kaleem dark mode
-  static const Color darkSurface = Color(0xFF1C1C1C); // Dark gray - Kaleem surface
-  static const Color darkSurfaceVariant = Color(0xFF2A2A2A); // Medium dark gray
-  static const Color darkOnPrimary = Color(0xFF0F0F0F); // Near-black
-  static const Color darkOnSecondary = Color(0xFF0F0F0F); // Near-black
-  static const Color darkOnSurface = Color(0xFFEFEFEF); // Light gray/white - Kaleem text
-  static const Color darkOnBackground = Color(0xFFEFEFEF); // Light gray/white
+  // Background: Gradient from #1E221E → #151815 (dark green-black gradient)
+  static const Color darkBackground = Color(0xFF1E221E); // Dark green-black - start of gradient
+  static const Color darkBackgroundEnd = Color(0xFF151815); // Very dark green-black - end of gradient
+  static const Color darkSurface = Color(0xFF151815); // Very dark green-black - header background
+  static const Color darkSurfaceVariant = Color(0xFF3E463E); // Dark green-gray
+  static const Color darkOnPrimary = Color(0xFFFFFFFF); // White
+  static const Color darkOnSecondary = Color(0xFFFFFFFF); // White
+  static const Color darkOnSurface = Color(0xFFF0FFF0); // Light green-tinted white - header text
+  static const Color darkOnBackground = Color(0xFFF0FFF0); // Light green-tinted white - black
+  static const Color darkGray = Color(0xFF3C463C); // Dark green-gray (60, 70, 60)
+  static const Color darkGrayLight = Color(0xFF1E231E); // Very dark green-gray (30, 35, 30)
+  static const Color darkGrayDark = Color(0xFFF0FFF0); // Light green-tinted white (240, 255, 240)
 
   // Semantic Colors (Balance) - Respects flipColors setting
   // These will be used with Consumer to watch flipColorsProvider
