@@ -368,21 +368,23 @@ class AppTheme {
       // Typography with Tajawal font (Kaleem.dev)
       textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), true),
       
-      // AppBar theme
+      // AppBar theme - Solid dark green-black with shadow (Kaleem.dev)
       appBarTheme: AppBarTheme(
         elevation: 0,
         centerTitle: false,
-        titleTextStyle: GoogleFonts.inter(
-          fontSize: 20,
-          fontWeight: FontWeight.w500,
+        titleTextStyle: GoogleFonts.tajawal(
+          fontSize: 22, // Nav links: 1.375rem (22px)
+          fontWeight: FontWeight.w700, // Bold
           color: AppColors.darkOnSurface,
         ),
         iconTheme: IconThemeData(
           color: AppColors.darkOnSurface,
           size: 24,
         ),
-        backgroundColor: AppColors.darkSurface,
+        backgroundColor: AppColors.darkSurface, // #151815 - solid
         foregroundColor: AppColors.darkOnSurface,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.black.withOpacity(0.08),
       ),
       
       // Card theme
