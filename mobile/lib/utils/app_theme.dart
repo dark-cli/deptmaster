@@ -67,9 +67,6 @@ class AppTheme {
       
       // Typography with Google Fonts
       textTheme: _buildTextTheme(GoogleFonts.interTextTheme(), false),
-      displayLarge: GoogleFonts.poppins(),
-      displayMedium: GoogleFonts.poppins(),
-      displaySmall: GoogleFonts.poppins(),
       
       // AppBar theme
       appBarTheme: AppBarTheme(
@@ -361,9 +358,6 @@ class AppTheme {
       
       // Typography with Google Fonts
       textTheme: _buildTextTheme(GoogleFonts.interTextTheme(), true),
-      displayLarge: GoogleFonts.poppins(),
-      displayMedium: GoogleFonts.poppins(),
-      displaySmall: GoogleFonts.poppins(),
       
       // AppBar theme
       appBarTheme: AppBarTheme(
