@@ -397,7 +397,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                     return ListTile(
                                       leading: const Icon(Icons.person),
                                       title: Directionality(
-                                        textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+                                        textDirection: const TextDirection(0), // Force LTR for mixed Arabic/English text
                                         child: Text(contact.name),
                                       ),
                                       onTap: () {
