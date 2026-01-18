@@ -5,62 +5,61 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._(); // Private constructor to prevent instantiation
 
-  // Light Mode Colors - Exact Kaleem.dev Palette
-  static const Color lightPrimary = Color(0xFF964A4A); // Reddish-brown accent
-  static const Color lightPrimaryDark = Color(0xFF7A3B3B); // Darker reddish-brown
-  static const Color lightSecondary = Color(0xFF964A4A); // Same as accent
-  static const Color lightSecondaryDark = Color(0xFF7A3B3B); // Darker variant
-  static const Color lightTertiary = Color(0xFF964A4A); // Accent color
-  static const Color lightTertiaryDark = Color(0xFF7A3B3B); // Darker accent
-  static const Color lightError = Color(0xFFDC2626); // Red 600
+  // Light Mode Colors - Material Design 3 Defaults
+  // Using Material 3 default blue seed color
+  static const Color lightPrimary = Color(0xFF6750A4); // Material 3 default primary
+  static const Color lightPrimaryDark = Color(0xFF4F378B); // Darker primary
+  static const Color lightSecondary = Color(0xFF625B71); // Material 3 default secondary
+  static const Color lightSecondaryDark = Color(0xFF4A4458); // Darker secondary
+  static const Color lightTertiary = Color(0xFF7D5260); // Material 3 default tertiary
+  static const Color lightTertiaryDark = Color(0xFF633B48); // Darker tertiary
+  static const Color lightError = Color(0xFFBA1A1A); // Material 3 default error
   static const Color lightSuccess = Color(0xFF16A34A); // Green 600
   static const Color lightWarning = Color(0xFFF59E0B); // Amber 500
-  // Background: Gradient from #F5E7DE → #F2BFA4 (beige to peach)
-  static const Color lightBackground = Color(0xFFF5E7DE); // Beige/cream - start of gradient
-  static const Color lightBackgroundEnd = Color(0xFFF2BFA4); // Peach - end of gradient
-  static const Color lightSurface = Color(0xFFFFFFFF); // White header background
-  static const Color lightSurfaceVariant = Color(0xFFF5F5F5); // Very light gray
+  static const Color lightBackground = Color(0xFFFFFBFE); // Material 3 default background
+  static const Color lightBackgroundEnd = Color(0xFFFFFBFE); // Same for no gradient
+  static const Color lightSurface = Color(0xFFFFFBFE); // Material 3 default surface
+  static const Color lightSurfaceVariant = Color(0xFFE7E0EC); // Material 3 surface variant
   static const Color lightOnPrimary = Color(0xFFFFFFFF); // White
   static const Color lightOnSecondary = Color(0xFFFFFFFF); // White
-  static const Color lightOnSurface = Color(0xFF34495E); // Dark blue-gray - header text
-  static const Color lightOnBackground = Color(0xFF34495E); // Dark blue-gray - black
-  static const Color lightGray = Color(0xFFDCDCDC); // Light gray (220, 220, 220)
-  static const Color lightGrayLight = Color(0xFFF5F5F5); // Very light gray (245, 245, 245)
-  static const Color lightGrayDark = Color(0xFF212529); // Dark gray (33, 37, 41)
+  static const Color lightOnSurface = Color(0xFF1C1B1F); // Material 3 on surface
+  static const Color lightOnBackground = Color(0xFF1C1B1F); // Material 3 on background
+  static const Color lightGray = Color(0xFF79747E); // Material 3 outline
+  static const Color lightGrayLight = Color(0xFFE7E0EC); // Surface variant
+  static const Color lightGrayDark = Color(0xFF49454F); // On surface variant
 
-  // Dark Mode Colors - Exact Kaleem.dev Palette
-  static const Color darkPrimary = Color(0xFF4CAF50); // Green accent
-  static const Color darkPrimaryLight = Color(0xFF66BB6A); // Lighter green
-  static const Color darkPrimaryDark = Color(0xFF388E3C); // Darker green
-  static const Color darkSecondary = Color(0xFF4CAF50); // Same as accent
-  static const Color darkSecondaryLight = Color(0xFF66BB6A); // Lighter green
-  static const Color darkSecondaryDark = Color(0xFF388E3C); // Darker variant
-  static const Color darkTertiary = Color(0xFF4CAF50); // Accent color
-  static const Color darkTertiaryLight = Color(0xFF66BB6A); // Lighter green
-  static const Color darkError = Color(0xFFF87171); // Red 400
-  static const Color darkSuccess = Color(0xFF4CAF50); // Green accent
+  // Dark Mode Colors - Material Design 3 Defaults
+  static const Color darkPrimary = Color(0xFFD0BCFF); // Material 3 default primary (light)
+  static const Color darkPrimaryLight = Color(0xFFEADDFF); // Lighter primary
+  static const Color darkPrimaryDark = Color(0xFFB69DF8); // Darker primary
+  static const Color darkSecondary = Color(0xFFCCC2DC); // Material 3 default secondary
+  static const Color darkSecondaryLight = Color(0xFFE8DEF8); // Lighter secondary
+  static const Color darkSecondaryDark = Color(0xFFB0A6C0); // Darker secondary
+  static const Color darkTertiary = Color(0xFFEFB8C8); // Material 3 default tertiary
+  static const Color darkTertiaryLight = Color(0xFFF2D8E4); // Lighter tertiary
+  static const Color darkError = Color(0xFFFFB4AB); // Material 3 default error
+  static const Color darkSuccess = Color(0xFF4ADE80); // Green 400
   static const Color darkWarning = Color(0xFFFBBF24); // Amber 400
-  // Background: Gradient from #1E221E → #151815 (dark green-black gradient)
-  static const Color darkBackground = Color(0xFF1E221E); // Dark green-black - start of gradient
-  static const Color darkBackgroundEnd = Color(0xFF151815); // Very dark green-black - end of gradient
-  static const Color darkSurface = Color(0xFF151815); // Very dark green-black - header background
-  static const Color darkSurfaceVariant = Color(0xFF3E463E); // Dark green-gray
-  static const Color darkOnPrimary = Color(0xFFFFFFFF); // White
-  static const Color darkOnSecondary = Color(0xFFFFFFFF); // White
-  static const Color darkOnSurface = Color(0xFFF0FFF0); // Light green-tinted white - header text
-  static const Color darkOnBackground = Color(0xFFF0FFF0); // Light green-tinted white - black
-  static const Color darkGray = Color(0xFF3C463C); // Dark green-gray (60, 70, 60)
-  static const Color darkGrayLight = Color(0xFF1E231E); // Very dark green-gray (30, 35, 30)
-  static const Color darkGrayDark = Color(0xFFF0FFF0); // Light green-tinted white (240, 255, 240)
+  static const Color darkBackground = Color(0xFF1C1B1F); // Material 3 default background
+  static const Color darkBackgroundEnd = Color(0xFF1C1B1F); // Same for no gradient
+  static const Color darkSurface = Color(0xFF1C1B1F); // Material 3 default surface
+  static const Color darkSurfaceVariant = Color(0xFF49454F); // Material 3 surface variant
+  static const Color darkOnPrimary = Color(0xFF381E72); // Material 3 on primary
+  static const Color darkOnSecondary = Color(0xFF332D41); // Material 3 on secondary
+  static const Color darkOnSurface = Color(0xFFE6E1E5); // Material 3 on surface
+  static const Color darkOnBackground = Color(0xFFE6E1E5); // Material 3 on background
+  static const Color darkGray = Color(0xFF938F99); // Material 3 outline
+  static const Color darkGrayLight = Color(0xFF49454F); // Surface variant
+  static const Color darkGrayDark = Color(0xFFCAC4D0); // On surface variant
 
-  // Semantic Colors for Give/Received - Fits Kaleem.dev theme
-  // Light Mode: Give = reddish-brown (accent), Received = warm teal
-  static const Color lightGive = Color(0xFF964A4A); // Reddish-brown - matches accent
-  static const Color lightReceived = Color(0xFF0D9488); // Warm teal - complements beige background
+  // Semantic Colors for Give/Received - Material 3 defaults
+  // Light Mode: Give = red (error), Received = green (success)
+  static const Color lightGive = Color(0xFFBA1A1A); // Material 3 error - red
+  static const Color lightReceived = Color(0xFF16A34A); // Green 600 - success
   
-  // Dark Mode: Give = green (accent), Received = warm amber
-  static const Color darkGive = Color(0xFF4CAF50); // Green - matches accent
-  static const Color darkReceived = Color(0xFFF59E0B); // Warm amber - complements dark green
+  // Dark Mode: Give = red (error), Received = green (success)
+  static const Color darkGive = Color(0xFFFFB4AB); // Material 3 error - light red
+  static const Color darkReceived = Color(0xFF4ADE80); // Green 400 - success
   
   // Semantic Colors (Balance) - Respects flipColors setting
   // These will be used with Consumer to watch flipColorsProvider

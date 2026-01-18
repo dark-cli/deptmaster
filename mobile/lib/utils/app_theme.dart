@@ -64,7 +64,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: Brightness.light,
-      scaffoldBackgroundColor: Colors.transparent, // Allow gradient to show through
+      scaffoldBackgroundColor: AppColors.lightBackground, // Material 3 default
       
       // Typography with Tajawal font (Kaleem.dev)
       textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), false),
@@ -365,7 +365,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: Brightness.dark,
-      scaffoldBackgroundColor: Colors.transparent, // Allow gradient to show through
+      scaffoldBackgroundColor: AppColors.lightBackground, // Material 3 default
       
       // Typography with Tajawal font (Kaleem.dev)
       textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), true),
@@ -383,7 +383,7 @@ class AppTheme {
           color: AppColors.darkOnSurface,
           size: 24,
         ),
-        backgroundColor: AppColors.darkSurface, // #151815 - solid
+        backgroundColor: AppColors.darkSurface, // Material 3 default
         foregroundColor: AppColors.darkOnSurface,
         surfaceTintColor: Colors.transparent,
         shadowColor: Colors.black.withOpacity(0.08),
@@ -558,7 +558,7 @@ class AppTheme {
       // Navigation bar theme (Material 3) - Solid dark green-black (Kaleem.dev)
       navigationBarTheme: NavigationBarThemeData(
         elevation: 0,
-        backgroundColor: AppColors.darkSurface, // #151815 - solid
+        backgroundColor: AppColors.darkSurface, // Material 3 default
         indicatorColor: AppColors.darkSurfaceVariant,
         labelTextStyle: MaterialStateProperty.resolveWith((states) {
           if (states.contains(MaterialState.selected)) {
