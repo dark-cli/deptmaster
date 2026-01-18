@@ -315,11 +315,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text(
-                                  contact.name,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                  overflow: TextOverflow.ellipsis,
+                                child: Directionality(
                                   textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+                                  child: Text(
+                                    contact.name,
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
                               Text(
@@ -363,11 +365,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text(
-                                  contact.name,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                  overflow: TextOverflow.ellipsis,
+                                child: Directionality(
                                   textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+                                  child: Text(
+                                    contact.name,
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
                               Text(

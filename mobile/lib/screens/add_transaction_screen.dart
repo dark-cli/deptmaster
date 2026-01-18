@@ -396,9 +396,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                     final contact = _filteredContacts[index];
                                     return ListTile(
                                       leading: const Icon(Icons.person),
-                                      title: Text(
-                                        contact.name,
+                                      title: Directionality(
                                         textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+                                        child: Text(contact.name),
                                       ),
                                       onTap: () {
                                         setState(() {

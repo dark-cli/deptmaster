@@ -93,9 +93,9 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
       appBar: AppBar(
         title: _selectionMode 
             ? Text('${_selectedTransactions.length} selected')
-            : Text(
-                widget.contact.name,
+            : Directionality(
                 textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+                child: Text(widget.contact.name),
               ),
         leading: _selectionMode
             ? IconButton(

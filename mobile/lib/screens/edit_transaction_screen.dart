@@ -260,9 +260,9 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                     items: _contacts.map((contact) {
                       return DropdownMenuItem(
                         value: contact,
-                        child: Text(
-                          contact.name,
+                        child: Directionality(
                           textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+                          child: Text(contact.name),
                         ),
                       );
                     }).toList(),

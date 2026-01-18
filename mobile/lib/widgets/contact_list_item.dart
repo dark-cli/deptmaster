@@ -94,10 +94,12 @@ class ContactListItem extends StatelessWidget {
                   ),
                 ),
               ),
-        title: Text(
-          contact.name,
-          semanticsLabel: 'Contact ${contact.name}',
+        title: Directionality(
           textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+          child: Text(
+            contact.name,
+            semanticsLabel: 'Contact ${contact.name}',
+          ),
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
