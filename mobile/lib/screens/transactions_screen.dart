@@ -691,7 +691,10 @@ class TransactionListItem extends StatelessWidget {
             color: color,
           ),
         ),
-        title: Text(_getContactName()),
+        title: Text(
+          _getContactName(),
+          textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,

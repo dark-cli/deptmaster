@@ -97,6 +97,7 @@ class ContactListItem extends StatelessWidget {
         title: Text(
           contact.name,
           semanticsLabel: 'Contact ${contact.name}',
+          textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,

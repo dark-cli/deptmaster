@@ -319,6 +319,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                   contact.name,
                                   style: Theme.of(context).textTheme.bodySmall,
                                   overflow: TextOverflow.ellipsis,
+                                  textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
                                 ),
                               ),
                               Text(
@@ -366,6 +367,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                   contact.name,
                                   style: Theme.of(context).textTheme.bodySmall,
                                   overflow: TextOverflow.ellipsis,
+                                  textDirection: TextDirection.ltr, // Force LTR for mixed Arabic/English text
                                 ),
                               ),
                               Text(
