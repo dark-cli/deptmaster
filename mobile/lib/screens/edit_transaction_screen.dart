@@ -1,0 +1,456 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/transaction.dart';
+import '../models/contact.dart';
+import '../services/api_service.dart';
+import '../services/settings_service.dart';
+import '../providers/settings_provider.dart';
+
+class EditTransactionScreen extends ConsumerStatefulWidget {
+  final Transaction transaction;
+  final Contact? contact; // Optional - if provided, contact is fixed
+
+  const EditTransactionScreen({
+    super.key,
+    required this.transaction,
+    this.contact,
+  });
+
+  @override
+  ConsumerState<EditTransactionScreen> createState() => _EditTransactionScreenState();
+}
+
+class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _amountController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  
+  Contact? _selectedContact;
+  TransactionDirection _direction = TransactionDirection.owed;
+  DateTime _selectedDate = DateTime.now();
+  DateTime? _dueDate;
+  bool _dueDateSwitchEnabled = false; // Switch state for due date
+  bool _saving = false;
+  List<Contact> _contacts = [];
+
+  // Format number with thousands separators
+  static String _formatNumber(String value) {
+    // Remove all non-digit characters
+    final digitsOnly = value.replaceAll(RegExp(r'[^\d]'), '');
+    if (digitsOnly.isEmpty) return '';
+    
+    // Parse as integer and format with commas
+    final number = int.tryParse(digitsOnly);
+    if (number == null) return value;
+    
+    return number.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  // Parse formatted number back to integer
+  static int _parseFormattedNumber(String value) {
+    final digitsOnly = value.replaceAll(RegExp(r'[^\d]'), '');
+    return int.tryParse(digitsOnly) ?? 0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize with transaction data - format amount with commas
+    _amountController.text = _formatNumber(widget.transaction.amount.toString());
+    _descriptionController.text = widget.transaction.description ?? '';
+    _direction = widget.transaction.direction;
+    _selectedDate = widget.transaction.transactionDate;
+    _dueDate = widget.transaction.dueDate;
+    _dueDateSwitchEnabled = widget.transaction.dueDate != null;
+    _loadContacts();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    // Settings loaded, but due date switch state comes from transaction data
+  }
+
+  Future<void> _loadContacts() async {
+    try {
+      final contacts = await ApiService.getContacts();
+      if (mounted) {
+        setState(() {
+          _contacts = contacts;
+          // Set selected contact - find by ID from loaded list
+          if (widget.contact != null && contacts.isNotEmpty) {
+            _selectedContact = contacts.firstWhere(
+              (c) => c.id == widget.contact!.id,
+              orElse: () => contacts.firstWhere(
+                (c) => c.id == widget.transaction.contactId,
+                orElse: () => contacts.first,
+              ),
+            );
+          } else if (contacts.isNotEmpty) {
+            _selectedContact = contacts.firstWhere(
+              (c) => c.id == widget.transaction.contactId,
+              orElse: () => contacts.first,
+            );
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading contacts: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _selectDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _selectDueDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dueDate ?? DateTime.now().add(const Duration(days: 30)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _dueDate = picked;
+      });
+    }
+  }
+
+  Future<void> _saveTransaction() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedContact == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a contact')),
+      );
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+    });
+
+    try {
+      final amountText = _amountController.text.trim();
+      final amount = _parseFormattedNumber(amountText); // Parse formatted number
+
+      // Call API to update transaction
+      await ApiService.updateTransaction(
+        widget.transaction.id,
+        amount: amount,
+        direction: _direction,
+        description: _descriptionController.text.trim().isEmpty
+            ? null
+            : _descriptionController.text.trim(),
+        transactionDate: _selectedDate,
+        contactId: _selectedContact!.id,
+        dueDate: _dueDateSwitchEnabled ? _dueDate : null,
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop(true); // Return true to indicate success
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Transaction updated!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Edit Transaction'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Delete Transaction'),
+                  content: const Text('Are you sure you want to delete this transaction?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: TextButton.styleFrom(foregroundColor: Colors.red),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirm == true && mounted) {
+                try {
+                  await ApiService.deleteTransaction(widget.transaction.id);
+                  if (mounted) {
+                    Navigator.of(context).pop(true); // Return true to refresh
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('✅ Transaction deleted!')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error deleting: $e')),
+                    );
+                  }
+                }
+              }
+            },
+          ),
+        ],
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // Contact selector (disabled if contact is fixed)
+            _contacts.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : DropdownButtonFormField<Contact>(
+                    value: _selectedContact,
+                    decoration: const InputDecoration(
+                      labelText: 'Contact *',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _contacts.map((contact) {
+                      return DropdownMenuItem(
+                        value: contact,
+                        child: Text(contact.name),
+                      );
+                    }).toList(),
+                    onChanged: widget.contact != null ? null : (contact) {
+                      setState(() {
+                        _selectedContact = contact;
+                      });
+                    },
+                    validator: (value) {
+                      if (value == null) {
+                        return 'Please select a contact';
+                      }
+                      return null;
+                    },
+                  ),
+            const SizedBox(height: 16),
+            
+            // Direction selector - "Give" or "Received"
+            Consumer(
+              builder: (context, ref, child) {
+                final flipColors = ref.watch(flipColorsProvider);
+                final giveColor = flipColors ? Colors.red : Colors.green;
+                final receivedColor = flipColors ? Colors.green : Colors.red;
+                
+                return SegmentedButton<TransactionDirection>(
+                  segments: [
+                    ButtonSegment(
+                      value: TransactionDirection.lent,
+                      label: const Text('Give'),
+                      icon: Icon(Icons.arrow_upward, color: giveColor),
+                    ),
+                    ButtonSegment(
+                      value: TransactionDirection.owed,
+                      label: const Text('Received'),
+                      icon: Icon(Icons.arrow_downward, color: receivedColor),
+                    ),
+                  ],
+                  selected: {_direction},
+                  onSelectionChanged: (Set<TransactionDirection> newSelection) {
+                    setState(() {
+                      _direction = newSelection.first;
+                    });
+                  },
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            
+            // Amount
+            TextFormField(
+              controller: _amountController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Amount (IQD) *',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[\d,]')),
+                TextInputFormatter.withFunction((oldValue, newValue) {
+                  // Format the number with commas as user types
+                  final formatted = _formatNumber(newValue.text);
+                  // Preserve cursor position
+                  final cursorOffset = newValue.selection.baseOffset;
+                  final newCursorOffset = formatted.length - (oldValue.text.length - cursorOffset);
+                  return TextEditingValue(
+                    text: formatted,
+                    selection: TextSelection.collapsed(
+                      offset: newCursorOffset.clamp(0, formatted.length),
+                    ),
+                  );
+                }),
+              ],
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Amount is required';
+                }
+                final parsed = _parseFormattedNumber(value);
+                if (parsed == 0) {
+                  return 'Please enter a valid number';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            
+            // Date
+            InkWell(
+              onTap: _selectDate,
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Date *',
+                  border: OutlineInputBorder(),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}',
+                    ),
+                    const Icon(Icons.calendar_today),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            // Due Date Switch
+            SwitchListTile(
+              title: const Text('Due Date'),
+              subtitle: Text(
+                _dueDateSwitchEnabled && _dueDate != null
+                    ? '${_dueDate!.year}-${_dueDate!.month.toString().padLeft(2, '0')}-${_dueDate!.day.toString().padLeft(2, '0')}'
+                    : 'Not set',
+              ),
+              value: _dueDateSwitchEnabled,
+              onChanged: (value) async {
+                setState(() {
+                  _dueDateSwitchEnabled = value;
+                });
+                if (value && _dueDate == null) {
+                  // Set default due date when switch is turned on
+                  final defaultDays = await SettingsService.getDefaultDueDateDays();
+                  if (mounted) {
+                    setState(() {
+                      _dueDate = DateTime.now().add(Duration(days: defaultDays));
+                    });
+                  }
+                } else if (!value) {
+                  setState(() {
+                    _dueDate = null;
+                  });
+                }
+              },
+              secondary: _dueDateSwitchEnabled
+                  ? IconButton(
+                      icon: const Icon(Icons.calendar_today),
+                      onPressed: _selectDueDate,
+                      tooltip: 'Select due date',
+                    )
+                  : null,
+            ),
+            if (_dueDateSwitchEnabled && _dueDate != null) ...[
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: _selectDueDate,
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Due Date',
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${_dueDate!.year}-${_dueDate!.month.toString().padLeft(2, '0')}-${_dueDate!.day.toString().padLeft(2, '0')}',
+                      ),
+                      const Icon(Icons.event),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            
+            // Description
+            TextFormField(
+              controller: _descriptionController,
+              decoration: const InputDecoration(
+                labelText: 'Description',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 3,
+            ),
+            const SizedBox(height: 24),
+            
+            // Save button
+            ElevatedButton(
+              onPressed: _saving ? null : _saveTransaction,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: _saving
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Update Transaction'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

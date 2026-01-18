@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""
+Migrate Debitum SQLite database to Debt Tracker PostgreSQL event-sourced database
+"""
+
+import sys
+import sqlite3
+import psycopg2
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+def get_db_connection():
+    """Get PostgreSQL connection"""
+    return psycopg2.connect(
+        host="localhost",
+        port=5432,
+        database="debt_tracker",
+        user="debt_tracker",
+        password="dev_password"
+    )
+
+def migrate_debitum(debitum_db_path):
+    """Migrate Debitum data to Debt Tracker"""
+    
+    print(f"📊 Reading Debitum database: {debitum_db_path}")
+    
+    # Connect to Debitum SQLite
+    debitum_conn = sqlite3.connect(debitum_db_path)
+    debitum_conn.row_factory = sqlite3.Row
+    debitum_cur = debitum_conn.cursor()
+    
+    # Connect to Debt Tracker PostgreSQL
+    pg_conn = get_db_connection()
+    pg_cur = pg_conn.cursor()
+    
+    try:
+        # Find or create the "max" user
+        pg_cur.execute("SELECT id FROM users_projection WHERE email = 'max' LIMIT 1")
+        user_row = pg_cur.fetchone()
+        
+        if user_row:
+            user_id = uuid.UUID(user_row[0])
+            print(f"👤 Using existing user 'max': {user_id}")
+        else:
+            # Create the "max" user if it doesn't exist
+            user_id = uuid.uuid4()
+            print(f"👤 Creating user 'max': {user_id}")
+            pg_cur.execute("""
+                INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id)
+                VALUES (%s, %s, %s, %s, 0)
+            """, (str(user_id), "max", "$2b$12$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK", datetime.now()))
+            pg_conn.commit()
+        
+        # Clear existing data for this user (but keep the user)
+        print("🗑️  Clearing existing data...")
+        # Delete transaction images (if table exists)
+        try:
+            pg_cur.execute("""
+                DELETE FROM transaction_images_projection 
+                WHERE transaction_id IN (SELECT id FROM transactions_projection WHERE user_id = %s)
+            """, (str(user_id),))
+        except Exception:
+            pass  # Table might not exist
+        # Delete reminders
+        try:
+            pg_cur.execute("""
+                DELETE FROM reminders_projection 
+                WHERE user_id = %s
+            """, (str(user_id),))
+        except Exception:
+            pass  # Table might not exist
+        # Delete transactions
+        pg_cur.execute("""
+            DELETE FROM transactions_projection 
+            WHERE user_id = %s
+        """, (str(user_id),))
+        # Delete contacts
+        pg_cur.execute("""
+            DELETE FROM contacts_projection 
+            WHERE user_id = %s
+        """, (str(user_id),))
+        # Delete events
+        pg_cur.execute("""
+            DELETE FROM events 
+            WHERE user_id = %s
+        """, (str(user_id),))
+        # Delete snapshots
+        try:
+            pg_cur.execute("""
+                DELETE FROM snapshots 
+                WHERE user_id = %s
+            """, (str(user_id),))
+        except Exception:
+            pass  # Table might not exist
+        pg_conn.commit()
+        print("✅ Existing data cleared")
+        
+        # Migrate persons to contacts
+        print("📇 Migrating contacts...")
+        debitum_cur.execute("SELECT * FROM person ORDER BY id_person")
+        persons = debitum_cur.fetchall()
+        
+        contact_map = {}  # Map old person ID to new contact UUID
+        event_counter = 0
+        
+        for person in persons:
+            contact_id = uuid.uuid4()
+            contact_map[person['id_person']] = contact_id
+            event_counter += 1
+            
+            # Create event
+            event_data = {
+                "name": person['name'],
+                "phone": person['linked_contact_uri'] if person['linked_contact_uri'] else None,
+                "email": None,
+                "notes": person['note'] if person['note'] else ''
+            }
+            
+            pg_cur.execute("""
+                INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+                VALUES (%s, 'contact', %s, 'CONTACT_CREATED', 1, %s, %s)
+                RETURNING id
+            """, (str(user_id), str(contact_id), json.dumps(event_data), datetime.now()))
+            
+            event_id = pg_cur.fetchone()[0]
+            
+            # Create projection
+            # Truncate phone/URI if too long (VARCHAR(50) limit)
+            phone = person['linked_contact_uri'] if person['linked_contact_uri'] else None
+            if phone and len(phone) > 50:
+                # For Android contact URIs, just store a shortened version or None
+                phone = None  # Android URIs are not useful outside Android anyway
+            
+            pg_cur.execute("""
+                INSERT INTO contacts_projection (id, user_id, name, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                VALUES (%s, %s, %s, %s, %s, %s, false, %s, %s, %s)
+            """, (
+                str(contact_id),
+                str(user_id),
+                person['name'],
+                phone,
+                None,  # email
+                person['note'] if person['note'] else None,
+                datetime.now(),
+                datetime.now(),
+                event_id
+            ))
+            
+            print(f"  ✅ {person['name']}")
+        
+        pg_conn.commit()
+        print(f"✅ Migrated {len(persons)} contacts")
+        
+        # Migrate transactions
+        print("💰 Migrating transactions...")
+        debitum_cur.execute("""
+            SELECT t.*, p.name as person_name
+            FROM txn t
+            JOIN person p ON t.id_person = p.id_person
+            ORDER BY t.id_transaction
+        """)
+        transactions = debitum_cur.fetchall()
+        
+        for txn in transactions:
+            transaction_id = uuid.uuid4()
+            contact_id = contact_map[txn['id_person']]
+            event_counter += 1
+            
+            # Determine direction based on amount sign
+            # In Debitum: negative = user gave money, positive = user received
+            direction = "lent" if txn['amount'] > 0 else "owed"
+            amount = abs(txn['amount'])
+            
+            # Convert timestamp (Debitum uses milliseconds)
+            if txn['timestamp']:
+                txn_date = datetime.fromtimestamp(txn['timestamp'] / 1000.0).date()
+            else:
+                txn_date = datetime.now().date()
+            
+            # Create event
+            event_data = {
+                "contact_id": str(contact_id),
+                "type": "money" if txn['is_monetary'] else "item",
+                "direction": direction,
+                "amount": amount,
+                "currency": "USD",
+                "description": txn['description'] if txn['description'] else '',
+                "transaction_date": str(txn_date)
+            }
+            
+            pg_cur.execute("""
+                INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+                VALUES (%s, 'transaction', %s, 'TRANSACTION_CREATED', 1, %s, %s)
+                RETURNING id
+            """, (str(user_id), str(transaction_id), json.dumps(event_data), datetime.now()))
+            
+            event_id = pg_cur.fetchone()[0]
+            
+            # Note: is_settled and settled_at columns were removed in migration 002
+            # We only migrate money transactions now (items are not supported)
+            if not txn['is_monetary']:
+                # Skip non-monetary transactions (items)
+                continue
+            
+            # Create projection (only money transactions)
+            pg_cur.execute("""
+                INSERT INTO transactions_projection 
+                (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, is_deleted, created_at, updated_at, last_event_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, false, %s, %s, %s)
+            """, (
+                str(transaction_id),
+                str(user_id),
+                str(contact_id),
+                "money",
+                direction,
+                amount,
+                "USD",
+                txn['description'] if txn['description'] else None,
+                txn_date,
+                datetime.now(),
+                datetime.now(),
+                event_id
+            ))
+            
+            print(f"  ✅ {txn['person_name']}: {amount} ({'money' if txn['is_monetary'] else 'item'})")
+        
+        pg_conn.commit()
+        print(f"✅ Migrated {len(transactions)} transactions")
+        
+        # Migrate images if any
+        print("🖼️  Checking for images...")
+        debitum_cur.execute("SELECT COUNT(*) FROM image")
+        image_count = debitum_cur.fetchone()[0]
+        if image_count > 0:
+            print(f"  ℹ️  Found {image_count} images (not migrated - you'll need to handle images separately)")
+        
+        print("")
+        print(f"✅ Migration complete!")
+        print(f"   - {len(persons)} contacts")
+        print(f"   - {len(transactions)} transactions")
+        print(f"   - {event_counter} events created")
+        print("")
+        print("🌐 View your data at: http://localhost:8000/admin")
+        
+    except Exception as e:
+        pg_conn.rollback()
+        print(f"❌ Error during migration: {e}")
+        raise
+    finally:
+        debitum_conn.close()
+        pg_cur.close()
+        pg_conn.close()
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python3 migrate_debitum.py <path-to-debitum.db>")
+        sys.exit(1)
+    
+    debitum_db = sys.argv[1]
+    if not Path(debitum_db).exists():
+        print(f"Error: File not found: {debitum_db}")
+        sys.exit(1)
+    
+    migrate_debitum(debitum_db)
