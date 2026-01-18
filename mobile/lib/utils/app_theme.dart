@@ -68,7 +68,7 @@ class AppTheme {
       // Typography with Tajawal font (Kaleem.dev)
       textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), false),
       
-      // AppBar theme
+      // AppBar theme - Semi-transparent peach with shadow (Kaleem.dev)
       appBarTheme: AppBarTheme(
         elevation: 0,
         centerTitle: false,
@@ -81,8 +81,10 @@ class AppTheme {
           color: AppColors.lightOnSurface,
           size: 24,
         ),
-        backgroundColor: AppColors.lightSurface,
+        backgroundColor: AppColors.lightBackgroundEnd.withOpacity(0.8), // Peach with 80% opacity
         foregroundColor: AppColors.lightOnSurface,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.black.withOpacity(0.08),
       ),
       
       // Card theme
@@ -245,10 +247,10 @@ class AppTheme {
         ),
       ),
       
-      // Navigation bar theme (Material 3)
+      // Navigation bar theme (Material 3) - Semi-transparent peach (Kaleem.dev)
       navigationBarTheme: NavigationBarThemeData(
         elevation: 0,
-        backgroundColor: AppColors.lightSurface,
+        backgroundColor: AppColors.lightBackgroundEnd.withOpacity(0.8), // Peach with 80% opacity
         indicatorColor: AppColors.lightSurfaceVariant,
         labelTextStyle: MaterialStateProperty.resolveWith((states) {
           if (states.contains(MaterialState.selected)) {
@@ -549,10 +551,10 @@ class AppTheme {
         ),
       ),
       
-      // Navigation bar theme (Material 3)
+      // Navigation bar theme (Material 3) - Solid dark green-black (Kaleem.dev)
       navigationBarTheme: NavigationBarThemeData(
         elevation: 0,
-        backgroundColor: AppColors.darkSurface,
+        backgroundColor: AppColors.darkSurface, // #151815 - solid
         indicatorColor: AppColors.darkSurfaceVariant,
         labelTextStyle: MaterialStateProperty.resolveWith((states) {
           if (states.contains(MaterialState.selected)) {
