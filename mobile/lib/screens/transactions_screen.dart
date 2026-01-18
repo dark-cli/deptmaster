@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../utils/text_utils.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -692,9 +693,8 @@ class TransactionListItem extends StatelessWidget {
             color: color,
           ),
         ),
-        title: Directionality(
-          textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
-          child: Text(_getContactName()),
+        title: Text(
+          TextUtils.forceLtr(_getContactName()), // Force LTR for mixed Arabic/English text
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

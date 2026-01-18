@@ -10,6 +10,7 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../utils/text_utils.dart';
 
 class ContactListItem extends StatelessWidget {
   final Contact contact;
@@ -95,12 +96,9 @@ class ContactListItem extends StatelessWidget {
                   ),
                 ),
               ),
-        title: Directionality(
-          textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
-          child: Text(
-            contact.name,
-            semanticsLabel: 'Contact ${contact.name}',
-          ),
+        title: Text(
+          TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+          semanticsLabel: 'Contact ${contact.name}',
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,

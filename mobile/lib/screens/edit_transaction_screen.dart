@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/transaction.dart';
@@ -261,9 +262,8 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                     items: _contacts.map((contact) {
                       return DropdownMenuItem(
                         value: contact,
-                        child: Directionality(
-                          textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
-                          child: Text(contact.name),
+                        child: Text(
+                          TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
                         ),
                       );
                     }).toList(),

@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/transaction.dart';
@@ -397,9 +398,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                     final contact = _filteredContacts[index];
                                     return ListTile(
                                       leading: const Icon(Icons.person),
-                                      title: Directionality(
-                                        textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
-                                        child: Text(contact.name),
+                                      title: Text(
+                                        TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
                                       ),
                                       onTap: () {
                                         setState(() {

@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../utils/text_utils.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
@@ -316,13 +317,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Directionality(
-                                  textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
-                                  child: Text(
-                                    contact.name,
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                                child: Text(
+                                  TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               Text(
@@ -366,13 +364,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Directionality(
-                                  textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
-                                  child: Text(
-                                    contact.name,
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                                child: Text(
+                                  TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               Text(
