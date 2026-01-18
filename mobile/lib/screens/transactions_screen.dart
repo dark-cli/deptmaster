@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show TextDirection;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
