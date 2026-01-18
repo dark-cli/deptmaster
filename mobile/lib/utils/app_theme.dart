@@ -235,11 +235,14 @@ class AppTheme {
         backgroundColor: AppColors.lightSurface,
         selectedItemColor: AppColors.lightPrimary,
         unselectedItemColor: Colors.grey.shade600,
-        selectedLabelStyle: GoogleFonts.inter(
+        selectedLabelStyle: GoogleFonts.tajawal(
           fontSize: 12,
-          fontWeight: FontWeight.w500,
+          fontWeight: FontWeight.w700, // Bold
         ),
-        unselectedLabelStyle: GoogleFonts.inter(fontSize: 12),
+        unselectedLabelStyle: GoogleFonts.tajawal(
+          fontSize: 12,
+          fontWeight: FontWeight.w400, // Regular
+        ),
       ),
       
       // Navigation bar theme (Material 3)
@@ -249,14 +252,15 @@ class AppTheme {
         indicatorColor: AppColors.lightSurfaceVariant,
         labelTextStyle: MaterialStateProperty.resolveWith((states) {
           if (states.contains(MaterialState.selected)) {
-            return GoogleFonts.inter(
+            return GoogleFonts.tajawal(
               fontSize: 12,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w700, // Bold
               color: AppColors.lightPrimary,
             );
           }
-          return GoogleFonts.inter(
+          return GoogleFonts.tajawal(
             fontSize: 12,
+            fontWeight: FontWeight.w400, // Regular
             color: Colors.grey.shade600,
           );
         }),
@@ -535,11 +539,14 @@ class AppTheme {
         backgroundColor: AppColors.darkSurface,
         selectedItemColor: AppColors.darkPrimary,
         unselectedItemColor: Colors.grey.shade400,
-        selectedLabelStyle: GoogleFonts.inter(
+        selectedLabelStyle: GoogleFonts.tajawal(
           fontSize: 12,
-          fontWeight: FontWeight.w500,
+          fontWeight: FontWeight.w700, // Bold
         ),
-        unselectedLabelStyle: GoogleFonts.inter(fontSize: 12),
+        unselectedLabelStyle: GoogleFonts.tajawal(
+          fontSize: 12,
+          fontWeight: FontWeight.w400, // Regular
+        ),
       ),
       
       // Navigation bar theme (Material 3)
