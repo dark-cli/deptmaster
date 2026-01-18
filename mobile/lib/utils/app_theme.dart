@@ -9,55 +9,11 @@ import 'app_shapes.dart';
 class AppTheme {
   AppTheme._(); // Private constructor to prevent instantiation
 
-  /// Light theme configuration
+  /// Light theme configuration - Material Design 3 defaults
   static ThemeData get lightTheme {
-    final colorScheme = ColorScheme.light(
-      // Primary colors
-      primary: AppColors.lightPrimary,
-      onPrimary: AppColors.lightOnPrimary,
-      primaryContainer: AppColors.lightPrimaryDark,
-      onPrimaryContainer: AppColors.lightOnPrimary,
-      
-      // Secondary colors
-      secondary: AppColors.lightSecondary,
-      onSecondary: AppColors.lightOnSecondary,
-      secondaryContainer: AppColors.lightSecondaryDark,
-      onSecondaryContainer: AppColors.lightOnSecondary,
-      
-      // Tertiary colors
-      tertiary: AppColors.lightTertiary,
-      onTertiary: AppColors.lightOnPrimary,
-      tertiaryContainer: AppColors.lightTertiaryDark,
-      onTertiaryContainer: AppColors.lightOnPrimary,
-      
-      // Error colors
-      error: AppColors.lightError,
-      onError: AppColors.lightOnPrimary,
-      errorContainer: AppColors.lightError,
-      onErrorContainer: AppColors.lightOnPrimary,
-      
-      // Surface colors
-      surface: AppColors.lightSurface,
-      onSurface: AppColors.lightOnSurface,
-      surfaceVariant: AppColors.lightSurfaceVariant,
-      onSurfaceVariant: AppColors.lightOnSurface,
-      
-      // Background colors
-      background: AppColors.lightBackground,
-      onBackground: AppColors.lightOnBackground,
-      
-      // Outline colors
-      outline: Colors.grey.shade400,
-      outlineVariant: Colors.grey.shade300,
-      
-      // Shadow
-      shadow: Colors.black.withOpacity(0.1),
-      scrim: Colors.black.withOpacity(0.5),
-      
-      // Inverse colors
-      inverseSurface: AppColors.darkSurface,
-      onInverseSurface: AppColors.darkOnSurface,
-      inversePrimary: AppColors.darkPrimary,
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: Colors.blue,
+      brightness: Brightness.light,
     );
 
     return ThemeData(
@@ -310,55 +266,11 @@ class AppTheme {
     );
   }
 
-  /// Dark theme configuration
+  /// Dark theme configuration - Material Design 3 defaults
   static ThemeData get darkTheme {
-    final colorScheme = ColorScheme.dark(
-      // Primary colors
-      primary: AppColors.darkPrimary,
-      onPrimary: AppColors.darkOnPrimary,
-      primaryContainer: AppColors.darkPrimaryLight,
-      onPrimaryContainer: AppColors.darkOnPrimary,
-      
-      // Secondary colors
-      secondary: AppColors.darkSecondary,
-      onSecondary: AppColors.darkOnSecondary,
-      secondaryContainer: AppColors.darkSecondaryLight,
-      onSecondaryContainer: AppColors.darkOnSecondary,
-      
-      // Tertiary colors
-      tertiary: AppColors.darkTertiary,
-      onTertiary: AppColors.darkOnPrimary,
-      tertiaryContainer: AppColors.darkTertiaryLight,
-      onTertiaryContainer: AppColors.darkOnPrimary,
-      
-      // Error colors
-      error: AppColors.darkError,
-      onError: AppColors.darkOnPrimary,
-      errorContainer: AppColors.darkError,
-      onErrorContainer: AppColors.darkOnPrimary,
-      
-      // Surface colors
-      surface: AppColors.darkSurface,
-      onSurface: AppColors.darkOnSurface,
-      surfaceVariant: AppColors.darkSurfaceVariant,
-      onSurfaceVariant: AppColors.darkOnSurface,
-      
-      // Background colors
-      background: AppColors.darkBackground,
-      onBackground: AppColors.darkOnBackground,
-      
-      // Outline colors
-      outline: Colors.grey.shade600,
-      outlineVariant: Colors.grey.shade700,
-      
-      // Shadow
-      shadow: Colors.black.withOpacity(0.3),
-      scrim: Colors.black.withOpacity(0.7),
-      
-      // Inverse colors
-      inverseSurface: AppColors.lightSurface,
-      onInverseSurface: AppColors.lightOnSurface,
-      inversePrimary: AppColors.lightPrimary,
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: Colors.blue,
+      brightness: Brightness.dark,
     );
 
     return ThemeData(
@@ -618,109 +530,10 @@ class AppTheme {
 
   /// Build text theme with proper Material 3 type scale
   static TextTheme _buildTextTheme(TextTheme base, bool isDark) {
-    // Use Kaleem.dev inspired text colors for optimal contrast
     final onSurface = isDark 
-        ? AppColors.darkOnSurface 
-        : AppColors.lightOnSurface; // Dark charcoal for clean contrast
+        ? base.bodyLarge?.color ?? Colors.white
+        : base.bodyLarge?.color ?? Colors.black;
     
-    return base.copyWith(
-      // H1: 3.5625rem (57px)
-      displayLarge: GoogleFonts.tajawal(
-        fontSize: 57,
-        fontWeight: FontWeight.w700, // Bold
-        height: 1.5, // Line height 1.5
-        color: onSurface,
-      ),
-      // H2: 2.8125rem (45px)
-      displayMedium: GoogleFonts.tajawal(
-        fontSize: 45,
-        fontWeight: FontWeight.w700, // Bold
-        height: 1.5,
-        color: onSurface,
-      ),
-      // H3: 2.25rem (36px)
-      displaySmall: GoogleFonts.tajawal(
-        fontSize: 36,
-        fontWeight: FontWeight.w700, // Bold
-        height: 1.5,
-        color: onSurface,
-      ),
-      // H4: 2rem (32px)
-      headlineLarge: GoogleFonts.tajawal(
-        fontSize: 32,
-        fontWeight: FontWeight.w700, // Bold
-        height: 1.5,
-        color: onSurface,
-      ),
-      headlineMedium: GoogleFonts.tajawal(
-        fontSize: 28,
-        fontWeight: FontWeight.w700, // Bold
-        height: 1.5,
-        color: onSurface,
-      ),
-      headlineSmall: GoogleFonts.tajawal(
-        fontSize: 24,
-        fontWeight: FontWeight.w700, // Bold
-        height: 1.5,
-        color: onSurface,
-      ),
-      // Nav links: 1.375rem (22px)
-      titleLarge: GoogleFonts.tajawal(
-        fontSize: 22,
-        fontWeight: FontWeight.w700, // Bold
-        height: 1.5,
-        color: onSurface,
-      ),
-      // Blockquote: 1.333em (~21.3px)
-      titleMedium: GoogleFonts.tajawal(
-        fontSize: 21.3,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5,
-        color: onSurface,
-      ),
-      titleSmall: GoogleFonts.tajawal(
-        fontSize: 18,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5,
-        color: onSurface,
-      ),
-      // Body text: 1rem (16px), line height 1.5
-      bodyLarge: GoogleFonts.tajawal(
-        fontSize: 16,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5, // Line height 1.5
-        color: onSurface,
-      ),
-      bodyMedium: GoogleFonts.tajawal(
-        fontSize: 16,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5,
-        color: onSurface,
-      ),
-      bodySmall: GoogleFonts.tajawal(
-        fontSize: 14,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5,
-        color: onSurface,
-      ),
-      labelLarge: GoogleFonts.tajawal(
-        fontSize: 16,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5,
-        color: onSurface,
-      ),
-      labelMedium: GoogleFonts.tajawal(
-        fontSize: 14,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5,
-        color: onSurface,
-      ),
-      labelSmall: GoogleFonts.tajawal(
-        fontSize: 12,
-        fontWeight: FontWeight.w400, // Regular
-        height: 1.5,
-        color: onSurface,
-      ),
-    );
+    return base;
   }
 }
