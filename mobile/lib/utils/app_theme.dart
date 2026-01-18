@@ -599,7 +599,10 @@ class AppTheme {
 
   /// Build text theme with proper Material 3 type scale
   static TextTheme _buildTextTheme(TextTheme base, bool isDark) {
-    final onSurface = isDark ? AppColors.darkOnSurface : AppColors.lightOnSurface;
+    // Use warm dark colors for better contrast on warm backgrounds
+    final onSurface = isDark 
+        ? AppColors.darkOnSurface 
+        : const Color(0xFF1C1917); // Warm dark brown for better contrast on cream
     
     return base.copyWith(
       displayLarge: GoogleFonts.poppins(
