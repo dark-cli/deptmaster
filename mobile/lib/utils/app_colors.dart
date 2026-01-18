@@ -53,18 +53,41 @@ class AppColors {
   static const Color darkGrayLight = Color(0xFF1E231E); // Very dark green-gray (30, 35, 30)
   static const Color darkGrayDark = Color(0xFFF0FFF0); // Light green-tinted white (240, 255, 240)
 
+  // Semantic Colors for Give/Received - Fits Kaleem.dev theme
+  // Light Mode: Give = reddish-brown (accent), Received = warm teal
+  static const Color lightGive = Color(0xFF964A4A); // Reddish-brown - matches accent
+  static const Color lightReceived = Color(0xFF0D9488); // Warm teal - complements beige background
+  
+  // Dark Mode: Give = green (accent), Received = warm amber
+  static const Color darkGive = Color(0xFF4CAF50); // Green - matches accent
+  static const Color darkReceived = Color(0xFFF59E0B); // Warm amber - complements dark green
+  
   // Semantic Colors (Balance) - Respects flipColors setting
   // These will be used with Consumer to watch flipColorsProvider
   static Color getBalanceColor(bool isPositive, bool flipColors, bool isDark) {
     if (isPositive) {
       return flipColors
-          ? (isDark ? darkError : lightError)
-          : (isDark ? darkSuccess : lightSuccess);
+          ? (isDark ? darkReceived : lightReceived)
+          : (isDark ? darkGive : lightGive);
     } else {
       return flipColors
-          ? (isDark ? darkSuccess : lightSuccess)
-          : (isDark ? darkError : lightError);
+          ? (isDark ? darkGive : lightGive)
+          : (isDark ? darkReceived : lightReceived);
     }
+  }
+  
+  // Get Give color (money going out)
+  static Color getGiveColor(bool flipColors, bool isDark) {
+    return flipColors
+        ? (isDark ? darkReceived : lightReceived)
+        : (isDark ? darkGive : lightGive);
+  }
+  
+  // Get Received color (money coming in)
+  static Color getReceivedColor(bool flipColors, bool isDark) {
+    return flipColors
+        ? (isDark ? darkGive : lightGive)
+        : (isDark ? darkReceived : lightReceived);
   }
 
   // Legacy support (deprecated - use theme colors instead)

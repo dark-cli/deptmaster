@@ -1,0 +1,332 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+import '../models/contact.dart';
+import '../models/transaction.dart';
+import 'auth_service.dart';
+
+class ApiService {
+  // Auto-detect platform and use appropriate URL
+  static String get baseUrl {
+    if (kIsWeb) {
+      // Web browser: use localhost
+      return 'http://localhost:8000/api/admin';
+    } else if (Platform.isAndroid) {
+      // Android: use 10.0.2.2 for emulator, or actual IP for physical device
+      // For emulator, 10.0.2.2 maps to host's localhost
+      return 'http://10.0.2.2:8000/api/admin';
+    } else {
+      // iOS or other: use localhost
+      return 'http://localhost:8000/api/admin';
+    }
+  }
+
+  // Get auth headers with token
+  static Future<Map<String, String>> _getHeaders() async {
+    final headers = {'Content-Type': 'application/json'};
+    final token = await AuthService.getToken();
+    if (token != null) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+  
+  // Contacts
+  static Future<List<Contact>> getContacts() async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('$baseUrl/contacts'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((json) => Contact.fromJson(json)).toList();
+      } else {
+        print('Error fetching contacts: HTTP ${response.statusCode}');
+        print('Response: ${response.body}');
+      }
+    } catch (e) {
+      print('Error fetching contacts: $e');
+    }
+    return [];
+  }
+
+  static Future<Contact?> createContact(Contact contact) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.post(
+        Uri.parse('${baseUrl.replaceAll('/admin', '')}/contacts'),
+        headers: headers,
+        body: json.encode({
+          'name': contact.name,
+          'phone': contact.phone,
+          'email': contact.email,
+          'notes': contact.notes,
+        }),
+      );
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final data = json.decode(response.body);
+        // Return a contact with the data from response
+        return Contact(
+          id: data['id'] as String,
+          name: data['name'] as String,
+          phone: null,
+          email: null,
+          notes: null,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          balance: (data['balance'] as num?)?.toInt() ?? 0,
+        );
+      } else {
+        final errorBody = response.body;
+        try {
+          final error = json.decode(errorBody);
+          throw Exception(error['error'] ?? 'Failed to create contact');
+        } catch (_) {
+          throw Exception('Failed to create contact: ${response.statusCode} - $errorBody');
+        }
+      }
+    } catch (e) {
+      print('Error creating contact: $e');
+      rethrow;
+    }
+  }
+
+  // Update contact
+  static Future<void> updateContact(String contactId, Contact contact) async {
+    try {
+      final apiUrl = baseUrl.replaceAll('/admin', '');
+      final headers = await _getHeaders();
+      final response = await http.put(
+        Uri.parse('$apiUrl/contacts/$contactId'),
+        headers: headers,
+        body: json.encode({
+          'name': contact.name,
+          'phone': contact.phone,
+          'email': contact.email,
+          'notes': contact.notes,
+        }),
+      );
+      if (response.statusCode == 200) {
+        return;
+      } else {
+        final errorBody = response.body;
+        try {
+          final error = json.decode(errorBody);
+          throw Exception(error['error'] ?? 'Failed to update contact');
+        } catch (_) {
+          throw Exception('Failed to update contact: ${response.statusCode} - $errorBody');
+        }
+      }
+    } catch (e) {
+      print('Error updating contact: $e');
+      rethrow;
+    }
+  }
+
+  // Delete contact
+  static Future<void> deleteContact(String contactId) async {
+    try {
+      final apiUrl = baseUrl.replaceAll('/admin', '');
+      final headers = await _getHeaders();
+      final response = await http.delete(
+        Uri.parse('$apiUrl/contacts/$contactId'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        return;
+      } else {
+        final errorBody = response.body;
+        try {
+          final error = json.decode(errorBody);
+          throw Exception(error['error'] ?? 'Failed to delete contact');
+        } catch (_) {
+          throw Exception('Failed to delete contact: ${response.statusCode} - $errorBody');
+        }
+      }
+    } catch (e) {
+      print('Error deleting contact: $e');
+      rethrow;
+    }
+  }
+
+  // Bulk delete contacts
+  static Future<void> bulkDeleteContacts(List<String> contactIds) async {
+    try {
+      // Delete contacts one by one (could be optimized with a bulk endpoint)
+      for (final contactId in contactIds) {
+        await deleteContact(contactId);
+      }
+    } catch (e) {
+      print('Error bulk deleting contacts: $e');
+      rethrow;
+    }
+  }
+
+  // Bulk delete transactions
+  static Future<void> bulkDeleteTransactions(List<String> transactionIds) async {
+    try {
+      // Delete transactions one by one (could be optimized with a bulk endpoint)
+      for (final transactionId in transactionIds) {
+        await deleteTransaction(transactionId);
+      }
+    } catch (e) {
+      print('Error bulk deleting transactions: $e');
+      rethrow;
+    }
+  }
+
+  // Transactions
+  static Future<List<Transaction>> getTransactions() async {
+    try {
+      // Use /api/transactions instead of /api/admin/transactions
+      final apiUrl = baseUrl.replaceAll('/admin', '');
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('$apiUrl/transactions'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        final transactions = <Transaction>[];
+        for (var jsonItem in data) {
+          try {
+            transactions.add(Transaction.fromJson(jsonItem));
+          } catch (e, stackTrace) {
+            print('Error parsing transaction: $e');
+            print('Transaction data: $jsonItem');
+            print('Stack trace: $stackTrace');
+            // Continue with other transactions
+          }
+        }
+        print('✅ Loaded ${transactions.length} transactions');
+        return transactions;
+      } else {
+        print('Error fetching transactions: HTTP ${response.statusCode}');
+        print('Response: ${response.body}');
+      }
+    } catch (e, stackTrace) {
+      print('Error fetching transactions: $e');
+      print('Stack trace: $stackTrace');
+    }
+    return [];
+  }
+
+  static Future<Transaction?> createTransaction(Transaction transaction) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.post(
+        Uri.parse('${baseUrl.replaceAll('/admin', '')}/transactions'),
+        headers: headers,
+        body: json.encode({
+          'contact_id': transaction.contactId,
+          'type': transaction.type == TransactionType.money ? 'money' : 'item',
+          'direction': transaction.direction == TransactionDirection.owed ? 'owed' : 'lent',
+          'amount': transaction.amount,
+          'currency': transaction.currency,
+          'description': transaction.description,
+          'transaction_date': transaction.transactionDate.toIso8601String().split('T')[0],
+          'due_date': transaction.dueDate?.toIso8601String().split('T')[0],
+        }),
+      );
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final data = json.decode(response.body);
+        // Return a transaction with the data from request
+        return Transaction(
+          id: data['id'] as String,
+          contactId: data['contact_id'] as String,
+          type: transaction.type,
+          direction: transaction.direction,
+          amount: transaction.amount,
+          currency: transaction.currency,
+          description: transaction.description,
+          transactionDate: transaction.transactionDate,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
+      } else {
+        final errorBody = response.body;
+        try {
+          final error = json.decode(errorBody);
+          throw Exception(error['error'] ?? 'Failed to create transaction');
+        } catch (_) {
+          throw Exception('Failed to create transaction: ${response.statusCode} - $errorBody');
+        }
+      }
+    } catch (e) {
+      print('Error creating transaction: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> updateTransaction(
+    String transactionId, {
+    int? amount,
+    TransactionDirection? direction,
+    String? description,
+    DateTime? transactionDate,
+    String? contactId,
+    DateTime? dueDate,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (amount != null) body['amount'] = amount;
+      if (direction != null) {
+        body['direction'] = direction == TransactionDirection.owed ? 'owed' : 'lent';
+      }
+      if (description != null) body['description'] = description;
+      if (transactionDate != null) {
+        body['transaction_date'] = transactionDate.toIso8601String().split('T')[0];
+      }
+      if (contactId != null) body['contact_id'] = contactId;
+      if (dueDate != null) {
+        body['due_date'] = dueDate.toIso8601String().split('T')[0];
+      }
+
+      final headers = await _getHeaders();
+      final response = await http.put(
+        Uri.parse('${baseUrl.replaceAll('/admin', '')}/transactions/$transactionId'),
+        headers: headers,
+        body: json.encode(body),
+      );
+
+      if (response.statusCode != 200) {
+        final errorBody = response.body;
+        try {
+          final error = json.decode(errorBody);
+          throw Exception(error['error'] ?? 'Failed to update transaction');
+        } catch (_) {
+          throw Exception('Failed to update transaction: ${response.statusCode} - $errorBody');
+        }
+      }
+    } catch (e) {
+      print('Error updating transaction: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> deleteTransaction(String transactionId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.delete(
+        Uri.parse('${baseUrl.replaceAll('/admin', '')}/transactions/$transactionId'),
+        headers: headers,
+      );
+
+      if (response.statusCode != 200) {
+        final errorBody = response.body;
+        try {
+          final error = json.decode(errorBody);
+          throw Exception(error['error'] ?? 'Failed to delete transaction');
+        } catch (_) {
+          throw Exception('Failed to delete transaction: ${response.statusCode} - $errorBody');
+        }
+      }
+    } catch (e) {
+      print('Error deleting transaction: $e');
+      rethrow;
+    }
+  }
+}

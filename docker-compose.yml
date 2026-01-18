@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:14
+    container_name: debt_tracker_postgres
+    environment:
+      POSTGRES_DB: debt_tracker
+      POSTGRES_USER: debt_tracker
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/backup.sh:/backup.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U debt_tracker"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - debt_tracker_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: debt_tracker_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - debt_tracker_network
+
+  api:
+    build:
+      context: ./backend/rust-api
+      dockerfile: Dockerfile
+    container_name: debt_tracker_api
+    environment:
+      DATABASE_URL: postgresql://debt_tracker:${DB_PASSWORD:-dev_password}@postgres:5432/debt_tracker
+      REDIS_URL: redis://redis:6379
+      PORT: 8000
+      RUST_LOG: info
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - debt_tracker_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  debt_tracker_network:
+    driver: bridge

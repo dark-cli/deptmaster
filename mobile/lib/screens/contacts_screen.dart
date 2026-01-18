@@ -467,9 +467,10 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                       child: Consumer(
                         builder: (context, ref, child) {
                           final flipColors = ref.watch(flipColorsProvider);
+                          final isDark = Theme.of(context).brightness == Brightness.dark;
                           final balanceColor = totalBalance < 0
-                              ? (flipColors ? Colors.green : Colors.red)
-                              : (flipColors ? Colors.red : Colors.green);
+                              ? AppColors.getReceivedColor(flipColors, isDark)
+                              : AppColors.getGiveColor(flipColors, isDark);
                           return Text(
                             _formatBalance(totalBalance),
                             style: Theme.of(context).textTheme.headlineLarge?.copyWith(

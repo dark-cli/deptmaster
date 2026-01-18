@@ -1,0 +1,51 @@
+name: debt_tracker_mobile
+description: Debt Tracker Mobile App
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State management
+  riverpod: ^2.4.9
+  flutter_riverpod: ^2.4.9
+  
+  # Local storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.1
+  
+  # HTTP client
+  http: ^1.1.2
+  dio: ^5.4.0
+  web_socket_channel: ^2.4.0
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  google_fonts: ^6.1.0
+  
+  # Utils
+  intl: ^0.19.0
+  uuid: ^4.2.1
+  shared_preferences: ^2.2.2
+  
+  # Biometric
+  local_auth: ^2.1.7
+  
+  # Icons
+  flutter_svg: ^2.0.9
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  mockito: ^5.4.4
+  build_runner: ^2.4.7
+  flutter_lints: ^3.0.1
+  hive_generator: ^2.0.1
+
+flutter:
+  uses-material-design: true

@@ -7,6 +7,8 @@ import '../models/transaction.dart';
 import '../services/dummy_data_service.dart';
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../utils/app_colors.dart';
+import '../utils/theme_colors.dart';
 
 class ContactListItem extends StatelessWidget {
   final Contact contact;
@@ -34,13 +36,16 @@ class ContactListItem extends StatelessWidget {
     }
   }
 
-  Color _getAvatarColor(int balance, bool flipColors) {
+  Color _getAvatarColor(int balance, bool flipColors, BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (balance == 0) {
-      return Colors.grey;
+      return ThemeColors.gray(context, shade: 600);
     } else if (balance < 0) {
-      return flipColors ? Colors.green : Colors.red;
+      // Negative balance = money received (owed to us)
+      return AppColors.getReceivedColor(flipColors, isDark);
     } else {
-      return flipColors ? Colors.red : Colors.green;
+      // Positive balance = money given (we owe)
+      return AppColors.getGiveColor(flipColors, isDark);
     }
   }
 
@@ -67,7 +72,7 @@ class ContactListItem extends StatelessWidget {
     // Balance is stored as whole units (IQD), not cents
     final balance = contact.balance;
     final status = _getStatus(balance, flipColorsValue);
-    final avatarColor = _getAvatarColor(balance, flipColorsValue);
+    final avatarColor = _getAvatarColor(balance, flipColorsValue, context);
     final isSelected = this.isSelected ?? false;
 
     return ListTile(
@@ -99,7 +104,7 @@ class ContactListItem extends StatelessWidget {
           Text(
             status,
             style: TextStyle(
-              color: Colors.grey[600],
+              color: ThemeColors.gray(context, shade: 600),
             ),
           ),
           if (balance != 0) ...[

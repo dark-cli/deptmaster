@@ -7,6 +7,8 @@ import '../services/api_service.dart';
 import '../services/realtime_service.dart';
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../utils/app_colors.dart';
+import '../utils/theme_colors.dart';
 import 'contact_transactions_screen.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -196,9 +198,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           (Match m) => '${m[1]},',
         );
         final balanceText = totalBalance < 0 ? '-$formatted' : '$formatted';
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         final balanceColor = totalBalance < 0
-            ? (flipColors ? Colors.green : Colors.red)
-            : (flipColors ? Colors.red : Colors.green);
+            ? AppColors.getReceivedColor(flipColors, isDark)
+            : AppColors.getGiveColor(flipColors, isDark);
         
         return Card(
           child: Padding(
@@ -266,9 +269,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         final topDebts = negativeBalances.take(5).toList();
         final topCredits = positiveBalances.take(5).toList();
         
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         // Apply flip colors: debts should be opposite of credits
-        final debtColor = flipColors ? Colors.green : Colors.red;
-        final creditColor = flipColors ? Colors.red : Colors.green;
+        final debtColor = AppColors.getReceivedColor(flipColors, isDark);
+        final creditColor = AppColors.getGiveColor(flipColors, isDark);
         
         return Card(
       child: Padding(
@@ -424,13 +428,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   label: Text(
                     isOverdue ? 'Overdue' : '$daysUntil days',
                     style: TextStyle(
-                      color: isOverdue ? Colors.red : Colors.orange,
+                      color: isOverdue ? ThemeColors.error(context) : ThemeColors.warning(context),
                       fontSize: 12,
                     ),
                   ),
                   backgroundColor: isOverdue 
-                      ? Colors.red.withOpacity(0.1)
-                      : Colors.orange.withOpacity(0.1),
+                      ? ThemeColors.error(context).withOpacity(0.1)
+                      : ThemeColors.warning(context).withOpacity(0.1),
                 ),
                 onTap: () {
                   if (contact != null) {

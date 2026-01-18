@@ -1,0 +1,6 @@
+To install Linux desktop dependencies, run:
+
+sudo dnf install -y clang ninja-build gtk3-devel
+
+Then run the app with:
+./start_app.sh linux

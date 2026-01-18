@@ -6,6 +6,8 @@ import '../models/contact.dart';
 import '../services/api_service.dart';
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../utils/app_colors.dart';
+import '../utils/theme_colors.dart';
 import 'add_contact_screen.dart';
 
 class AddTransactionScreen extends ConsumerStatefulWidget {
@@ -415,8 +417,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
             Consumer(
               builder: (context, ref, child) {
                 final flipColors = ref.watch(flipColorsProvider);
-                final giveColor = flipColors ? Colors.red : Colors.green;
-                final receivedColor = flipColors ? Colors.green : Colors.red;
+                final isDark = Theme.of(context).brightness == Brightness.dark;
+                final giveColor = AppColors.getGiveColor(flipColors, isDark);
+                final receivedColor = AppColors.getReceivedColor(flipColors, isDark);
                 
                 return SegmentedButton<TransactionDirection>(
                   segments: [

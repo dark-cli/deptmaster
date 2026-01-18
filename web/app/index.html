@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debt Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .header .subtitle {
+            opacity: 0.9;
+            font-size: 0.9rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-card .label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            background: white;
+            padding: 0.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .tab {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 6px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            background: #f5f5f5;
+        }
+
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .contact-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .contact-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .contact-info {
+            flex: 1;
+        }
+
+        .contact-name {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .contact-details {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .contact-details span {
+            margin-right: 1rem;
+        }
+
+        .balance {
+            text-align: right;
+            font-size: 1.3rem;
+            font-weight: bold;
+        }
+
+        .balance.positive {
+            color: #10b981;
+        }
+
+        .balance.negative {
+            color: #ef4444;
+        }
+
+        .balance.zero {
+            color: #6b7280;
+        }
+
+        .transaction-card {
+            background: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .transaction-info {
+            flex: 1;
+        }
+
+        .transaction-contact {
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .transaction-details {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        .transaction-amount {
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        .transaction-amount.owed {
+            color: #ef4444;
+        }
+
+        .transaction-amount.lent {
+            color: #10b981;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        .refresh-btn {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 56px;
+            height: 56px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: transform 0.2s;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.95);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .spinning {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>💰 Debt Tracker</h1>
+        <div class="subtitle">Manage your debts and track who owes what</div>
+    </div>
+
+    <div class="container">
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div class="value" id="totalContacts">-</div>
+                <div class="label">Contacts</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="totalTransactions">-</div>
+                <div class="label">Transactions</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="totalBalance">-</div>
+                <div class="label">Net Balance</div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('contacts')">Contacts</button>
+            <button class="tab" onclick="showTab('transactions')">Transactions</button>
+        </div>
+
+        <div id="contacts" class="tab-content active">
+            <div id="contactsLoading" class="loading">Loading contacts...</div>
+            <div id="contactsContent"></div>
+        </div>
+
+        <div id="transactions" class="tab-content">
+            <div id="transactionsLoading" class="loading">Loading transactions...</div>
+            <div id="transactionsContent"></div>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="loadData()" id="refreshBtn" title="Refresh data">
+        🔄
+    </button>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api/admin';
+
+        let contacts = [];
+        let transactions = [];
+
+        function showTab(tabName) {
+            // Update tabs
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tabName).classList.add('active');
+        }
+
+        function formatCurrency(cents) {
+            return `$${(Math.abs(cents) / 100).toFixed(2)}`;
+        }
+
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+
+        async function loadData() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            refreshBtn.classList.add('spinning');
+            
+            try {
+                await Promise.all([loadContacts(), loadTransactions()]);
+                updateStats();
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showError('Failed to load data. Make sure the backend is running on port 8000.');
+            } finally {
+                refreshBtn.classList.remove('spinning');
+            }
+        }
+
+        async function loadContacts() {
+            const loading = document.getElementById('contactsLoading');
+            const content = document.getElementById('contactsContent');
+            
+            try {
+                const response = await fetch(`${API_URL}/contacts`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                contacts = await response.json();
+                
+                loading.style.display = 'none';
+                content.innerHTML = contacts.map(contact => {
+                    const balance = contact.balance || 0;
+                    const balanceClass = balance > 0 ? 'positive' : balance < 0 ? 'negative' : 'zero';
+                    const balanceText = balance > 0 
+                        ? `They owe ${formatCurrency(balance)}`
+                        : balance < 0 
+                        ? `You owe ${formatCurrency(balance)}`
+                        : 'Settled';
+                    
+                    // Hide phone if it's an Android contact URI (not useful in browser)
+                    const showPhone = contact.phone && !contact.phone.startsWith('content://');
+                    
+                    return `
+                        <div class="contact-card">
+                            <div class="contact-info">
+                                <div class="contact-name">${contact.name}</div>
+                                <div class="contact-details">
+                                    ${showPhone ? `<span>📞 ${contact.phone}</span>` : ''}
+                                    ${contact.email ? `<span>✉️ ${contact.email}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="balance ${balanceClass}">
+                                ${balanceText}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                loading.innerHTML = `<div class="error">Error loading contacts: ${error.message}</div>`;
+                throw error;
+            }
+        }
+
+        async function loadTransactions() {
+            const loading = document.getElementById('transactionsLoading');
+            const content = document.getElementById('transactionsContent');
+            
+            try {
+                const response = await fetch(`${API_URL}/transactions`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                transactions = await response.json();
+                
+                // Create contact map for names
+                const contactMap = new Map(contacts.map(c => [c.id, c.name]));
+                
+                loading.style.display = 'none';
+                content.innerHTML = transactions.map(transaction => {
+                    const contactName = contactMap.get(transaction.contact_id) || 'Unknown';
+                    const isMoney = transaction.type === 'money';
+                    const isOwed = transaction.direction === 'owed';
+                    const amountClass = isOwed ? 'owed' : 'lent';
+                    const amountText = isMoney 
+                        ? formatCurrency(transaction.amount)
+                        : `${transaction.amount} item(s)`;
+                    
+                    return `
+                        <div class="transaction-card">
+                            <div class="transaction-info">
+                                <div class="transaction-contact">${contactName}</div>
+                                <div class="transaction-details">
+                                    ${transaction.description || 'No description'}
+                                    <span style="margin-left: 1rem;">${formatDate(transaction.transaction_date)}</span>
+                                </div>
+                            </div>
+                            <div class="transaction-amount ${amountClass}">
+                                ${isOwed ? '-' : '+'}${amountText}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                loading.innerHTML = `<div class="error">Error loading transactions: ${error.message}</div>`;
+                throw error;
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('totalContacts').textContent = contacts.length;
+            document.getElementById('totalTransactions').textContent = transactions.length;
+            
+            const totalBalance = contacts.reduce((sum, c) => sum + (c.balance || 0), 0);
+            const balanceElement = document.getElementById('totalBalance');
+            balanceElement.textContent = formatCurrency(totalBalance);
+            balanceElement.className = 'value ' + (totalBalance > 0 ? 'positive' : totalBalance < 0 ? 'negative' : 'zero');
+        }
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+            document.querySelector('.container').insertBefore(errorDiv, document.querySelector('.stats'));
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        // Load data on page load
+        loadData();
+    </script>
+</body>
+</html>
