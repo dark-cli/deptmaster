@@ -64,6 +64,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: Brightness.light,
+      scaffoldBackgroundColor: Colors.transparent, // Allow gradient to show through
       
       // Typography with Tajawal font (Kaleem.dev)
       textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), false),
@@ -364,6 +365,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: Brightness.dark,
+      scaffoldBackgroundColor: Colors.transparent, // Allow gradient to show through
       
       // Typography with Tajawal font (Kaleem.dev)
       textTheme: _buildTextTheme(GoogleFonts.tajawalTextTheme(), true),
