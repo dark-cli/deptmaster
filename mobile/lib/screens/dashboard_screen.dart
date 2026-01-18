@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -316,7 +317,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Directionality(
-                                  textDirection: const TextDirection(0), // Force LTR for mixed Arabic/English text
+                                  textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
                                   child: Text(
                                     contact.name,
                                     style: Theme.of(context).textTheme.bodySmall,
@@ -366,7 +367,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Directionality(
-                                  textDirection: const TextDirection(0), // Force LTR for mixed Arabic/English text
+                                  textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
                                   child: Text(
                                     contact.name,
                                     style: Theme.of(context).textTheme.bodySmall,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -94,7 +95,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
         title: _selectionMode 
             ? Text('${_selectedTransactions.length} selected')
             : Directionality(
-                textDirection: const TextDirection(0), // Force LTR for mixed Arabic/English text
+                textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
                 child: Text(widget.contact.name),
               ),
         leading: _selectionMode

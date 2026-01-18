@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
@@ -95,7 +96,7 @@ class ContactListItem extends StatelessWidget {
                 ),
               ),
         title: Directionality(
-          textDirection: const TextDirection(0), // Force LTR for mixed Arabic/English text
+          textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
           child: Text(
             contact.name,
             semanticsLabel: 'Contact ${contact.name}',

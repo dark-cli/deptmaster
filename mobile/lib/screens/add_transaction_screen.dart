@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -397,7 +398,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                     return ListTile(
                                       leading: const Icon(Icons.person),
                                       title: Directionality(
-                                        textDirection: const TextDirection(0), // Force LTR for mixed Arabic/English text
+                                        textDirection: ui.TextDirection.ltr, // Force LTR for mixed Arabic/English text
                                         child: Text(contact.name),
                                       ),
                                       onTap: () {
