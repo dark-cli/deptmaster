@@ -207,9 +207,8 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
             _loadTransactions();
           }
         },
-        backgroundColor: Colors.orange,
-        child: const Icon(Icons.add, color: Colors.white),
         tooltip: 'Add Transaction',
+        child: const Icon(Icons.add),
       ),
       body: Builder(
         builder: (context) {

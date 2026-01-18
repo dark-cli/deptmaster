@@ -12,6 +12,7 @@ import 'services/realtime_service.dart';
 import 'services/settings_service.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'utils/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -116,19 +117,8 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
           child: child!,
         );
       },
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-        brightness: Brightness.light,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-        brightness: Brightness.dark,
-      ),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
       themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
       initialRoute: widget.initialRoute,
       routes: {

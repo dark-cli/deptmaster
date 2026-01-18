@@ -124,10 +124,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         onLongPress: _showAddContactDialog,
         child: FloatingActionButton(
           onPressed: _showAddTransactionDialog,
-          backgroundColor: Colors.orange,
-          child: const Icon(Icons.add, color: Colors.white),
           tooltip: 'Add Transaction (tap) or Contact (long press)',
-          shape: const CircleBorder(),
+          child: const Icon(Icons.add),
         ),
       ),
     );

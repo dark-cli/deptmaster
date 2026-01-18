@@ -76,7 +76,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.account_balance_wallet, size: 80, color: Colors.orange),
+                  Icon(
+                    Icons.account_balance_wallet,
+                    size: 80,
+                    color: Theme.of(context).colorScheme.tertiary,
+                  ),
                   const SizedBox(height: 32),
                   Text(
                     'Login',
@@ -88,13 +92,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
+                        color: Theme.of(context).colorScheme.errorContainer,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
                       child: Text(
                         _error!,
-                        style: const TextStyle(color: Colors.red),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
