@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
@@ -6,13 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/api_service.dart';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../widgets/gradient_background.dart';
-import '../widgets/gradient_card.dart';
 
 class EditTransactionScreen extends ConsumerStatefulWidget {
   final Transaction transaction;
@@ -72,7 +72,8 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
   Future<void> _loadContacts() async {
     try {
-      final contacts = await ApiService.getContacts();
+      // Always use local database - never call API from UI
+      final contacts = await LocalDatabaseService.getContacts();
       if (mounted) {
         setState(() {
           _contacts = contacts;
@@ -147,18 +148,36 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
       final amountText = _amountController.text.trim();
       final amount = _parseNumber(amountText);
 
-      // Call API to update transaction
-      await ApiService.updateTransaction(
-        widget.transaction.id,
-        amount: amount,
+      // Always update local database first (instant, snappy)
+      // Background sync service will handle server communication
+      final updatedTransaction = Transaction(
+        id: widget.transaction.id,
+        contactId: _selectedContact!.id,
+        type: widget.transaction.type,
         direction: _direction,
+        amount: amount,
+        currency: widget.transaction.currency,
         description: _descriptionController.text.trim().isEmpty
             ? null
             : _descriptionController.text.trim(),
         transactionDate: _selectedDate,
-        contactId: _selectedContact!.id,
         dueDate: _dueDateSwitchEnabled ? _dueDate : null,
+        imagePaths: widget.transaction.imagePaths,
+        createdAt: widget.transaction.createdAt,
+        updatedAt: DateTime.now(),
+        isSynced: false, // Mark as unsynced since we're updating locally
       );
+      await LocalDatabaseService.updateTransaction(updatedTransaction);
+      
+      // Add to pending operations for background sync
+      if (!kIsWeb) {
+        await SyncService.addPendingOperation(
+          entityId: widget.transaction.id,
+          type: PendingOperationType.update,
+          entityType: 'transaction',
+          data: updatedTransaction.toJson(),
+        );
+      }
 
       if (mounted) {
         Navigator.of(context).pop(true); // Return true to indicate success
@@ -239,19 +258,30 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
               if (confirm == true && mounted) {
                 try {
-                  await ApiService.deleteTransaction(widget.transaction.id);
-                  if (mounted) {
-                    Navigator.of(context).pop(true); // Return true to refresh
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('✅ Transaction deleted!')),
+                  // Always delete from local database first
+                  await LocalDatabaseService.deleteTransaction(widget.transaction.id);
+                  
+                  // Add to pending operations for background sync
+                  if (!kIsWeb) {
+                    await SyncService.addPendingOperation(
+                      entityId: widget.transaction.id,
+                      type: PendingOperationType.delete,
+                      entityType: 'transaction',
+                      data: null,
                     );
                   }
+                  
+                  if (!mounted) return;
+                  Navigator.of(context).pop(true); // Return true to refresh
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('✅ Transaction deleted!')),
+                  );
                 } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error deleting: $e')),
-                    );
-                  }
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error deleting: $e')),
+                  );
                 }
               }
             },
@@ -380,7 +410,6 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                   // Try to preserve cursor position
                   final oldCursor = newValue.selection.baseOffset;
                   final oldTextLength = oldValue.text.length;
-                  final newTextLength = formatted.length;
                   
                   // Simple cursor adjustment: if at end, stay at end
                   int newCursor;

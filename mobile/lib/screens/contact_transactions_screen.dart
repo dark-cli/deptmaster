@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -7,9 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/api_service.dart';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
 import '../services/realtime_service.dart';
-import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -72,7 +71,8 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
     });
     
     try {
-      final allTransactions = await ApiService.getTransactions();
+      // Always use local database - never call API from UI
+      final allTransactions = await LocalDatabaseService.getTransactions();
       // Filter transactions for this contact
       final contactTransactions = allTransactions
           .where((t) => t.contactId == widget.contact.id)
@@ -154,35 +154,51 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                           });
 
                           try {
-                            await ApiService.bulkDeleteTransactions(_selectedTransactions.toList());
-                            if (mounted) {
-                              setState(() {
-                                _selectedTransactions.clear();
-                                _selectionMode = false;
-                              });
-                              _loadTransactions();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('✅ ${_selectedTransactions.length} transaction(s) deleted'),
-                                ),
-                              );
+                            final deletedCount = _selectedTransactions.length;
+                            final deletedIds = _selectedTransactions.toList();
+                            
+                            // Always delete from local database first
+                            await LocalDatabaseService.bulkDeleteTransactions(deletedIds);
+                            
+                            // Add to pending operations for background sync
+                            if (!kIsWeb) {
+                              for (final id in deletedIds) {
+                                await SyncService.addPendingOperation(
+                                  entityId: id,
+                                  type: PendingOperationType.delete,
+                                  entityType: 'transaction',
+                                  data: null,
+                                );
+                              }
                             }
+                            
+                            if (!mounted) return;
+                            setState(() {
+                              _selectedTransactions.clear();
+                              _selectionMode = false;
+                            });
+                            _loadTransactions();
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('✅ $deletedCount transaction(s) deleted'),
+                              ),
+                            );
                           } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Error deleting transactions: $e'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              setState(() {
-                                _loading = false;
-                              });
-                            }
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error deleting transactions: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            setState(() {
+                              _loading = false;
+                            });
                           }
                         }
                     },
-            ),
+                  ),
           ] else ...[
           IconButton(
             icon: const Icon(Icons.edit),
@@ -191,7 +207,8 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                 context: context,
                 screen: EditContactScreen(contact: widget.contact),
               );
-              if (result == true && mounted) {
+              if (result == true) {
+                if (!mounted) return;
                 // Reload contact data
                 Navigator.of(context).pop(true);
               }
@@ -374,19 +391,30 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
 
                             if (confirm == true && mounted) {
                               try {
-                                await ApiService.deleteTransaction(transaction.id);
-                                if (mounted) {
-                                  _loadTransactions();
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('✅ Transaction deleted!')),
+                                // Always delete from local database first
+                                await LocalDatabaseService.deleteTransaction(transaction.id);
+                                
+                                // Add to pending operations for background sync
+                                if (!kIsWeb) {
+                                  await SyncService.addPendingOperation(
+                                    entityId: transaction.id,
+                                    type: PendingOperationType.delete,
+                                    entityType: 'transaction',
+                                    data: null,
                                   );
                                 }
+                                
+                                if (!mounted) return;
+                                _loadTransactions();
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('✅ Transaction deleted!')),
+                                );
                               } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Error deleting: $e')),
-                                  );
-                                }
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error deleting: $e')),
+                                );
                               }
                             }
                           },
@@ -582,9 +610,7 @@ class _TransactionListItem extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: InkWell(
-        onTap: onSelectionChanged != null
-            ? onSelectionChanged
-            : onEdit,
+        onTap: onSelectionChanged ?? onEdit,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(

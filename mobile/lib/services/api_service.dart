@@ -1,7 +1,5 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import 'auth_service.dart';
@@ -36,11 +34,23 @@ class ApiService {
         final List<dynamic> data = json.decode(response.body);
         return data.map((json) => Contact.fromJson(json)).toList();
       } else {
-        print('Error fetching contacts: HTTP ${response.statusCode}');
-        print('Response: ${response.body}');
+        // Only log non-connection errors
+        final errorStr = response.body;
+        if (!errorStr.contains('Connection refused') && 
+            !errorStr.contains('Failed host lookup') &&
+            !errorStr.contains('Network is unreachable')) {
+          print('Error fetching contacts: HTTP ${response.statusCode}');
+          print('Response: ${response.body}');
+        }
       }
     } catch (e) {
-      print('Error fetching contacts: $e');
+      // Silently handle connection errors - app works offline
+      final errorStr = e.toString();
+      if (!errorStr.contains('Connection refused') && 
+          !errorStr.contains('Failed host lookup') &&
+          !errorStr.contains('Network is unreachable')) {
+        print('Error fetching contacts: $e');
+      }
     }
     return [];
   }
@@ -201,12 +211,24 @@ class ApiService {
         print('✅ Loaded ${transactions.length} transactions');
         return transactions;
       } else {
-        print('Error fetching transactions: HTTP ${response.statusCode}');
-        print('Response: ${response.body}');
+        // Only log non-connection errors
+        final errorStr = response.body;
+        if (!errorStr.contains('Connection refused') && 
+            !errorStr.contains('Failed host lookup') &&
+            !errorStr.contains('Network is unreachable')) {
+          print('Error fetching transactions: HTTP ${response.statusCode}');
+          print('Response: ${response.body}');
+        }
       }
     } catch (e, stackTrace) {
-      print('Error fetching transactions: $e');
-      print('Stack trace: $stackTrace');
+      // Silently handle connection errors - app works offline
+      final errorStr = e.toString();
+      if (!errorStr.contains('Connection refused') && 
+          !errorStr.contains('Failed host lookup') &&
+          !errorStr.contains('Network is unreachable')) {
+        print('Error fetching transactions: $e');
+        print('Stack trace: $stackTrace');
+      }
     }
     return [];
   }

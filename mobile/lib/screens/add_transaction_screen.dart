@@ -1,4 +1,3 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
@@ -6,13 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/api_service.dart';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
+import '../services/dummy_data_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../widgets/gradient_background.dart';
-import '../widgets/gradient_card.dart';
 import 'add_contact_screen.dart';
 import '../utils/bottom_sheet_helper.dart';
 
@@ -153,7 +154,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
   Future<void> _loadContacts() async {
     try {
-      final contacts = await ApiService.getContacts();
+      // Always use local database - never call API from UI
+      final contacts = await LocalDatabaseService.getContacts();
       if (mounted) {
         setState(() {
           _contacts = contacts;
@@ -232,8 +234,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
       final amountText = _amountController.text.trim();
       final amount = _parseNumber(amountText);
 
+      // Generate UUID for local ID (server expects UUID format)
+      final transactionId = DummyDataService.uuid.v4();
+      
       final transaction = Transaction(
-        id: DateTime.now().millisecondsSinceEpoch.toString(), // Temporary ID
+        id: transactionId,
         contactId: _selectedContact!.id,
         type: TransactionType.money, // Always money (items removed)
         direction: _direction,
@@ -248,8 +253,19 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         updatedAt: DateTime.now(),
       );
 
-      // Call API to create transaction
-      await ApiService.createTransaction(transaction);
+      // Always save to local database first (instant, snappy)
+      // Background sync service will handle server communication
+      await LocalDatabaseService.createTransaction(transaction);
+      
+      // Add to pending operations for background sync
+      if (!kIsWeb) {
+        await SyncService.addPendingOperation(
+          entityId: transaction.id,
+          type: PendingOperationType.create,
+          entityType: 'transaction',
+          data: transaction.toJson(),
+        );
+      }
 
       if (mounted) {
         Navigator.of(context).pop(true); // Return true to indicate success

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
-import '../services/api_service.dart';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
+import '../services/dummy_data_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AddContactScreen extends ConsumerStatefulWidget {
   final String? initialName;
@@ -47,9 +50,11 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
     });
 
     try {
-      // Call API to create contact
+      // Generate UUID for local ID (server expects UUID format)
+      final contactId = DummyDataService.uuid.v4();
+      
       final contact = Contact(
-        id: '', // Will be set by API
+        id: contactId,
         name: _nameController.text.trim(),
         username: _usernameController.text.trim().isEmpty ? null : _usernameController.text.trim(),
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
@@ -60,7 +65,19 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
         balance: 0,
       );
 
-      final createdContact = await ApiService.createContact(contact);
+      // Always save to local database first (instant, snappy)
+      // Background sync service will handle server communication
+      final createdContact = await LocalDatabaseService.createContact(contact);
+      
+      // Add to pending operations for background sync
+      if (!kIsWeb) {
+        await SyncService.addPendingOperation(
+          entityId: contact.id,
+          type: PendingOperationType.create,
+          entityType: 'contact',
+          data: contact.toJson(),
+        );
+      }
 
       if (mounted) {
         Navigator.of(context).pop(createdContact); // Return the created contact

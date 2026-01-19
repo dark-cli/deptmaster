@@ -1,39 +1,25 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:hive_flutter/hive_flutter.dart';
-import '../models/contact.dart';
-import '../models/transaction.dart';
+import 'local_database_service.dart';
 import 'api_service.dart';
-import 'dummy_data_service.dart';
+import 'sync_service.dart';
 
 class DataService {
+  /// Load data from API and sync to local database
   static Future<void> loadFromApi() async {
     try {
       // Fetch contacts from API
       final contacts = await ApiService.getContacts();
       
-      // For web, we don't use Hive - data is loaded directly in screens
+      // Fetch transactions from API
+      final transactions = await ApiService.getTransactions();
+      
+      // Sync to local database (for mobile/desktop)
       if (!kIsWeb) {
-        final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-        
-        // Clear and add contacts
-        await contactsBox.clear();
-        for (var contact in contacts) {
-          await contactsBox.put(contact.id, contact);
-        }
-        
-        // Fetch transactions from API
-        final transactions = await ApiService.getTransactions();
-        final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-        
-        // Clear and add transactions
-        await transactionsBox.clear();
-        for (var transaction in transactions) {
-          await transactionsBox.put(transaction.id, transaction);
-        }
-        
-        print('✅ Loaded ${contacts.length} contacts and ${transactions.length} transactions from API');
+        await LocalDatabaseService.syncContactsFromServer(contacts);
+        await LocalDatabaseService.syncTransactionsFromServer(transactions);
+        print('✅ Loaded ${contacts.length} contacts and ${transactions.length} transactions from API to local');
       } else {
-        print('✅ Web: API data will be loaded directly in screens');
+        print('✅ Web: Loaded ${contacts.length} contacts and ${transactions.length} transactions from API');
       }
     } catch (e) {
       print('❌ Error loading from API: $e');
@@ -41,8 +27,14 @@ class DataService {
     }
   }
   
+  /// Sync with API: push pending changes, then pull latest
   static Future<void> syncWithApi() async {
-    // Future: Implement sync logic (upload local changes, download remote changes)
-    await loadFromApi();
+    if (kIsWeb) {
+      // Web: just reload from API
+      await loadFromApi();
+    } else {
+      // Mobile/Desktop: full sync (push pending, then pull)
+      await SyncService.fullSync();
+    }
   }
 }

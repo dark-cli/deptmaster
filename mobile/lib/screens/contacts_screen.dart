@@ -4,19 +4,15 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
+import '../models/transaction.dart';
 import '../services/dummy_data_service.dart';
-import '../services/api_service.dart';
-import 'dart:async';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
 import '../widgets/contact_list_item.dart';
 import 'add_contact_screen.dart';
-import 'edit_contact_screen.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
 import '../services/realtime_service.dart';
-import '../services/settings_service.dart';
-import '../providers/settings_provider.dart';
-import '../utils/app_colors.dart';
-import '../utils/theme_colors.dart';
 import '../utils/bottom_sheet_helper.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
@@ -58,6 +54,28 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     
     // Connect WebSocket if not connected
     RealtimeService.connect();
+    
+    // Listen to local Hive box changes for offline updates
+    _setupLocalListeners();
+  }
+
+  void _setupLocalListeners() {
+    if (kIsWeb) return;
+    
+    // Listen to local Hive box changes for offline updates
+    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+    
+    contactsBox.listenable().addListener(_onLocalDataChanged);
+    transactionsBox.listenable().addListener(_onLocalDataChanged);
+  }
+
+  void _onLocalDataChanged() {
+    // Reload contacts when local database changes (works offline)
+    // Transactions affect contact balances, so reload when either changes
+    if (mounted) {
+      _loadContacts();
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -77,7 +95,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     }
   }
 
-  @override
   void _onSearchChanged() {
     _applySearchAndSort();
   }
@@ -135,62 +152,44 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    if (!kIsWeb) {
+      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+      contactsBox.listenable().removeListener(_onLocalDataChanged);
+      transactionsBox.listenable().removeListener(_onLocalDataChanged);
+    }
     RealtimeService.removeListener(_onRealtimeUpdate);
     super.dispose();
   }
 
-  Future<void> _loadContacts() async {
+  Future<void> _loadContacts({bool sync = false}) async {
     setState(() {
       _loading = true;
       _error = null;
     });
     
     try {
-      // Try to load from API (online)
-      final contacts = await ApiService.getContacts();
+      // Local-first: read from local database (instant, snappy)
+      List<Contact> contacts;
       
-      // Update state (works for both web and desktop)
-          if (mounted) {
-            setState(() {
-              _contacts = contacts;
-              _filteredContacts = contacts;
-              _loading = false;
-            });
-            _applySearchAndSort();
-          }
+      // Always use local database - never call API from UI
+      contacts = await LocalDatabaseService.getContacts();
       
-      // Store in Hive for offline capability (mobile/desktop)
-      if (!kIsWeb) {
-        try {
-          final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-          await contactsBox.clear();
-          for (var contact in contacts) {
-            await contactsBox.put(contact.id, contact);
-          }
-        } catch (e) {
-          // Hive might not be initialized, that's okay
-          print('⚠️ Could not store in Hive: $e');
-        }
+      // If sync requested, do full sync in background
+      if (sync && !kIsWeb) {
+        SyncService.fullSync(); // Don't await, let it run in background
+      }
+      
+      // Update state
+      if (mounted) {
+        setState(() {
+          _contacts = contacts;
+          _filteredContacts = contacts;
+          _loading = false;
+        });
+        _applySearchAndSort();
       }
     } catch (e) {
-      // If online fails, try to load from Hive (offline)
-      if (!kIsWeb) {
-        try {
-          final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-          final contacts = contactsBox.values.cast<Contact>().toList();
-          if (mounted) {
-            setState(() {
-              _contacts = contacts;
-              _loading = false;
-              _error = 'Offline - showing cached data';
-            });
-          }
-          return;
-        } catch (_) {
-          // Hive also failed
-        }
-      }
-      
       if (mounted) {
         setState(() {
           _error = e.toString();
@@ -200,26 +199,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     }
   }
 
-  int _calculateTotalBalance() {
-    // Use state directly (works for both web and desktop)
-    if (_contacts != null && _contacts!.isNotEmpty) {
-      return _contacts!.fold<int>(0, (sum, contact) => sum + contact.balance);
-    }
-    return 0;
-  }
-
-  
-  String _formatBalance(int balance) {
-    // Balance is stored as whole units (IQD), not cents
-    if (balance == 0) return '0 IQD';
-    // Format with commas for thousands
-    final absBalance = balance.abs();
-    final formatted = absBalance.toString().replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-      (Match m) => '${m[1]},',
-    );
-    return balance < 0 ? '-$formatted IQD' : '$formatted IQD';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -309,21 +288,39 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                         });
 
                         try {
-                          await ApiService.bulkDeleteContacts(_selectedContacts.toList());
+                          final deletedCount = _selectedContacts.length;
+                          final deletedIds = _selectedContacts.toList();
+                          
+                          // Always delete from local database first
+                          await LocalDatabaseService.bulkDeleteContacts(deletedIds);
+                          
+                          // Add to pending operations for background sync
+                          if (!kIsWeb) {
+                            for (final id in deletedIds) {
+                              await SyncService.addPendingOperation(
+                                entityId: id,
+                                type: PendingOperationType.delete,
+                                entityType: 'contact',
+                                data: null,
+                              );
+                            }
+                          }
+                          
                           if (mounted) {
                             setState(() {
                               _selectedContacts.clear();
                               _selectionMode = false;
                             });
                             _loadContacts();
+                            if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('✅ ${_selectedContacts.length} contact(s) deleted'),
+                                content: Text('✅ $deletedCount contact(s) deleted'),
                               ),
                             );
                           }
-                        } catch (e) {
-                          if (mounted) {
+                          } catch (e) {
+                            if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('Error deleting contacts: $e'),
@@ -335,7 +332,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             });
                           }
                         }
-                      }
                     },
             ),
           ] else ...[
@@ -405,7 +401,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadContacts,
+        onRefresh: () => _loadContacts(sync: true),
         child: Builder(
           builder: (context) {
             if (_loading) {
@@ -429,7 +425,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
             }
 
             final contacts = _getContacts();
-            final totalBalance = _calculateTotalBalance();
 
             if (contacts.isEmpty && _searchController.text.isNotEmpty) {
               return Center(

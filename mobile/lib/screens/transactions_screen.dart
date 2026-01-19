@@ -10,9 +10,9 @@ import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
 import '../services/dummy_data_service.dart';
-import '../services/api_service.dart';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
 import '../services/realtime_service.dart';
-import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import 'edit_transaction_screen.dart';
 import 'add_transaction_screen.dart';
@@ -154,20 +154,28 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
     super.dispose();
   }
 
-  Future<void> _loadData() async {
+  Future<void> _loadData({bool sync = false}) async {
     setState(() {
       _loading = true;
       _error = null;
     });
     
     try {
-      print('🔄 Loading transactions from API...');
-      final transactions = await ApiService.getTransactions();
-      print('📊 Got ${transactions.length} transactions from API');
-      final contacts = await ApiService.getContacts();
-      print('👥 Got ${contacts.length} contacts from API');
+      // Local-first: read from local database (instant, snappy)
+      List<Transaction> transactions;
+      List<Contact> contacts;
       
-      // Update state (works for both web and desktop)
+      // Always use local database - never call API from UI
+      transactions = await LocalDatabaseService.getTransactions();
+      contacts = await LocalDatabaseService.getContacts();
+      print('📊 Got ${transactions.length} transactions and ${contacts.length} contacts from local database');
+      
+      // If sync requested, do full sync in background
+      if (sync && !kIsWeb) {
+        SyncService.fullSync(); // Don't await, let it run in background
+      }
+      
+      // Update state
       if (mounted) {
         setState(() {
           _transactions = transactions;
@@ -178,47 +186,9 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
         _applySearchAndSort();
         print('✅ State updated with ${_transactions?.length ?? 0} transactions');
       }
-      
-      // Store in Hive for offline capability (mobile/desktop)
-      if (!kIsWeb) {
-        try {
-          final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-          await transactionsBox.clear();
-          for (var transaction in transactions) {
-            await transactionsBox.put(transaction.id, transaction);
-          }
-          print('✅ Stored ${transactions.length} transactions in Hive');
-        } catch (e) {
-          // Hive might not be initialized or enum adapter issue - that's okay
-          print('⚠️ Could not store in Hive: $e');
-        }
-      }
     } catch (e, stackTrace) {
       print('❌ Error loading transactions: $e');
       print('Stack trace: $stackTrace');
-      
-      // If online fails, try to load from Hive (offline)
-      if (!kIsWeb) {
-        try {
-          final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-          final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-          final transactions = transactionsBox.values.cast<Transaction>().toList();
-          final contacts = contactsBox.values.cast<Contact>().toList();
-          if (mounted) {
-            setState(() {
-              _transactions = transactions;
-              _filteredTransactions = transactions;
-              _contacts = contacts;
-              _loading = false;
-              _error = 'Offline - showing cached data';
-            });
-            _applySearchAndSort();
-          }
-          return;
-        } catch (_) {
-          // Hive also failed
-        }
-      }
       
       if (mounted) {
         setState(() {
@@ -317,31 +287,48 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                           });
 
                           try {
-                            await ApiService.bulkDeleteTransactions(_selectedTransactions.toList());
+                            final deletedCount = _selectedTransactions.length;
+                            final deletedIds = _selectedTransactions.toList();
+                            
+                            // Always delete from local database first
+                            await LocalDatabaseService.bulkDeleteTransactions(deletedIds);
+                            
+                            // Add to pending operations for background sync
+                            if (!kIsWeb) {
+                              for (final id in deletedIds) {
+                                await SyncService.addPendingOperation(
+                                  entityId: id,
+                                  type: PendingOperationType.delete,
+                                  entityType: 'transaction',
+                                  data: null,
+                                );
+                              }
+                            }
+                            
                             if (mounted) {
                               setState(() {
                                 _selectedTransactions.clear();
                                 _selectionMode = false;
                               });
                               _loadData();
+                              if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('✅ ${_selectedTransactions.length} transaction(s) deleted'),
+                                  content: Text('✅ $deletedCount transaction(s) deleted'),
                                 ),
                               );
                             }
                           } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Error deleting transactions: $e'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              setState(() {
-                                _loading = false;
-                              });
-                            }
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error deleting transactions: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            setState(() {
+                              _loading = false;
+                            });
                           }
                         }
                     },
@@ -467,7 +454,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
               : <String, String>{};
 
           return RefreshIndicator(
-            onRefresh: _loadData,
+            onRefresh: () => _loadData(sync: true),
             child: ListView.builder(
               itemCount: transactions.length,
               cacheExtent: 200, // Cache more items for smoother scrolling

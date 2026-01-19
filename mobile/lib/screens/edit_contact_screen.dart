@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
-import '../services/api_service.dart';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class EditContactScreen extends ConsumerStatefulWidget {
   final Contact contact;
@@ -52,15 +54,29 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
       final contact = Contact(
         id: widget.contact.id,
         name: _nameController.text.trim(),
+        username: widget.contact.username, // Preserve username
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
         createdAt: widget.contact.createdAt,
         updatedAt: DateTime.now(),
+        isSynced: false, // Mark as unsynced since we're updating locally
         balance: widget.contact.balance,
       );
 
-      await ApiService.updateContact(widget.contact.id, contact);
+      // Always update local database first (instant, snappy)
+      // Background sync service will handle server communication
+      await LocalDatabaseService.updateContact(contact);
+      
+      // Add to pending operations for background sync
+      if (!kIsWeb) {
+        await SyncService.addPendingOperation(
+          entityId: contact.id,
+          type: PendingOperationType.update,
+          entityType: 'contact',
+          data: contact.toJson(),
+        );
+      }
 
       if (mounted) {
         Navigator.of(context).pop(true);

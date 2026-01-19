@@ -1,11 +1,11 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:io' show Platform;
 import 'contacts_screen.dart';
 import 'transactions_screen.dart';
 import 'dashboard_screen.dart';
-import 'settings_screen.dart';
 import 'add_contact_screen.dart';
 import 'add_transaction_screen.dart';
 import 'backend_setup_screen.dart';
@@ -453,9 +453,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         currentPort: _backendPort,
         onSaved: () async {
           await _loadSettings();
-          if (mounted) {
-            Navigator.of(context).pop();
-          }
+          if (!mounted) return;
+          Navigator.of(context).pop();
         },
       ),
     );
@@ -491,8 +490,9 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
       ),
     );
 
-    if (confirm == true && mounted) {
+    if (confirm == true) {
       await AuthService.logout();
+      if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const LoginScreen()),
         (Route<dynamic> route) => false,

@@ -51,19 +51,92 @@ DB_PASSWORD="${DB_PASSWORD:-dev_password}"
 
 export PGPASSWORD="$DB_PASSWORD"
 
-echo "🗑️  Dropping existing database..."
+echo "🗑️  Flushing all old database data..."
+echo ""
+
+# Step 1: Terminate all connections to the database
+echo "   1️⃣  Terminating all connections to '$DB_NAME'..."
 docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres <<EOF
--- Terminate existing connections
+-- Force terminate all connections to the database
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
 WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();
+EOF
+echo "   ✅ All connections terminated"
+echo ""
 
--- Drop and recreate database
+# Step 2: Drop the database completely
+echo "   2️⃣  Dropping database '$DB_NAME'..."
+docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres <<EOF
+-- Drop database if it exists (this will fail if there are still connections)
 DROP DATABASE IF EXISTS $DB_NAME;
+EOF
+
+# Wait a moment for the drop to complete
+sleep 1
+
+# Step 3: Verify database is gone
+echo "   3️⃣  Verifying database is completely removed..."
+DB_EXISTS=$(docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null || echo "0")
+
+if [ "$DB_EXISTS" = "1" ]; then
+    echo "   ⚠️  Database still exists, trying force drop..."
+    # Try to drop again with more aggressive connection termination
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres <<EOF
+-- Terminate all connections more aggressively
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = '$DB_NAME';
+
+-- Wait a moment
+SELECT pg_sleep(1);
+
+-- Drop database
+DROP DATABASE IF EXISTS $DB_NAME;
+EOF
+    sleep 1
+    DB_EXISTS=$(docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null || echo "0")
+    
+    if [ "$DB_EXISTS" = "1" ]; then
+        echo "   ❌ ERROR: Could not drop database. There may be active connections."
+        echo "   💡 Try stopping the backend server first: ./STOP_SERVER.sh"
+        exit 1
+    fi
+fi
+echo "   ✅ Database successfully dropped"
+echo ""
+
+# Step 4: Create fresh empty database
+echo "   4️⃣  Creating fresh empty database..."
+docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres <<EOF
 CREATE DATABASE $DB_NAME;
 EOF
 
-echo "✅ Database reset complete"
+# Step 5: Verify database is empty
+echo "   5️⃣  Verifying database is completely empty..."
+TABLE_COUNT=$(docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null || echo "0")
+
+if [ "$TABLE_COUNT" != "0" ]; then
+    echo "   ⚠️  WARNING: Database contains $TABLE_COUNT tables (should be 0)"
+    echo "   🧹 Cleaning up any remaining tables..."
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" <<EOF
+-- Drop all tables if any exist
+DO \$\$ 
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+        EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
+    END LOOP;
+END \$\$;
+EOF
+    echo "   ✅ Remaining tables cleaned up"
+else
+    echo "   ✅ Database is completely empty"
+fi
+
+echo ""
+echo "✅ Database completely flushed and reset"
 echo ""
 
 echo "📝 Running migrations..."

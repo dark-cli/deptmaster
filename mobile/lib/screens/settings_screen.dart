@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/settings_service.dart';
-import '../services/auth_service.dart';
 import '../providers/settings_provider.dart';
-import 'login_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -15,7 +13,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _darkMode = true; // Default to dark mode
   String _defaultDirection = 'give';
-  bool _flipColors = false;
+  // ignore: unused_field
   bool _dueDateEnabled = false;
   int _defaultDueDateDays = 30;
   bool _defaultDueDateSwitch = false;
@@ -29,7 +27,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _loadSettings() async {
     final darkMode = await SettingsService.getDarkMode();
     final defaultDir = await SettingsService.getDefaultDirection();
-    final flip = await SettingsService.getFlipColors();
+    await SettingsService.getFlipColors();
     final dueDateEnabled = await SettingsService.getDueDateEnabled();
     final defaultDays = await SettingsService.getDefaultDueDateDays();
     final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
@@ -38,7 +36,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       setState(() {
         _darkMode = darkMode;
         _defaultDirection = defaultDir;
-        _flipColors = flip;
         _dueDateEnabled = dueDateEnabled;
         _defaultDueDateDays = defaultDays;
         _defaultDueDateSwitch = defaultDueDateSwitch;

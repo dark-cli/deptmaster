@@ -93,6 +93,18 @@ def migrate_debitum(debitum_db_path):
     pg_cur = pg_conn.cursor()
     
     try:
+        # First, check if database has any existing data (should be empty after RESET_DATABASE.sh)
+        pg_cur.execute("SELECT COUNT(*) FROM transactions_projection")
+        total_txns = pg_cur.fetchone()[0]
+        pg_cur.execute("SELECT COUNT(*) FROM contacts_projection")
+        total_contacts = pg_cur.fetchone()[0]
+        
+        if total_txns > 0 or total_contacts > 0:
+            print(f"⚠️  WARNING: Database already contains {total_txns} transactions and {total_contacts} contacts!")
+            print("   This script should be run after RESET_DATABASE.sh which drops and recreates the database.")
+            print("   Existing data will be cleared for the 'max' user, but other users' data will remain.")
+            print("   Proceeding with clearing and re-importing data for 'max' user...")
+        
         # Find or create the "max" user
         pg_cur.execute("SELECT id FROM users_projection WHERE email = 'max' LIMIT 1")
         user_row = pg_cur.fetchone()
@@ -112,47 +124,88 @@ def migrate_debitum(debitum_db_path):
         
         # Clear existing data for this user (but keep the user)
         print("🗑️  Clearing existing data...")
+        
+        # Use TRUNCATE CASCADE for more reliable deletion (faster and handles foreign keys)
+        # But we need to be careful - we only want to delete data for this user
+        # So we'll use DELETE with proper ordering instead
+        
+        # First, verify we're starting clean by counting existing records
+        pg_cur.execute("SELECT COUNT(*) FROM transactions_projection WHERE user_id = %s", (str(user_id),))
+        existing_txns = pg_cur.fetchone()[0]
+        pg_cur.execute("SELECT COUNT(*) FROM contacts_projection WHERE user_id = %s", (str(user_id),))
+        existing_contacts = pg_cur.fetchone()[0]
+        pg_cur.execute("SELECT COUNT(*) FROM events WHERE user_id = %s", (str(user_id),))
+        existing_events = pg_cur.fetchone()[0]
+        
+        print(f"  📊 Existing records: {existing_txns} transactions, {existing_contacts} contacts, {existing_events} events")
+        
+        # Delete in order: dependent tables first, then main tables
         # Delete transaction images (if table exists)
         try:
             pg_cur.execute("""
                 DELETE FROM transaction_images_projection 
                 WHERE transaction_id IN (SELECT id FROM transactions_projection WHERE user_id = %s)
             """, (str(user_id),))
-        except Exception:
-            pass  # Table might not exist
+            if pg_cur.rowcount > 0:
+                print(f"  ✅ Deleted {pg_cur.rowcount} transaction images")
+        except Exception as e:
+            print(f"  ⚠️  Could not delete transaction images: {e}")
+        
         # Delete reminders
         try:
             pg_cur.execute("""
                 DELETE FROM reminders_projection 
                 WHERE user_id = %s
             """, (str(user_id),))
-        except Exception:
-            pass  # Table might not exist
-        # Delete transactions
+            if pg_cur.rowcount > 0:
+                print(f"  ✅ Deleted {pg_cur.rowcount} reminders")
+        except Exception as e:
+            print(f"  ⚠️  Could not delete reminders: {e}")
+        
+        # Delete transactions (must be before contacts due to foreign key)
         pg_cur.execute("""
             DELETE FROM transactions_projection 
             WHERE user_id = %s
         """, (str(user_id),))
+        print(f"  ✅ Deleted {pg_cur.rowcount} transactions")
+        
         # Delete contacts
         pg_cur.execute("""
             DELETE FROM contacts_projection 
             WHERE user_id = %s
         """, (str(user_id),))
+        print(f"  ✅ Deleted {pg_cur.rowcount} contacts")
+        
         # Delete events
         pg_cur.execute("""
             DELETE FROM events 
             WHERE user_id = %s
         """, (str(user_id),))
+        print(f"  ✅ Deleted {pg_cur.rowcount} events")
+        
         # Delete snapshots
         try:
             pg_cur.execute("""
                 DELETE FROM snapshots 
                 WHERE user_id = %s
             """, (str(user_id),))
-        except Exception:
-            pass  # Table might not exist
+            if pg_cur.rowcount > 0:
+                print(f"  ✅ Deleted {pg_cur.rowcount} snapshots")
+        except Exception as e:
+            print(f"  ⚠️  Could not delete snapshots: {e}")
+        
         pg_conn.commit()
-        print("✅ Existing data cleared")
+        
+        # Verify deletion
+        pg_cur.execute("SELECT COUNT(*) FROM transactions_projection WHERE user_id = %s", (str(user_id),))
+        remaining_txns = pg_cur.fetchone()[0]
+        pg_cur.execute("SELECT COUNT(*) FROM contacts_projection WHERE user_id = %s", (str(user_id),))
+        remaining_contacts = pg_cur.fetchone()[0]
+        
+        if remaining_txns > 0 or remaining_contacts > 0:
+            print(f"  ⚠️  WARNING: Still have {remaining_txns} transactions and {remaining_contacts} contacts after deletion!")
+        else:
+            print("✅ Existing data cleared (verified)")
         
         # Migrate persons to contacts
         print("📇 Migrating contacts...")
@@ -297,7 +350,26 @@ def migrate_debitum(debitum_db_path):
             print(f"  ✅ {txn['person_name']}: {amount} ({'money' if txn['is_monetary'] else 'item'})")
         
         pg_conn.commit()
-        print(f"✅ Migrated {len(transactions)} transactions")
+        
+        # Count only monetary transactions (items are skipped)
+        monetary_transactions = [t for t in transactions if t['is_monetary']]
+        print(f"✅ Migrated {len(monetary_transactions)} transactions ({len(transactions) - len(monetary_transactions)} items skipped)")
+        
+        # Verify final counts
+        pg_cur.execute("SELECT COUNT(*) FROM transactions_projection WHERE user_id = %s", (str(user_id),))
+        final_txns = pg_cur.fetchone()[0]
+        pg_cur.execute("SELECT COUNT(*) FROM contacts_projection WHERE user_id = %s", (str(user_id),))
+        final_contacts = pg_cur.fetchone()[0]
+        
+        print("")
+        print("📊 Final verification:")
+        print(f"   - {final_contacts} contacts in database")
+        print(f"   - {final_txns} transactions in database")
+        
+        if final_contacts != len(persons):
+            print(f"   ⚠️  WARNING: Expected {len(persons)} contacts but found {final_contacts}")
+        if final_txns != len(monetary_transactions):
+            print(f"   ⚠️  WARNING: Expected {len(monetary_transactions)} transactions but found {final_txns}")
         
         # Migrate images if any
         print("🖼️  Checking for images...")
@@ -309,7 +381,7 @@ def migrate_debitum(debitum_db_path):
         print("")
         print(f"✅ Migration complete!")
         print(f"   - {len(persons)} contacts")
-        print(f"   - {len(transactions)} transactions")
+        print(f"   - {len(monetary_transactions)} transactions")
         print(f"   - {event_counter} events created")
         print("")
         print("🌐 View your data at: http://localhost:8000/admin")

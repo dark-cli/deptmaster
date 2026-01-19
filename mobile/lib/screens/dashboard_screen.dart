@@ -1,13 +1,15 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/api_service.dart';
 import '../services/realtime_service.dart';
-import '../services/settings_service.dart';
+import '../services/local_database_service.dart';
+import '../services/sync_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:hive_flutter/hive_flutter.dart';
+import '../services/dummy_data_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -34,6 +36,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     _loadData();
     RealtimeService.addListener(_onRealtimeUpdate);
     RealtimeService.connect();
+    _setupLocalListeners();
+  }
+
+  void _setupLocalListeners() {
+    if (kIsWeb) return;
+    
+    // Listen to local Hive box changes for offline updates
+    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+    
+    contactsBox.listenable().addListener(_onLocalDataChanged);
+    transactionsBox.listenable().addListener(_onLocalDataChanged);
+  }
+
+  void _onLocalDataChanged() {
+    // Reload data when local database changes (works offline)
+    if (mounted) {
+      _loadData();
+    }
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -45,14 +66,36 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
   }
 
-  Future<void> _loadData() async {
+  @override
+  void dispose() {
+    if (!kIsWeb) {
+      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+      contactsBox.listenable().removeListener(_onLocalDataChanged);
+      transactionsBox.listenable().removeListener(_onLocalDataChanged);
+    }
+    RealtimeService.removeListener(_onRealtimeUpdate);
+    super.dispose();
+  }
+
+  Future<void> _loadData({bool sync = false}) async {
     setState(() {
       _loading = true;
     });
 
     try {
-      final contacts = await ApiService.getContacts();
-      final transactions = await ApiService.getTransactions();
+      // Local-first: read from local database (instant, snappy)
+      List<Contact> contacts;
+      List<Transaction> transactions;
+      
+      // Always use local database - never call API from UI
+      contacts = await LocalDatabaseService.getContacts();
+      transactions = await LocalDatabaseService.getTransactions();
+      
+      // If sync requested, do full sync in background
+      if (sync && !kIsWeb) {
+        SyncService.fullSync(); // Don't await, let it run in background
+      }
       
       if (mounted) {
         setState(() {
@@ -102,12 +145,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   @override
-  void dispose() {
-    RealtimeService.removeListener(_onRealtimeUpdate);
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     // Watch due date enabled setting
     final dueDateEnabled = ref.watch(dueDateEnabledProvider);
@@ -142,7 +179,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         title: const Text('Dashboard'),
       ),
       body: RefreshIndicator(
-        onRefresh: _loadData,
+        onRefresh: () => _loadData(sync: true),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
@@ -520,8 +557,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   ) {
     return Consumer(
       builder: (context, ref, child) {
-        final flipColors = ref.watch(flipColorsProvider);
-        final isDark = Theme.of(context).brightness == Brightness.dark;
         final warningColor = ThemeColors.warning(context);
         final errorColor = ThemeColors.error(context);
         

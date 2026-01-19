@@ -11,9 +11,9 @@ import 'services/dummy_data_service.dart';
 import 'services/data_service.dart';
 import 'services/realtime_service.dart';
 import 'services/settings_service.dart';
-import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/backend_config_service.dart';
+import 'services/sync_service.dart';
 import 'utils/app_theme.dart';
 
 void main() async {
@@ -37,20 +37,44 @@ void main() async {
     await Hive.openBox<Contact>(DummyDataService.contactsBoxName);
     await Hive.openBox<Transaction>(DummyDataService.transactionsBoxName);
     
+    // Initialize SyncService for local-first architecture
+    await SyncService.initialize();
+    
     if (isBackendConfigured) {
-      // Try to load from API, fallback to dummy data if API fails
+      // Try to load from API and sync to local, fallback to dummy data if API fails
       try {
         await DataService.loadFromApi();
+        // After initial load, do a full sync to ensure everything is up to date
+        await SyncService.fullSync();
       } catch (e) {
-        print('⚠️ Could not load from API, using dummy data: $e');
-        await DummyDataService.initialize();
+        // Silently handle connection errors - app works offline
+        final errorStr = e.toString();
+        if (!errorStr.contains('Connection refused') && 
+            !errorStr.contains('Failed host lookup') &&
+            !errorStr.contains('Network is unreachable')) {
+          print('⚠️ Could not load from API, using local data: $e');
+        }
+        // Ensure we have dummy data if local database is empty
+        if (!kIsWeb) {
+          final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+          final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+          if (contactsBox.isEmpty && transactionsBox.isEmpty) {
+            await DummyDataService.initialize();
+          }
+        } else {
+          await DummyDataService.initialize();
+        }
       }
       
-      // Connect to WebSocket for real-time updates
-      RealtimeService.connect();
+      // Connect to WebSocket for real-time updates (silently fails if offline)
+      RealtimeService.connect().catchError((e) {
+        // Silently handle connection errors
+      });
       
-      // Sync when coming back online
-      RealtimeService.syncWhenOnline();
+      // Sync when coming back online (silently fails if offline)
+      RealtimeService.syncWhenOnline().catchError((e) {
+        // Silently handle connection errors
+      });
     } else {
       // Use dummy data if backend is not configured
       await DummyDataService.initialize();
@@ -59,12 +83,16 @@ void main() async {
   
   // For web, also connect WebSocket (only if backend is configured)
   if (kIsWeb && isBackendConfigured) {
-    RealtimeService.connect();
+    RealtimeService.connect().catchError((e) {
+      // Silently handle connection errors
+    });
   }
   
   // Load settings from backend on app start (only if configured)
   if (isBackendConfigured) {
-    SettingsService.loadSettingsFromBackend();
+    SettingsService.loadSettingsFromBackend().catchError((e) {
+      // Silently handle connection errors
+    });
   }
     
     // Initialize flip colors provider
