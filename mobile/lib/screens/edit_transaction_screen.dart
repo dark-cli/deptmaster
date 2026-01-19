@@ -10,6 +10,8 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../widgets/gradient_background.dart';
+import '../widgets/gradient_card.dart';
 
 class EditTransactionScreen extends ConsumerStatefulWidget {
   final Transaction transaction;
@@ -198,8 +200,10 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
         title: const Text('Edit Transaction'),
         actions: [
           IconButton(
@@ -248,7 +252,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
           children: [
             // Contact selector (disabled if contact is fixed)
             _contacts.isEmpty
@@ -262,8 +266,24 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                     items: _contacts.map((contact) {
                       return DropdownMenuItem(
                         value: contact,
-                        child: Text(
-                          TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                              ),
+                            ),
+                            if (contact.username != null && contact.username!.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '@${contact.username}',
+                                style: TextStyle(
+                                  color: ThemeColors.gray(context, shade: 500),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       );
                     }).toList(),
@@ -457,6 +477,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

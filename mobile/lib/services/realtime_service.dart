@@ -8,6 +8,7 @@ import '../models/contact.dart';
 import '../models/transaction.dart';
 import 'api_service.dart';
 import 'dummy_data_service.dart';
+import 'backend_config_service.dart';
 
 class RealtimeService {
   static WebSocketChannel? _channel;
@@ -15,14 +16,8 @@ class RealtimeService {
   static bool _isConnected = false;
   static final List<Function(Map<String, dynamic>)> _listeners = [];
 
-  static String get _wsUrl {
-    if (kIsWeb) {
-      return 'ws://localhost:8000/ws';
-    } else if (Platform.isAndroid) {
-      return 'ws://10.0.2.2:8000/ws';
-    } else {
-      return 'ws://localhost:8000/ws';
-    }
+  static Future<String> get _wsUrl async {
+    return await BackendConfigService.getWebSocketUrl();
   }
 
   static Future<void> connect() async {
@@ -31,7 +26,8 @@ class RealtimeService {
     }
 
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+      final wsUrl = await _wsUrl;
+      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       _isConnected = true;
       print('✅ WebSocket connected');
 
@@ -46,18 +42,30 @@ class RealtimeService {
           }
         },
         onError: (error) {
+          // Only log if it's not a connection refused error (backend not running)
+          if (error.toString().contains('Connection refused')) {
+            // Silently handle - backend server is not running
+            _isConnected = false;
+            return; // Don't try to reconnect if server is not running
+          }
           print('WebSocket error: $error');
           _isConnected = false;
           _reconnect();
         },
         onDone: () {
-          print('WebSocket closed');
+          // Only log if we were previously connected
+          if (_isConnected) {
+            print('WebSocket closed');
+          }
           _isConnected = false;
           _reconnect();
         },
       );
     } catch (e) {
-      print('Failed to connect WebSocket: $e');
+      // Only log if it's not a connection refused error
+      if (!e.toString().contains('Connection refused')) {
+        print('Failed to connect WebSocket: $e');
+      }
       _isConnected = false;
     }
   }
@@ -65,7 +73,7 @@ class RealtimeService {
   static void _reconnect() {
     Future.delayed(const Duration(seconds: 3), () {
       if (!_isConnected) {
-        print('Reconnecting WebSocket...');
+        // Silently attempt reconnect - don't spam console if server is down
         connect();
       }
     });

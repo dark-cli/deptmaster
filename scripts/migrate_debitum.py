@@ -8,6 +8,7 @@ import sqlite3
 import psycopg2
 import json
 import uuid
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,62 @@ def get_db_connection():
         user="debt_tracker",
         password="dev_password"
     )
+
+def extract_username(name):
+    """
+    Extract username (English letters and numbers) from contact name.
+    
+    Args:
+        name: Contact name string (may contain Arabic, English, numbers)
+    
+    Returns:
+        Extracted username string, or None if no username found
+    """
+    if not name:
+        return None
+    
+    # Find all sequences of English letters and numbers
+    matches = re.findall(r'[a-zA-Z0-9]+', name)
+    
+    if not matches:
+        return None
+    
+    # Join all matches (in case username is split by spaces or other chars)
+    username = ''.join(matches)
+    
+    # Return None if empty, otherwise return the extracted username
+    return username if username else None
+
+def split_name_and_username(full_name):
+    """
+    Split a contact name into name (without username) and username.
+    
+    Args:
+        full_name: Full contact name that may contain username
+    
+    Returns:
+        Tuple of (name_without_username, username)
+        - name_without_username: Original name with username removed, or original if no username
+        - username: Extracted username, or None
+    """
+    if not full_name:
+        return (None, None)
+    
+    username = extract_username(full_name)
+    
+    if not username:
+        return (full_name, None)
+    
+    # Remove the username from the name
+    # Replace the username pattern with empty string
+    name_without_username = re.sub(r'[a-zA-Z0-9]+', '', full_name)
+    name_without_username = re.sub(r'\s+', ' ', name_without_username).strip()
+    
+    # If after removing username, name is empty, keep original name
+    if not name_without_username:
+        name_without_username = full_name
+    
+    return (name_without_username, username)
 
 def migrate_debitum(debitum_db_path):
     """Migrate Debitum data to Debt Tracker"""
@@ -110,9 +167,18 @@ def migrate_debitum(debitum_db_path):
             contact_map[person['id_person']] = contact_id
             event_counter += 1
             
+            # Extract username from name
+            original_name = person['name'] or ''
+            contact_name, username = split_name_and_username(original_name)
+            
+            # Ensure we have at least a name (fallback to original if extraction resulted in empty)
+            if not contact_name or contact_name.strip() == '':
+                contact_name = original_name
+            
             # Create event
             event_data = {
-                "name": person['name'],
+                "name": contact_name,
+                "username": username,
                 "phone": person['linked_contact_uri'] if person['linked_contact_uri'] else None,
                 "email": None,
                 "notes": person['note'] if person['note'] else ''
@@ -134,12 +200,13 @@ def migrate_debitum(debitum_db_path):
                 phone = None  # Android URIs are not useful outside Android anyway
             
             pg_cur.execute("""
-                INSERT INTO contacts_projection (id, user_id, name, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-                VALUES (%s, %s, %s, %s, %s, %s, false, %s, %s, %s)
+                INSERT INTO contacts_projection (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, false, %s, %s, %s)
             """, (
                 str(contact_id),
                 str(user_id),
-                person['name'],
+                contact_name,
+                username,
                 phone,
                 None,  # email
                 person['note'] if person['note'] else None,
@@ -148,7 +215,10 @@ def migrate_debitum(debitum_db_path):
                 event_id
             ))
             
-            print(f"  ✅ {person['name']}")
+            display_name = contact_name
+            if username:
+                display_name = f"{contact_name} (@{username})"
+            print(f"  ✅ {display_name}")
         
         pg_conn.commit()
         print(f"✅ Migrated {len(persons)} contacts")

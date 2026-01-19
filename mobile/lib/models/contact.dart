@@ -11,6 +11,9 @@ class Contact extends HiveObject {
   @HiveField(1)
   String name;
 
+  @HiveField(9)
+  String? username;
+
   @HiveField(2)
   String? phone;
 
@@ -35,6 +38,7 @@ class Contact extends HiveObject {
   Contact({
     required this.id,
     required this.name,
+    this.username,
     this.phone,
     this.email,
     this.notes,
@@ -47,6 +51,7 @@ class Contact extends HiveObject {
   Contact copyWith({
     String? id,
     String? name,
+    String? username,
     String? phone,
     String? email,
     String? notes,
@@ -58,6 +63,7 @@ class Contact extends HiveObject {
     return Contact(
       id: id ?? this.id,
       name: name ?? this.name,
+      username: username ?? this.username,
       phone: phone ?? this.phone,
       email: email ?? this.email,
       notes: notes ?? this.notes,
@@ -72,6 +78,7 @@ class Contact extends HiveObject {
     return {
       'id': id,
       'name': name,
+      'username': username,
       'phone': phone,
       'email': email,
       'notes': notes,
@@ -90,6 +97,7 @@ class Contact extends HiveObject {
     return Contact(
       id: json['id'] as String,
       name: json['name'] as String,
+      username: json['username'] as String?,
       phone: json['phone'] as String?,
       email: json['email'] as String?,
       notes: json['notes'] as String?,

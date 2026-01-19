@@ -91,6 +91,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     if (query.isNotEmpty) {
       filtered = filtered.where((contact) {
         return contact.name.toLowerCase().contains(query) ||
+               (contact.username?.toLowerCase().contains(query) ?? false) ||
                (contact.phone?.toLowerCase().contains(query) ?? false) ||
                (contact.email?.toLowerCase().contains(query) ?? false) ||
                (contact.notes?.toLowerCase().contains(query) ?? false);
@@ -445,57 +446,14 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
             }
             
 
-          return Column(
-            children: [
-              // TOTAL Summary Section
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'TOTAL',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Consumer(
-                        builder: (context, ref, child) {
-                          final flipColors = ref.watch(flipColorsProvider);
-                          final isDark = Theme.of(context).brightness == Brightness.dark;
-                          final balanceColor = totalBalance < 0
-                              ? AppColors.getReceivedColor(flipColors, isDark)
-                              : AppColors.getGiveColor(flipColors, isDark);
-                          return Text(
-                            _formatBalance(totalBalance),
-                            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: balanceColor,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Contacts List (with performance optimization)
-              Expanded(
-                child: ListView.builder(
-                  itemCount: contacts.length,
-                  cacheExtent: 200, // Cache more items for smoother scrolling
-                  itemBuilder: (context, index) {
-                      final contact = contacts[index];
-                      final isSelected = _selectionMode && _selectedContacts.contains(contact.id);
-                      
-                      Widget contactItem = ContactListItem(
+          return ListView.builder(
+            itemCount: contacts.length,
+            cacheExtent: 200, // Cache more items for smoother scrolling
+            itemBuilder: (context, index) {
+              final contact = contacts[index];
+              final isSelected = _selectionMode && _selectedContacts.contains(contact.id);
+              
+              Widget contactItem = ContactListItem(
                         contact: contact,
                         isSelected: _selectionMode ? isSelected : null,
                         onSelectionChanged: _selectionMode
@@ -602,13 +560,10 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           },
                           child: contactItem,
                         );
-                      }
-                      
-                      return contactItem;
-                    },
-                  ),
-              ),
-            ],
+              }
+              
+              return contactItem;
+            },
           );
           },
         ),

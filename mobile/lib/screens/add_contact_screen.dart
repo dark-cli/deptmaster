@@ -15,6 +15,7 @@ class AddContactScreen extends ConsumerStatefulWidget {
 class _AddContactScreenState extends ConsumerState<AddContactScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _notesController = TextEditingController();
@@ -31,6 +32,7 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _notesController.dispose();
@@ -49,6 +51,7 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
       final contact = Contact(
         id: '', // Will be set by API
         name: _nameController.text.trim(),
+        username: _usernameController.text.trim().isEmpty ? null : _usernameController.text.trim(),
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
@@ -104,6 +107,16 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
                 return null;
               },
               autofocus: true,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _usernameController,
+              decoration: const InputDecoration(
+                labelText: 'Username',
+                hintText: 'English letters and numbers only',
+                border: OutlineInputBorder(),
+                helperText: 'Optional: English letters and numbers (e.g., Ahmed123)',
+              ),
             ),
             const SizedBox(height: 16),
             TextFormField(

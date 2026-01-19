@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
+import 'backend_config_service.dart';
 
 class AuthService {
   static const String _keyToken = 'auth_token';
@@ -11,21 +12,12 @@ class AuthService {
   static const String _keyUsername = 'username';
   static final LocalAuthentication _localAuth = LocalAuthentication();
 
-  static String _getBaseUrl() {
-    if (kIsWeb) {
-      return 'http://localhost:8000';
-    } else if (Platform.isAndroid) {
-      return 'http://10.0.2.2:8000';
-    } else {
-      return 'http://localhost:8000';
-    }
-  }
-
   // Login
   static Future<Map<String, dynamic>> login(String username, String password) async {
     try {
+      final baseUrl = await BackendConfigService.getBaseUrl();
       final response = await http.post(
-        Uri.parse('${_getBaseUrl()}/api/auth/login'),
+        Uri.parse('$baseUrl/api/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'username': username,

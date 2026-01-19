@@ -10,6 +10,8 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../widgets/gradient_background.dart';
+import '../widgets/gradient_card.dart';
 import 'add_contact_screen.dart';
 
 class AddTransactionScreen extends ConsumerStatefulWidget {
@@ -79,7 +81,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     }
 
     final filtered = _contacts.where((contact) {
-      return contact.name.toLowerCase().contains(query);
+      return contact.name.toLowerCase().contains(query) ||
+             (contact.username?.toLowerCase().contains(query) ?? false);
     }).toList();
 
     setState(() {
@@ -293,14 +296,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Add Transaction'),
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Add Transaction'),
+        ),
+        body: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
           children: [
             // Contact search field
             _contacts.isEmpty
@@ -398,8 +403,24 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                     final contact = _filteredContacts[index];
                                     return ListTile(
                                       leading: const Icon(Icons.person),
-                                      title: Text(
-                                        TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                      title: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                            ),
+                                          ),
+                                          if (contact.username != null && contact.username!.isNotEmpty) ...[
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              '@${contact.username}',
+                                              style: TextStyle(
+                                                color: ThemeColors.gray(context, shade: 500),
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
                                       ),
                                       onTap: () {
                                         setState(() {
@@ -598,6 +619,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

@@ -11,9 +11,13 @@ import '../services/api_service.dart';
 import '../services/realtime_service.dart';
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../utils/app_colors.dart';
+import '../utils/theme_colors.dart';
 import 'add_transaction_screen.dart';
 import 'edit_transaction_screen.dart';
 import 'edit_contact_screen.dart';
+import '../widgets/gradient_background.dart';
+import '../widgets/gradient_card.dart';
 
 class ContactTransactionsScreen extends ConsumerStatefulWidget {
   final Contact contact;
@@ -91,12 +95,29 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
         title: _selectionMode 
             ? Text('${_selectedTransactions.length} selected')
-            : Text(
-                TextUtils.forceLtr(widget.contact.name), // Force LTR for mixed Arabic/English text
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    TextUtils.forceLtr(widget.contact.name), // Force LTR for mixed Arabic/English text
+                  ),
+                  if (widget.contact.username != null && widget.contact.username!.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '@${widget.contact.username}',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ],
               ),
         leading: _selectionMode
             ? IconButton(
@@ -269,37 +290,39 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           return Column(
             children: [
               // Balance Summary
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'BALANCE',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: Colors.grey,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                child: GradientCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'BALANCE',
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: Colors.grey,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Consumer(
-                      builder: (context, ref, child) {
-                        final flipColors = ref.watch(flipColorsProvider);
-                        final balanceColor = totalBalance < 0
-                            ? (flipColors ? Colors.green : Colors.red)
-                            : (flipColors ? Colors.red : Colors.green);
-                        return Text(
-                          _formatBalance(totalBalance),
-                          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: balanceColor,
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Consumer(
+                        builder: (context, ref, child) {
+                          final flipColors = ref.watch(flipColorsProvider);
+                          final isDark = Theme.of(context).brightness == Brightness.dark;
+                          final balanceColor = totalBalance < 0
+                              ? AppColors.getReceivedColor(flipColors, isDark)
+                              : AppColors.getGiveColor(flipColors, isDark);
+                          return Text(
+                            _formatBalance(totalBalance),
+                            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: balanceColor,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
               // Transactions List with pull-to-refresh
@@ -542,6 +565,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           );
         },
       ),
+      ),
     );
   }
 
@@ -579,111 +603,192 @@ class _TransactionListItem extends StatelessWidget {
         final flipColors = ref.watch(flipColorsProvider);
         final dateFormat = DateFormat('MMM d, y');
         final isOwed = transaction.direction == TransactionDirection.owed;
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         final color = flipColors
-            ? (isOwed ? Colors.green : Colors.red)
-            : (isOwed ? Colors.red : Colors.green);
+            ? (isOwed 
+                ? AppColors.getReceivedColor(flipColors, isDark)
+                : AppColors.getGiveColor(flipColors, isDark))
+            : (isOwed 
+                ? AppColors.getGiveColor(flipColors, isDark)
+                : AppColors.getReceivedColor(flipColors, isDark));
         
-        return _buildTransactionItem(context, dateFormat, color);
+        return _buildTransactionItem(context, dateFormat, color, flipColors);
       },
     );
   }
 
-  Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color) {
+  String _formatAmount(int amount) {
+    // Amount is stored as whole units (IQD), format with commas
+    return amount.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  String _getStatus(TransactionDirection direction, bool flipColors) {
+    // For transactions: "owed" = you owe them (GIVE), "lent" = they owe you (RECEIVED)
+    if (direction == TransactionDirection.owed) {
+      return flipColors ? 'YOU LENT' : 'YOU OWE';
+    } else {
+      return flipColors ? 'YOU OWE' : 'YOU LENT';
+    }
+  }
+
+  Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color, bool flipColors) {
+    // Pre-allocate width for amount section to ensure names align
+    const double amountSectionWidth = 120.0;
+    
+    final amount = transaction.amount;
+    final status = _getStatus(transaction.direction, flipColors);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: isSelected != null && isSelected == true
-            ? Checkbox(
-                value: true,
-                onChanged: (value) => onSelectionChanged?.call(),
-              )
-            : CircleAvatar(
-                backgroundColor: color.withOpacity(0.2),
-                child: Icon(
-                  Icons.attach_money,
-                  color: color,
-                ),
-              ),
-        title: Text(
-          transaction.description ?? 'Transaction',
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              dateFormat.format(transaction.transactionDate),
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-            if (transaction.dueDate != null) ...[
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(Icons.event, size: 14, color: Colors.orange),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Due: ${dateFormat.format(transaction.dueDate!)}',
-                    style: TextStyle(
-                      color: transaction.dueDate!.isBefore(DateTime.now())
-                          ? Colors.red
-                          : Colors.orange,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              transaction.getFormattedAmount(2),
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            PopupMenuButton(
-              icon: const Icon(Icons.more_vert),
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit, size: 20),
-                      SizedBox(width: 8),
-                      Text('Edit'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete, size: 20, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('Delete', style: TextStyle(color: Colors.red)),
-                    ],
-                  ),
-                ),
-              ],
-              onSelected: (value) {
-                if (value == 'edit' && onEdit != null) {
-                  onEdit!();
-                } else if (value == 'delete' && onDelete != null) {
-                  onDelete!();
-                }
-              },
-            ),
-          ],
-        ),
+      child: InkWell(
         onTap: onSelectionChanged != null
             ? onSelectionChanged
             : onEdit,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              // Left side: Avatar (or Checkbox in selection mode)
+              isSelected != null && isSelected == true
+                  ? Checkbox(
+                      value: true,
+                      onChanged: (value) => onSelectionChanged?.call(),
+                    )
+                  : CircleAvatar(
+                      backgroundColor: color.withOpacity(0.2),
+                      radius: 24,
+                      child: Icon(
+                        Icons.attach_money,
+                        color: color,
+                        size: 18,
+                      ),
+                    ),
+              const SizedBox(width: 16),
+              // Description and Date
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      transaction.description ?? 'Transaction',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    // Reserve space for consistent card height (same as username space in transactions screen)
+                    const SizedBox(height: 16),
+                    if (transaction.dueDate != null) ...[
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.event,
+                            size: 12,
+                            color: transaction.dueDate!.isBefore(DateTime.now())
+                                ? ThemeColors.error(context)
+                                : ThemeColors.warning(context),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            dateFormat.format(transaction.dueDate!),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: transaction.dueDate!.isBefore(DateTime.now())
+                                  ? ThemeColors.error(context)
+                                  : ThemeColors.warning(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ] else ...[
+                      Text(
+                        dateFormat.format(transaction.transactionDate),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: ThemeColors.gray(context, shade: 500),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              // Right side: Amount and Status (fixed width)
+              SizedBox(
+                width: amountSectionWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${_formatAmount(amount)} IQD',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: color,
+                      ),
+                      textAlign: TextAlign.right,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      status,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: ThemeColors.gray(context, shade: 600),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+              // Popup menu button
+              if (onEdit != null || onDelete != null) ...[
+                const SizedBox(width: 8),
+                PopupMenuButton(
+                  icon: const Icon(Icons.more_vert),
+                  itemBuilder: (context) => [
+                    if (onEdit != null)
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit, size: 20),
+                            SizedBox(width: 8),
+                            Text('Edit'),
+                          ],
+                        ),
+                      ),
+                    if (onDelete != null)
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete, size: 20, color: Colors.red),
+                            SizedBox(width: 8),
+                            Text('Delete', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                  ],
+                  onSelected: (value) {
+                    if (value == 'edit' && onEdit != null) {
+                      onEdit!();
+                    } else if (value == 'delete' && onDelete != null) {
+                      onDelete!();
+                    }
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';
+import '../utils/theme_colors.dart';
+import '../utils/app_colors.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -91,7 +92,9 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
           ),
         );
         final contactName = contact?.name ?? 'Unknown';
+        final contactUsername = contact?.username ?? '';
         return contactName.toLowerCase().contains(query) ||
+               (contactUsername.isNotEmpty && contactUsername.toLowerCase().contains(query)) ||
                (transaction.description?.toLowerCase().contains(query) ?? false) ||
                transaction.amount.toString().contains(query);
       }).toList();
@@ -664,6 +667,12 @@ class TransactionListItem extends StatelessWidget {
     return contact?.name ?? 'Unknown';
   }
 
+  Contact? _getContact() {
+    if (kIsWeb) return null;
+    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+    return contactsBox.get(transaction.contactId);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer(
@@ -671,66 +680,182 @@ class TransactionListItem extends StatelessWidget {
         final flipColors = ref.watch(flipColorsProvider);
         final dateFormat = DateFormat('MMM d, y');
         final isOwed = transaction.direction == TransactionDirection.owed;
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         final color = flipColors
-            ? (isOwed ? Colors.green : Colors.red)
-            : (isOwed ? Colors.red : Colors.green);
+            ? (isOwed 
+                ? AppColors.getReceivedColor(flipColors, isDark)
+                : AppColors.getGiveColor(flipColors, isDark))
+            : (isOwed 
+                ? AppColors.getGiveColor(flipColors, isDark)
+                : AppColors.getReceivedColor(flipColors, isDark));
         
-        return _buildTransactionItem(context, dateFormat, color);
+        return _buildTransactionItem(context, dateFormat, color, flipColors);
       },
     );
   }
 
-  Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color) {
+  String _formatAmount(int amount) {
+    // Amount is stored as whole units (IQD), format with commas
+    return amount.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
+
+  String _getStatus(TransactionDirection direction, bool flipColors) {
+    // For transactions: "owed" = you owe them (GIVE), "lent" = they owe you (RECEIVED)
+    if (direction == TransactionDirection.owed) {
+      return flipColors ? 'YOU LENT' : 'YOU OWE';
+    } else {
+      return flipColors ? 'YOU OWE' : 'YOU LENT';
+    }
+  }
+
+  Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color, bool flipColors) {
+    // Pre-allocate width for amount section to ensure names align
+    const double amountSectionWidth = 120.0;
+    
+    final contact = _getContact();
+    final contactName = _getContactName();
+    final amount = transaction.amount;
+    final status = _getStatus(transaction.direction, flipColors);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: CircleAvatar(
-          backgroundColor: color.withOpacity(0.2),
-          child: Icon(
-            Icons.attach_money,
-            color: color,
-          ),
-        ),
-        title: Text(
-          TextUtils.forceLtr(_getContactName()), // Force LTR for mixed Arabic/English text
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (transaction.description != null) 
-              Text(transaction.description!),
-            Text(
-              dateFormat.format(transaction.transactionDate),
-              style: TextStyle(color: Colors.grey[600]),
-            ),
-            if (transaction.dueDate != null) ...[
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(Icons.event, size: 14, color: Colors.orange),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Due: ${dateFormat.format(transaction.dueDate!)}',
-                    style: TextStyle(
-                      color: transaction.dueDate!.isBefore(DateTime.now())
-                          ? Colors.red
-                          : Colors.orange,
-                      fontSize: 12,
+      child: InkWell(
+        onTap: null, // Add navigation if needed
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              // Left side: Avatar
+              CircleAvatar(
+                backgroundColor: color.withOpacity(0.2),
+                radius: 24,
+                child: Icon(
+                  Icons.attach_money,
+                  color: color,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 16),
+              // Name, Username, and Description/Date
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      TextUtils.forceLtr(contactName), // Force LTR for mixed Arabic/English text
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                  ),
-                ],
+                    // Always reserve space for username to maintain consistent card height
+                    if (contact?.username != null && contact!.username!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '@${contact.username}',
+                        style: TextStyle(
+                          color: ThemeColors.gray(context, shade: 500),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ] else ...[
+                      // Reserve same space when username is missing (2px spacing + 14px text height)
+                      const SizedBox(height: 16),
+                    ],
+                    if (transaction.description != null || transaction.dueDate != null) ...[
+                      const SizedBox(height: 4),
+                      if (transaction.description != null)
+                        Text(
+                          transaction.description!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: ThemeColors.gray(context, shade: 600),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (transaction.dueDate != null) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.event,
+                              size: 12,
+                              color: transaction.dueDate!.isBefore(DateTime.now())
+                                  ? ThemeColors.error(context)
+                                  : ThemeColors.warning(context),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              dateFormat.format(transaction.dueDate!),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: transaction.dueDate!.isBefore(DateTime.now())
+                                    ? ThemeColors.error(context)
+                                    : ThemeColors.warning(context),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else if (transaction.description == null) ...[
+                        Text(
+                          dateFormat.format(transaction.transactionDate),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: ThemeColors.gray(context, shade: 500),
+                          ),
+                        ),
+                      ],
+                    ] else ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        dateFormat.format(transaction.transactionDate),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: ThemeColors.gray(context, shade: 500),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              // Right side: Amount and Status (fixed width)
+              SizedBox(
+                width: amountSectionWidth,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${_formatAmount(amount)} IQD',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: color,
+                      ),
+                      textAlign: TextAlign.right,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      status,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: ThemeColors.gray(context, shade: 600),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
             ],
-          ],
-        ),
-        trailing: Text(
-          transaction.getFormattedAmount(2),
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: color,
           ),
         ),
       ),

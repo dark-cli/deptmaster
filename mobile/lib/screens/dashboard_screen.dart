@@ -11,7 +11,9 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../widgets/gradient_card.dart';
 import 'contact_transactions_screen.dart';
+import 'add_transaction_screen.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -141,7 +143,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       body: RefreshIndicator(
         onRefresh: _loadData,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
           children: [
             // Stats Cards
             _buildStatsCard(context, totalBalance),
@@ -156,30 +158,28 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             // Upcoming Due Dates (show if enabled, even if empty)
             if (_dueDateEnabled) ...[
               if (upcomingDueDates.isNotEmpty) ...[
-                _buildDueDatesSection(context, upcomingDueDates, contactMap, 'Upcoming Due Dates'),
+                _buildDueDatesSection(context, upcomingDueDates, contactMap, 'Payment Reminders'),
                 const SizedBox(height: 16),
               ] else ...[
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Upcoming Due Dates',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                GradientCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Payment Reminders',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No upcoming due dates in the next 30 days',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.grey,
-                          ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No upcoming payments in the next 30 days',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.grey,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -205,34 +205,32 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ? AppColors.getReceivedColor(flipColors, isDark)
             : AppColors.getGiveColor(flipColors, isDark);
         
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'TOTAL BALANCE',
-                  style: Theme.of(context).textTheme.labelMedium,
+        return GradientCard(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'TOTAL BALANCE',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$balanceText IQD',
+                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: balanceColor,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  '$balanceText IQD',
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: balanceColor,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildStatItem(context, 'Contacts', _contacts?.length ?? 0),
-                    _buildStatItem(context, 'Transactions', _transactions?.length ?? 0),
-                  ],
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildStatItem(context, 'Contacts', _contacts?.length ?? 0),
+                  _buildStatItem(context, 'Transactions', _transactions?.length ?? 0),
+                ],
+              ),
+            ],
           ),
         );
       },
@@ -276,27 +274,28 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         final debtColor = AppColors.getReceivedColor(flipColors, isDark);
         final creditColor = AppColors.getGiveColor(flipColors, isDark);
         
-        return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Top Debts & Credits',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
+        return GradientCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Outstanding Balances',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       Text(
-                        'Top Debts',
+                        'You Owe',
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       const SizedBox(height: 8),
@@ -307,43 +306,89 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                           (Match m) => '${m[1]},',
                         );
                         return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 16,
-                                color: debtColor,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                  overflow: TextOverflow.ellipsis,
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ContactTransactionsScreen(contact: contact),
                                 ),
-                              ),
-                              Text(
-                                '$formatted IQD',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: debtColor,
-                                  fontWeight: FontWeight.bold,
+                              );
+                            },
+                            onLongPress: () {
+                              // Open close debt screen with reverse transaction
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => AddTransactionScreenWithData(
+                                    contact: contact,
+                                    amount: amount, // The absolute balance amount
+                                    direction: TransactionDirection.lent, // Reverse direction to close debt
+                                    description: 'Close debt',
+                                  ),
                                 ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 4,
+                                    height: 16,
+                                    color: debtColor,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                          style: Theme.of(context).textTheme.bodySmall,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (contact.username != null && contact.username!.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '@${contact.username}',
+                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                              color: ThemeColors.gray(context, shade: 500),
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '$formatted IQD',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: debtColor,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
                         );
                       }),
                     ],
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 48),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       Text(
-                        'Top Credits',
+                        'Owed to You',
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       const SizedBox(height: 8),
@@ -354,42 +399,72 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                           (Match m) => '${m[1]},',
                         );
                         return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 16,
-                                color: creditColor,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                  overflow: TextOverflow.ellipsis,
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ContactTransactionsScreen(contact: contact),
                                 ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 4,
+                                    height: 16,
+                                    color: creditColor,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                          style: Theme.of(context).textTheme.bodySmall,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (contact.username != null && contact.username!.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '@${contact.username}',
+                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                              color: ThemeColors.gray(context, shade: 500),
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '$formatted IQD',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: creditColor,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              Text(
-                                '$formatted IQD',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: creditColor,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         );
                       }),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+                ],
+              ),
+            ],
+          ),
+        );
       },
     );
   }
@@ -400,59 +475,107 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     Map<String, Contact> contactMap,
     String title,
   ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
+    return Consumer(
+      builder: (context, ref, child) {
+        final flipColors = ref.watch(flipColorsProvider);
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final warningColor = ThemeColors.warning(context);
+        final errorColor = ThemeColors.error(context);
+        
+        return GradientCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            ...upcoming.map((transaction) {
-              final contact = contactMap[transaction.contactId];
-              final daysUntil = transaction.dueDate!.difference(DateTime.now()).inDays;
-              final isOverdue = daysUntil < 0;
-              
-              return ListTile(
-                leading: CircleAvatar(
-                  child: Text(contact?.name[0] ?? '?'),
-                ),
-                title: Text(contact?.name ?? 'Unknown'),
-                subtitle: Text(
-                  '${transaction.getFormattedAmount(2)} • ${DateFormat('MMM d, y').format(transaction.dueDate!)}',
-                ),
-                trailing: Chip(
-                  label: Text(
-                    isOverdue ? 'Overdue' : '$daysUntil days',
-                    style: TextStyle(
-                      color: isOverdue ? ThemeColors.error(context) : ThemeColors.warning(context),
-                      fontSize: 12,
+              const SizedBox(height: 16),
+              ...upcoming.map((transaction) {
+                final contact = contactMap[transaction.contactId];
+                final daysUntil = transaction.dueDate!.difference(DateTime.now()).inDays;
+                final isOverdue = daysUntil < 0;
+                final statusColor = isOverdue ? errorColor : warningColor;
+                final formattedAmount = transaction.getFormattedAmount(2);
+                final formattedDate = DateFormat('MMM d, y').format(transaction.dueDate!);
+                final statusText = isOverdue ? 'Overdue' : '$daysUntil days';
+                
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: InkWell(
+                    onTap: () {
+                      if (contact != null) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ContactTransactionsScreen(contact: contact),
+                          ),
+                        );
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 4,
+                            height: 16,
+                            color: statusColor,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  TextUtils.forceLtr(contact?.name ?? 'Unknown'),
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (contact?.username != null && contact!.username!.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '@${contact.username}',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: ThemeColors.gray(context, shade: 500),
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$formattedAmount • $formattedDate',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: ThemeColors.gray(context, shade: 600),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            statusText,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: statusColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  backgroundColor: isOverdue 
-                      ? ThemeColors.error(context).withOpacity(0.1)
-                      : ThemeColors.warning(context).withOpacity(0.1),
-                ),
-                onTap: () {
-                  if (contact != null) {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => ContactTransactionsScreen(contact: contact),
-                      ),
-                    );
-                  }
-                },
-              );
-            }),
-          ],
-        ),
-      ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
     );
   }
-
 }

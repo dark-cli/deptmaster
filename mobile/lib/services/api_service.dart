@@ -5,21 +5,12 @@ import 'dart:io' show Platform;
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import 'auth_service.dart';
+import 'backend_config_service.dart';
 
 class ApiService {
-  // Auto-detect platform and use appropriate URL
-  static String get baseUrl {
-    if (kIsWeb) {
-      // Web browser: use localhost
-      return 'http://localhost:8000/api/admin';
-    } else if (Platform.isAndroid) {
-      // Android: use 10.0.2.2 for emulator, or actual IP for physical device
-      // For emulator, 10.0.2.2 maps to host's localhost
-      return 'http://10.0.2.2:8000/api/admin';
-    } else {
-      // iOS or other: use localhost
-      return 'http://localhost:8000/api/admin';
-    }
+  // Get base URL from backend configuration
+  static Future<String> get baseUrl async {
+    return await BackendConfigService.getApiBaseUrl();
   }
 
   // Get auth headers with token
@@ -36,8 +27,9 @@ class ApiService {
   static Future<List<Contact>> getContacts() async {
     try {
       final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
       final response = await http.get(
-        Uri.parse('$baseUrl/contacts'),
+        Uri.parse('$apiBaseUrl/contacts'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -56,8 +48,10 @@ class ApiService {
   static Future<Contact?> createContact(Contact contact) async {
     try {
       final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final response = await http.post(
-        Uri.parse('${baseUrl.replaceAll('/admin', '')}/contacts'),
+        Uri.parse('$apiUrl/contacts'),
         headers: headers,
         body: json.encode({
           'name': contact.name,
@@ -97,7 +91,8 @@ class ApiService {
   // Update contact
   static Future<void> updateContact(String contactId, Contact contact) async {
     try {
-      final apiUrl = baseUrl.replaceAll('/admin', '');
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
       final response = await http.put(
         Uri.parse('$apiUrl/contacts/$contactId'),
@@ -129,7 +124,8 @@ class ApiService {
   // Delete contact
   static Future<void> deleteContact(String contactId) async {
     try {
-      final apiUrl = baseUrl.replaceAll('/admin', '');
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
       final response = await http.delete(
         Uri.parse('$apiUrl/contacts/$contactId'),
@@ -182,7 +178,8 @@ class ApiService {
   static Future<List<Transaction>> getTransactions() async {
     try {
       // Use /api/transactions instead of /api/admin/transactions
-      final apiUrl = baseUrl.replaceAll('/admin', '');
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
       final response = await http.get(
         Uri.parse('$apiUrl/transactions'),
@@ -217,8 +214,10 @@ class ApiService {
   static Future<Transaction?> createTransaction(Transaction transaction) async {
     try {
       final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final response = await http.post(
-        Uri.parse('${baseUrl.replaceAll('/admin', '')}/transactions'),
+        Uri.parse('$apiUrl/transactions'),
         headers: headers,
         body: json.encode({
           'contact_id': transaction.contactId,
@@ -286,8 +285,10 @@ class ApiService {
       }
 
       final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final response = await http.put(
-        Uri.parse('${baseUrl.replaceAll('/admin', '')}/transactions/$transactionId'),
+        Uri.parse('$apiUrl/transactions/$transactionId'),
         headers: headers,
         body: json.encode(body),
       );
@@ -310,8 +311,10 @@ class ApiService {
   static Future<void> deleteTransaction(String transactionId) async {
     try {
       final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final response = await http.delete(
-        Uri.parse('${baseUrl.replaceAll('/admin', '')}/transactions/$transactionId'),
+        Uri.parse('$apiUrl/transactions/$transactionId'),
         headers: headers,
       );
 

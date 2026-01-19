@@ -15,6 +15,7 @@ class GradientBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     
     return Container(
       decoration: BoxDecoration(
@@ -23,12 +24,13 @@ class GradientBackground extends StatelessWidget {
           end: Alignment.bottomCenter,
           colors: isDark
               ? [
-                  AppColors.darkBackground, // #1E221E
-                  AppColors.darkBackgroundEnd, // #151815
+                  AppColors.darkBackground, // Keep existing dark gradient
+                  AppColors.darkBackgroundEnd,
                 ]
               : [
-                  AppColors.lightBackground, // #F5E7DE
-                  AppColors.lightBackgroundEnd, // #F2BFA4
+                  // Use Material 3 surface colors for softer light mode
+                  colorScheme.surfaceContainerHighest, // Softer top - no opacity needed
+                  colorScheme.surfaceContainerHigh, // Softer bottom - no opacity needed
                 ],
         ),
       ),
@@ -49,12 +51,13 @@ class HeaderBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colorScheme = Theme.of(context).colorScheme;
     
     return Container(
       decoration: BoxDecoration(
         color: isDark
-            ? AppColors.darkSurface // #151815 - solid
-            : AppColors.lightBackgroundEnd.withOpacity(0.8), // Peach with 80% opacity
+            ? AppColors.darkSurface // Keep existing dark surface
+            : colorScheme.surfaceContainerHighest.withOpacity(0.7), // Softer Material 3 surface
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.08),

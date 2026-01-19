@@ -40,6 +40,7 @@ impl<'r> FromRow<'r, PgRow> for EventResponse {
 pub struct ContactResponse {
     pub id: String,
     pub name: String,
+    pub username: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,
     pub balance: i64,  // Net balance: positive = they owe you, negative = you owe them
@@ -52,6 +53,7 @@ impl<'r> FromRow<'r, PgRow> for ContactResponse {
         Ok(Self {
             id: row.try_get::<uuid::Uuid, _>("id")?.to_string(),
             name: row.try_get("name")?,
+            username: row.try_get("username").ok(),
             email: row.try_get("email")?,
             phone: row.try_get("phone")?,
             balance: row.try_get("balance")?,
@@ -149,6 +151,7 @@ pub async fn get_contacts(
         SELECT 
             c.id,
             c.name,
+            c.username,
             c.email,
             c.phone,
             COALESCE(SUM(
@@ -163,7 +166,7 @@ pub async fn get_contacts(
         FROM contacts_projection c
         LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
         WHERE c.is_deleted = false
-        GROUP BY c.id, c.name, c.email, c.phone, c.is_deleted, c.created_at
+        GROUP BY c.id, c.name, c.username, c.email, c.phone, c.is_deleted, c.created_at
         ORDER BY ABS(COALESCE(SUM(
             CASE 
                 WHEN t.direction = 'lent' THEN t.amount

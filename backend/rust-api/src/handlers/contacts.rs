@@ -12,6 +12,7 @@ use crate::websocket;
 #[derive(Deserialize)]
 pub struct CreateContactRequest {
     pub name: String,
+    pub username: Option<String>,
     pub phone: Option<String>,
     pub email: Option<String>,
     pub notes: Option<String>,
@@ -20,6 +21,7 @@ pub struct CreateContactRequest {
 #[derive(Deserialize)]
 pub struct UpdateContactRequest {
     pub name: Option<String>,
+    pub username: Option<String>,
     pub phone: Option<String>,
     pub email: Option<String>,
     pub notes: Option<String>,
@@ -70,6 +72,7 @@ pub async fn create_contact(
     // Create event data
     let event_data = serde_json::json!({
         "name": payload.name,
+        "username": payload.username,
         "phone": payload.phone,
         "email": payload.email,
         "notes": payload.notes
@@ -100,13 +103,14 @@ pub async fn create_contact(
     sqlx::query(
         r#"
         INSERT INTO contacts_projection 
-        (id, user_id, name, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-        VALUES ($1, $2, $3, $4, $5, $6, false, NOW(), NOW(), $7)
+        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW(), NOW(), $8)
         "#
     )
     .bind(contact_id)
     .bind(user_id)
     .bind(payload.name.trim())
+    .bind(payload.username.as_deref())
     .bind(payload.phone.as_deref())
     .bind(payload.email.as_deref())
     .bind(payload.notes.as_deref())
@@ -189,7 +193,7 @@ pub async fn update_contact(
 
     // Get current contact data
     let current = sqlx::query(
-        "SELECT name, phone, email, notes FROM contacts_projection WHERE id = $1"
+        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1"
     )
     .bind(contact_uuid)
     .fetch_one(&*state.db_pool)
@@ -203,12 +207,14 @@ pub async fn update_contact(
     })?;
 
     let current_name: String = current.get::<String, _>("name");
+    let current_username: Option<String> = current.get::<Option<String>, _>("username");
     let current_phone: Option<String> = current.get::<Option<String>, _>("phone");
     let current_email: Option<String> = current.get::<Option<String>, _>("email");
     let current_notes: Option<String> = current.get::<Option<String>, _>("notes");
 
     // Use new values or keep current
     let new_name = payload.name.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or(&current_name);
+    let new_username = payload.username.as_ref().or(current_username.as_ref());
     let new_phone = payload.phone.as_ref().or(current_phone.as_ref());
     let new_email = payload.email.as_ref().or(current_email.as_ref());
     let new_notes = payload.notes.as_ref().or(current_notes.as_ref());
@@ -216,6 +222,7 @@ pub async fn update_contact(
     // Create event data
     let event_data = serde_json::json!({
         "name": new_name,
+        "username": new_username,
         "phone": new_phone,
         "email": new_email,
         "notes": new_notes
@@ -246,11 +253,12 @@ pub async fn update_contact(
     sqlx::query(
         r#"
         UPDATE contacts_projection 
-        SET name = $1, phone = $2, email = $3, notes = $4, updated_at = NOW(), last_event_id = $5
-        WHERE id = $6
+        SET name = $1, username = $2, phone = $3, email = $4, notes = $5, updated_at = NOW(), last_event_id = $6
+        WHERE id = $7
         "#
     )
     .bind(new_name)
+    .bind(new_username)
     .bind(new_phone)
     .bind(new_email)
     .bind(new_notes)

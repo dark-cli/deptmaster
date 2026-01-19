@@ -233,6 +233,7 @@
                         <tr>
                             <th>ID</th>
                             <th>Name</th>
+                            <th>Username</th>
                             <th>Email</th>
                             <th>Phone</th>
                             <th>Balance</th>
@@ -373,6 +374,7 @@
                     <tr>
                         <td>${contact.id.substring(0, 8)}...</td>
                         <td>${contact.name}</td>
+                        <td>${contact.username ? '@' + contact.username : '-'}</td>
                         <td>${contact.email || '-'}</td>
                         <td>${contact.phone || '-'}</td>
                         <td><span class="badge ${balanceClass}">${balanceText}</span></td>

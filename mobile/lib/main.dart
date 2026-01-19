@@ -6,16 +6,21 @@ import 'models/contact.dart';
 import 'models/transaction.dart'; // This imports the generated adapters too
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/backend_setup_screen.dart';
 import 'services/dummy_data_service.dart';
 import 'services/data_service.dart';
 import 'services/realtime_service.dart';
 import 'services/settings_service.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'services/backend_config_service.dart';
 import 'utils/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Check if backend is configured (check this first, before any API calls)
+  final isBackendConfigured = await BackendConfigService.isConfigured();
   
   // Hive doesn't work in web, skip initialization for web
   if (!kIsWeb) {
@@ -32,35 +37,47 @@ void main() async {
     await Hive.openBox<Contact>(DummyDataService.contactsBoxName);
     await Hive.openBox<Transaction>(DummyDataService.transactionsBoxName);
     
-    // Try to load from API, fallback to dummy data if API fails
-    try {
-      await DataService.loadFromApi();
-    } catch (e) {
-      print('⚠️ Could not load from API, using dummy data: $e');
+    if (isBackendConfigured) {
+      // Try to load from API, fallback to dummy data if API fails
+      try {
+        await DataService.loadFromApi();
+      } catch (e) {
+        print('⚠️ Could not load from API, using dummy data: $e');
+        await DummyDataService.initialize();
+      }
+      
+      // Connect to WebSocket for real-time updates
+      RealtimeService.connect();
+      
+      // Sync when coming back online
+      RealtimeService.syncWhenOnline();
+    } else {
+      // Use dummy data if backend is not configured
       await DummyDataService.initialize();
     }
-    
-    // Connect to WebSocket for real-time updates
-    RealtimeService.connect();
-    
-    // Sync when coming back online
-    RealtimeService.syncWhenOnline();
   }
   
-    // For web, also connect WebSocket
-    if (kIsWeb) {
-      RealtimeService.connect();
-    }
-    
-    // Load settings from backend on app start
+  // For web, also connect WebSocket (only if backend is configured)
+  if (kIsWeb && isBackendConfigured) {
+    RealtimeService.connect();
+  }
+  
+  // Load settings from backend on app start (only if configured)
+  if (isBackendConfigured) {
     SettingsService.loadSettingsFromBackend();
+  }
     
     // Initialize flip colors provider
     // This will be done automatically when the provider is first accessed
     
-    // Check if user is logged in
-    final isLoggedIn = await AuthService.isLoggedIn();
-    final initialRoute = isLoggedIn ? '/' : '/login';
+    // Determine initial route
+    String initialRoute;
+    if (!isBackendConfigured) {
+      initialRoute = '/setup';
+    } else {
+      final isLoggedIn = await AuthService.isLoggedIn();
+      initialRoute = isLoggedIn ? '/' : '/login';
+    }
     
     runApp(ProviderScope(
       child: DebtTrackerApp(initialRoute: initialRoute),
@@ -123,6 +140,7 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
       initialRoute: widget.initialRoute,
       routes: {
         '/': (context) => const HomeScreen(),
+        '/setup': (context) => const BackendSetupScreen(),
         '/login': (context) => const LoginScreen(),
       },
       debugShowCheckedModeBanner: false,

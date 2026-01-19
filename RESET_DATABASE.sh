@@ -75,9 +75,13 @@ if command -v sqlx &> /dev/null; then
     sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
 else
     echo "   sqlx-cli not found, running migrations manually via psql..."
-    # Run migrations directly via psql
+    # Run migrations directly via psql (from backend/rust-api directory)
     docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/001_initial_schema.sql
     docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/002_remove_transaction_settled.sql 2>/dev/null || true
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/003_add_due_date.sql 2>/dev/null || true
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/004_user_settings.sql 2>/dev/null || true
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/005_create_default_user.sql 2>/dev/null || true
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/006_add_username_to_contacts.sql 2>/dev/null || true
 fi
 
 cd ../..

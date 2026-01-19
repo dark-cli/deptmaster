@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:io' show Platform;
 import 'auth_service.dart';
+import 'backend_config_service.dart';
 
 class SettingsService {
   static const String _keyDarkMode = 'dark_mode';
@@ -25,7 +26,7 @@ class SettingsService {
     await prefs.setBool(_keyDarkMode, enabled);
     // Also sync to backend
     try {
-      final baseUrl = _getBaseUrl();
+      final baseUrl = await _getBaseUrl();
       final headers = <String, String>{'Content-Type': 'application/json'};
       try {
         final token = await AuthService.getToken();
@@ -54,7 +55,7 @@ class SettingsService {
     await prefs.setString(_keyDefaultDirection, direction);
     // Also sync to backend
     try {
-      final baseUrl = _getBaseUrl();
+      final baseUrl = await _getBaseUrl();
       final headers = <String, String>{'Content-Type': 'application/json'};
       try {
         final token = await AuthService.getToken();
@@ -83,7 +84,7 @@ class SettingsService {
     await prefs.setBool(_keyFlipColors, flip);
     // Also sync to backend
     try {
-      final baseUrl = _getBaseUrl();
+      final baseUrl = await _getBaseUrl();
       final headers = <String, String>{'Content-Type': 'application/json'};
       try {
         final token = await AuthService.getToken();
@@ -112,7 +113,7 @@ class SettingsService {
     await prefs.setBool(_keyDueDateEnabled, enabled);
     // Also sync to backend
     try {
-      final baseUrl = _getBaseUrl();
+      final baseUrl = await _getBaseUrl();
       final headers = <String, String>{'Content-Type': 'application/json'};
       try {
         final token = await AuthService.getToken();
@@ -141,7 +142,7 @@ class SettingsService {
     await prefs.setInt(_keyDefaultDueDateDays, days);
     // Also sync to backend
     try {
-      final baseUrl = _getBaseUrl();
+      final baseUrl = await _getBaseUrl();
       final headers = <String, String>{'Content-Type': 'application/json'};
       try {
         final token = await AuthService.getToken();
@@ -170,7 +171,7 @@ class SettingsService {
     await prefs.setBool(_keyDefaultDueDateSwitch, enabled);
     // Also sync to backend
     try {
-      final baseUrl = _getBaseUrl();
+      final baseUrl = await _getBaseUrl();
       final headers = <String, String>{'Content-Type': 'application/json'};
       try {
         final token = await AuthService.getToken();
@@ -191,7 +192,7 @@ class SettingsService {
   // Load settings from backend on app start
   static Future<void> loadSettingsFromBackend() async {
     try {
-      final baseUrl = _getBaseUrl();
+      final baseUrl = await _getBaseUrl();
       final headers = <String, String>{'Content-Type': 'application/json'};
       // Add auth token if available
       try {
@@ -222,13 +223,8 @@ class SettingsService {
     }
   }
 
-  static String _getBaseUrl() {
-    if (kIsWeb) {
-      return 'http://localhost:8000/admin';
-    } else if (Platform.isAndroid) {
-      return 'http://10.0.2.2:8000/admin';
-    } else {
-      return 'http://localhost:8000/admin';
-    }
+  static Future<String> _getBaseUrl() async {
+    final baseUrl = await BackendConfigService.getBaseUrl();
+    return '$baseUrl/admin';
   }
 }
