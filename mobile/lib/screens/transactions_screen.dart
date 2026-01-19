@@ -16,6 +16,7 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import 'edit_transaction_screen.dart';
 import 'add_transaction_screen.dart';
+import '../utils/bottom_sheet_helper.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   const TransactionsScreen({super.key});
@@ -527,16 +528,15 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                       final reverseDirection = transaction.direction == TransactionDirection.owed
                           ? TransactionDirection.lent
                           : TransactionDirection.owed;
-                      final result = await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => AddTransactionScreenWithData(
-                            contact: contact,
-                            amount: transaction.amount,
-                            direction: reverseDirection,
-                            description: transaction.description != null
-                                ? 'Close: ${transaction.description}'
-                                : 'Close transaction',
-                          ),
+                      final result = await showScreenAsBottomSheet(
+                        context: context,
+                        screen: AddTransactionScreenWithData(
+                          contact: contact,
+                          amount: transaction.amount,
+                          direction: reverseDirection,
+                          description: transaction.description != null
+                              ? 'Close: ${transaction.description}'
+                              : 'Close transaction',
                         ),
                       );
                       if (result == true && mounted) {
@@ -557,12 +557,11 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                             balance: 0,
                           ),
                         );
-                        final result = await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => EditTransactionScreen(
-                              transaction: transaction,
-                              contact: contact,
-                            ),
+                        final result = await showScreenAsBottomSheet(
+                          context: context,
+                          screen: EditTransactionScreen(
+                            transaction: transaction,
+                            contact: contact,
                           ),
                         );
                         if (result == true && mounted) {

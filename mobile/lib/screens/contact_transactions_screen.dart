@@ -18,6 +18,7 @@ import 'edit_transaction_screen.dart';
 import 'edit_contact_screen.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
+import '../utils/bottom_sheet_helper.dart';
 
 class ContactTransactionsScreen extends ConsumerStatefulWidget {
   final Contact contact;
@@ -186,10 +187,9 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           IconButton(
             icon: const Icon(Icons.edit),
             onPressed: () async {
-              final result = await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => EditContactScreen(contact: widget.contact),
-                ),
+              final result = await showScreenAsBottomSheet(
+                context: context,
+                screen: EditContactScreen(contact: widget.contact),
               );
               if (result == true && mounted) {
                 // Reload contact data
@@ -212,10 +212,9 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          final result = await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => AddTransactionScreen(contact: widget.contact),
-            ),
+          final result = await showScreenAsBottomSheet(
+            context: context,
+            screen: AddTransactionScreen(contact: widget.contact),
           );
           if (result == true && mounted) {
             _loadTransactions();
@@ -342,12 +341,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                 }
                               : null,
                           onEdit: () async {
-                            final result = await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => EditTransactionScreen(
-                                  transaction: transaction,
-                                  contact: widget.contact,
-                                ),
+                            final result = await showScreenAsBottomSheet(
+                              context: context,
+                              screen: EditTransactionScreen(
+                                transaction: transaction,
+                                contact: widget.contact,
                               ),
                             );
                             if (result == true && mounted) {
@@ -429,16 +427,15 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             final reverseDirection = transaction.direction == TransactionDirection.owed
                                 ? TransactionDirection.lent
                                 : TransactionDirection.owed;
-                            final result = await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => AddTransactionScreenWithData(
-                                  contact: widget.contact,
-                                  amount: transaction.amount,
-                                  direction: reverseDirection,
-                                  description: transaction.description != null
-                                      ? 'Close: ${transaction.description}'
-                                      : 'Close transaction',
-                                ),
+                            final result = await showScreenAsBottomSheet(
+                              context: context,
+                              screen: AddTransactionScreenWithData(
+                                contact: widget.contact,
+                                amount: transaction.amount,
+                                direction: reverseDirection,
+                                description: transaction.description != null
+                                    ? 'Close: ${transaction.description}'
+                                    : 'Close transaction',
                               ),
                             );
                             if (result == true && mounted) {
@@ -449,12 +446,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                           child: GestureDetector(
                             onTap: () async {
                               // Open edit transaction screen
-                              final result = await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => EditTransactionScreen(
-                                    transaction: transaction,
-                                    contact: widget.contact,
-                                  ),
+                              final result = await showScreenAsBottomSheet(
+                                context: context,
+                                screen: EditTransactionScreen(
+                                  transaction: transaction,
+                                  contact: widget.contact,
                                 ),
                               );
                               if (result == true && mounted) {
@@ -479,12 +475,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                       return GestureDetector(
                         onTap: () async {
                           // Open edit transaction screen
-                          final result = await Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => EditTransactionScreen(
-                                transaction: transaction,
-                                contact: widget.contact,
-                              ),
+                          final result = await showScreenAsBottomSheet(
+                            context: context,
+                            screen: EditTransactionScreen(
+                              transaction: transaction,
+                              contact: widget.contact,
                             ),
                           );
                           if (result == true && mounted) {

@@ -88,6 +88,27 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Edit Contact'),
+        actions: [
+          IconButton(
+            icon: _saving
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  )
+                : Icon(
+                    Icons.save,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+            onPressed: _saving ? null : _saveContact,
+            tooltip: 'Update Contact',
+          ),
+        ],
       ),
       body: Form(
         key: _formKey,
@@ -133,20 +154,6 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLines: 3,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _saving ? null : _saveContact,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: _saving
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Update Contact'),
             ),
           ],
         ),

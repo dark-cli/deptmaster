@@ -17,6 +17,7 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../utils/bottom_sheet_helper.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   const ContactsScreen({super.key});
@@ -377,8 +378,9 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
             IconButton(
               icon: const Icon(Icons.add),
               onPressed: () async {
-                final result = await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const AddContactScreen()),
+                final result = await showScreenAsBottomSheet(
+                  context: context,
+                  screen: const AddContactScreen(),
                 );
                 // Refresh if contact was created
                 if (result == true && mounted) {
@@ -505,10 +507,9 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           ),
                           confirmDismiss: (direction) async {
                             // Open new transaction screen with this contact (swipe right)
-                            final result = await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => AddTransactionScreen(contact: contact),
-                              ),
+                            final result = await showScreenAsBottomSheet(
+                              context: context,
+                              screen: AddTransactionScreen(contact: contact),
                             );
                             if (result == true && mounted) {
                               _loadContacts();

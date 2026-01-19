@@ -197,6 +197,25 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
         title: const Text('Edit Transaction'),
         actions: [
           IconButton(
+            icon: _saving
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  )
+                : Icon(
+                    Icons.save,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+            onPressed: _saving ? null : _saveTransaction,
+            tooltip: 'Update Transaction',
+          ),
+          IconButton(
             icon: const Icon(Icons.delete),
             onPressed: () async {
               final confirm = await showDialog<bool>(
@@ -495,22 +514,6 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLines: 3,
-            ),
-            const SizedBox(height: 24),
-            
-            // Save button
-            ElevatedButton(
-              onPressed: _saving ? null : _saveTransaction,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              child: _saving
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Update Transaction'),
             ),
           ],
         ),

@@ -14,6 +14,7 @@ import '../utils/theme_colors.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
 import 'add_contact_screen.dart';
+import '../utils/bottom_sheet_helper.dart';
 
 class AddTransactionScreen extends ConsumerStatefulWidget {
   final Contact? contact; // Optional - if provided, contact is pre-selected and fixed
@@ -286,6 +287,27 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: const Text('Add Transaction'),
+          actions: [
+            IconButton(
+              icon: _saving
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      Icons.save,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+              onPressed: _saving ? null : _saveTransaction,
+              tooltip: 'Save Transaction',
+            ),
+          ],
         ),
         body: Form(
           key: _formKey,
@@ -346,8 +368,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                             border: Border.all(color: Colors.grey),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: _filteredContacts.isEmpty
-                              ? ListTile(
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _filteredContacts.length + 1, // +1 for "Create new contact"
+                            itemBuilder: (context, index) {
+                              // Show "Create new contact" option at the end
+                              if (index == _filteredContacts.length) {
+                                return ListTile(
                                   leading: const Icon(Icons.person_add),
                                   title: const Text('Create new contact'),
                                   subtitle: Text(
@@ -357,11 +384,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                   ),
                                   onTap: () async {
                                     final searchText = _contactSearchController.text.trim();
-                                    final result = await Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (context) => AddContactScreen(
-                                          initialName: searchText.isNotEmpty ? searchText : null,
-                                        ),
+                                    final result = await showScreenAsBottomSheet(
+                                      context: context,
+                                      screen: AddContactScreen(
+                                        initialName: searchText.isNotEmpty ? searchText : null,
                                       ),
                                     );
                                     if (result != null && result is Contact && mounted) {
@@ -380,43 +406,42 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                       });
                                     }
                                   },
-                                )
-                              : ListView.builder(
-                                  shrinkWrap: true,
-                                  itemCount: _filteredContacts.length,
-                                  itemBuilder: (context, index) {
-                                    final contact = _filteredContacts[index];
-                                    return ListTile(
-                                      leading: const Icon(Icons.person),
-                                      title: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
-                                            ),
-                                          ),
-                                          if (contact.username != null && contact.username!.isNotEmpty) ...[
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              '@${contact.username}',
-                                              style: TextStyle(
-                                                color: ThemeColors.gray(context, shade: 500),
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
+                                );
+                              }
+                              
+                              // Show filtered contact
+                              final contact = _filteredContacts[index];
+                              return ListTile(
+                                leading: const Icon(Icons.person),
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
                                       ),
-                                      onTap: () {
-                                        setState(() {
-                                          _selectedContact = contact;
-                                          _contactSearchController.text = contact.name;
-                                          _showContactSuggestions = false;
-                                        });
-                                      },
-                                    );
-                                  },
+                                    ),
+                                    if (contact.username != null && contact.username!.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        '@${contact.username}',
+                                        style: TextStyle(
+                                          color: ThemeColors.gray(context, shade: 500),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
+                                onTap: () {
+                                  setState(() {
+                                    _selectedContact = contact;
+                                    _contactSearchController.text = contact.name;
+                                    _showContactSuggestions = false;
+                                  });
+                                },
+                              );
+                            },
+                          ),
                         ),
                       ],
                     ],
@@ -620,26 +645,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLines: 3,
-            ),
-            const SizedBox(height: 24),
-            
-            // Save button
-            Semantics(
-              button: true,
-              label: 'Save transaction',
-              child: ElevatedButton(
-                onPressed: _saving ? null : _saveTransaction,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: _saving
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Save Transaction'),
-              ),
             ),
           ],
         ),

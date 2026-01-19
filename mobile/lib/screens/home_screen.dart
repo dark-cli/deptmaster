@@ -15,6 +15,7 @@ import '../services/settings_service.dart';
 import '../services/backend_config_service.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/gradient_background.dart';
+import '../utils/bottom_sheet_helper.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -195,27 +196,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _showAddTransactionDialog() {
-    showModalBottomSheet(
+    showScreenAsBottomSheet(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.9,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => const AddTransactionScreen(),
-      ),
+      screen: const AddTransactionScreen(),
     );
   }
 
   void _showAddContactDialog() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const AddContactScreen(),
-      ),
+    showScreenAsBottomSheet(
+      context: context,
+      screen: const AddContactScreen(),
     );
   }
 }

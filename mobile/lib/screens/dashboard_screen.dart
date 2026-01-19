@@ -14,6 +14,7 @@ import '../utils/theme_colors.dart';
 import '../widgets/gradient_card.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
+import '../utils/bottom_sheet_helper.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -352,15 +353,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                             },
                             onLongPress: () {
                               // Open close debt screen with reverse transaction
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => AddTransactionScreenWithData(
-                                    contact: contact,
-                                    amount: amount, // The absolute balance amount
-                                    direction: TransactionDirection.lent, // Reverse direction to close debt
-                                    description: 'Close debt',
-                                  ),
+                              showScreenAsBottomSheet(
+                                context: context,
+                                screen: AddTransactionScreenWithData(
+                                  contact: contact,
+                                  amount: amount, // The absolute balance amount
+                                  direction: TransactionDirection.lent, // Reverse direction to close debt
+                                  description: 'Close debt',
                                 ),
                               );
                             },
