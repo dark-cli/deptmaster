@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
 import '../services/api_service.dart';
@@ -40,33 +41,22 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
   bool _saving = false;
   List<Contact> _contacts = [];
 
-  // Format number with thousands separators
-  static String _formatNumber(String value) {
-    // Remove all non-digit characters
-    final digitsOnly = value.replaceAll(RegExp(r'[^\d]'), '');
-    if (digitsOnly.isEmpty) return '';
-    
-    // Parse as integer and format with commas
-    final number = int.tryParse(digitsOnly);
-    if (number == null) return value;
-    
-    return number.toString().replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-      (Match m) => '${m[1]},',
-    );
-  }
-
-  // Parse formatted number back to integer
-  static int _parseFormattedNumber(String value) {
+  // Parse number to integer (removes commas)
+  static int _parseNumber(String value) {
     final digitsOnly = value.replaceAll(RegExp(r'[^\d]'), '');
     return int.tryParse(digitsOnly) ?? 0;
+  }
+
+  // Format number with commas using NumberFormat
+  static String _formatNumber(int value) {
+    return NumberFormat.decimalPattern().format(value);
   }
 
   @override
   void initState() {
     super.initState();
-    // Initialize with transaction data - format amount with commas
-    _amountController.text = _formatNumber(widget.transaction.amount.toString());
+    // Initialize with transaction data - format with commas
+    _amountController.text = _formatNumber(widget.transaction.amount);
     _descriptionController.text = widget.transaction.description ?? '';
     _direction = widget.transaction.direction;
     _selectedDate = widget.transaction.transactionDate;
@@ -155,7 +145,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
     try {
       final amountText = _amountController.text.trim();
-      final amount = _parseFormattedNumber(amountText); // Parse formatted number
+      final amount = _parseNumber(amountText);
 
       // Call API to update transaction
       await ApiService.updateTransaction(
@@ -252,7 +242,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
       body: Form(
         key: _formKey,
         child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
             // Contact selector (disabled if contact is fixed)
             _contacts.isEmpty
@@ -267,19 +257,26 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                       return DropdownMenuItem(
                         value: contact,
                         child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Expanded(
+                            Flexible(
                               child: Text(
                                 TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
                               ),
                             ),
                             if (contact.username != null && contact.username!.isNotEmpty) ...[
                               const SizedBox(width: 8),
-                              Text(
-                                '@${contact.username}',
-                                style: TextStyle(
-                                  color: ThemeColors.gray(context, shade: 500),
-                                  fontSize: 12,
+                              Flexible(
+                                child: Text(
+                                  '@${contact.username}',
+                                  style: TextStyle(
+                                    color: ThemeColors.gray(context, shade: 500),
+                                    fontSize: 12,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                 ),
                               ),
                             ],
@@ -343,17 +340,57 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
               ),
               keyboardType: TextInputType.number,
               inputFormatters: [
+                // Allow digits and commas
                 FilteringTextInputFormatter.allow(RegExp(r'[\d,]')),
+                // Simple formatter: add commas every 3 digits from right
                 TextInputFormatter.withFunction((oldValue, newValue) {
-                  // Format the number with commas as user types
-                  final formatted = _formatNumber(newValue.text);
-                  // Preserve cursor position
-                  final cursorOffset = newValue.selection.baseOffset;
-                  final newCursorOffset = formatted.length - (oldValue.text.length - cursorOffset);
+                  // Remove all commas, then add them back
+                  final digitsOnly = newValue.text.replaceAll(',', '');
+                  if (digitsOnly.isEmpty) {
+                    return const TextEditingValue(text: '');
+                  }
+                  
+                  // Format with commas using NumberFormat
+                  final number = int.tryParse(digitsOnly);
+                  if (number == null) {
+                    return oldValue; // Invalid input, keep old value
+                  }
+                  
+                  final formatted = _formatNumber(number);
+                  
+                  // Try to preserve cursor position
+                  final oldCursor = newValue.selection.baseOffset;
+                  final oldTextLength = oldValue.text.length;
+                  final newTextLength = formatted.length;
+                  
+                  // Simple cursor adjustment: if at end, stay at end
+                  int newCursor;
+                  if (oldCursor >= oldTextLength) {
+                    newCursor = formatted.length;
+                  } else {
+                    // Count digits before cursor in old text
+                    final digitsBeforeCursor = oldValue.text
+                        .substring(0, oldCursor)
+                        .replaceAll(',', '')
+                        .length;
+                    // Find position in new text with same digit count
+                    int digitsSeen = 0;
+                    newCursor = formatted.length;
+                    for (int i = 0; i < formatted.length; i++) {
+                      if (RegExp(r'\d').hasMatch(formatted[i])) {
+                        digitsSeen++;
+                        if (digitsSeen > digitsBeforeCursor) {
+                          newCursor = i;
+                          break;
+                        }
+                      }
+                    }
+                  }
+                  
                   return TextEditingValue(
                     text: formatted,
                     selection: TextSelection.collapsed(
-                      offset: newCursorOffset.clamp(0, formatted.length),
+                      offset: newCursor.clamp(0, formatted.length),
                     ),
                   );
                 }),
@@ -362,7 +399,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                 if (value == null || value.trim().isEmpty) {
                   return 'Amount is required';
                 }
-                final parsed = _parseFormattedNumber(value);
+                final parsed = _parseNumber(value);
                 if (parsed == 0) {
                   return 'Please enter a valid number';
                 }

@@ -19,11 +19,34 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
   bool _loading = false;
   String? _error;
   bool _testingConnection = false;
+  bool _connectionTestPassed = false;
+  String? _testedIp;
+  int? _testedPort;
 
   @override
   void initState() {
     super.initState();
     _loadCurrentConfig();
+    // Listen to text field changes to reset test status
+    _ipController.addListener(_onFieldChanged);
+    _portController.addListener(_onFieldChanged);
+  }
+
+  void _onFieldChanged() {
+    if (_connectionTestPassed) {
+      final currentIp = _ipController.text.trim();
+      final currentPort = int.tryParse(_portController.text.trim());
+      
+      // Reset test status if IP or port changed
+      if (currentIp != _testedIp || currentPort != _testedPort) {
+        setState(() {
+          _connectionTestPassed = false;
+          _testedIp = null;
+          _testedPort = null;
+          _error = null;
+        });
+      }
+    }
   }
 
   Future<void> _loadCurrentConfig() async {
@@ -37,6 +60,8 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
 
   @override
   void dispose() {
+    _ipController.removeListener(_onFieldChanged);
+    _portController.removeListener(_onFieldChanged);
     _ipController.dispose();
     _portController.dispose();
     super.dispose();
@@ -72,6 +97,12 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
         });
         
         if (response.statusCode == 200) {
+          setState(() {
+            _connectionTestPassed = true;
+            _testedIp = ip;
+            _testedPort = port;
+            _error = null;
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('✅ Connection successful!'),
@@ -79,6 +110,11 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
             ),
           );
         } else {
+          setState(() {
+            _connectionTestPassed = false;
+            _testedIp = null;
+            _testedPort = null;
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('⚠️ Server responded with status ${response.statusCode}'),
@@ -91,6 +127,9 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
       if (mounted) {
         setState(() {
           _testingConnection = false;
+          _connectionTestPassed = false;
+          _testedIp = null;
+          _testedPort = null;
           if (e is TimeoutException) {
             _error = e.message;
           } else {
@@ -142,7 +181,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
         ),
         body: SafeArea(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(32.0),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
             child: Form(
               key: _formKey,
               child: Column(
@@ -243,49 +282,77 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                           ),
                         ],
                         const SizedBox(height: 24),
-                        Row(
+                        // Stack buttons vertically on mobile
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: _testingConnection || _loading ? null : _testConnection,
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                            OutlinedButton(
+                              onPressed: _testingConnection || _loading ? null : _testConnection,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: _testingConnection
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
-                                      )
-                                    : const Text('Test Connection'),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              flex: 2,
-                              child: ElevatedButton(
-                                onPressed: _loading ? null : _handleSubmit,
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                                side: BorderSide(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  width: 2,
                                 ),
-                                child: _loading
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                        ),
-                                      )
-                                    : const Text('Save & Continue'),
                               ),
+                              child: _testingConnection
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : Text(
+                                      'Test Connection',
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.primary,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
                             ),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: (_loading || !_connectionTestPassed) ? null : _handleSubmit,
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                backgroundColor: _connectionTestPassed
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                foregroundColor: _connectionTestPassed
+                                    ? Theme.of(context).colorScheme.onPrimary
+                                    : Theme.of(context).colorScheme.onSurface.withOpacity(0.38),
+                              ),
+                              child: _loading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                      ),
+                                    )
+                                  : Text(
+                                      'Save & Continue',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                            ),
+                            if (!_connectionTestPassed && !_testingConnection && _error == null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                'Please test connection first',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 16),

@@ -492,71 +492,28 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                       if (!_selectionMode) {
                         return Dismissible(
                           key: Key(contact.id),
-                          direction: DismissDirection.horizontal,
+                          direction: DismissDirection.startToEnd, // Only swipe right (LTR)
+                          dismissThresholds: const {
+                            DismissDirection.startToEnd: 0.7, // Require 70% swipe for add transaction
+                          },
+                          movementDuration: const Duration(milliseconds: 300), // Slower animation
                           background: Container(
                             alignment: Alignment.centerLeft,
                             padding: const EdgeInsets.only(left: 20),
-                            color: Colors.red,
-                            child: const Icon(Icons.delete, color: Colors.white),
-                          ),
-                          secondaryBackground: Container(
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.only(right: 20),
                             color: Colors.green,
                             child: const Icon(Icons.add, color: Colors.white),
                           ),
                           confirmDismiss: (direction) async {
-                            if (direction == DismissDirection.startToEnd) {
-                              // Delete (swipe left to right)
-                              final confirm = await showDialog<bool>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Delete Contact'),
-                                  content: Text('Are you sure you want to delete ${contact.name}? This will also delete all associated transactions.'),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.of(context).pop(false),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => Navigator.of(context).pop(true),
-                                      style: TextButton.styleFrom(foregroundColor: Colors.red),
-                                      child: const Text('Delete'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (confirm == true && mounted) {
-                                try {
-                                  await ApiService.deleteContact(contact.id);
-                                  if (mounted) {
-                                    _loadContacts();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('✅ Contact deleted')),
-                                    );
-                                  }
-                                } catch (e) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-                                    );
-                                  }
-                                }
-                              }
-                              return confirm ?? false;
-                            } else if (direction == DismissDirection.endToStart) {
-                              // Open new transaction screen with this contact (swipe right to left)
-                              final result = await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => AddTransactionScreen(contact: contact),
-                                ),
-                              );
-                              if (result == true && mounted) {
-                                _loadContacts();
-                              }
-                              return false; // Don't dismiss
+                            // Open new transaction screen with this contact (swipe right)
+                            final result = await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => AddTransactionScreen(contact: contact),
+                              ),
+                            );
+                            if (result == true && mounted) {
+                              _loadContacts();
                             }
-                            return false;
+                            return false; // Don't dismiss
                           },
                           child: contactItem,
                         );

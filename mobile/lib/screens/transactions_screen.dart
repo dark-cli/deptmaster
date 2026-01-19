@@ -486,20 +486,20 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                 if (!_selectionMode) {
                   return Dismissible(
                     key: Key(transaction.id),
-                    direction: DismissDirection.horizontal,
+                    direction: DismissDirection.startToEnd, // Only swipe right (LTR)
+                    dismissThresholds: const {
+                      DismissDirection.startToEnd: 0.7, // Require 70% swipe for close
+                    },
+                    movementDuration: const Duration(milliseconds: 300), // Slower animation
                     background: Container(
                       alignment: Alignment.centerLeft,
                       padding: const EdgeInsets.only(left: 20),
-                      color: Colors.red,
-                      child: const Icon(Icons.delete, color: Colors.white),
-                    ),
-                    secondaryBackground: Container(
-                      alignment: Alignment.centerRight,
-                      padding: const EdgeInsets.only(right: 20),
                       color: Colors.green,
                       child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                        mainAxisAlignment: MainAxisAlignment.start,
                         children: [
+                          Icon(Icons.check_circle, color: Colors.white),
+                          SizedBox(width: 8),
                           Text(
                             'Close',
                             style: TextStyle(
@@ -508,84 +508,41 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                               fontSize: 16,
                             ),
                           ),
-                          SizedBox(width: 8),
-                          Icon(Icons.check_circle, color: Colors.white),
                         ],
                       ),
                     ),
                     confirmDismiss: (direction) async {
-                      if (direction == DismissDirection.startToEnd) {
-                        // Delete (swipe left to right)
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Delete Transaction'),
-                            content: const Text('Are you sure you want to delete this transaction?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(true),
-                                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                                child: const Text('Delete'),
-                              ),
-                            ],
+                      // Open reverse transaction - opposite direction, same amount, same contact (swipe right)
+                      final contact = _contacts?.firstWhere(
+                        (c) => c.id == transaction.contactId,
+                        orElse: () => Contact(
+                          id: transaction.contactId,
+                          name: 'Unknown',
+                          createdAt: DateTime.now(),
+                          updatedAt: DateTime.now(),
+                          balance: 0,
+                        ),
+                      );
+                      // Create a reverse transaction screen with pre-filled data to close/settle the transaction
+                      final reverseDirection = transaction.direction == TransactionDirection.owed
+                          ? TransactionDirection.lent
+                          : TransactionDirection.owed;
+                      final result = await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => AddTransactionScreenWithData(
+                            contact: contact,
+                            amount: transaction.amount,
+                            direction: reverseDirection,
+                            description: transaction.description != null
+                                ? 'Close: ${transaction.description}'
+                                : 'Close transaction',
                           ),
-                        );
-                        if (confirm == true && mounted) {
-                          try {
-                            await ApiService.deleteTransaction(transaction.id);
-                            if (mounted) {
-                              _loadData();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('✅ Transaction deleted')),
-                              );
-                            }
-                          } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-                              );
-                            }
-                          }
-                        }
-                        return confirm ?? false;
-                      } else if (direction == DismissDirection.endToStart) {
-                        // Open reverse transaction - opposite direction, same amount, same contact (swipe right to left)
-                        final contact = _contacts?.firstWhere(
-                          (c) => c.id == transaction.contactId,
-                          orElse: () => Contact(
-                            id: transaction.contactId,
-                            name: 'Unknown',
-                            createdAt: DateTime.now(),
-                            updatedAt: DateTime.now(),
-                            balance: 0,
-                          ),
-                        );
-                        // Create a reverse transaction screen with pre-filled data to close/settle the transaction
-                        final reverseDirection = transaction.direction == TransactionDirection.owed
-                            ? TransactionDirection.lent
-                            : TransactionDirection.owed;
-                        final result = await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => AddTransactionScreenWithData(
-                              contact: contact,
-                              amount: transaction.amount,
-                              direction: reverseDirection,
-                              description: transaction.description != null
-                                  ? 'Close: ${transaction.description}'
-                                  : 'Close transaction',
-                            ),
-                          ),
-                        );
-                        if (result == true && mounted) {
-                          _loadData();
-                        }
-                        return false; // Don't dismiss
+                        ),
+                      );
+                      if (result == true && mounted) {
+                        _loadData();
                       }
-                      return false;
+                      return false; // Don't dismiss
                     },
                     child: GestureDetector(
                       onTap: () async {

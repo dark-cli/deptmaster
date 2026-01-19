@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
 import '../services/api_service.dart';
@@ -114,12 +115,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
       if (mounted) {
         setState(() {
           if (dataWidget.amount != null) {
-            // Format amount with commas
-            final formatted = dataWidget.amount!.toString().replaceAllMapped(
-              RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-              (Match m) => '${m[1]},',
-            );
-            _amountController.text = formatted;
+            _amountController.text = _formatNumber(dataWidget.amount!);
           }
           if (dataWidget.direction != null) {
             _direction = dataWidget.direction!;
@@ -207,26 +203,15 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     }
   }
 
-  // Format number with thousands separators
-  static String _formatNumber(String value) {
-    // Remove all non-digit characters
-    final digitsOnly = value.replaceAll(RegExp(r'[^\d]'), '');
-    if (digitsOnly.isEmpty) return '';
-    
-    // Parse as integer and format with commas
-    final number = int.tryParse(digitsOnly);
-    if (number == null) return value;
-    
-    return number.toString().replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-      (Match m) => '${m[1]},',
-    );
-  }
-
-  // Parse formatted number back to integer
-  static int _parseFormattedNumber(String value) {
+  // Parse number to integer (removes commas)
+  static int _parseNumber(String value) {
     final digitsOnly = value.replaceAll(RegExp(r'[^\d]'), '');
     return int.tryParse(digitsOnly) ?? 0;
+  }
+
+  // Format number with commas using NumberFormat
+  static String _formatNumber(int value) {
+    return NumberFormat.decimalPattern().format(value);
   }
 
   Future<void> _saveTransaction() async {
@@ -244,7 +229,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
     try {
       final amountText = _amountController.text.trim();
-      final amount = _parseFormattedNumber(amountText); // Parse formatted number
+      final amount = _parseNumber(amountText);
 
       final transaction = Transaction(
         id: DateTime.now().millisecondsSinceEpoch.toString(), // Temporary ID
@@ -305,7 +290,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         body: Form(
           key: _formKey,
           child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
             // Contact search field
             _contacts.isEmpty
@@ -481,17 +466,56 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
               ),
               keyboardType: TextInputType.number,
               inputFormatters: [
+                // Allow digits and commas
                 FilteringTextInputFormatter.allow(RegExp(r'[\d,]')),
+                // Simple formatter: add commas every 3 digits from right
                 TextInputFormatter.withFunction((oldValue, newValue) {
-                  // Format the number with commas as user types
-                  final formatted = _formatNumber(newValue.text);
-                  // Preserve cursor position
-                  final cursorOffset = newValue.selection.baseOffset;
-                  final newCursorOffset = formatted.length - (oldValue.text.length - cursorOffset);
+                  // Remove all commas, then add them back
+                  final digitsOnly = newValue.text.replaceAll(',', '');
+                  if (digitsOnly.isEmpty) {
+                    return const TextEditingValue(text: '');
+                  }
+                  
+                  // Format with commas using NumberFormat
+                  final number = int.tryParse(digitsOnly);
+                  if (number == null) {
+                    return oldValue; // Invalid input, keep old value
+                  }
+                  
+                  final formatted = _formatNumber(number);
+                  
+                  // Try to preserve cursor position
+                  final oldCursor = newValue.selection.baseOffset;
+                  final oldTextLength = oldValue.text.length;
+                  
+                  // Simple cursor adjustment: if at end, stay at end
+                  int newCursor;
+                  if (oldCursor >= oldTextLength) {
+                    newCursor = formatted.length;
+                  } else {
+                    // Count digits before cursor in old text
+                    final digitsBeforeCursor = oldValue.text
+                        .substring(0, oldCursor)
+                        .replaceAll(',', '')
+                        .length;
+                    // Find position in new text with same digit count
+                    int digitsSeen = 0;
+                    newCursor = formatted.length;
+                    for (int i = 0; i < formatted.length; i++) {
+                      if (RegExp(r'\d').hasMatch(formatted[i])) {
+                        digitsSeen++;
+                        if (digitsSeen > digitsBeforeCursor) {
+                          newCursor = i;
+                          break;
+                        }
+                      }
+                    }
+                  }
+                  
                   return TextEditingValue(
                     text: formatted,
                     selection: TextSelection.collapsed(
-                      offset: newCursorOffset.clamp(0, formatted.length),
+                      offset: newCursor.clamp(0, formatted.length),
                     ),
                   );
                 }),
@@ -500,7 +524,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                 if (value == null || value.trim().isEmpty) {
                   return 'Amount is required';
                 }
-                final parsed = _parseFormattedNumber(value);
+                final parsed = _parseNumber(value);
                 if (parsed == 0) {
                   return 'Please enter a valid number';
                 }

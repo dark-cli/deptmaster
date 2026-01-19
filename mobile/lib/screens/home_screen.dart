@@ -231,7 +231,6 @@ class _SettingsContent extends ConsumerStatefulWidget {
 class _SettingsContentState extends ConsumerState<_SettingsContent> {
   bool _darkMode = true;
   String _defaultDirection = 'give';
-  bool _dueDateEnabled = false;
   int _defaultDueDateDays = 30;
   bool _defaultDueDateSwitch = false;
   String _backendIp = '';
@@ -246,7 +245,6 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   Future<void> _loadSettings() async {
     final darkMode = await SettingsService.getDarkMode();
     final defaultDir = await SettingsService.getDefaultDirection();
-    final dueDateEnabled = await SettingsService.getDueDateEnabled();
     final defaultDays = await SettingsService.getDefaultDueDateDays();
     final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
     final backendIp = await BackendConfigService.getBackendIp();
@@ -256,7 +254,6 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
       setState(() {
         _darkMode = darkMode;
         _defaultDirection = defaultDir;
-        _dueDateEnabled = dueDateEnabled;
         _defaultDueDateDays = defaultDays;
         _defaultDueDateSwitch = defaultDueDateSwitch;
         _backendIp = backendIp;
@@ -359,52 +356,58 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         
         // Due Date Settings
         _buildSectionHeader('Due Date'),
-        SwitchListTile(
-          title: const Text('Enable Due Dates'),
-          subtitle: const Text('Show due dates on dashboard'),
-          value: _dueDateEnabled,
-          onChanged: (value) async {
-            await SettingsService.setDueDateEnabled(value);
-            setState(() {
-              _dueDateEnabled = value;
-            });
+        Consumer(
+          builder: (context, ref, child) {
+            final dueDateEnabled = ref.watch(dueDateEnabledProvider);
+            return Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Enable Due Dates'),
+                  subtitle: const Text('Show due dates on dashboard'),
+                  value: dueDateEnabled,
+                  onChanged: (value) async {
+                    await ref.read(dueDateEnabledProvider.notifier).setDueDateEnabled(value);
+                  },
+                ),
+                if (dueDateEnabled) ...[
+                  SwitchListTile(
+                    title: const Text('Default Due Date Switch'),
+                    subtitle: const Text('Due date switch default state in transaction form'),
+                    value: _defaultDueDateSwitch,
+                    onChanged: (value) async {
+                      await SettingsService.setDefaultDueDateSwitch(value);
+                      setState(() {
+                        _defaultDueDateSwitch = value;
+                      });
+                    },
+                  ),
+                  ListTile(
+                    title: const Text('Default Due Date (Days)'),
+                    subtitle: Text('$_defaultDueDateDays days from transaction date'),
+                    trailing: SizedBox(
+                      width: 100,
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.right,
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                        ),
+                        controller: TextEditingController(text: _defaultDueDateDays.toString()),
+                        onSubmitted: (value) async {
+                          final days = int.tryParse(value) ?? 30;
+                          await SettingsService.setDefaultDueDateDays(days);
+                          setState(() {
+                            _defaultDueDateDays = days;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            );
           },
         ),
-        if (_dueDateEnabled) ...[
-          SwitchListTile(
-            title: const Text('Default Due Date Switch'),
-            subtitle: const Text('Due date switch default state in transaction form'),
-            value: _defaultDueDateSwitch,
-            onChanged: (value) async {
-              await SettingsService.setDefaultDueDateSwitch(value);
-              setState(() {
-                _defaultDueDateSwitch = value;
-              });
-            },
-          ),
-          ListTile(
-            title: const Text('Default Due Date (Days)'),
-            subtitle: Text('$_defaultDueDateDays days from transaction date'),
-            trailing: SizedBox(
-              width: 100,
-              child: TextField(
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.right,
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                ),
-                controller: TextEditingController(text: _defaultDueDateDays.toString()),
-                onSubmitted: (value) async {
-                  final days = int.tryParse(value) ?? 30;
-                  await SettingsService.setDefaultDueDateDays(days);
-                  setState(() {
-                    _defaultDueDateDays = days;
-                  });
-                },
-              ),
-            ),
-          ),
-        ],
         
         // Backend Configuration
         _buildSectionHeader('Backend Configuration'),

@@ -101,23 +101,12 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
         appBar: AppBar(
         title: _selectionMode 
             ? Text('${_selectedTransactions.length} selected')
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    TextUtils.forceLtr(widget.contact.name), // Force LTR for mixed Arabic/English text
-                  ),
-                  if (widget.contact.username != null && widget.contact.username!.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      '@${widget.contact.username}',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ],
+            : Text(
+                widget.contact.username != null && widget.contact.username!.isNotEmpty
+                    ? '${TextUtils.forceLtr(widget.contact.name)} @${widget.contact.username}'
+                    : TextUtils.forceLtr(widget.contact.name),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
         leading: _selectionMode
             ? IconButton(
@@ -291,7 +280,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
             children: [
               // Balance Summary
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 child: GradientCard(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -410,20 +399,20 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                       if (!_selectionMode) {
                         return Dismissible(
                           key: Key(transaction.id),
-                          direction: DismissDirection.horizontal,
+                          direction: DismissDirection.startToEnd, // Only swipe right (LTR)
+                          dismissThresholds: const {
+                            DismissDirection.startToEnd: 0.7, // Require 70% swipe for close
+                          },
+                          movementDuration: const Duration(milliseconds: 300), // Slower animation
                           background: Container(
                             alignment: Alignment.centerLeft,
                             padding: const EdgeInsets.only(left: 20),
-                            color: Colors.red,
-                            child: const Icon(Icons.delete, color: Colors.white),
-                          ),
-                          secondaryBackground: Container(
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.only(right: 20),
                             color: Colors.green,
                             child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
+                              mainAxisAlignment: MainAxisAlignment.start,
                               children: [
+                                Icon(Icons.check_circle, color: Colors.white),
+                                SizedBox(width: 8),
                                 Text(
                                   'Close',
                                   style: TextStyle(
@@ -432,73 +421,30 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                     fontSize: 16,
                                   ),
                                 ),
-                                SizedBox(width: 8),
-                                Icon(Icons.check_circle, color: Colors.white),
                               ],
                             ),
                           ),
                           confirmDismiss: (direction) async {
-                            if (direction == DismissDirection.startToEnd) {
-                              // Delete (swipe left to right)
-                              final confirm = await showDialog<bool>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Delete Transaction'),
-                                  content: const Text('Are you sure you want to delete this transaction?'),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.of(context).pop(false),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => Navigator.of(context).pop(true),
-                                      style: TextButton.styleFrom(foregroundColor: Colors.red),
-                                      child: const Text('Delete'),
-                                    ),
-                                  ],
+                            // Open reverse transaction to close/settle (swipe right)
+                            final reverseDirection = transaction.direction == TransactionDirection.owed
+                                ? TransactionDirection.lent
+                                : TransactionDirection.owed;
+                            final result = await Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => AddTransactionScreenWithData(
+                                  contact: widget.contact,
+                                  amount: transaction.amount,
+                                  direction: reverseDirection,
+                                  description: transaction.description != null
+                                      ? 'Close: ${transaction.description}'
+                                      : 'Close transaction',
                                 ),
-                              );
-                              if (confirm == true && mounted) {
-                                try {
-                                  await ApiService.deleteTransaction(transaction.id);
-                                  if (mounted) {
-                                    _loadTransactions();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('✅ Transaction deleted')),
-                                    );
-                                  }
-                                } catch (e) {
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-                                    );
-                                  }
-                                }
-                              }
-                              return confirm ?? false;
-                            } else if (direction == DismissDirection.endToStart) {
-                              // Open reverse transaction to close/settle (swipe right to left)
-                              final reverseDirection = transaction.direction == TransactionDirection.owed
-                                  ? TransactionDirection.lent
-                                  : TransactionDirection.owed;
-                              final result = await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => AddTransactionScreenWithData(
-                                    contact: widget.contact,
-                                    amount: transaction.amount,
-                                    direction: reverseDirection,
-                                    description: transaction.description != null
-                                        ? 'Close: ${transaction.description}'
-                                        : 'Close transaction',
-                                  ),
-                                ),
-                              );
-                              if (result == true && mounted) {
-                                _loadTransactions();
-                              }
-                              return false; // Don't dismiss
+                              ),
+                            );
+                            if (result == true && mounted) {
+                              _loadTransactions();
                             }
-                            return false;
+                            return false; // Don't dismiss
                           },
                           child: GestureDetector(
                             onTap: () async {
@@ -635,9 +581,6 @@ class _TransactionListItem extends StatelessWidget {
   }
 
   Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color, bool flipColors) {
-    // Pre-allocate width for amount section to ensure names align
-    const double amountSectionWidth = 120.0;
-    
     final amount = transaction.amount;
     final status = _getStatus(transaction.direction, flipColors);
 
@@ -648,7 +591,7 @@ class _TransactionListItem extends StatelessWidget {
             ? onSelectionChanged
             : onEdit,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
               // Left side: Avatar (or Checkbox in selection mode)
@@ -659,14 +602,14 @@ class _TransactionListItem extends StatelessWidget {
                     )
                   : CircleAvatar(
                       backgroundColor: color.withOpacity(0.2),
-                      radius: 24,
+                      radius: 20,
                       child: Icon(
                         Icons.attach_money,
                         color: color,
-                        size: 18,
+                        size: 16,
                       ),
                     ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               // Description and Date
               Expanded(
                 child: Column(
@@ -674,15 +617,21 @@ class _TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      transaction.description ?? 'Transaction',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
+                    if (transaction.description != null && transaction.description!.isNotEmpty) ...[
+                      Text(
+                        transaction.description!,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
-                    ),
-                    // Reserve space for consistent card height (same as username space in transactions screen)
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
+                    ] else ...[
+                      // Reserve space for consistent card height when no description
+                      const SizedBox(height: 16),
+                    ],
                     if (transaction.dueDate != null) ...[
                       Row(
                         children: [
@@ -694,13 +643,17 @@ class _TransactionListItem extends StatelessWidget {
                                 : ThemeColors.warning(context),
                           ),
                           const SizedBox(width: 4),
-                          Text(
-                            dateFormat.format(transaction.dueDate!),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: transaction.dueDate!.isBefore(DateTime.now())
-                                  ? ThemeColors.error(context)
-                                  : ThemeColors.warning(context),
+                          Flexible(
+                            child: Text(
+                              dateFormat.format(transaction.dueDate!),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: transaction.dueDate!.isBefore(DateTime.now())
+                                    ? ThemeColors.error(context)
+                                    : ThemeColors.warning(context),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         ],
@@ -712,15 +665,16 @@ class _TransactionListItem extends StatelessWidget {
                           fontSize: 11,
                           color: ThemeColors.gray(context, shade: 500),
                         ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                     ],
                   ],
                 ),
               ),
-              const SizedBox(width: 16),
-              // Right side: Amount and Status (fixed width)
-              SizedBox(
-                width: amountSectionWidth,
+              const SizedBox(width: 8),
+              // Right side: Amount and Status (flexible width)
+              Flexible(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -730,29 +684,34 @@ class _TransactionListItem extends StatelessWidget {
                       '${_formatAmount(amount)} IQD',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                        fontSize: 14,
                         color: color,
                       ),
                       textAlign: TextAlign.right,
                       overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       status,
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 10,
                         color: ThemeColors.gray(context, shade: 600),
                       ),
-                      textAlign: TextAlign.center,
+                      textAlign: TextAlign.right,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                   ],
                 ),
               ),
               // Popup menu button
               if (onEdit != null || onDelete != null) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
                 PopupMenuButton(
-                  icon: const Icon(Icons.more_vert),
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                   itemBuilder: (context) => [
                     if (onEdit != null)
                       const PopupMenuItem(

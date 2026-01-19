@@ -26,7 +26,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   List<Contact>? _contacts;
   List<Transaction>? _transactions;
   bool _loading = true;
-  bool _dueDateEnabled = false;
 
   @override
   void initState() {
@@ -34,7 +33,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     _loadData();
     RealtimeService.addListener(_onRealtimeUpdate);
     RealtimeService.connect();
-    _loadSettings();
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -42,17 +40,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (type == 'contact_created' || type == 'contact_updated' ||
         type == 'transaction_created' || type == 'transaction_updated' ||
         type == 'transaction_deleted') {
-      _loadData();
-    }
-  }
-
-  Future<void> _loadSettings() async {
-    final enabled = await SettingsService.getDueDateEnabled();
-    if (mounted) {
-      setState(() {
-        _dueDateEnabled = enabled;
-      });
-      // Reload data after settings change to show/hide due dates
       _loadData();
     }
   }
@@ -92,15 +79,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     // Don't check _dueDateEnabled here - let the UI decide whether to show
     
     final now = DateTime.now();
-    // Get all upcoming due dates (not overdue, within next 30 days)
+    // Get all due dates: overdue or within next 30 days
     final upcoming = _transactions!
         .where((t) => t.dueDate != null && 
-                      t.dueDate!.isAfter(now) && 
-                      t.dueDate!.difference(now).inDays <= 30)
+                      (t.dueDate!.isBefore(now) || // Include overdue
+                       (t.dueDate!.isAfter(now) && t.dueDate!.difference(now).inDays <= 30))) // Or within 30 days
         .toList();
     
-    upcoming.sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
-    return upcoming.take(5).toList(); // Limit to top 5
+    // Sort: overdue first (most overdue first), then upcoming (soonest first)
+    upcoming.sort((a, b) {
+      final aDays = a.dueDate!.difference(now).inDays;
+      final bDays = b.dueDate!.difference(now).inDays;
+      // If both overdue or both upcoming, sort by date
+      if ((aDays < 0 && bDays < 0) || (aDays >= 0 && bDays >= 0)) {
+        return a.dueDate!.compareTo(b.dueDate!);
+      }
+      // Overdue comes before upcoming
+      return aDays < 0 ? -1 : 1;
+    });
+    return upcoming.take(10).toList(); // Limit to top 10
   }
 
   @override
@@ -111,6 +108,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch due date enabled setting
+    final dueDateEnabled = ref.watch(dueDateEnabledProvider);
+    
     if (_loading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
@@ -125,7 +125,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     
     // Debug: Print due dates info
     print('🔍 Dashboard Debug:');
-    print('  Due Date Enabled: $_dueDateEnabled');
+    print('  Due Date Enabled: $dueDateEnabled');
     print('  Total Transactions: ${_transactions?.length ?? 0}');
     final transactionsWithDueDates = _transactions?.where((t) => t.dueDate != null).toList() ?? [];
     print('  Transactions with due dates: ${transactionsWithDueDates.length}');
@@ -143,7 +143,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       body: RefreshIndicator(
         onRefresh: _loadData,
         child: ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
             // Stats Cards
             _buildStatsCard(context, totalBalance),
@@ -156,7 +156,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ],
             
             // Upcoming Due Dates (show if enabled, even if empty)
-            if (_dueDateEnabled) ...[
+            if (dueDateEnabled) ...[
               if (upcomingDueDates.isNotEmpty) ...[
                 _buildDueDatesSection(context, upcomingDueDates, contactMap, 'Payment Reminders'),
                 const SizedBox(height: 16),
@@ -206,7 +206,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             : AppColors.getGiveColor(flipColors, isDark);
         
         return GradientCard(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -217,7 +217,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               const SizedBox(height: 8),
               Text(
                 '$balanceText IQD',
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: balanceColor,
                 ),
@@ -242,13 +242,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       children: [
         Text(
           value.toString(),
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.bold,
           ),
         ),
         Text(
           label,
-          style: Theme.of(context).textTheme.bodySmall,
+          style: Theme.of(context).textTheme.bodyMedium,
         ),
       ],
     );
@@ -286,19 +286,53 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  // Stack vertically on small screens (width < 600)
+                  final isSmallScreen = constraints.maxWidth < 600;
+                  
+                  return isSmallScreen
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildDebtsColumn(context, topDebts, debtColor, flipColors, isDark),
+                            const SizedBox(height: 24),
+                            _buildCreditsColumn(context, topCredits, creditColor, flipColors, isDark),
+                          ],
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: _buildDebtsColumn(context, topDebts, debtColor, flipColors, isDark),
+                            ),
+                            const SizedBox(width: 24),
+                            Expanded(
+                              child: _buildCreditsColumn(context, topCredits, creditColor, flipColors, isDark),
+                            ),
+                          ],
+                        );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDebtsColumn(BuildContext context, List<Contact> topDebts, Color debtColor, bool flipColors, bool isDark) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
                       Text(
                         'You Owe',
-                        style: Theme.of(context).textTheme.titleSmall,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      const SizedBox(height: 8),
+          const SizedBox(height: 8),
                       ...topDebts.map((contact) {
                         final amount = contact.balance.abs();
                         final formatted = amount.toString().replaceAllMapped(
@@ -347,9 +381,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
+                                          TextUtils.forceLtr(contact.name),
                                           style: Theme.of(context).textTheme.bodySmall,
                                           overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
                                         ),
                                         if (contact.username != null && contact.username!.isNotEmpty) ...[
                                           const SizedBox(height: 2),
@@ -359,17 +394,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                               color: ThemeColors.gray(context, shade: 500),
                                               fontSize: 10,
                                             ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
                                           ),
                                         ],
                                       ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Text(
-                                    '$formatted IQD',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: debtColor,
-                                      fontWeight: FontWeight.bold,
+                                  Flexible(
+                                    child: Text(
+                                      '$formatted IQD',
+                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        color: debtColor,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
                                     ),
                                   ),
                                 ],
@@ -379,20 +420,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         );
                       }),
                     ],
-                  ),
-                ),
-                const SizedBox(width: 48),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
+                  );
+  }
+
+  Widget _buildCreditsColumn(BuildContext context, List<Contact> topCredits, Color creditColor, bool flipColors, bool isDark) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
                       Text(
                         'Owed to You',
-                        style: Theme.of(context).textTheme.titleSmall,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      const SizedBox(height: 8),
-                      ...topCredits.map((contact) {
+          const SizedBox(height: 8),
+          ...topCredits.map((contact) {
                         final amount = contact.balance;
                         final formatted = amount.toString().replaceAllMapped(
                           RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
@@ -426,9 +469,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
-                                          style: Theme.of(context).textTheme.bodySmall,
+                                          TextUtils.forceLtr(contact.name),
+                                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                           overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
                                         ),
                                         if (contact.username != null && contact.username!.isNotEmpty) ...[
                                           const SizedBox(height: 2),
@@ -436,19 +482,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                             '@${contact.username}',
                                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                               color: ThemeColors.gray(context, shade: 500),
-                                              fontSize: 10,
+                                              fontSize: 12,
                                             ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
                                           ),
                                         ],
                                       ],
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Text(
-                                    '$formatted IQD',
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: creditColor,
-                                      fontWeight: FontWeight.bold,
+                                  Flexible(
+                                    child: Text(
+                                      '$formatted IQD',
+                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        color: creditColor,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
                                     ),
                                   ),
                                 ],
@@ -458,15 +510,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         );
                       }),
                     ],
-                  ),
-                ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
+                  );
   }
 
   Widget _buildDueDatesSection(
@@ -534,8 +578,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               children: [
                                 Text(
                                   TextUtils.forceLtr(contact?.name ?? 'Unknown'),
-                                  style: Theme.of(context).textTheme.bodySmall,
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                   overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                 ),
                                 if (contact?.username != null && contact!.username!.isNotEmpty) ...[
                                   const SizedBox(height: 2),
@@ -543,8 +590,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                     '@${contact.username}',
                                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: ThemeColors.gray(context, shade: 500),
-                                      fontSize: 10,
+                                      fontSize: 12,
                                     ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
                                   ),
                                 ],
                                 const SizedBox(height: 2),
@@ -552,18 +601,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                   '$formattedAmount • $formattedDate',
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: ThemeColors.gray(context, shade: 600),
-                                    fontSize: 10,
+                                    fontSize: 12,
                                   ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                 ),
                               ],
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            statusText,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: statusColor,
-                              fontWeight: FontWeight.bold,
+                          Flexible(
+                            child: Text(
+                              statusText,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: statusColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              textAlign: TextAlign.right,
                             ),
                           ),
                         ],
