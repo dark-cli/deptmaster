@@ -14,16 +14,20 @@ mod background;
 mod database;
 mod utils;
 mod websocket;
+// app_state module removed - AppState defined directly in main.rs
 
 use config::Config;
 use database::DatabasePool;
 use websocket::BroadcastChannel;
+use services::eventstore::EventStoreClient;
 
+// Define AppState in main.rs (not in shared app_state.rs to avoid library build issues)
 #[derive(Clone)]
 pub struct AppState {
     pub db_pool: DatabasePool,
     pub config: Arc<Config>,
     pub broadcast_tx: BroadcastChannel,
+    pub eventstore: Arc<EventStoreClient>,
 }
 
 #[tokio::main]
@@ -49,6 +53,14 @@ async fn main() -> anyhow::Result<()> {
     let db_pool = database::new_pool(&config.database_url).await?;
     info!("Database connection pool created");
 
+    // Initialize EventStore client
+    let eventstore = Arc::new(EventStoreClient::new(
+        config.eventstore_url.clone(),
+        config.eventstore_username.clone(),
+        config.eventstore_password.clone(),
+    ));
+    info!("EventStore client initialized");
+
     // Seed dummy data if database is empty
     services::seed_data::seed_dummy_data(&db_pool).await?;
 
@@ -70,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
         db_pool: db_pool.clone(),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        eventstore: eventstore.clone(),
     };
 
     // Build API routes
@@ -78,6 +91,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health_check))
         .route("/admin", get(handlers::admin_panel))
         .route("/api/admin/events", get(handlers::get_events))
+        .route("/api/admin/events/latest", get(handlers::get_latest_event_id))
+        .route("/api/admin/events/backfill-transactions", post(handlers::backfill_transaction_events))
+        .route("/api/admin/eventstore/events", get(handlers::get_eventstore_events))
+        .route("/api/admin/eventstore/streams", get(handlers::get_eventstore_streams))
         .route("/api/admin/contacts", get(handlers::get_contacts))
         .route("/api/admin/transactions", get(handlers::get_transactions))
         .route("/api/admin/projections/status", get(handlers::get_projection_status))

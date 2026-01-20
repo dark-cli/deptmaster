@@ -320,15 +320,15 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                             }
                           } catch (e) {
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error deleting transactions: $e'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                            setState(() {
-                              _loading = false;
-                            });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Error deleting transactions: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              setState(() {
+                                _loading = false;
+                              });
                           }
                         }
                     },
@@ -501,35 +501,35 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     ),
                     confirmDismiss: (direction) async {
                       // Open reverse transaction - opposite direction, same amount, same contact (swipe right)
-                      final contact = _contacts?.firstWhere(
-                        (c) => c.id == transaction.contactId,
-                        orElse: () => Contact(
-                          id: transaction.contactId,
-                          name: 'Unknown',
-                          createdAt: DateTime.now(),
-                          updatedAt: DateTime.now(),
-                          balance: 0,
-                        ),
-                      );
-                      // Create a reverse transaction screen with pre-filled data to close/settle the transaction
-                      final reverseDirection = transaction.direction == TransactionDirection.owed
-                          ? TransactionDirection.lent
-                          : TransactionDirection.owed;
+                        final contact = _contacts?.firstWhere(
+                          (c) => c.id == transaction.contactId,
+                          orElse: () => Contact(
+                            id: transaction.contactId,
+                            name: 'Unknown',
+                            createdAt: DateTime.now(),
+                            updatedAt: DateTime.now(),
+                            balance: 0,
+                          ),
+                        );
+                        // Create a reverse transaction screen with pre-filled data to close/settle the transaction
+                        final reverseDirection = transaction.direction == TransactionDirection.owed
+                            ? TransactionDirection.lent
+                            : TransactionDirection.owed;
                       final result = await showScreenAsBottomSheet(
                         context: context,
                         screen: AddTransactionScreenWithData(
-                          contact: contact,
-                          amount: transaction.amount,
-                          direction: reverseDirection,
-                          description: transaction.description != null
-                              ? 'Close: ${transaction.description}'
-                              : 'Close transaction',
-                        ),
-                      );
-                      if (result == true && mounted) {
-                        _loadData();
-                      }
-                      return false; // Don't dismiss
+                              contact: contact,
+                              amount: transaction.amount,
+                              direction: reverseDirection,
+                              description: transaction.description != null
+                                  ? 'Close: ${transaction.description}'
+                                  : 'Close transaction',
+                          ),
+                        );
+                        if (result == true && mounted) {
+                          _loadData();
+                        }
+                        return false; // Don't dismiss
                     },
                     child: GestureDetector(
                       onTap: () async {
@@ -547,8 +547,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                         final result = await showScreenAsBottomSheet(
                           context: context,
                           screen: EditTransactionScreen(
-                            transaction: transaction,
-                            contact: contact,
+                              transaction: transaction,
+                              contact: contact,
                           ),
                         );
                         if (result == true && mounted) {
@@ -673,22 +673,22 @@ class TransactionListItem extends StatelessWidget {
             children: [
               // Left side: Avatar
               CircleAvatar(
-                backgroundColor: color.withOpacity(0.2),
+          backgroundColor: color.withOpacity(0.2),
                 radius: 24,
-                child: Icon(
-                  Icons.attach_money,
-                  color: color,
+          child: Icon(
+            Icons.attach_money,
+            color: color,
                   size: 18,
-                ),
-              ),
+          ),
+        ),
               const SizedBox(width: 16),
               // Name, Username, and Description/Date
               Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+          mainAxisSize: MainAxisSize.min,
+          children: [
                     Text(
                       TextUtils.forceLtr(contactName), // Force LTR for mixed Arabic/English text
                       style: const TextStyle(
@@ -712,8 +712,8 @@ class TransactionListItem extends StatelessWidget {
                     ],
                     if (transaction.description != null || transaction.dueDate != null) ...[
                       const SizedBox(height: 4),
-                      if (transaction.description != null)
-                        Text(
+            if (transaction.description != null) 
+            Text(
                           transaction.description!,
                           style: TextStyle(
                             fontSize: 12,
@@ -721,11 +721,11 @@ class TransactionListItem extends StatelessWidget {
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                        ),
-                      if (transaction.dueDate != null) ...[
+            ),
+            if (transaction.dueDate != null) ...[
                         const SizedBox(height: 2),
-                        Row(
-                          children: [
+              Row(
+                children: [
                             Icon(
                               Icons.event,
                               size: 12,
@@ -733,17 +733,17 @@ class TransactionListItem extends StatelessWidget {
                                   ? ThemeColors.error(context)
                                   : ThemeColors.warning(context),
                             ),
-                            const SizedBox(width: 4),
-                            Text(
+                  const SizedBox(width: 4),
+                  Text(
                               dateFormat.format(transaction.dueDate!),
-                              style: TextStyle(
+                    style: TextStyle(
                                 fontSize: 11,
-                                color: transaction.dueDate!.isBefore(DateTime.now())
+                      color: transaction.dueDate!.isBefore(DateTime.now())
                                     ? ThemeColors.error(context)
                                     : ThemeColors.warning(context),
-                              ),
-                            ),
-                          ],
+                    ),
+                  ),
+                ],
                         ),
                       ] else if (transaction.description == null) ...[
                         Text(
@@ -762,10 +762,10 @@ class TransactionListItem extends StatelessWidget {
                           fontSize: 11,
                           color: ThemeColors.gray(context, shade: 500),
                         ),
-                      ),
-                    ],
-                  ],
-                ),
+              ),
+            ],
+          ],
+        ),
               ),
               const SizedBox(width: 16),
               // Right side: Amount and Status (fixed width)
@@ -778,10 +778,10 @@ class TransactionListItem extends StatelessWidget {
                   children: [
                     Text(
                       '${_formatAmount(amount)} IQD',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
                         fontSize: 16,
-                        color: color,
+            color: color,
                       ),
                       textAlign: TextAlign.right,
                       overflow: TextOverflow.ellipsis,

@@ -200,7 +200,9 @@
         </div>
 
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('events')">Events</button>
+            <button class="tab active" onclick="switchTab('events')">PostgreSQL Events</button>
+            <button class="tab" onclick="switchTab('eventstore')">EventStore Events</button>
+            <button class="tab" onclick="switchTab('streams')">EventStore Streams</button>
             <button class="tab" onclick="switchTab('contacts')">Contacts</button>
             <button class="tab" onclick="switchTab('transactions')">Transactions</button>
             <button class="tab" onclick="switchTab('projections')">Projections</button>
@@ -283,6 +285,7 @@
             await Promise.all([
                 loadStats(),
                 loadEvents(),
+                loadEventStoreStreams(),
                 loadContacts(),
                 loadTransactions(),
                 loadProjections()

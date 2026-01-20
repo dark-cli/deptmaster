@@ -13,21 +13,25 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            color: #333;
+            background: #FFFBFE; /* Material 3 light background */
+            color: #1C1B1F; /* Material 3 on background */
             transition: background-color 0.3s, color 0.3s;
         }
 
         body.dark-mode {
-            background: #121212;
-            color: #e0e0e0;
+            background: #1C1B1F; /* Material 3 dark background */
+            color: #E6E1E5; /* Material 3 on background */
         }
 
         .header {
-            background: #1976d2;
+            background: #6750A4; /* Material 3 light primary */
             color: white;
             padding: 1rem 2rem;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        body.dark-mode .header {
+            background: #6750A4; /* Keep primary color in dark mode too */
         }
 
         .header h1 {
@@ -48,34 +52,46 @@
         }
 
         .stat-card {
-            background: white;
+            background: #FFFBFE; /* Material 3 light surface */
             padding: 1.5rem;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            transition: background-color 0.3s;
+            transition: background-color 0.3s, color 0.3s;
         }
 
         body.dark-mode .stat-card {
-            background: #1e1e1e;
+            background: #1C1B1F; /* Material 3 dark surface */
         }
 
         .stat-card h3 {
             font-size: 0.9rem;
-            color: #666;
+            color: #79747E; /* Material 3 light outline */
             margin-bottom: 0.5rem;
+        }
+
+        body.dark-mode .stat-card h3 {
+            color: #938F99; /* Material 3 dark outline */
         }
 
         .stat-card .value {
             font-size: 2rem;
             font-weight: bold;
-            color: #1976d2;
+            color: #6750A4; /* Material 3 light primary */
+        }
+
+        body.dark-mode .stat-card .value {
+            color: #D0BCFF; /* Material 3 dark primary */
         }
 
         .tabs {
             display: flex;
             gap: 1rem;
             margin-bottom: 1rem;
-            border-bottom: 2px solid #e0e0e0;
+            border-bottom: 2px solid #E7E0EC; /* Material 3 light surface variant */
+        }
+
+        body.dark-mode .tabs {
+            border-bottom-color: #49454F; /* Material 3 dark surface variant */
         }
 
         .tab {
@@ -84,14 +100,24 @@
             border: none;
             background: none;
             font-size: 1rem;
-            color: #666;
+            color: #79747E; /* Material 3 light outline */
             border-bottom: 2px solid transparent;
             margin-bottom: -2px;
+            transition: color 0.3s;
+        }
+
+        body.dark-mode .tab {
+            color: #938F99; /* Material 3 dark outline */
         }
 
         .tab.active {
-            color: #1976d2;
-            border-bottom-color: #1976d2;
+            color: #6750A4; /* Material 3 light primary */
+            border-bottom-color: #6750A4;
+        }
+
+        body.dark-mode .tab.active {
+            color: #D0BCFF; /* Material 3 dark primary */
+            border-bottom-color: #D0BCFF;
         }
 
         .tab-content {
@@ -103,7 +129,7 @@
         }
 
         .table-container {
-            background: white;
+            background: #FFFBFE; /* Material 3 light surface */
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             overflow: hidden;
@@ -111,7 +137,7 @@
         }
 
         body.dark-mode .table-container {
-            background: #1e1e1e;
+            background: #1C1B1F; /* Material 3 dark surface */
         }
 
         table {
@@ -122,28 +148,33 @@
         th, td {
             padding: 1rem;
             text-align: left;
-            border-bottom: 1px solid #e0e0e0;
+            border-bottom: 1px solid #E7E0EC; /* Material 3 light surface variant */
+        }
+
+        body.dark-mode th,
+        body.dark-mode td {
+            border-bottom-color: #49454F; /* Material 3 dark surface variant */
         }
 
         th {
-            background: #f5f5f5;
+            background: #E7E0EC; /* Material 3 light surface variant */
             font-weight: 600;
-            color: #666;
+            color: #1C1B1F; /* Material 3 on surface */
             transition: background-color 0.3s, color 0.3s;
         }
 
         body.dark-mode th {
-            background: #2d2d2d;
-            color: #b0b0b0;
+            background: #49454F; /* Material 3 dark surface variant */
+            color: #E6E1E5; /* Material 3 on surface */
         }
 
         tr:hover {
-            background: #f9f9f9;
+            background: #E7E0EC; /* Material 3 light surface variant */
             transition: background-color 0.2s;
         }
 
         body.dark-mode tr:hover {
-            background: #2d2d2d;
+            background: #49454F; /* Material 3 dark surface variant */
         }
 
         .badge {
@@ -155,22 +186,37 @@
         }
 
         .badge.success {
-            background: #e8f5e9;
-            color: #2e7d32;
+            background: rgba(22, 163, 74, 0.1); /* Material 3 light success with opacity */
+            color: #16A34A; /* Material 3 light success */
+        }
+
+        body.dark-mode .badge.success {
+            background: rgba(74, 222, 128, 0.2); /* Material 3 dark success with opacity */
+            color: #4ADE80; /* Material 3 dark success */
         }
 
         .badge.warning {
-            background: #fff3e0;
-            color: #f57c00;
+            background: rgba(245, 158, 11, 0.1); /* Material 3 light warning with opacity */
+            color: #F59E0B; /* Material 3 light warning */
+        }
+
+        body.dark-mode .badge.warning {
+            background: rgba(251, 191, 36, 0.2); /* Material 3 dark warning with opacity */
+            color: #FBBF24; /* Material 3 dark warning */
         }
 
         .badge.error {
-            background: #ffebee;
-            color: #c62828;
+            background: rgba(186, 26, 26, 0.1); /* Material 3 light error with opacity */
+            color: #BA1A1A; /* Material 3 light error */
+        }
+
+        body.dark-mode .badge.error {
+            background: rgba(255, 180, 171, 0.2); /* Material 3 dark error with opacity */
+            color: #FFB4AB; /* Material 3 dark error */
         }
 
         .refresh-btn {
-            background: #1976d2;
+            background: #6750A4; /* Material 3 light primary */
             color: white;
             border: none;
             padding: 0.75rem 1.5rem;
@@ -178,24 +224,158 @@
             cursor: pointer;
             font-size: 1rem;
             margin-bottom: 1rem;
+            transition: background-color 0.3s;
         }
 
         .refresh-btn:hover {
-            background: #1565c0;
+            background: #4F378B; /* Material 3 light primary dark */
+        }
+
+        body.dark-mode .refresh-btn {
+            background: #6750A4; /* Keep primary in dark mode */
+        }
+
+        body.dark-mode .refresh-btn:hover {
+            background: #B69DF8; /* Material 3 dark primary dark */
         }
 
         .loading {
             text-align: center;
             padding: 2rem;
-            color: #666;
+            color: #79747E; /* Material 3 light outline */
+        }
+
+        body.dark-mode .loading {
+            color: #938F99; /* Material 3 dark outline */
         }
 
         .error {
-            background: #ffebee;
-            color: #c62828;
+            background: rgba(186, 26, 26, 0.1); /* Material 3 light error with opacity */
+            color: #BA1A1A; /* Material 3 light error */
             padding: 1rem;
             border-radius: 4px;
             margin: 1rem 0;
+        }
+
+        body.dark-mode         .error {
+            background: rgba(255, 180, 171, 0.2); /* Material 3 dark error with opacity */
+            color: #FFB4AB; /* Material 3 dark error */
+        }
+
+        /* Dark mode styles for all form inputs and interactive elements */
+        body.dark-mode .filter-section {
+            background: #1C1B1F !important;
+            border-bottom-color: #49454F !important;
+        }
+
+        body.dark-mode .form-input,
+        body.dark-mode input[type="text"],
+        body.dark-mode input[type="date"],
+        body.dark-mode input[type="search"],
+        body.dark-mode select {
+            background: #1C1B1F !important;
+            border-color: #49454F !important;
+            color: #E6E1E5 !important;
+        }
+
+        body.dark-mode select option {
+            background: #1C1B1F !important;
+            color: #E6E1E5 !important;
+        }
+
+        body.dark-mode .form-input::placeholder,
+        body.dark-mode input::placeholder {
+            color: #938F99 !important;
+        }
+
+        body.dark-mode label,
+        body.dark-mode .form-label {
+            color: #E6E1E5 !important;
+        }
+
+        body.dark-mode .pagination-section {
+            background: #49454F !important;
+            border-bottom-color: #49454F !important;
+        }
+
+        body.dark-mode .page-info {
+            color: #E6E1E5 !important;
+        }
+
+        body.dark-mode .events-count {
+            color: #938F99 !important;
+        }
+
+        body.dark-mode .btn-secondary {
+            background: #625B71 !important;
+        }
+
+        body.dark-mode .btn-secondary:hover {
+            background: #4A4458 !important;
+        }
+
+        body.dark-mode .btn-pagination {
+            background: #6750A4 !important;
+        }
+
+        body.dark-mode .btn-pagination:hover {
+            background: #B69DF8 !important;
+        }
+
+        body.dark-mode .btn-pagination:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        body.dark-mode .event-name {
+            color: #938F99 !important;
+        }
+
+        body.dark-mode .user-id {
+            color: #CAC4D0 !important;
+        }
+
+        body.dark-mode .comment-box {
+            background: rgba(103, 80, 164, 0.2) !important;
+            border-left-color: #D0BCFF !important;
+            color: #E6E1E5 !important;
+        }
+
+        body.dark-mode .no-comment {
+            color: #938F99 !important;
+        }
+
+        body.dark-mode .details-summary {
+            color: #938F99 !important;
+        }
+
+        body.dark-mode .details-summary-link {
+            color: #D0BCFF !important;
+        }
+
+        body.dark-mode .details-pre {
+            background: #49454F !important;
+            border-color: #49454F !important;
+            color: #E6E1E5 !important;
+        }
+
+        body.dark-mode .projection-info {
+            background: #49454F !important;
+            color: #E6E1E5 !important;
+        }
+
+        /* Code elements */
+        code {
+            background: #E7E0EC;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        body.dark-mode code {
+            background: #49454F;
+            color: #E6E1E5;
         }
     </style>
 </head>
@@ -230,7 +410,9 @@
         </div>
 
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('events')">Events</button>
+            <button class="tab active" onclick="switchTab('events')">PostgreSQL Events</button>
+            <button class="tab" onclick="switchTab('eventstore')">EventStore Events</button>
+            <button class="tab" onclick="switchTab('streams')">EventStore Streams</button>
             <button class="tab" onclick="switchTab('contacts')">Contacts</button>
             <button class="tab" onclick="switchTab('transactions')">Transactions</button>
             <button class="tab" onclick="switchTab('projections')">Projections</button>
@@ -238,16 +420,81 @@
 
         <div id="events" class="tab-content active">
             <div class="table-container">
+                <!-- Search and Filter Controls -->
+                <div class="filter-section" style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">🔍 Search</label>
+                            <input type="text" id="eventSearch" placeholder="Search in comments, names, event types..." 
+                                   class="form-input"
+                                   style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;"
+                                   onkeyup="debounceSearch()">
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Event Type</label>
+                            <select id="eventTypeFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyFilters()">
+                                <option value="">All Types</option>
+                                <option value="CONTACT_CREATED">Contact Created</option>
+                                <option value="CONTACT_UPDATED">Contact Updated</option>
+                                <option value="CONTACT_DELETED">Contact Deleted</option>
+                                <option value="TRANSACTION_CREATED">Transaction Created</option>
+                                <option value="TRANSACTION_UPDATED">Transaction Updated</option>
+                                <option value="TRANSACTION_DELETED">Transaction Deleted</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Aggregate Type</label>
+                            <select id="aggregateTypeFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyFilters()">
+                                <option value="">All</option>
+                                <option value="contact">Contact</option>
+                                <option value="transaction">Transaction</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Date From</label>
+                            <input type="date" id="dateFromFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyFilters()">
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Date To</label>
+                            <input type="date" id="dateToFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyFilters()">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button class="refresh-btn" onclick="applyFilters()" style="margin: 0;">🔍 Apply Filters</button>
+                        <button onclick="clearFilters()" class="btn-secondary" style="padding: 0.75rem 1.5rem; background: #625B71; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">Clear Filters</button>
+                        <button class="refresh-btn" onclick="loadEvents()" style="margin: 0; background: #4caf50;">🔄 Refresh</button>
+                        <span id="eventsCount" class="events-count" style="margin-left: auto; color: #79747E;"></span>
+                    </div>
+                </div>
+                
+                <!-- Pagination -->
+                <div class="pagination-section" style="padding: 1rem; background: #E7E0EC; border-bottom: 1px solid #E7E0EC; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <label class="form-label" style="margin-right: 0.5rem; color: #1C1B1F;">Page Size:</label>
+                        <select id="pageSize" class="form-input" onchange="applyFilters()" style="padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                        </select>
+                    </div>
+                    <div>
+                        <button onclick="previousPage()" id="prevBtn" class="btn-pagination" style="padding: 0.5rem 1rem; margin-right: 0.5rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">← Previous</button>
+                        <span id="pageInfo" class="page-info" style="margin: 0 1rem; color: #1C1B1F;">Page 1</span>
+                        <button onclick="nextPage()" id="nextBtn" class="btn-pagination" style="padding: 0.5rem 1rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">Next →</button>
+                    </div>
+                </div>
+                
                 <div class="loading" id="eventsLoading">Loading events...</div>
                 <table id="eventsTable" style="display: none;">
                     <thead>
                         <tr>
-                            <th>ID</th>
-                            <th>Type</th>
+                            <th>When</th>
                             <th>Event Type</th>
-                            <th>User ID</th>
-                            <th>Created At</th>
-                            <th>Data</th>
+                            <th>Aggregate</th>
+                            <th>User</th>
+                            <th>Comment</th>
+                            <th>Details</th>
                         </tr>
                     </thead>
                     <tbody id="eventsBody"></tbody>
@@ -296,6 +543,49 @@
             </div>
         </div>
 
+        <div id="eventstore" class="tab-content">
+            <div class="table-container">
+                <div class="filter-section" style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC;">
+                    <label for="streamSelect" class="form-label" style="margin-right: 1rem; color: #1C1B1F;">Select Stream:</label>
+                    <select id="streamSelect" class="form-input" onchange="loadEventStoreEvents()" style="padding: 0.5rem; min-width: 300px; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;">
+                        <option value="">-- Select a stream --</option>
+                    </select>
+                    <button class="refresh-btn" onclick="loadEventStoreStreams()" style="margin-left: 1rem;">🔄 Refresh Streams</button>
+                </div>
+                <div class="loading" id="eventstoreLoading">Select a stream to view events...</div>
+                <table id="eventstoreTable" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Stream</th>
+                            <th>Event ID</th>
+                            <th>Event Type</th>
+                            <th>Stream Version</th>
+                            <th>Data</th>
+                            <th>Metadata</th>
+                        </tr>
+                    </thead>
+                    <tbody id="eventstoreBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="streams" class="tab-content">
+            <div class="table-container">
+                <div class="loading" id="streamsLoading">Loading streams...</div>
+                <table id="streamsTable" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Stream Name</th>
+                            <th>Version</th>
+                            <th>Event Count</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="streamsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
         <div id="projections" class="tab-content">
             <div class="table-container">
                 <div class="loading" id="projectionsLoading">Loading projections...</div>
@@ -309,11 +599,19 @@
 
     <script>
         const API_URL = 'http://localhost:8000/api';
+        const WS_URL = 'ws://localhost:8000/ws';
+        
+        // Smart update state
+        let lastEventId = null;
+        let wsConnection = null;
+        let pollingInterval = null;
+        let isUpdating = false;
 
         async function loadData() {
             await Promise.all([
                 loadStats(),
                 loadEvents(),
+                loadEventStoreStreams(),
                 loadContacts(),
                 loadTransactions(),
                 loadProjections()
@@ -355,34 +653,318 @@
             }
         }
 
-        async function loadEvents() {
+        // Events log state
+        let currentPage = 0;
+        let pageSize = 100;
+        let searchTimeout = null;
+
+        function debounceSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                currentPage = 0; // Reset to first page on new search
+                applyFilters();
+            }, 500);
+        }
+
+        function clearFilters() {
+            document.getElementById('eventSearch').value = '';
+            document.getElementById('eventTypeFilter').value = '';
+            document.getElementById('aggregateTypeFilter').value = '';
+            document.getElementById('dateFromFilter').value = '';
+            document.getElementById('dateToFilter').value = '';
+            currentPage = 0;
+            applyFilters();
+        }
+
+        function previousPage() {
+            if (currentPage > 0) {
+                currentPage--;
+                applyFilters();
+            }
+        }
+
+        function nextPage() {
+            currentPage++;
+            applyFilters();
+        }
+
+        function applyFilters() {
+            pageSize = parseInt(document.getElementById('pageSize').value) || 100;
+            loadEvents();
+        }
+
+        async function loadEvents(silent = false) {
+            if (isUpdating && !silent) return; // Prevent concurrent updates unless silent
+            isUpdating = true;
+            
             const loading = document.getElementById('eventsLoading');
             const table = document.getElementById('eventsTable');
             const body = document.getElementById('eventsBody');
+            const countSpan = document.getElementById('eventsCount');
+            const pageInfo = document.getElementById('pageInfo');
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+
+            // Build query parameters
+            const params = new URLSearchParams();
+            params.append('limit', pageSize.toString());
+            params.append('offset', (currentPage * pageSize).toString());
+            
+            const search = document.getElementById('eventSearch').value.trim();
+            if (search) {
+                params.append('search', search);
+            }
+            
+            const eventType = document.getElementById('eventTypeFilter').value;
+            if (eventType) {
+                params.append('event_type', eventType);
+            }
+            
+            const aggregateType = document.getElementById('aggregateTypeFilter').value;
+            if (aggregateType) {
+                params.append('aggregate_type', aggregateType);
+            }
+            
+            const dateFrom = document.getElementById('dateFromFilter').value;
+            if (dateFrom) {
+                params.append('date_from', dateFrom + 'T00:00:00');
+            }
+            
+            const dateTo = document.getElementById('dateToFilter').value;
+            if (dateTo) {
+                params.append('date_to', dateTo + 'T23:59:59');
+            }
 
             try {
-                const response = await fetch(`${API_URL}/admin/events?limit=100`);
+                if (!silent) {
+                    loading.style.display = 'block';
+                    table.style.display = 'none';
+                }
+                
+                const response = await fetch(`${API_URL}/admin/events?${params.toString()}`);
                 if (!response.ok) {
                     const text = await response.text();
                     throw new Error(`HTTP ${response.status}: ${text}`);
                 }
                 const events = await response.json();
 
-                loading.style.display = 'none';
+                if (!silent) {
+                    loading.style.display = 'none';
+                }
                 table.style.display = 'table';
-                body.innerHTML = events.map(event => `
-                    <tr>
-                        <td>${event.event_id.substring(0, 8)}...</td>
-                        <td>${event.aggregate_type}</td>
-                        <td>${event.event_type}</td>
-                        <td>${event.user_id.substring(0, 8)}...</td>
-                        <td>${formatDateTime(event.created_at)}</td>
-                        <td><pre style="max-width: 300px; overflow: auto;">${JSON.stringify(event.event_data, null, 2)}</pre></td>
-                    </tr>
-                `).join('');
+                
+                // Update count
+                countSpan.textContent = `Showing ${events.length} event(s)`;
+                
+                // Update pagination
+                pageInfo.textContent = `Page ${currentPage + 1}`;
+                prevBtn.disabled = currentPage === 0;
+                prevBtn.style.opacity = currentPage === 0 ? '0.5' : '1';
+                prevBtn.style.cursor = currentPage === 0 ? 'not-allowed' : 'pointer';
+                nextBtn.disabled = events.length < pageSize;
+                nextBtn.style.opacity = events.length < pageSize ? '0.5' : '1';
+                nextBtn.style.cursor = events.length < pageSize ? 'not-allowed' : 'pointer';
+                
+                // Smooth DOM update - only replace if content changed
+                const newContent = renderEvents(events);
+                const currentContent = body.innerHTML;
+                
+                if (newContent !== currentContent) {
+                    // Add fade effect for smooth update
+                    if (silent) {
+                        body.style.transition = 'opacity 0.2s';
+                        body.style.opacity = '0.7';
+                        setTimeout(() => {
+                            body.innerHTML = newContent;
+                            body.style.opacity = '1';
+                        }, 100);
+                    } else {
+                        body.innerHTML = newContent;
+                    }
+                }
             } catch (error) {
-                loading.innerHTML = `<div class="error">Error loading events: ${error.message}</div>`;
+                if (!silent) {
+                    loading.innerHTML = `<div class="error">Error loading events: ${error.message}</div>`;
+                }
                 console.error('Error:', error);
+            } finally {
+                isUpdating = false;
+            }
+        }
+        
+        // Extract event rendering to separate function for reuse
+        function renderEvents(events) {
+            return events.map(event => {
+                    const eventData = event.event_data || {};
+                    const comment = eventData.comment || eventData.Comment || null;
+                    const name = eventData.name || eventData.Name || null;
+                    const amount = eventData.amount || null;
+                    const direction = eventData.direction || null;
+                    const type = eventData.type || null;
+                    const description = eventData.description || null;
+                    
+                    // Get event type badge color
+                    let badgeClass = 'badge';
+                    const eventTypeUpper = event.event_type.toUpperCase();
+                    if (eventTypeUpper.includes('CREATED') || eventTypeUpper.includes('CREATE')) {
+                        badgeClass += ' success';
+                    } else if (eventTypeUpper.includes('UPDATED') || eventTypeUpper.includes('UPDATE')) {
+                        badgeClass += ' warning';
+                    } else if (eventTypeUpper.includes('DELETED') || eventTypeUpper.includes('DELETE')) {
+                        badgeClass += ' error';
+                    }
+                    
+                    // Format event type for display
+                    const displayEventType = event.event_type
+                        .replace(/_/g, ' ')
+                        .split(' ')
+                        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                        .join(' ');
+                    
+                    // Format aggregate type
+                    const aggregateDisplay = event.aggregate_type.charAt(0).toUpperCase() + event.aggregate_type.slice(1);
+                    
+                    // User display
+                    const userDisplay = event.user_email || event.user_id.substring(0, 8) + '...';
+                    
+                    // Build details summary (show key fields inline)
+                    let detailsSummary = [];
+                    if (name) detailsSummary.push(`Name: ${name}`);
+                    if (amount !== null) {
+                        const amountStr = type === 'money' ? `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : `${amount} item(s)`;
+                        detailsSummary.push(`Amount: ${amountStr}`);
+                    }
+                    if (direction) detailsSummary.push(`Direction: ${direction}`);
+                    if (description) detailsSummary.push(`Description: ${description.substring(0, 50)}${description.length > 50 ? '...' : ''}`);
+                    
+                    // Format event data for full display
+                    const displayData = {...eventData};
+                    delete displayData.comment;
+                    delete displayData.timestamp;
+                    delete displayData.user_id;
+                    
+                    return `
+                        <tr>
+                            <td style="white-space: nowrap; font-size: 0.9rem;">
+                                ${formatDateTime(event.created_at)}
+                            </td>
+                            <td>
+                                <span class="${badgeClass}">${displayEventType}</span>
+                            </td>
+                            <td>
+                                <div><strong>${aggregateDisplay}</strong></div>
+                                ${name ? `<div class="event-name" style="font-size: 0.85rem; color: #79747E;">${name}</div>` : ''}
+                            </td>
+                            <td style="font-size: 0.9rem;">
+                                <div style="font-weight: 500;">${userDisplay}</div>
+                                ${event.user_email ? `<div class="user-id" style="font-size: 0.75rem; color: #938F99; font-family: monospace;">${event.user_id.substring(0, 8)}...</div>` : ''}
+                            </td>
+                            <td style="max-width: 250px;">
+                                ${comment ? `
+                                    <div class="comment-box" style="padding: 0.5rem; background: rgba(103, 80, 164, 0.1); border-left: 3px solid #6750A4; border-radius: 4px; font-size: 0.9rem;">
+                                        ${comment}
+                                    </div>
+                                ` : '<em class="no-comment" style="color: #938F99; font-size: 0.85rem;">No comment</em>'}
+                            </td>
+                            <td>
+                                ${detailsSummary.length > 0 ? `
+                                    <div class="details-summary" style="font-size: 0.85rem; color: #79747E; margin-bottom: 0.25rem;">
+                                        ${detailsSummary.join(' • ')}
+                                    </div>
+                                ` : ''}
+                                <details style="cursor: pointer; font-size: 0.85rem;">
+                                    <summary class="details-summary-link" style="color: #6750A4; user-select: none;">View Full Data</summary>
+                                    <pre class="details-pre" style="max-width: 500px; max-height: 300px; overflow: auto; margin-top: 0.5rem; padding: 0.75rem; background: #E7E0EC; border-radius: 4px; font-size: 0.8rem; border: 1px solid #E7E0EC;">${JSON.stringify(displayData, null, 2)}</pre>
+                                </details>
+                            </td>
+                        </tr>
+                    `;
+            }).join('');
+        }
+        
+        // Smart update system - only updates when there are changes
+        function startSmartUpdates() {
+            // First, get the latest event ID
+            fetch(`${API_URL}/admin/events/latest`)
+                .then(r => r.json())
+                .then(data => {
+                    lastEventId = data.latest_event_id;
+                })
+                .catch(err => console.error('Error getting latest event ID:', err));
+            
+            // Try WebSocket first (real-time)
+            try {
+                wsConnection = new WebSocket(WS_URL);
+                
+                wsConnection.onopen = () => {
+                    console.log('✅ WebSocket connected for real-time updates');
+                };
+                
+                wsConnection.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        // When we receive a WebSocket event, check if it's an event-related change
+                        if (message.type && (message.type.includes('contact') || message.type.includes('transaction'))) {
+                            // New event created, update the list
+                            checkForUpdates();
+                        }
+                    } catch (e) {
+                        console.error('Error parsing WebSocket message:', e);
+                    }
+                };
+                
+                wsConnection.onerror = (error) => {
+                    console.log('WebSocket error, falling back to polling:', error);
+                    // Fallback to polling if WebSocket fails
+                    startPolling();
+                };
+                
+                wsConnection.onclose = () => {
+                    console.log('WebSocket closed, falling back to polling');
+                    startPolling();
+                };
+            } catch (e) {
+                console.log('WebSocket not available, using polling:', e);
+                startPolling();
+            }
+        }
+        
+        // Smart polling - only updates when there are changes
+        function startPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            
+            pollingInterval = setInterval(async () => {
+                // Only check if events tab is active and no filters are applied
+                const hasFilters = document.getElementById('eventSearch')?.value.trim() ||
+                                  document.getElementById('eventTypeFilter')?.value ||
+                                  document.getElementById('aggregateTypeFilter')?.value ||
+                                  document.getElementById('dateFromFilter')?.value ||
+                                  document.getElementById('dateToFilter')?.value;
+                
+                if (hasFilters || !document.getElementById('events')?.classList.contains('active')) {
+                    return; // Don't auto-update if filters are active or tab is not visible
+                }
+                
+                // Check for changes
+                await checkForUpdates();
+            }, 3000); // Check every 3 seconds
+        }
+        
+        // Check for updates (used by WebSocket and polling)
+        async function checkForUpdates() {
+            try {
+                const response = await fetch(`${API_URL}/admin/events/latest`);
+                const data = await response.json();
+                
+                if (data.latest_event_id !== null && data.latest_event_id !== lastEventId) {
+                    // There are new events!
+                    console.log('🔄 New events detected, updating...');
+                    lastEventId = data.latest_event_id;
+                    // Smoothly update without page reload
+                    await loadEvents(true); // true = silent update
+                }
+            } catch (err) {
+                console.error('Error checking for updates:', err);
             }
         }
 
@@ -487,12 +1069,12 @@
                 loading.style.display = 'none';
                 content.style.display = 'block';
                 info.innerHTML = `
-                    <div style="background: #f5f5f5; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
+                    <div class="projection-info" style="background: #E7E0EC; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; color: #1C1B1F;">
                         <strong>Last Event ID:</strong> ${status.last_event_id || 'N/A'}<br>
                         <strong>Projections Updated:</strong> ${status.projections_updated || 'N/A'}<br>
                         <strong>Last Update:</strong> ${status.last_update ? new Date(status.last_update).toLocaleString() : 'N/A'}
                     </div>
-                    <pre style="background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow: auto;">${JSON.stringify(status, null, 2)}</pre>
+                    <pre class="details-pre" style="background: #E7E0EC; padding: 1rem; border-radius: 4px; overflow: auto; color: #1C1B1F;">${JSON.stringify(status, null, 2)}</pre>
                 `;
             } catch (error) {
                 loading.innerHTML = `<div class="error">Error loading projections: ${error.message}</div>`;
@@ -511,12 +1093,122 @@
             }
         }
 
+        async function loadEventStoreStreams() {
+            const loading = document.getElementById('streamsLoading');
+            const table = document.getElementById('streamsTable');
+            const body = document.getElementById('streamsBody');
+            const select = document.getElementById('streamSelect');
+
+            try {
+                const response = await fetch(`${API_URL}/admin/eventstore/streams`);
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                }
+                const streams = await response.json();
+
+                // Update dropdown
+                if (select) {
+                    select.innerHTML = '<option value="">-- Select a stream --</option>';
+                    streams.forEach(stream => {
+                        const option = document.createElement('option');
+                        option.value = stream.stream_name;
+                        option.textContent = `${stream.stream_name} (v${stream.version !== null ? stream.version : '?'}, ${stream.event_count} events)`;
+                        select.appendChild(option);
+                    });
+                }
+
+                // Update table
+                if (loading) loading.style.display = 'none';
+                if (table) table.style.display = 'table';
+                if (body) {
+                    body.innerHTML = streams.map(stream => `
+                        <tr>
+                            <td><code>${stream.stream_name}</code></td>
+                            <td>${stream.version !== null ? stream.version : 'N/A'}</td>
+                            <td>${stream.event_count}</td>
+                            <td>
+                                <button onclick="selectStream('${stream.stream_name}')" class="btn-pagination" style="padding: 0.25rem 0.75rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">
+                                    View Events
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                if (loading) loading.innerHTML = `<div class="error">Error loading streams: ${error.message}</div>`;
+                console.error('Error:', error);
+            }
+        }
+
+        function selectStream(streamName) {
+            const select = document.getElementById('streamSelect');
+            if (select) {
+                select.value = streamName;
+            }
+            switchTab('eventstore');
+            loadEventStoreEvents();
+        }
+
+        async function loadEventStoreEvents() {
+            const streamName = document.getElementById('streamSelect')?.value;
+            const loading = document.getElementById('eventstoreLoading');
+            const table = document.getElementById('eventstoreTable');
+            const body = document.getElementById('eventstoreBody');
+
+            if (!streamName) {
+                if (loading) loading.innerHTML = 'Select a stream to view events...';
+                if (table) table.style.display = 'none';
+                return;
+            }
+
+            try {
+                if (loading) {
+                    loading.innerHTML = 'Loading events...';
+                    loading.style.display = 'block';
+                }
+                if (table) table.style.display = 'none';
+
+                const response = await fetch(`${API_URL}/admin/eventstore/events?stream_name=${encodeURIComponent(streamName)}&limit=100`);
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                }
+                const events = await response.json();
+
+                if (loading) loading.style.display = 'none';
+                if (table) table.style.display = 'table';
+                if (body) {
+                    body.innerHTML = events.map(event => `
+                        <tr>
+                            <td><code>${event.stream_name}</code></td>
+                            <td>${event.event_id.substring(0, 8)}...</td>
+                            <td><strong>${event.event_type}</strong></td>
+                            <td>${event.stream_version}</td>
+                            <td><pre class="details-pre" style="max-width: 400px; overflow: auto; max-height: 200px;">${JSON.stringify(event.data, null, 2)}</pre></td>
+                            <td>${event.metadata ? `<pre class="details-pre" style="max-width: 200px; overflow: auto; max-height: 200px;">${JSON.stringify(event.metadata, null, 2)}</pre>` : '-'}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                if (loading) loading.innerHTML = `<div class="error">Error loading events: ${error.message}</div>`;
+                console.error('Error:', error);
+            }
+        }
+
         function switchTab(tabName) {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
             event.target.classList.add('active');
             document.getElementById(tabName).classList.add('active');
+            
+            // Load data for specific tabs
+            if (tabName === 'streams') {
+                loadEventStoreStreams();
+            } else if (tabName === 'eventstore') {
+                loadEventStoreEvents();
+            }
         }
 
         // Dark mode toggle - default to dark mode
@@ -543,8 +1235,8 @@
         // Load data on page load
         loadData();
         
-        // Auto-refresh events more frequently (every 2 seconds)
-        setInterval(loadEvents, 2000);
+        // Start smart updates (WebSocket + polling fallback)
+        startSmartUpdates();
         
         // Auto-refresh other data every 10 seconds
         setInterval(() => {

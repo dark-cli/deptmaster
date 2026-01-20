@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
-use bcrypt::{hash, verify, DEFAULT_COST};
+use bcrypt::verify;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -16,6 +16,7 @@ pub struct LoginRequest {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct RegisterRequest {
     pub username: String,
     pub email: String,

@@ -36,8 +36,18 @@ fi
 if ! docker ps | grep -q "debt_tracker_postgres"; then
     echo "⚠️  PostgreSQL container not running. Starting Docker services..."
     cd backend
-    docker-compose up -d postgres redis
-    echo "⏳ Waiting for PostgreSQL to be ready..."
+    docker-compose up -d postgres redis eventstore
+    echo "⏳ Waiting for PostgreSQL and EventStore to be ready..."
+    sleep 5
+    cd ..
+fi
+
+# Check if EventStore container is running
+if ! docker ps | grep -q "debt_tracker_eventstore"; then
+    echo "⚠️  EventStore container not running. Starting EventStore..."
+    cd backend
+    docker-compose up -d eventstore
+    echo "⏳ Waiting for EventStore to be ready..."
     sleep 5
     cd ..
 fi
@@ -162,13 +172,83 @@ cd ../..
 echo "✅ Migrations complete"
 echo ""
 
-echo "📥 Importing data from Debitum backup..."
+echo "🗑️  Resetting EventStore (must be clean before importing)..."
+# EventStore must be reset BEFORE importing data so events are created naturally
+if docker ps | grep -q "debt_tracker_eventstore"; then
+    echo "   Stopping EventStore container..."
+    docker stop debt_tracker_eventstore || true
+    docker rm debt_tracker_eventstore || true
+    echo "   Removing EventStore data volume..."
+    docker volume rm eventstore_data 2>/dev/null || true
+    echo "   Starting fresh EventStore..."
+    cd backend
+    docker-compose up -d eventstore
+    echo "⏳ Waiting for EventStore to be ready..."
+    sleep 10
+    cd ..
+    echo "   ✅ EventStore reset complete"
+else
+    echo "   ⚠️  EventStore container not running, starting it..."
+    cd backend
+    docker-compose up -d eventstore
+    echo "⏳ Waiting for EventStore to be ready..."
+    sleep 10
+    cd ..
+    echo "   ✅ EventStore started"
+fi
+
+echo ""
+echo "🚀 Starting API server (required for natural data insertion)..."
+# Stop any existing server
+pkill -f "debt-tracker-api" || true
+sleep 2
+
+# Start the server in the background
+cd backend/rust-api
+if [ -f "target/release/debt-tracker-api" ]; then
+    echo "   Using release build..."
+    nohup target/release/debt-tracker-api > /tmp/debt-tracker-api.log 2>&1 &
+else
+    echo "   Building and starting server (this may take a minute)..."
+    cargo build --release
+    nohup target/release/debt-tracker-api > /tmp/debt-tracker-api.log 2>&1 &
+fi
+
+cd "$SCRIPT_DIR"
+
+# Wait for server to be ready
+echo "⏳ Waiting for server to start..."
+for i in {1..30}; do
+    if curl -f http://localhost:8000/health > /dev/null 2>&1; then
+        echo "   ✅ Server is ready"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo "   ❌ Server failed to start after 30 seconds"
+        echo "   Check logs: tail -f /tmp/debt-tracker-api.log"
+        exit 1
+    fi
+    sleep 1
+done
+
+echo ""
+echo "📥 Importing data from Debitum backup via API (creates EventStore events naturally)..."
 cd scripts
 
 # Check if Python script exists
-if [ ! -f "migrate_debitum.py" ]; then
-    echo "❌ migrate_debitum.py not found in scripts directory"
+if [ ! -f "migrate_debitum_via_api.py" ]; then
+    echo "❌ migrate_debitum_via_api.py not found in scripts directory"
     exit 1
+fi
+
+# Check if requests library is available
+if ! python3 -c "import requests" 2>/dev/null; then
+    echo "⚠️  Python 'requests' library not found. Installing..."
+    pip3 install requests || {
+        echo "❌ Failed to install requests library"
+        echo "💡 Try: pip3 install requests"
+        exit 1
+    }
 fi
 
 # Extract backup to temp directory
@@ -195,11 +275,11 @@ fi
 echo "📊 Found SQLite database: $SQLITE_DB"
 echo ""
 
-# Run Python migration script
-echo "🔄 Running migration script..."
-python3 migrate_debitum.py "$SQLITE_DB" || {
-    echo "❌ Failed to import data"
-    echo "💡 Make sure you have required Python packages: pip3 install sqlalchemy psycopg2-binary"
+# Run Python migration script via API
+echo "🔄 Running migration via API (this creates EventStore events naturally)..."
+python3 migrate_debitum_via_api.py "$SQLITE_DB" || {
+    echo "❌ Failed to import data via API"
+    echo "💡 Check server logs: tail -f /tmp/debt-tracker-api.log"
     rm -rf "$TEMP_DIR"
     exit 1
 }
@@ -210,10 +290,16 @@ rm -rf "$TEMP_DIR"
 cd "$SCRIPT_DIR"
 
 echo ""
-echo "✅ Database reset and import complete!"
+echo "✅ Database and EventStore reset and import complete!"
 echo ""
-echo "📊 You can now:"
+echo "📊 Server is running and data has been imported with EventStore events!"
+echo ""
+echo "🌐 You can now:"
 echo "   - View data in admin panel: http://localhost:8000/admin"
-echo "   - Start the server: ./START_SERVER.sh"
+echo "   - View EventStore UI: http://localhost:2113 (admin/changeit)"
+echo "   - Check EventStore events: All contacts and transactions have events!"
 echo "   - View in Flutter app: http://localhost:8080"
+echo ""
+echo "📝 Note: The server is already running. To restart it:"
+echo "   ./RESTART_SERVER.sh"
 echo ""

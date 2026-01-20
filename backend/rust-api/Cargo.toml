@@ -59,6 +59,9 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 thiserror = "1"
 
+# Base64 encoding (for EventStore)
+base64 = "0.22"
+
 # Redis (optional)
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
@@ -71,7 +74,15 @@ tokio-test = "0.4"
 mockall = "0.12"
 axum-test = "8.0"
 
+[profile.dev]
+# Faster incremental compilation
+incremental = true
+opt-level = 0
+debug = true
+
 [profile.release]
+# Optimized but faster to build
 opt-level = 3
-lto = true
-codegen-units = 1
+lto = "thin"  # Faster than full LTO, still good optimization
+codegen-units = 4  # More parallel compilation units = faster builds
+incremental = true  # Enable incremental compilation for release

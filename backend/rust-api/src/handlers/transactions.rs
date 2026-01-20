@@ -20,6 +20,7 @@ pub struct CreateTransactionRequest {
     pub description: Option<String>,
     pub transaction_date: String, // ISO date string
     pub due_date: Option<String>, // Optional ISO date string
+    pub comment: String, // Required: explanation for why this transaction is being created
 }
 
 #[derive(Deserialize)]
@@ -32,6 +33,12 @@ pub struct UpdateTransactionRequest {
     pub description: Option<String>,
     pub transaction_date: Option<String>,
     pub due_date: Option<String>,
+    pub comment: Option<String>, // Optional: explanation for why this transaction is being updated
+}
+
+#[derive(Deserialize)]
+pub struct DeleteTransactionRequest {
+    pub comment: Option<String>, // Optional but recommended: explanation for why this transaction is being deleted
 }
 
 #[derive(Serialize)]
@@ -146,6 +153,14 @@ pub async fn create_transaction(
             Json(serde_json::json!({"error": "Contact not found"})),
         ));
     }
+    
+    // Validate comment is required for create operations
+    if payload.comment.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Comment is required. Please explain why you are creating this transaction."})),
+        ));
+    }
 
     // Generate transaction ID
     let transaction_id = Uuid::new_v4();
@@ -178,7 +193,7 @@ pub async fn create_transaction(
     let due_date = payload.due_date.as_ref()
         .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
     
-    // Create event data
+    // Create event data with full audit trail
     let event_data = serde_json::json!({
         "contact_id": payload.contact_id,
         "type": payload.r#type,
@@ -187,10 +202,33 @@ pub async fn create_transaction(
         "currency": currency,
         "description": payload.description,
         "transaction_date": payload.transaction_date,
-        "due_date": payload.due_date
+        "due_date": payload.due_date,
+        "comment": payload.comment, // Required: user's explanation for this action
+        "timestamp": Utc::now().to_rfc3339() // When the action was performed
     });
 
-    // Create event in event store
+    // Write event to EventStore
+    let stream_name = format!("transaction-{}", transaction_id);
+    let event_uuid = Uuid::new_v4();
+    
+    // Append event to EventStore (new stream, so expected version is -1)
+    // Note: EventStore write failures are logged but don't block transaction creation
+    let stream_version = state.eventstore
+        .write_event(
+            &stream_name,
+            "TransactionCreated",
+            event_uuid,
+            event_data.clone(),
+            -1, // New stream
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("EventStore write failed (non-blocking): {:?}. Transaction will still be created.", e);
+            0 // Default version if EventStore fails
+        });
+
+    // Also write to PostgreSQL events table for backward compatibility (dual-write)
+    // TODO: Remove this once fully migrated to EventStore
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
@@ -204,7 +242,7 @@ pub async fn create_transaction(
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
-        tracing::error!("Error creating event: {:?}", e);
+        tracing::error!("Error creating event in PostgreSQL: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to create transaction event"})),
@@ -229,7 +267,7 @@ pub async fn create_transaction(
     .bind(payload.description.as_deref())
     .bind(transaction_date)
     .bind(due_date)
-    .bind(event_id)
+    .bind(event_id) // Use PostgreSQL event ID for last_event_id
     .execute(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -370,7 +408,22 @@ pub async fn update_transaction(
         }
     }
 
-    // Create event data
+    // Get current transaction data for audit trail
+    let current_txn = sqlx::query(
+        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
+    )
+    .bind(transaction_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching transaction data: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
+    
+    // Create event data with full audit trail
     let event_data = serde_json::json!({
         "contact_id": new_contact_id.to_string(),
         "type": new_type,
@@ -379,14 +432,58 @@ pub async fn update_transaction(
         "currency": new_currency,
         "description": new_description,
         "transaction_date": new_date.format("%Y-%m-%d").to_string(),
-        "due_date": new_due_date.map(|d| d.format("%Y-%m-%d").to_string())
+        "due_date": new_due_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        "comment": payload.comment.unwrap_or_else(|| "No comment provided".to_string()), // Optional comment
+        "timestamp": chrono::Utc::now().to_rfc3339(), // When the action was performed
+        "previous_values": current_txn.map(|row| serde_json::json!({
+            "contact_id": row.get::<Uuid, _>("contact_id").to_string(),
+            "type": row.get::<String, _>("type"),
+            "direction": row.get::<String, _>("direction"),
+            "amount": row.get::<i64, _>("amount"),
+            "currency": row.get::<Option<String>, _>("currency"),
+            "description": row.get::<Option<String>, _>("description"),
+            "transaction_date": row.get::<chrono::NaiveDate, _>("transaction_date").format("%Y-%m-%d").to_string(),
+            "due_date": row.get::<Option<chrono::NaiveDate>, _>("due_date").map(|d| d.format("%Y-%m-%d").to_string())
+        }))
     });
 
-    // Create update event
-    let event_id = sqlx::query_scalar::<_, i64>(
+    // Write event to EventStore
+    let stream_name = format!("transaction-{}", transaction_uuid);
+    let event_uuid = Uuid::new_v4();
+    
+    // Get current stream version for optimistic concurrency
+    let current_version = state.eventstore
+        .get_stream_version(&stream_name)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error getting stream version: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to get stream version"})),
+            )
+        })?;
+
+    // Append event to EventStore
+    let expected_version = current_version.unwrap_or(-1);
+    let stream_version = state.eventstore
+        .write_event(
+            &stream_name,
+            "TransactionUpdated",
+            event_uuid,
+            event_data.clone(),
+            expected_version,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("EventStore write failed (non-blocking): {:?}. Transaction will still be updated.", e);
+            expected_version + 1 // Increment version if EventStore fails
+        });
+
+    // Also write to PostgreSQL events table for backward compatibility (dual-write)
+    let update_event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_UPDATED', 2, $3, NOW())
+        VALUES ($1, 'transaction', $2, 'TRANSACTION_UPDATED', 1, $3, NOW())
         RETURNING id
         "#
     )
@@ -396,10 +493,10 @@ pub async fn update_transaction(
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
-        tracing::error!("Error creating update event: {:?}", e);
+        tracing::error!("Error creating update event in PostgreSQL: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to update transaction event"})),
+            Json(serde_json::json!({"error": "Failed to create transaction update event"})),
         )
     })?;
 
@@ -420,7 +517,7 @@ pub async fn update_transaction(
     .bind(new_description)
     .bind(new_date)
     .bind(new_due_date)
-    .bind(event_id)
+    .bind(update_event_id) // Use PostgreSQL event ID
     .bind(transaction_uuid)
     .execute(&*state.db_pool)
     .await
@@ -453,6 +550,7 @@ pub async fn update_transaction(
 pub async fn delete_transaction(
     Path(transaction_id): Path<String>,
     State(state): State<AppState>,
+    Json(payload): Json<DeleteTransactionRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let transaction_uuid = Uuid::parse_str(&transaction_id).map_err(|e| {
         (
@@ -496,23 +594,85 @@ pub async fn delete_transaction(
         )
     })?;
 
-    // Create delete event
-    let event_id = sqlx::query_scalar::<_, i64>(
+    // Get transaction data before deletion for audit trail
+    let transaction_data = sqlx::query(
+        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
+    )
+    .bind(transaction_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching transaction data: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
+
+    // Write delete event to EventStore with full audit trail
+    let stream_name = format!("transaction-{}", transaction_uuid);
+    let event_uuid = Uuid::new_v4();
+    let event_data = serde_json::json!({
+        "comment": payload.comment.unwrap_or_else(|| "No comment provided".to_string()),
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "deleted_transaction": transaction_data.map(|row| serde_json::json!({
+            "contact_id": row.get::<Uuid, _>("contact_id").to_string(),
+            "type": row.get::<String, _>("type"),
+            "direction": row.get::<String, _>("direction"),
+            "amount": row.get::<i64, _>("amount"),
+            "currency": row.get::<Option<String>, _>("currency"),
+            "description": row.get::<Option<String>, _>("description"),
+            "transaction_date": row.get::<chrono::NaiveDate, _>("transaction_date").format("%Y-%m-%d").to_string(),
+            "due_date": row.get::<Option<chrono::NaiveDate>, _>("due_date").map(|d| d.format("%Y-%m-%d").to_string())
+        }))
+    });
+    
+    // Get current stream version for optimistic concurrency
+    let current_version = state.eventstore
+        .get_stream_version(&stream_name)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error getting stream version: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to get stream version"})),
+            )
+        })?;
+
+    // Append event to EventStore
+    let expected_version = current_version.unwrap_or(-1);
+    let stream_version = state.eventstore
+        .write_event(
+            &stream_name,
+            "TransactionDeleted",
+            event_uuid,
+            event_data.clone(),
+            expected_version,
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("EventStore write failed (non-blocking): {:?}. Transaction will still be deleted.", e);
+            expected_version + 1 // Increment version if EventStore fails
+        });
+
+    // Also write to PostgreSQL events table for backward compatibility (dual-write)
+    let delete_event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_DELETED', 3, '{}', NOW())
+        VALUES ($1, 'transaction', $2, 'TRANSACTION_DELETED', 1, $3, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
     .bind(transaction_uuid)
+    .bind(&event_data)
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
-        tracing::error!("Error creating delete event: {:?}", e);
+        tracing::error!("Error creating delete event in PostgreSQL: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to delete transaction event"})),
+            Json(serde_json::json!({"error": "Failed to create transaction delete event"})),
         )
     })?;
 
@@ -524,7 +684,7 @@ pub async fn delete_transaction(
         WHERE id = $2
         "#
     )
-    .bind(event_id)
+    .bind(delete_event_id) // Use PostgreSQL event ID
     .bind(transaction_uuid)
     .execute(&*state.db_pool)
     .await

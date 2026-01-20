@@ -236,7 +236,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
       // Generate UUID for local ID (server expects UUID format)
       final transactionId = DummyDataService.uuid.v4();
-      
+
       final transaction = Transaction(
         id: transactionId,
         contactId: _selectedContact!.id,
@@ -301,8 +301,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     return GradientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Add Transaction'),
+      appBar: AppBar(
+        title: const Text('Add Transaction'),
           actions: [
             IconButton(
               icon: _saving
@@ -324,10 +324,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
               tooltip: 'Save Transaction',
             ),
           ],
-        ),
-        body: Form(
-          key: _formKey,
-          child: ListView(
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
             // Contact search field
@@ -403,7 +403,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                     final result = await showScreenAsBottomSheet(
                                       context: context,
                                       screen: AddContactScreen(
-                                        initialName: searchText.isNotEmpty ? searchText : null,
+                                          initialName: searchText.isNotEmpty ? searchText : null,
                                       ),
                                     );
                                     if (result != null && result is Contact && mounted) {
@@ -426,9 +426,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                               }
                               
                               // Show filtered contact
-                              final contact = _filteredContacts[index];
-                              return ListTile(
-                                leading: const Icon(Icons.person),
+                                    final contact = _filteredContacts[index];
+                                    return ListTile(
+                                      leading: const Icon(Icons.person),
                                 title: Row(
                                   children: [
                                     Expanded(
@@ -448,16 +448,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                     ],
                                   ],
                                 ),
-                                onTap: () {
-                                  setState(() {
-                                    _selectedContact = contact;
-                                    _contactSearchController.text = contact.name;
-                                    _showContactSuggestions = false;
-                                  });
-                                },
-                              );
-                            },
-                          ),
+                                      onTap: () {
+                                        setState(() {
+                                          _selectedContact = contact;
+                                          _contactSearchController.text = contact.name;
+                                          _showContactSuggestions = false;
+                                        });
+                                      },
+                                    );
+                                  },
+                                ),
                         ),
                       ],
                     ],
@@ -663,8 +663,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
               maxLines: 3,
             ),
           ],
+            ),
         ),
-      ),
       ),
     );
   }
