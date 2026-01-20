@@ -749,7 +749,7 @@
                 const events = await response.json();
 
                 if (!silent) {
-                    loading.style.display = 'none';
+                loading.style.display = 'none';
                 }
                 table.style.display = 'table';
                 
@@ -784,7 +784,7 @@
                 }
             } catch (error) {
                 if (!silent) {
-                    loading.innerHTML = `<div class="error">Error loading events: ${error.message}</div>`;
+                loading.innerHTML = `<div class="error">Error loading events: ${error.message}</div>`;
                 }
                 console.error('Error:', error);
             } finally {

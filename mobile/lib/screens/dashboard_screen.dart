@@ -5,8 +5,8 @@ import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../services/realtime_service.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
+import '../services/sync_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/dummy_data_service.dart';
@@ -89,12 +89,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       List<Transaction> transactions;
       
       // Always use local database - never call API from UI
-      contacts = await LocalDatabaseService.getContacts();
-      transactions = await LocalDatabaseService.getTransactions();
+      contacts = await LocalDatabaseServiceV2.getContacts();
+      transactions = await LocalDatabaseServiceV2.getTransactions();
       
       // If sync requested, do full sync in background
       if (sync && !kIsWeb) {
-        SyncService.fullSync(); // Don't await, let it run in background
+        SyncServiceV2.manualSync(); // Don't await, let it run in background
       }
       
       if (mounted) {

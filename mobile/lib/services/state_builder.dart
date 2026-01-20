@@ -1,6 +1,7 @@
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../models/event.dart';
+import 'event_store_service.dart';
 
 /// Application state containing all contacts and transactions
 class AppState {
@@ -259,5 +260,21 @@ class StateBuilder {
       }
     }
     return null;
+  }
+
+  /// Calculate total debt at a specific timestamp
+  /// Returns the sum of all contact balances up to that point in time
+  static Future<int> calculateTotalDebtAtTime(DateTime timestamp) async {
+    // Get all events up to the timestamp
+    final allEvents = await EventStoreService.getAllEvents();
+    final eventsUpToTime = allEvents
+        .where((e) => e.timestamp.isBefore(timestamp) || e.timestamp.isAtSameMomentAs(timestamp))
+        .toList();
+
+    // Build state from events up to that time
+    final state = buildState(eventsUpToTime);
+
+    // Calculate total debt (sum of all contact balances)
+    return state.contacts.fold<int>(0, (sum, contact) => sum + contact.balance);
   }
 }

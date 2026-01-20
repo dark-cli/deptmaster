@@ -6,8 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../services/dummy_data_service.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
+import '../services/sync_service_v2.dart';
 import '../widgets/contact_list_item.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
@@ -173,11 +173,11 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
       List<Contact> contacts;
       
       // Always use local database - never call API from UI
-      contacts = await LocalDatabaseService.getContacts();
+      contacts = await LocalDatabaseServiceV2.getContacts();
       
       // If sync requested, do full sync in background
       if (sync && !kIsWeb) {
-        SyncService.fullSync(); // Don't await, let it run in background
+        SyncServiceV2.manualSync(); // Don't await, let it run in background
       }
       
       // Update state
@@ -292,19 +292,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           final deletedIds = _selectedContacts.toList();
                           
                           // Always delete from local database first
-                          await LocalDatabaseService.bulkDeleteContacts(deletedIds);
-                          
-                          // Add to pending operations for background sync
-                          if (!kIsWeb) {
-                            for (final id in deletedIds) {
-                              await SyncService.addPendingOperation(
-                                entityId: id,
-                                type: PendingOperationType.delete,
-                                entityType: 'contact',
-                                data: null,
-                              );
-                            }
-                          }
+                          await LocalDatabaseServiceV2.bulkDeleteContacts(deletedIds);
                           
                           if (mounted) {
                             setState(() {

@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/contact.dart';
@@ -313,8 +314,11 @@ class LocalDatabaseServiceV2 {
       for (final transaction in state.transactions) {
         await transactionsBox.put(transaction.id, transaction);
       }
+      
+      print('✅ State rebuilt: ${state.contacts.length} contacts, ${state.transactions.length} transactions saved to Hive');
     } catch (e) {
-      print('Error rebuilding state: $e');
+      print('❌ Error rebuilding state: $e');
+      developer.log('State rebuild error', error: e, stackTrace: StackTrace.current);
       rethrow;
     }
   }

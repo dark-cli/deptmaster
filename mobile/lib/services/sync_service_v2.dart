@@ -26,7 +26,7 @@ class SyncServiceV2 {
   /// Start periodic sync check
   static void _startPeriodicSync() {
     _periodicSyncTimer?.cancel();
-    // Sync every 30 seconds
+    // Sync every 30 seconds (can be adjusted based on needs)
     _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       sync();
     });
@@ -59,6 +59,8 @@ class SyncServiceV2 {
           // First sync - mark current time
           await EventStoreService.setLastSyncTimestamp(DateTime.now());
         }
+        // Still rebuild state to ensure it's up to date
+        await _rebuildState();
         return;
       }
 
@@ -113,14 +115,22 @@ class SyncServiceV2 {
 
       if (unsyncedEvents.isNotEmpty) {
         // 8. Convert local events to server format
-        final eventsToSend = unsyncedEvents.map((e) => {
-          'id': e.id,
-          'aggregate_type': e.aggregateType,
-          'aggregate_id': e.aggregateId,
-          'event_type': e.eventType,
-          'event_data': e.eventData,
-          'timestamp': e.timestamp.toIso8601String(),
-          'version': e.version,
+        final eventsToSend = unsyncedEvents.map((e) {
+          // Ensure timestamp is in RFC3339 format (with Z suffix for UTC)
+          String timestamp = e.timestamp.toUtc().toIso8601String();
+          if (!timestamp.endsWith('Z')) {
+            timestamp = '${timestamp}Z';
+          }
+          
+          return {
+            'id': e.id,
+            'aggregate_type': e.aggregateType,
+            'aggregate_id': e.aggregateId,
+            'event_type': e.eventType,
+            'event_data': e.eventData,
+            'timestamp': timestamp,
+            'version': e.version,
+          };
         }).toList();
 
         // 9. Send to server
@@ -149,6 +159,12 @@ class SyncServiceV2 {
       await EventStoreService.setLastSyncTimestamp(DateTime.now());
 
       print('✅ Sync completed');
+      
+      // 14. Force UI refresh by triggering a state rebuild notification
+      // This ensures the UI updates after sync
+      final finalEvents = await EventStoreService.getAllEvents();
+      final finalState = StateBuilder.buildState(finalEvents);
+      print('📊 Final state: ${finalState.contacts.length} contacts, ${finalState.transactions.length} transactions');
     } catch (e) {
       print('❌ Sync error: $e');
       // Don't throw - sync failures shouldn't break the app

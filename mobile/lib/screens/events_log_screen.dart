@@ -4,8 +4,8 @@ import 'package:intl/intl.dart';
 import 'dart:convert';
 import '../models/event.dart';
 import '../services/event_store_service.dart';
-import '../services/local_database_service.dart';
-import '../services/projection_service.dart';
+import '../services/local_database_service_v2.dart';
+import '../services/state_builder.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 
@@ -732,7 +732,7 @@ class _EventCardState extends State<_EventCard> {
     if (contactId != null) {
       // For transactions, look up contact name
       try {
-        final contact = await LocalDatabaseService.getContact(contactId);
+        final contact = await LocalDatabaseServiceV2.getContact(contactId);
         if (contact != null && mounted) {
           setState(() {
             _contactName = contact.name;
@@ -775,7 +775,7 @@ class _EventCardState extends State<_EventCard> {
     
     try {
       // Calculate total debt at the time of this event (includes this event)
-      final totalDebt = await ProjectionService.calculateTotalDebtAtTime(widget.event.timestamp);
+      final totalDebt = await StateBuilder.calculateTotalDebtAtTime(widget.event.timestamp);
       if (mounted) {
         setState(() {
           _totalDebt = totalDebt;

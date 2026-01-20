@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
 import '../services/dummy_data_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -65,19 +64,9 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
         balance: 0,
       );
 
-      // Always save to local database first (instant, snappy)
+      // Save to local database (creates event, rebuilds state)
       // Background sync service will handle server communication
-      final createdContact = await LocalDatabaseService.createContact(contact);
-      
-      // Add to pending operations for background sync
-      if (!kIsWeb) {
-        await SyncService.addPendingOperation(
-          entityId: contact.id,
-          type: PendingOperationType.create,
-          entityType: 'contact',
-          data: contact.toJson(),
-        );
-      }
+      final createdContact = await LocalDatabaseServiceV2.createContact(contact);
 
       if (mounted) {
         Navigator.of(context).pop(createdContact); // Return the created contact

@@ -250,13 +250,13 @@ impl EventStoreClient {
                 } else {
                     String::new()
                 };
-                
-                result.push(EventStoreEntry {
-                    event_id: event_id.to_string(),
-                    event_type: event_type.to_string(),
-                    data,
+                        
+                        result.push(EventStoreEntry {
+                            event_id: event_id.to_string(),
+                            event_type: event_type.to_string(),
+                            data,
                     metadata: None,
-                });
+                        });
             }
             
             Ok(result)

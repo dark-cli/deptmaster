@@ -6,8 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
 import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
@@ -72,7 +71,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
     
     try {
       // Always use local database - never call API from UI
-      final allTransactions = await LocalDatabaseService.getTransactions();
+      final allTransactions = await LocalDatabaseServiceV2.getTransactions();
       // Filter transactions for this contact
       final contactTransactions = allTransactions
           .where((t) => t.contactId == widget.contact.id)
@@ -157,20 +156,8 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             final deletedCount = _selectedTransactions.length;
                             final deletedIds = _selectedTransactions.toList();
                             
-                            // Always delete from local database first
-                            await LocalDatabaseService.bulkDeleteTransactions(deletedIds);
-                            
-                            // Add to pending operations for background sync
-                            if (!kIsWeb) {
-                              for (final id in deletedIds) {
-                                await SyncService.addPendingOperation(
-                                  entityId: id,
-                                  type: PendingOperationType.delete,
-                                  entityType: 'transaction',
-                                  data: null,
-                                );
-                              }
-                            }
+                            // Delete from local database (creates events, rebuilds state)
+                            await LocalDatabaseServiceV2.bulkDeleteTransactions(deletedIds);
                             
                             if (!mounted) return;
                             setState(() {
@@ -391,18 +378,8 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
 
                             if (confirm == true && mounted) {
                               try {
-                                // Always delete from local database first
-                                await LocalDatabaseService.deleteTransaction(transaction.id);
-                                
-                                // Add to pending operations for background sync
-                                if (!kIsWeb) {
-                                  await SyncService.addPendingOperation(
-                                    entityId: transaction.id,
-                                    type: PendingOperationType.delete,
-                                    entityType: 'transaction',
-                                    data: null,
-                                  );
-                                }
+                                // Delete from local database (creates event, rebuilds state)
+                                await LocalDatabaseServiceV2.deleteTransaction(transaction.id);
                                 
                                 if (!mounted) return;
                                 _loadTransactions();

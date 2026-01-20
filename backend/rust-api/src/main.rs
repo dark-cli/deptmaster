@@ -20,6 +20,7 @@ use config::Config;
 use database::DatabasePool;
 use websocket::BroadcastChannel;
 use services::eventstore::EventStoreClient;
+use handlers::admin::rebuild_projections;
 
 // Define AppState in main.rs (not in shared app_state.rs to avoid library build issues)
 #[derive(Clone)]
@@ -98,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/contacts", get(handlers::get_contacts))
         .route("/api/admin/transactions", get(handlers::get_transactions))
         .route("/api/admin/projections/status", get(handlers::get_projection_status))
+        .route("/api/admin/projections/rebuild", axum::routing::post(rebuild_projections))
         .route("/api/contacts", post(handlers::create_contact))
         .route("/api/contacts/:id", put(handlers::update_contact))
         .route("/api/contacts/:id", delete(handlers::delete_contact))

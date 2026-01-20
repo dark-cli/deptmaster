@@ -371,10 +371,9 @@ class ApiService {
   static Future<Map<String, dynamic>> getSyncHash() async {
     try {
       final headers = await _getHeaders();
-      final apiBaseUrl = await baseUrl;
-      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final baseUrl = await BackendConfigService.getBaseUrl();
       final response = await http.get(
-        Uri.parse('$apiUrl/sync/hash'),
+        Uri.parse('$baseUrl/api/sync/hash'),
         headers: headers,
       );
 
@@ -392,9 +391,8 @@ class ApiService {
   static Future<List<Map<String, dynamic>>> getSyncEvents({String? since}) async {
     try {
       final headers = await _getHeaders();
-      final apiBaseUrl = await baseUrl;
-      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
-      final uri = Uri.parse('$apiUrl/sync/events');
+      final baseUrl = await BackendConfigService.getBaseUrl();
+      final uri = Uri.parse('$baseUrl/api/sync/events');
       final uriWithParams = since != null
           ? uri.replace(queryParameters: {'since': since})
           : uri;
@@ -419,10 +417,9 @@ class ApiService {
   static Future<Map<String, dynamic>> postSyncEvents(List<Map<String, dynamic>> events) async {
     try {
       final headers = await _getHeaders();
-      final apiBaseUrl = await baseUrl;
-      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final baseUrl = await BackendConfigService.getBaseUrl();
       final response = await http.post(
-        Uri.parse('$apiUrl/sync/events'),
+        Uri.parse('$baseUrl/api/sync/events'),
         headers: headers,
         body: json.encode(events),
       );
@@ -430,7 +427,18 @@ class ApiService {
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map<String, dynamic>;
       } else {
-        throw Exception('Failed to post sync events: ${response.statusCode}');
+        final errorBody = response.body;
+        print('❌ Server error response (${response.statusCode}): $errorBody');
+        // Try to parse error message if it's JSON
+        try {
+          final errorJson = json.decode(errorBody);
+          if (errorJson is Map && errorJson.containsKey('error')) {
+            print('❌ Error details: ${errorJson['error']}');
+          }
+        } catch (_) {
+          // Not JSON, just print as-is
+        }
+        throw Exception('Failed to post sync events: ${response.statusCode} - $errorBody');
       }
     } catch (e) {
       print('Error posting sync events: $e');

@@ -14,6 +14,7 @@ pub use admin::{
     get_contacts,
     get_latest_event_id,
     get_projection_status,
+    rebuild_projections,
 };
 pub use contacts::{
     create_contact, 

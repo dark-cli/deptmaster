@@ -5,8 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
@@ -73,7 +72,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
   Future<void> _loadContacts() async {
     try {
       // Always use local database - never call API from UI
-      final contacts = await LocalDatabaseService.getContacts();
+      final contacts = await LocalDatabaseServiceV2.getContacts();
       if (mounted) {
         setState(() {
           _contacts = contacts;
@@ -167,17 +166,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
         updatedAt: DateTime.now(),
         isSynced: false, // Mark as unsynced since we're updating locally
       );
-      await LocalDatabaseService.updateTransaction(updatedTransaction);
-      
-      // Add to pending operations for background sync
-      if (!kIsWeb) {
-        await SyncService.addPendingOperation(
-          entityId: widget.transaction.id,
-          type: PendingOperationType.update,
-          entityType: 'transaction',
-          data: updatedTransaction.toJson(),
-        );
-      }
+      await LocalDatabaseServiceV2.updateTransaction(updatedTransaction);
 
       if (mounted) {
         Navigator.of(context).pop(true); // Return true to indicate success
@@ -258,18 +247,8 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
               if (confirm == true && mounted) {
                 try {
-                  // Always delete from local database first
-                  await LocalDatabaseService.deleteTransaction(widget.transaction.id);
-                  
-                  // Add to pending operations for background sync
-                  if (!kIsWeb) {
-                    await SyncService.addPendingOperation(
-                      entityId: widget.transaction.id,
-                      type: PendingOperationType.delete,
-                      entityType: 'transaction',
-                      data: null,
-                    );
-                  }
+                  // Delete from local database (creates event, rebuilds state)
+                  await LocalDatabaseServiceV2.deleteTransaction(widget.transaction.id);
                   
                   if (!mounted) return;
                   Navigator.of(context).pop(true); // Return true to refresh

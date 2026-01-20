@@ -14,6 +14,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Verbose mode flag (set via --verbose or -v)
+VERBOSE=false
+
 # Database connection details
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
@@ -22,6 +25,27 @@ DB_USER="${DB_USER:-debt_tracker}"
 DB_PASSWORD="${DB_PASSWORD:-dev_password}"
 
 export PGPASSWORD="$DB_PASSWORD"
+
+# Verbose mode flag (set via --verbose or -v)
+VERBOSE=false
+
+# Parse command line arguments for verbose flag
+ARGS=()
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --verbose|-v)
+            VERBOSE=true
+            shift
+            ;;
+        *)
+            ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Restore positional arguments
+set -- "${ARGS[@]}"
 
 # Helper functions
 print_error() {
@@ -33,11 +57,20 @@ print_success() {
 }
 
 print_warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${YELLOW}⚠️  $1${NC}"
+    fi
 }
 
 print_info() {
-    echo -e "${BLUE}ℹ️  $1${NC}"
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${BLUE}ℹ️  $1${NC}"
+    fi
+}
+
+print_step() {
+    # Always show step messages (these are confirming messages)
+    echo -e "${BLUE}→ $1${NC}"
 }
 
 check_docker() {
@@ -56,7 +89,9 @@ wait_for_service() {
     print_info "Waiting for $name to be ready..."
     for i in $(seq 1 $max_retries); do
         if curl -f "$url" > /dev/null 2>&1; then
-            print_success "$name is ready"
+            if [ "$VERBOSE" = true ]; then
+                print_success "$name is ready"
+            fi
             return 0
         fi
         sleep $delay
@@ -92,6 +127,40 @@ cmd_reset() {
     fi
 }
 
+cmd_full_flash() {
+    local import_file="${1:-}"
+    
+    print_step "Full Flash: Resetting system..."
+    
+    check_docker
+    
+    # Stop server if running
+    pkill -f "debt-tracker-api" > /dev/null 2>&1 || true
+    sleep 2
+    
+    # Reset EventStore
+    print_info "Resetting EventStore..."
+    cmd_reset_eventstore > /dev/null 2>&1 || cmd_reset_eventstore
+    
+    # Reset database
+    print_info "Resetting database..."
+    cmd_reset_database > /dev/null 2>&1 || cmd_reset_database
+    
+    # Start server (needed for import and rebuild)
+    print_info "Starting server..."
+    cmd_start_server > /dev/null 2>&1 || cmd_start_server
+    
+    # If import file provided, import data (import already rebuilds projections)
+    if [ -n "$import_file" ]; then
+        cmd_import "$import_file"
+    else
+        print_step "Rebuilding projections..."
+        cmd_rebuild_projections
+    fi
+    
+    print_success "Full Flash complete!"
+}
+
 cmd_reset_database() {
     print_info "Resetting PostgreSQL database..."
     
@@ -101,26 +170,26 @@ cmd_reset_database() {
     if ! docker ps | grep -q "debt_tracker_postgres"; then
         print_warning "PostgreSQL not running. Starting..."
         cd backend
-        docker-compose up -d postgres
+        docker-compose up -d postgres > /dev/null 2>&1
         sleep 5
         cd ..
     fi
     
     print_info "Terminating all connections..."
-    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres <<EOF
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres > /dev/null 2>&1 <<EOF
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
 WHERE datname = '$DB_NAME' AND pid <> pg_backend_pid();
 EOF
     
     print_info "Dropping database..."
-    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres <<EOF
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres > /dev/null 2>&1 <<EOF
 DROP DATABASE IF EXISTS $DB_NAME;
 EOF
     sleep 1
     
     print_info "Creating fresh database..."
-    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres <<EOF
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d postgres > /dev/null 2>&1 <<EOF
 CREATE DATABASE $DB_NAME;
 EOF
     
@@ -128,19 +197,22 @@ EOF
     cd backend/rust-api
     
     if command -v sqlx &> /dev/null; then
-        sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME"
+        sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1 || {
+            print_error "Migration failed"
+            exit 1
+        }
     else
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/001_initial_schema.sql
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/002_remove_transaction_settled.sql 2>/dev/null || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/003_add_due_date.sql 2>/dev/null || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/004_user_settings.sql 2>/dev/null || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/005_create_default_user.sql 2>/dev/null || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/006_add_username_to_contacts.sql 2>/dev/null || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/001_initial_schema.sql > /dev/null 2>&1
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/002_remove_transaction_settled.sql > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/003_add_due_date.sql > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/004_user_settings.sql > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/005_create_default_user.sql > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/006_add_username_to_contacts.sql > /dev/null 2>&1 || true
     fi
     
     # Ensure only the "max" user exists (clean up any other users)
     print_info "Ensuring only default user exists..."
-    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" <<EOF
+    docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1 <<EOF
 -- Delete all users except "max"
 DELETE FROM users_projection WHERE email != 'max';
 -- Ensure "max" user exists (migration 005 should have created it, but just in case)
@@ -165,19 +237,19 @@ cmd_reset_eventstore() {
     
     if docker ps | grep -q "debt_tracker_eventstore"; then
         print_info "Stopping EventStore..."
-        docker stop debt_tracker_eventstore || true
-        docker rm debt_tracker_eventstore || true
+        docker stop debt_tracker_eventstore > /dev/null 2>&1 || true
+        docker rm debt_tracker_eventstore > /dev/null 2>&1 || true
     fi
     
     print_info "Removing EventStore data volume..."
-    docker volume rm eventstore_data 2>/dev/null || true
+    docker volume rm eventstore_data > /dev/null 2>&1 || true
     
     print_info "Starting fresh EventStore..."
     cd backend
-    docker-compose up -d eventstore
+    docker-compose up -d eventstore > /dev/null 2>&1
     cd ..
     
-    wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2
+    wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
     print_success "EventStore reset complete"
 }
 
@@ -194,70 +266,56 @@ cmd_import() {
         exit 1
     fi
     
-    print_info "Importing data from: $backup_file"
+    print_step "Importing data from: $backup_file"
     
     # Ensure EventStore is running
     if ! docker ps | grep -q "debt_tracker_eventstore"; then
         print_warning "EventStore not running. Starting..."
         cd backend
-        docker-compose up -d eventstore
-        wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2
+        docker-compose up -d eventstore > /dev/null 2>&1
+        wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
         cd ..
     fi
     
     # Ensure server is running
     if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
         print_warning "Server not running. Starting..."
-        cmd_start_server
+        cmd_start_server > /dev/null 2>&1 || cmd_start_server
     fi
-    
-    # Extract backup
-    TEMP_DIR=$(mktemp -d)
-    print_info "Extracting backup to: $TEMP_DIR"
-    
-    unzip -q "$backup_file" -d "$TEMP_DIR" || {
-        print_error "Failed to extract backup file"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    }
-    
-    # Find SQLite database
-    SQLITE_DB=$(find "$TEMP_DIR" -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" | head -1)
-    
-    if [ -z "$SQLITE_DB" ]; then
-        print_error "No SQLite database found in backup file"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    fi
-    
-    print_info "Found SQLite database: $SQLITE_DB"
     
     # Check for Python script and dependencies
-    if [ ! -f "scripts/migrate_debitum_via_api.py" ]; then
-        print_error "migrate_debitum_via_api.py not found"
-        rm -rf "$TEMP_DIR"
+    if [ ! -f "scripts/migrate_debitum_via_api_fast.py" ]; then
+        print_error "migrate_debitum_via_api_fast.py not found"
         exit 1
     fi
     
     if ! python3 -c "import requests" 2>/dev/null; then
         print_warning "Python 'requests' library not found. Installing..."
-        pip3 install requests || {
+        pip3 install requests > /dev/null 2>&1 || {
             print_error "Failed to install requests library"
-            rm -rf "$TEMP_DIR"
             exit 1
         }
     fi
     
     # Run migration
-    print_info "Running migration via API (creates EventStore events naturally)..."
-    python3 scripts/migrate_debitum_via_api.py "$SQLITE_DB" || {
-        print_error "Failed to import data"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    }
+    print_info "Running migration via API..."
+    if [ "$VERBOSE" = true ]; then
+        python3 scripts/migrate_debitum_via_api_fast.py "$backup_file" || {
+            print_error "Failed to import data"
+            exit 1
+        }
+    else
+        python3 scripts/migrate_debitum_via_api_fast.py "$backup_file" > /dev/null 2>&1 || {
+            print_error "Failed to import data"
+            exit 1
+        }
+    fi
     
-    rm -rf "$TEMP_DIR"
-    print_success "Import complete! All data has EventStore events."
+    # Rebuild projections from events
+    print_info "Rebuilding projections..."
+    cmd_rebuild_projections
+    
+    print_success "Import complete!"
 }
 
 cmd_start_services() {
@@ -269,29 +327,31 @@ cmd_start_services() {
     
     if [ "$1" = "postgres" ] || [ -z "$1" ]; then
         print_info "Starting PostgreSQL..."
-        docker-compose up -d postgres
+        docker-compose up -d postgres > /dev/null 2>&1
         sleep 5
     fi
     
     if [ "$1" = "eventstore" ] || [ -z "$1" ]; then
         print_info "Starting EventStore..."
-        docker-compose up -d eventstore
-        wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2
+        docker-compose up -d eventstore > /dev/null 2>&1
+        wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
     fi
     
     if [ "$1" = "redis" ] || [ -z "$1" ]; then
         print_info "Starting Redis..."
-        docker-compose up -d redis
+        docker-compose up -d redis > /dev/null 2>&1
         sleep 3
     fi
     
     if [ -z "$1" ]; then
         print_info "Starting all services..."
-        docker-compose up -d postgres eventstore redis
+        docker-compose up -d postgres eventstore redis > /dev/null 2>&1
     fi
     
     cd ..
-    print_success "Services started"
+    if [ "$VERBOSE" = true ]; then
+        print_success "Services started"
+    fi
 }
 
 cmd_stop_services() {
@@ -319,17 +379,21 @@ cmd_start_server() {
     print_info "Starting API server..."
     
     # Stop any existing server
-    pkill -f "debt-tracker-api" || true
+    pkill -f "debt-tracker-api" > /dev/null 2>&1 || true
     sleep 2
     
     # Ensure services are running
-    cmd_start_services
+    cmd_start_services > /dev/null 2>&1 || cmd_start_services
     
     # Build if needed
     if [ ! -f "backend/rust-api/target/release/debt-tracker-api" ]; then
-        print_info "Building server (this may take a minute)..."
+        print_step "Building server (this may take a minute)..."
         cd backend/rust-api
-        cargo build --release
+        if [ "$VERBOSE" = true ]; then
+            cargo build --release
+        else
+            cargo build --release > /dev/null 2>&1
+        fi
         cd "$SCRIPT_DIR"
     fi
     
@@ -337,8 +401,10 @@ cmd_start_server() {
     print_info "Starting server..."
     nohup backend/rust-api/target/release/debt-tracker-api > /tmp/debt-tracker-api.log 2>&1 &
     
-    wait_for_service "http://localhost:8000/health" "API Server" 30 1
-    print_success "Server started! Logs: /tmp/debt-tracker-api.log"
+    wait_for_service "http://localhost:8000/health" "API Server" 30 1 > /dev/null 2>&1
+    if [ "$VERBOSE" = true ]; then
+        print_success "Server started! Logs: /tmp/debt-tracker-api.log"
+    fi
 }
 
 cmd_stop_server() {
@@ -430,17 +496,50 @@ cmd_logs() {
     fi
 }
 
+cmd_rebuild_projections() {
+    print_step "Rebuilding projections..."
+    
+    # Ensure server is running
+    if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
+        print_error "Server is not running. Please start the server first: $0 start-server"
+        exit 1
+    fi
+    
+    # Call rebuild endpoint
+    local response
+    response=$(curl -s -X POST http://localhost:8000/api/admin/projections/rebuild)
+    
+    if echo "$response" | grep -q "successfully"; then
+        # Success is silent in non-verbose mode (step message is enough)
+        if [ "$VERBOSE" = true ]; then
+            print_success "Projections rebuilt successfully"
+        fi
+    elif echo "$response" | grep -q "error"; then
+        print_error "Failed to rebuild projections: $response"
+        exit 1
+    else
+        if [ "$VERBOSE" = true ]; then
+            print_warning "Unexpected response: $response"
+        fi
+    fi
+}
+
 cmd_help() {
     cat <<EOF
 Debt Tracker Management Script
 
-Usage: $0 <command> [options]
+Usage: $0 [--verbose|-v] <command> [options]
+
+Options:
+  --verbose, -v              Show detailed output (default: minimal output)
 
 Commands:
+  full-flash [backup.zip]     Complete reset + rebuild + optional import (recommended)
   reset [backup.zip]          Reset database + EventStore, optionally import data
   reset-db                    Reset PostgreSQL database only
   reset-eventstore            Reset EventStore only
   import <backup.zip>         Import data from Debitum backup (creates events)
+  rebuild-projections         Rebuild projections from events (via API)
   
   start-services [name]    Start Docker services (postgres/eventstore/redis/all)
   stop-services [name]      Stop Docker services
@@ -454,6 +553,8 @@ Commands:
   help                      Show this help message
 
 Examples:
+  $0 full-flash                      # Complete reset + rebuild (clean system)
+  $0 full-flash backup.zip           # Complete reset + import + rebuild (recommended)
   $0 reset                           # Clean reset (no data)
   $0 reset backup.zip                # Reset and import from backup
   $0 import backup.zip               # Import data (keeps existing data)
@@ -464,11 +565,16 @@ Examples:
 Environment Variables:
   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD  Database connection settings
 
+Note: By default, only confirming messages and errors are shown. Use --verbose for detailed output.
+
 EOF
 }
 
 # Main command dispatcher
 case "${1:-help}" in
+    full-flash|flash)
+        cmd_full_flash "${2:-}"
+        ;;
     reset)
         cmd_reset "${2:-}"
         ;;
@@ -485,6 +591,9 @@ case "${1:-help}" in
             exit 1
         fi
         cmd_import "$2"
+        ;;
+    rebuild-projections|rebuild)
+        cmd_rebuild_projections
         ;;
     start-services|start-service)
         cmd_start_services "${2:-}"

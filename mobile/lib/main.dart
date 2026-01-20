@@ -7,7 +7,7 @@ import 'models/contact.dart';
 import 'models/transaction.dart'; // This imports the generated adapters too
 import 'models/event.dart';
 import 'services/event_store_service.dart';
-import 'services/projection_service.dart';
+import 'services/state_builder.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/backend_setup_screen.dart';
@@ -17,7 +17,8 @@ import 'services/realtime_service.dart';
 import 'services/settings_service.dart';
 import 'services/auth_service.dart';
 import 'services/backend_config_service.dart';
-import 'services/sync_service.dart';
+import 'services/sync_service_v2.dart';
+import 'services/local_database_service_v2.dart';
 import 'utils/app_theme.dart';
 
 // Global navigator key for showing toasts from anywhere
@@ -48,32 +49,24 @@ void main() async {
     // Initialize EventStore for event sourcing
     await EventStoreService.initialize();
     
-    // Initialize SyncService for local-first architecture
-    await SyncService.initialize();
+    // Initialize LocalDatabaseServiceV2 (rebuilds state from events)
+    await LocalDatabaseServiceV2.initialize();
+    
+    // Initialize SyncServiceV2 for local-first architecture
+    await SyncServiceV2.initialize();
     
     if (isBackendConfigured) {
-      // Try to load from API and sync to local, fallback to dummy data if API fails
+      // Try to sync with server
       try {
-        await DataService.loadFromApi();
-        // After initial load, do a full sync to ensure everything is up to date
-        await SyncService.fullSync();
+        // Initial sync to get server events
+        await SyncServiceV2.manualSync();
       } catch (e) {
         // Silently handle connection errors - app works offline
         final errorStr = e.toString();
         if (!errorStr.contains('Connection refused') && 
             !errorStr.contains('Failed host lookup') &&
             !errorStr.contains('Network is unreachable')) {
-          print('⚠️ Could not load from API, using local data: $e');
-        }
-        // Rebuild projections from events if we have events but no projections
-        if (!kIsWeb) {
-          final eventCount = await EventStoreService.getEventCount();
-          final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-          final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-          // Only rebuild if we have events but no projections
-          if (eventCount > 0 && contactsBox.isEmpty && transactionsBox.isEmpty) {
-            await ProjectionService.rebuildProjections();
-          }
+          print('⚠️ Could not sync with server, using local data: $e');
         }
       }
       

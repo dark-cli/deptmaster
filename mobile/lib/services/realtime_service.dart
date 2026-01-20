@@ -4,8 +4,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'api_service.dart';
 import 'backend_config_service.dart';
-import 'local_database_service.dart';
-import 'sync_service.dart';
+import 'sync_service_v2.dart';
+import 'state_builder.dart';
+import 'event_store_service.dart';
 
 class RealtimeService {
   static WebSocketChannel? _channel;
@@ -60,7 +61,7 @@ class RealtimeService {
               
               // Trigger sync when connection is established
               if (!kIsWeb) {
-                SyncService.fullSync().catchError((e) {
+                SyncServiceV2.manualSync().catchError((e) {
                   // Silently handle sync errors
                 });
               }
@@ -207,44 +208,24 @@ class RealtimeService {
   static Future<void> _syncContact(Map<String, dynamic>? contactData) async {
     if (contactData == null) return;
     
-    try {
-      // Reload contacts from API to get latest data
-      final contacts = await ApiService.getContacts();
-      
-      // Update local database using LocalDatabaseService
-      if (!kIsWeb) {
-        await LocalDatabaseService.syncContactsFromServer(contacts);
-      }
-    } catch (e) {
-      // Silently handle connection errors
-      final errorStr = e.toString();
-      if (!errorStr.contains('Connection refused') && 
-          !errorStr.contains('Failed host lookup') &&
-          !errorStr.contains('Network is unreachable')) {
-        print('Error syncing contact: $e');
-      }
+    // In new architecture, we sync events, not entities
+    // Just trigger a sync to pull new events from server
+    if (!kIsWeb) {
+      SyncServiceV2.manualSync().catchError((e) {
+        // Silently handle sync errors
+      });
     }
   }
 
   static Future<void> _syncTransaction(Map<String, dynamic>? transactionData) async {
     if (transactionData == null) return;
     
-    try {
-      // Reload transactions from API to get latest data
-      final transactions = await ApiService.getTransactions();
-      
-      // Update local database using LocalDatabaseService
-      if (!kIsWeb) {
-        await LocalDatabaseService.syncTransactionsFromServer(transactions);
-      }
-    } catch (e) {
-      // Silently handle connection errors
-      final errorStr = e.toString();
-      if (!errorStr.contains('Connection refused') && 
-          !errorStr.contains('Failed host lookup') &&
-          !errorStr.contains('Network is unreachable')) {
-        print('Error syncing transaction: $e');
-      }
+    // In new architecture, we sync events, not entities
+    // Just trigger a sync to pull new events from server
+    if (!kIsWeb) {
+      SyncServiceV2.manualSync().catchError((e) {
+        // Silently handle sync errors
+      });
     }
   }
 
@@ -277,11 +258,11 @@ class RealtimeService {
     }
 
     try {
-      // Use SyncService for full sync (push pending changes, then pull from server)
+      // Use SyncServiceV2 for sync (hash-based, event-driven)
       if (!kIsWeb) {
-        await SyncService.fullSync();
+        await SyncServiceV2.manualSync();
       } else {
-        // Web: just reload from API
+        // Web: just reload from API (web doesn't use local storage)
         await ApiService.getContacts();
         await ApiService.getTransactions();
       }

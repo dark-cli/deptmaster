@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 class EditContactScreen extends ConsumerStatefulWidget {
@@ -64,19 +63,9 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
         balance: widget.contact.balance,
       );
 
-      // Always update local database first (instant, snappy)
+      // Update local database (creates event, rebuilds state)
       // Background sync service will handle server communication
-      await LocalDatabaseService.updateContact(contact);
-      
-      // Add to pending operations for background sync
-      if (!kIsWeb) {
-        await SyncService.addPendingOperation(
-          entityId: contact.id,
-          type: PendingOperationType.update,
-          entityType: 'contact',
-          data: contact.toJson(),
-        );
-      }
+      await LocalDatabaseServiceV2.updateContact(contact);
 
       if (mounted) {
         Navigator.of(context).pop(true);

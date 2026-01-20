@@ -10,8 +10,8 @@ import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
 import '../services/dummy_data_service.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
+import '../services/sync_service_v2.dart';
 import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
 import 'edit_transaction_screen.dart';
@@ -166,13 +166,13 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
       List<Contact> contacts;
       
       // Always use local database - never call API from UI
-      transactions = await LocalDatabaseService.getTransactions();
-      contacts = await LocalDatabaseService.getContacts();
+      transactions = await LocalDatabaseServiceV2.getTransactions();
+      contacts = await LocalDatabaseServiceV2.getContacts();
       print('📊 Got ${transactions.length} transactions and ${contacts.length} contacts from local database');
       
       // If sync requested, do full sync in background
       if (sync && !kIsWeb) {
-        SyncService.fullSync(); // Don't await, let it run in background
+        SyncServiceV2.manualSync(); // Don't await, let it run in background
       }
       
       // Update state
@@ -290,20 +290,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                             final deletedCount = _selectedTransactions.length;
                             final deletedIds = _selectedTransactions.toList();
                             
-                            // Always delete from local database first
-                            await LocalDatabaseService.bulkDeleteTransactions(deletedIds);
-                            
-                            // Add to pending operations for background sync
-                            if (!kIsWeb) {
-                              for (final id in deletedIds) {
-                                await SyncService.addPendingOperation(
-                                  entityId: id,
-                                  type: PendingOperationType.delete,
-                                  entityType: 'transaction',
-                                  data: null,
-                                );
-                              }
-                            }
+                            // Delete from local database (creates events, rebuilds state)
+                            await LocalDatabaseServiceV2.bulkDeleteTransactions(deletedIds);
                             
                             if (mounted) {
                               setState(() {

@@ -5,8 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/local_database_service.dart';
-import '../services/sync_service.dart';
+import '../services/local_database_service_v2.dart';
 import '../services/dummy_data_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/settings_service.dart';
@@ -160,7 +159,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     
     try {
       // Always use local database - never call API from UI
-      final contacts = await LocalDatabaseService.getContacts();
+      final contacts = await LocalDatabaseServiceV2.getContacts();
       if (mounted) {
         setState(() {
           _contacts = contacts;
@@ -263,19 +262,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         updatedAt: DateTime.now(),
       );
 
-      // Always save to local database first (instant, snappy)
+      // Save to local database (creates event, rebuilds state)
       // Background sync service will handle server communication
-      await LocalDatabaseService.createTransaction(transaction);
-      
-      // Add to pending operations for background sync
-      if (!kIsWeb) {
-        await SyncService.addPendingOperation(
-          entityId: transaction.id,
-          type: PendingOperationType.create,
-          entityType: 'transaction',
-          data: transaction.toJson(),
-        );
-      }
+      await LocalDatabaseServiceV2.createTransaction(transaction);
 
       if (mounted) {
         Navigator.of(context).pop(true); // Return true to indicate success

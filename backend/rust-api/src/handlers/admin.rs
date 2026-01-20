@@ -188,14 +188,14 @@ pub async fn get_events(
     
     let query = query_builder.build_query_as::<EventResponse>();
     let events = query.fetch_all(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching events: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-            )
-        })?;
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching events: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
 
     Ok(Json(events))
 }
@@ -456,6 +456,26 @@ pub async fn get_projection_status(
         projections_updated: Some(true),
         last_update: Some(chrono::Utc::now()),
     }))
+}
+
+/// Rebuild projections from all events
+pub async fn rebuild_projections(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::handlers::sync::rebuild_projections_from_events;
+    
+    match rebuild_projections_from_events(&state).await {
+        Ok(_) => Ok(Json(serde_json::json!({
+            "message": "Projections rebuilt successfully"
+        }))),
+        Err(e) => {
+            tracing::error!("Error rebuilding projections: {:?}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Failed to rebuild projections: {}", e)})),
+            ))
+        }
+    }
 }
 
 #[derive(Serialize)]
