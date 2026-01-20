@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,9 @@ import 'services/auth_service.dart';
 import 'services/backend_config_service.dart';
 import 'services/sync_service.dart';
 import 'utils/app_theme.dart';
+
+// Global navigator key for showing toasts from anywhere
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,8 +78,14 @@ void main() async {
       }
       
       // Connect to WebSocket for real-time updates (silently fails if offline)
-      RealtimeService.connect().catchError((e) {
-        // Silently handle connection errors
+      // Use runZoned to catch async exceptions
+      runZoned(() {
+        RealtimeService.connect().catchError((e) {
+          // Error is handled by RealtimeService error callback
+        });
+      }, onError: (error, stack) {
+        // Catch any unhandled async exceptions
+        // Error is handled by RealtimeService error callback
       });
       
       // Sync when coming back online (silently fails if offline)
@@ -91,8 +101,13 @@ void main() async {
   
   // For web, also connect WebSocket (only if backend is configured)
   if (kIsWeb && isBackendConfigured) {
-    RealtimeService.connect().catchError((e) {
-      // Silently handle connection errors
+    runZoned(() {
+      RealtimeService.connect().catchError((e) {
+        // Error is handled by RealtimeService error callback
+      });
+    }, onError: (error, stack) {
+      // Catch any unhandled async exceptions
+      // Error is handled by RealtimeService error callback
     });
   }
   
@@ -138,6 +153,17 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
     _loadTheme();
     // Listen for theme changes
     _watchTheme();
+    // Set up error callback for WebSocket connection errors
+    _setupRealtimeErrorHandler();
+  }
+
+  void _setupRealtimeErrorHandler() {
+    RealtimeService.setErrorCallback((message) {
+      // Don't show toast for connection errors - they're handled in UI
+      // The setup screen shows errors in the error box, and other screens
+      // should handle connection errors gracefully without annoying toasts
+      return;
+    });
   }
 
   Future<void> _loadTheme() async {
@@ -162,6 +188,7 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Debt Tracker',
       // Force LTR text direction to prevent RTL issues
       builder: (context, child) {

@@ -3,6 +3,7 @@ pub mod contacts;
 pub mod transactions;
 pub mod settings;
 pub mod auth;
+pub mod sync;
 
 pub use admin::{
     admin_panel,
@@ -27,3 +28,8 @@ pub use transactions::{
 };
 pub use settings::{get_settings, update_setting};
 pub use auth::login;
+pub use sync::{
+    get_sync_hash,
+    get_sync_events,
+    post_sync_events,
+};

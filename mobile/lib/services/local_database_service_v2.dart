@@ -2,27 +2,23 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../models/event.dart';
 import 'event_store_service.dart';
-import 'projection_service.dart';
-import 'dummy_data_service.dart';
+import 'state_builder.dart';
 import 'package:uuid/uuid.dart';
 
-/// Local-first database service with Event Sourcing
-/// All writes create events, projections are rebuilt from events
+/// Simplified Local Database Service - KISS approach
+/// All writes create events, state is rebuilt from events using StateBuilder
 class LocalDatabaseServiceV2 {
   static const uuid = Uuid();
 
-  // ========== CONTACTS ==========
+  // ========== READ OPERATIONS ==========
+  // Read directly from Hive boxes (projections)
 
   static Future<List<Contact>> getContacts() async {
     if (kIsWeb) return [];
     
     try {
-      // Rebuild projections to ensure they're up to date
-      await ProjectionService.rebuildProjections();
-      
-      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+      final contactsBox = Hive.box<Contact>('contacts');
       return contactsBox.values.toList();
     } catch (e) {
       print('Error reading contacts: $e');
@@ -34,172 +30,22 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return null;
     
     try {
-      return await ProjectionService.rebuildContact(id);
+      final contactsBox = Hive.box<Contact>('contacts');
+      return contactsBox.get(id);
     } catch (e) {
       print('Error reading contact: $e');
       return null;
     }
   }
 
-  static Future<Contact> createContact({
-    required String name,
-    String? username,
-    String? phone,
-    String? email,
-    String? notes,
-    required String comment, // Required comment
-  }) async {
-    if (kIsWeb) {
-      // For web, return a mock contact
-      return Contact(
-        id: uuid.v4(),
-        name: name,
-        username: username,
-        phone: phone,
-        email: email,
-        notes: notes,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-        isSynced: false,
-        balance: 0,
-      );
-    }
-
-    final contactId = uuid.v4();
-    final timestamp = DateTime.now().toIso8601String();
-
-    // Create event
-    await EventStoreService.appendEvent(
-      aggregateType: 'contact',
-      aggregateId: contactId,
-      eventType: 'CREATED',
-      eventData: {
-        'name': name,
-        'username': username,
-        'phone': phone,
-        'email': email,
-        'notes': notes,
-        'comment': comment,
-        'timestamp': timestamp,
-      },
-    );
-
-    // Rebuild projection
-    await ProjectionService.rebuildProjections();
-
-    final contact = await getContact(contactId);
-    if (contact == null) {
-      throw Exception('Failed to create contact');
-    }
-    return contact;
-  }
-
-  static Future<void> updateContact({
-    required String contactId,
-    String? name,
-    String? username,
-    String? phone,
-    String? email,
-    String? notes,
-    required String comment, // Required comment
-  }) async {
-    if (kIsWeb) return;
-
-    final timestamp = DateTime.now().toIso8601String();
-    final eventData = <String, dynamic>{
-      'comment': comment,
-      'timestamp': timestamp,
-    };
-
-    if (name != null) eventData['name'] = name;
-    if (username != null) eventData['username'] = username;
-    if (phone != null) eventData['phone'] = phone;
-    if (email != null) eventData['email'] = email;
-    if (notes != null) eventData['notes'] = notes;
-
-    // Get current contact for previous_values
-    final current = await getContact(contactId);
-    if (current != null) {
-      eventData['previous_values'] = {
-        'name': current.name,
-        'username': current.username,
-        'phone': current.phone,
-        'email': current.email,
-        'notes': current.notes,
-      };
-    }
-
-    // Create event
-    await EventStoreService.appendEvent(
-      aggregateType: 'contact',
-      aggregateId: contactId,
-      eventType: 'UPDATED',
-      eventData: eventData,
-    );
-
-    // Rebuild projection
-    await ProjectionService.rebuildProjections();
-  }
-
-  static Future<void> deleteContact({
-    required String contactId,
-    required String comment, // Required comment
-  }) async {
-    if (kIsWeb) return;
-
-    final timestamp = DateTime.now().toIso8601String();
-
-    // Get current contact for deleted_contact data
-    final current = await getContact(contactId);
-    final deletedContact = current != null ? {
-      'name': current.name,
-      'username': current.username,
-      'phone': current.phone,
-      'email': current.email,
-      'notes': current.notes,
-    } : null;
-
-    // Create event
-    await EventStoreService.appendEvent(
-      aggregateType: 'contact',
-      aggregateId: contactId,
-      eventType: 'DELETED',
-      eventData: {
-        'comment': comment,
-        'timestamp': timestamp,
-        'deleted_contact': deletedContact,
-      },
-    );
-
-    // Rebuild projection
-    await ProjectionService.rebuildProjections();
-  }
-
-  // ========== TRANSACTIONS ==========
-
   static Future<List<Transaction>> getTransactions() async {
     if (kIsWeb) return [];
     
     try {
-      // Rebuild projections to ensure they're up to date
-      await ProjectionService.rebuildProjections();
-      
-      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+      final transactionsBox = Hive.box<Transaction>('transactions');
       return transactionsBox.values.toList();
     } catch (e) {
       print('Error reading transactions: $e');
-      return [];
-    }
-  }
-
-  static Future<List<Transaction>> getTransactionsByContact(String contactId) async {
-    if (kIsWeb) return [];
-    
-    try {
-      final transactions = await getTransactions();
-      return transactions.where((t) => t.contactId == contactId).toList();
-    } catch (e) {
-      print('Error reading transactions by contact: $e');
       return [];
     }
   }
@@ -208,8 +54,7 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return null;
     
     try {
-      await ProjectionService.rebuildProjections();
-      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+      final transactionsBox = Hive.box<Transaction>('transactions');
       return transactionsBox.get(id);
     } catch (e) {
       print('Error reading transaction: $e');
@@ -217,168 +62,273 @@ class LocalDatabaseServiceV2 {
     }
   }
 
-  static Future<Transaction> createTransaction({
-    required String contactId,
-    required TransactionType type,
-    required TransactionDirection direction,
-    required int amount,
-    required String currency,
-    String? description,
-    required DateTime transactionDate,
-    DateTime? dueDate,
-    required String comment, // Required comment
-  }) async {
-    if (kIsWeb) {
-      // For web, return a mock transaction
-      return Transaction(
-        id: uuid.v4(),
-        contactId: contactId,
-        type: type,
-        direction: direction,
-        amount: amount,
-        currency: currency,
-        description: description,
-        transactionDate: transactionDate,
-        dueDate: dueDate,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-        isSynced: false,
-      );
+  static Future<List<Transaction>> getTransactionsByContact(String contactId) async {
+    if (kIsWeb) return [];
+    
+    try {
+      final transactionsBox = Hive.box<Transaction>('transactions');
+      return transactionsBox.values
+          .where((t) => t.contactId == contactId)
+          .toList();
+    } catch (e) {
+      print('Error reading transactions by contact: $e');
+      return [];
     }
-
-    final transactionId = uuid.v4();
-    final timestamp = DateTime.now().toIso8601String();
-
-    // Create event
-    await EventStoreService.appendEvent(
-      aggregateType: 'transaction',
-      aggregateId: transactionId,
-      eventType: 'CREATED',
-      eventData: {
-        'contact_id': contactId,
-        'type': type == TransactionType.money ? 'money' : 'item',
-        'direction': direction == TransactionDirection.owed ? 'owed' : 'lent',
-        'amount': amount,
-        'currency': currency,
-        'description': description,
-        'transaction_date': transactionDate.toIso8601String().split('T')[0],
-        'due_date': dueDate?.toIso8601String().split('T')[0],
-        'comment': comment,
-        'timestamp': timestamp,
-      },
-    );
-
-    // Rebuild projection
-    await ProjectionService.rebuildProjections();
-
-    final transaction = await getTransaction(transactionId);
-    if (transaction == null) {
-      throw Exception('Failed to create transaction');
-    }
-    return transaction;
   }
 
-  static Future<void> updateTransaction({
-    required String transactionId,
-    String? contactId,
-    TransactionType? type,
-    TransactionDirection? direction,
-    int? amount,
-    String? currency,
-    String? description,
-    DateTime? transactionDate,
-    DateTime? dueDate,
-    required String comment, // Required comment
-  }) async {
-    if (kIsWeb) return;
+  // ========== WRITE OPERATIONS ==========
+  // All writes create events, then rebuild state
 
-    final timestamp = DateTime.now().toIso8601String();
-    final eventData = <String, dynamic>{
-      'comment': comment,
-      'timestamp': timestamp,
-    };
-
-    if (contactId != null) eventData['contact_id'] = contactId;
-    if (type != null) eventData['type'] = type == TransactionType.money ? 'money' : 'item';
-    if (direction != null) eventData['direction'] = direction == TransactionDirection.owed ? 'owed' : 'lent';
-    if (amount != null) eventData['amount'] = amount;
-    if (currency != null) eventData['currency'] = currency;
-    if (description != null) eventData['description'] = description;
-    if (transactionDate != null) eventData['transaction_date'] = transactionDate.toIso8601String().split('T')[0];
-    if (dueDate != null) eventData['due_date'] = dueDate.toIso8601String().split('T')[0];
-
-    // Get current transaction for previous_values
-    final current = await getTransaction(transactionId);
-    if (current != null) {
-      eventData['previous_values'] = {
-        'contact_id': current.contactId,
-        'type': current.type == TransactionType.money ? 'money' : 'item',
-        'direction': current.direction == TransactionDirection.owed ? 'owed' : 'lent',
-        'amount': current.amount,
-        'currency': current.currency,
-        'description': current.description,
-        'transaction_date': current.transactionDate.toIso8601String().split('T')[0],
-        'due_date': current.dueDate?.toIso8601String().split('T')[0],
+  static Future<Contact> createContact(Contact contact, {String? comment}) async {
+    if (kIsWeb) return contact;
+    
+    try {
+      // 1. Create event
+      final eventData = {
+        'name': contact.name,
+        'username': contact.username,
+        'phone': contact.phone,
+        'email': contact.email,
+        'notes': contact.notes,
+        'comment': comment ?? 'Contact created',
+        'timestamp': DateTime.now().toIso8601String(),
       };
+
+      await EventStoreService.appendEvent(
+        aggregateType: 'contact',
+        aggregateId: contact.id,
+        eventType: 'CREATED',
+        eventData: eventData,
+      );
+
+      // 2. Rebuild state
+      await _rebuildState();
+
+      print('✅ Contact created: ${contact.name}');
+      return contact;
+    } catch (e) {
+      print('Error creating contact: $e');
+      rethrow;
     }
-
-    // Create event
-    await EventStoreService.appendEvent(
-      aggregateType: 'transaction',
-      aggregateId: transactionId,
-      eventType: 'UPDATED',
-      eventData: eventData,
-    );
-
-    // Rebuild projection
-    await ProjectionService.rebuildProjections();
   }
 
-  static Future<void> deleteTransaction({
-    required String transactionId,
-    required String comment, // Required comment
-  }) async {
-    if (kIsWeb) return;
+  static Future<Contact> updateContact(Contact contact, {String? comment}) async {
+    if (kIsWeb) return contact;
+    
+    try {
+      // 1. Create event
+      final eventData = {
+        'name': contact.name,
+        'username': contact.username,
+        'phone': contact.phone,
+        'email': contact.email,
+        'notes': contact.notes,
+        'comment': comment ?? 'Contact updated',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
 
-    final timestamp = DateTime.now().toIso8601String();
+      await EventStoreService.appendEvent(
+        aggregateType: 'contact',
+        aggregateId: contact.id,
+        eventType: 'UPDATED',
+        eventData: eventData,
+      );
 
-    // Get current transaction for deleted_transaction data
-    final current = await getTransaction(transactionId);
-    final deletedTransaction = current != null ? {
-      'contact_id': current.contactId,
-      'type': current.type == TransactionType.money ? 'money' : 'item',
-      'direction': current.direction == TransactionDirection.owed ? 'owed' : 'lent',
-      'amount': current.amount,
-      'currency': current.currency,
-      'description': current.description,
-      'transaction_date': current.transactionDate.toIso8601String().split('T')[0],
-      'due_date': current.dueDate?.toIso8601String().split('T')[0],
-    } : null;
+      // 2. Rebuild state
+      await _rebuildState();
 
-    // Create event
-    await EventStoreService.appendEvent(
-      aggregateType: 'transaction',
-      aggregateId: transactionId,
-      eventType: 'DELETED',
-      eventData: {
-        'comment': comment,
-        'timestamp': timestamp,
-        'deleted_transaction': deletedTransaction,
-      },
-    );
-
-    // Rebuild projection
-    await ProjectionService.rebuildProjections();
+      print('✅ Contact updated: ${contact.name}');
+      return contact;
+    } catch (e) {
+      print('Error updating contact: $e');
+      rethrow;
+    }
   }
 
-  static Future<void> bulkDeleteTransactions({
-    required List<String> transactionIds,
-    required String comment, // Required comment
-  }) async {
+  static Future<void> deleteContact(String contactId, {String? comment}) async {
     if (kIsWeb) return;
+    
+    try {
+      // 1. Create event
+      final eventData = {
+        'comment': comment ?? 'Contact deleted',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
 
+      await EventStoreService.appendEvent(
+        aggregateType: 'contact',
+        aggregateId: contactId,
+        eventType: 'DELETED',
+        eventData: eventData,
+      );
+
+      // 2. Rebuild state
+      await _rebuildState();
+
+      print('✅ Contact deleted: $contactId');
+    } catch (e) {
+      print('Error deleting contact: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Transaction> createTransaction(Transaction transaction) async {
+    if (kIsWeb) return transaction;
+    
+    try {
+      // 1. Create event
+      final eventData = {
+        'contact_id': transaction.contactId,
+        'type': transaction.type == TransactionType.item ? 'item' : 'money',
+        'direction': transaction.direction == TransactionDirection.lent ? 'lent' : 'owed',
+        'amount': transaction.amount,
+        'currency': transaction.currency,
+        'description': transaction.description,
+        'transaction_date': transaction.transactionDate.toIso8601String().split('T')[0],
+        'due_date': transaction.dueDate?.toIso8601String().split('T')[0],
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      await EventStoreService.appendEvent(
+        aggregateType: 'transaction',
+        aggregateId: transaction.id,
+        eventType: 'CREATED',
+        eventData: eventData,
+      );
+
+      // 2. Rebuild state
+      await _rebuildState();
+
+      print('✅ Transaction created: ${transaction.id}');
+      return transaction;
+    } catch (e) {
+      print('Error creating transaction: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Transaction> updateTransaction(Transaction transaction, {String? comment}) async {
+    if (kIsWeb) return transaction;
+    
+    try {
+      // 1. Create event
+      final eventData = {
+        'contact_id': transaction.contactId,
+        'type': transaction.type == TransactionType.item ? 'item' : 'money',
+        'direction': transaction.direction == TransactionDirection.lent ? 'lent' : 'owed',
+        'amount': transaction.amount,
+        'currency': transaction.currency,
+        'description': transaction.description,
+        'transaction_date': transaction.transactionDate.toIso8601String().split('T')[0],
+        'due_date': transaction.dueDate?.toIso8601String().split('T')[0],
+        'comment': comment ?? 'Transaction updated',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      await EventStoreService.appendEvent(
+        aggregateType: 'transaction',
+        aggregateId: transaction.id,
+        eventType: 'UPDATED',
+        eventData: eventData,
+      );
+
+      // 2. Rebuild state
+      await _rebuildState();
+
+      print('✅ Transaction updated: ${transaction.id}');
+      return transaction;
+    } catch (e) {
+      print('Error updating transaction: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> deleteTransaction(String transactionId, {String? comment}) async {
+    if (kIsWeb) return;
+    
+    try {
+      // 1. Create event
+      final eventData = {
+        'comment': comment ?? 'Transaction deleted',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      await EventStoreService.appendEvent(
+        aggregateType: 'transaction',
+        aggregateId: transactionId,
+        eventType: 'DELETED',
+        eventData: eventData,
+      );
+
+      // 2. Rebuild state
+      await _rebuildState();
+
+      print('✅ Transaction deleted: $transactionId');
+    } catch (e) {
+      print('Error deleting transaction: $e');
+      rethrow;
+    }
+  }
+
+  static Future<void> bulkDeleteContacts(List<String> contactIds) async {
+    if (kIsWeb) return;
+    
+    for (final id in contactIds) {
+      await deleteContact(id, comment: 'Bulk delete');
+    }
+  }
+
+  static Future<void> bulkDeleteTransactions(List<String> transactionIds) async {
+    if (kIsWeb) return;
+    
     for (final id in transactionIds) {
-      await deleteTransaction(transactionId: id, comment: '$comment (bulk delete)');
+      await deleteTransaction(id, comment: 'Bulk delete');
+    }
+  }
+
+  /// Rebuild state from all events
+  static Future<void> _rebuildState() async {
+    if (kIsWeb) return;
+
+    try {
+      // Get all events
+      final events = await EventStoreService.getAllEvents();
+      
+      // Build state using StateBuilder
+      final state = StateBuilder.buildState(events);
+      
+      // Save to Hive boxes
+      final contactsBox = await Hive.openBox<Contact>('contacts');
+      final transactionsBox = await Hive.openBox<Transaction>('transactions');
+      
+      // Clear existing data
+      await contactsBox.clear();
+      await transactionsBox.clear();
+      
+      // Write new state
+      for (final contact in state.contacts) {
+        await contactsBox.put(contact.id, contact);
+      }
+      
+      for (final transaction in state.transactions) {
+        await transactionsBox.put(transaction.id, transaction);
+      }
+    } catch (e) {
+      print('Error rebuilding state: $e');
+      rethrow;
+    }
+  }
+
+  /// Initialize and rebuild state on startup
+  static Future<void> initialize() async {
+    if (kIsWeb) return;
+
+    try {
+      // Rebuild state from events
+      await _rebuildState();
+      print('✅ LocalDatabaseServiceV2 initialized');
+    } catch (e) {
+      print('Error initializing LocalDatabaseServiceV2: $e');
     }
   }
 }

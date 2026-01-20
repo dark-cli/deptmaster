@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/auth_service.dart';
 import 'home_screen.dart';
+import 'backend_setup_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -152,6 +153,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('Login'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: _loading ? null : () {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(builder: (context) => const BackendSetupScreen()),
+                      );
+                    },
+                    child: const Text('Back to Backend Setup'),
                   ),
                 ],
               ),

@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import '../models/event.dart';
 import 'package:uuid/uuid.dart';
 
@@ -7,6 +10,7 @@ import 'package:uuid/uuid.dart';
 /// Stores all events locally and provides event sourcing capabilities
 class EventStoreService {
   static const String eventsBoxName = 'events';
+  static const String lastSyncTimestampKey = 'last_sync_timestamp';
   static const uuid = Uuid();
   static Box<Event>? _eventsBox;
 
@@ -191,6 +195,73 @@ class EventStoreService {
     } catch (e) {
       print('Error getting event count: $e');
       return 0;
+    }
+  }
+
+  /// Get hash of all events (for sync comparison)
+  static Future<String> getEventHash() async {
+    if (kIsWeb) return '';
+    if (_eventsBox == null) await initialize();
+
+    try {
+      final events = await getAllEvents();
+      final hasher = sha256;
+      final buffer = StringBuffer();
+      
+      for (final event in events) {
+        buffer.write(event.id);
+        buffer.write(event.timestamp.toIso8601String());
+      }
+      
+      final bytes = utf8.encode(buffer.toString());
+      final digest = hasher.convert(bytes);
+      return digest.toString();
+    } catch (e) {
+      print('Error getting event hash: $e');
+      return '';
+    }
+  }
+
+  /// Get last sync timestamp
+  static Future<DateTime?> getLastSyncTimestamp() async {
+    if (kIsWeb) return null;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final timestampStr = prefs.getString(lastSyncTimestampKey);
+      if (timestampStr == null) return null;
+      return DateTime.parse(timestampStr);
+    } catch (e) {
+      print('Error getting last sync timestamp: $e');
+      return null;
+    }
+  }
+
+  /// Set last sync timestamp
+  static Future<void> setLastSyncTimestamp(DateTime timestamp) async {
+    if (kIsWeb) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(lastSyncTimestampKey, timestamp.toIso8601String());
+    } catch (e) {
+      print('Error setting last sync timestamp: $e');
+    }
+  }
+
+  /// Get events after a timestamp (for incremental sync)
+  static Future<List<Event>> getEventsAfter(DateTime timestamp) async {
+    if (kIsWeb) return [];
+    if (_eventsBox == null) await initialize();
+
+    try {
+      return _eventsBox!.values
+          .where((e) => e.timestamp.isAfter(timestamp))
+          .toList()
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    } catch (e) {
+      print('Error getting events after timestamp: $e');
+      return [];
     }
   }
 }

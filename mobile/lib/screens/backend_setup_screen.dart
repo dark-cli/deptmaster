@@ -18,6 +18,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
   final _portController = TextEditingController();
   bool _loading = false;
   String? _error;
+  String? _successMessage;
   bool _testingConnection = false;
   bool _connectionTestPassed = false;
   String? _testedIp;
@@ -44,6 +45,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
           _testedIp = null;
           _testedPort = null;
           _error = null;
+          _successMessage = null;
         });
       }
     }
@@ -73,6 +75,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
     setState(() {
       _testingConnection = true;
       _error = null;
+      _successMessage = null;
     });
 
     try {
@@ -102,39 +105,29 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
             _testedIp = ip;
             _testedPort = port;
             _error = null;
+            _successMessage = 'Connection successful!';
           });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Connection successful!'),
-              backgroundColor: Colors.green,
-            ),
-          );
         } else {
           setState(() {
             _connectionTestPassed = false;
             _testedIp = null;
             _testedPort = null;
+            _error = 'Server responded with status ${response.statusCode}';
+            _successMessage = null;
           });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('⚠️ Server responded with status ${response.statusCode}'),
-              backgroundColor: Colors.orange,
-            ),
-          );
         }
       }
     } catch (e) {
       if (mounted) {
+        // Format error message
+        final errorMessage = _formatConnectionError(e);
         setState(() {
           _testingConnection = false;
           _connectionTestPassed = false;
           _testedIp = null;
           _testedPort = null;
-          if (e is TimeoutException) {
-            _error = e.message;
-          } else {
-            _error = 'Connection failed: ${e.toString()}';
-          }
+          _error = errorMessage;
+          _successMessage = null;
         });
       }
     }
@@ -146,6 +139,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _successMessage = null;
     });
 
     try {
@@ -162,9 +156,11 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
       }
     } catch (e) {
       if (mounted) {
+        // Format error message
+        final errorMessage = _formatConnectionError(e);
         setState(() {
-          _error = e.toString();
           _loading = false;
+          _error = errorMessage;
         });
       }
     }
@@ -281,6 +277,38 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                             ),
                           ),
                         ],
+                        if (_successMessage != null) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.green,
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.check_circle_outline,
+                                  color: Colors.green,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _successMessage!,
+                                    style: const TextStyle(
+                                      color: Colors.green,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 24),
                         // Stack buttons vertically on mobile
                         Column(
@@ -343,7 +371,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                                       ),
                                     ),
                             ),
-                            if (!_connectionTestPassed && !_testingConnection && _error == null) ...[
+                            if (!_connectionTestPassed && !_testingConnection) ...[
                               const SizedBox(height: 8),
                               Text(
                                 'Please test connection first',
@@ -370,6 +398,49 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
         ),
       ),
     );
+  }
+
+  String _formatConnectionError(dynamic error) {
+    // Extract error code if available
+    String? errorCode;
+    String simpleMessage = 'Cannot connect to server';
+    
+    // Try to extract error code from error message
+    try {
+      if (error != null) {
+        final errorStr = error.toString();
+        // Extract errno from error message if present (e.g., "errno = 111")
+        final errnoMatch = RegExp(r'errno\s*=\s*(\d+)').firstMatch(errorStr);
+        if (errnoMatch != null) {
+          errorCode = errnoMatch.group(1);
+        }
+      }
+    } catch (_) {
+      // Ignore if extraction fails
+    }
+    
+    // Determine simple message based on error content
+    final errorStr = error.toString().toLowerCase();
+    
+    if (error is TimeoutException) {
+      simpleMessage = 'Connection timeout';
+    } else if (errorStr.contains('connection refused')) {
+      simpleMessage = 'Connection refused';
+    } else if (errorStr.contains('failed host lookup') || errorStr.contains('name resolution')) {
+      simpleMessage = 'Server not found';
+    } else if (errorStr.contains('network is unreachable')) {
+      simpleMessage = 'Network unreachable';
+    } else if (errorStr.contains('timeout')) {
+      simpleMessage = 'Connection timeout';
+    } else {
+      simpleMessage = 'Connection failed';
+    }
+    
+    // Add error code if available
+    if (errorCode != null) {
+      return '$simpleMessage (Error: $errorCode)';
+    }
+    return simpleMessage;
   }
 }
 

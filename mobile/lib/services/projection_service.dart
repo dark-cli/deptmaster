@@ -338,8 +338,6 @@ class ProjectionService {
             } else if (event.eventType == 'UPDATED') {
               // For updates, we need to recalculate from all transactions for this contact
               // This is simplified - in a real system, you'd track the previous transaction
-              final direction = eventData['direction'] as String?;
-              final amount = (eventData['amount'] as num?)?.toInt() ?? 0;
               
               // Recalculate balance for this contact from all its transactions up to this point
               int balance = 0;

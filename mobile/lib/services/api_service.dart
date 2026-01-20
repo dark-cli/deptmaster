@@ -366,4 +366,75 @@ class ApiService {
       rethrow;
     }
   }
+
+  // Sync methods
+  static Future<Map<String, dynamic>> getSyncHash() async {
+    try {
+      final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final response = await http.get(
+        Uri.parse('$apiUrl/sync/hash'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      } else {
+        throw Exception('Failed to get sync hash: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error getting sync hash: $e');
+      rethrow;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getSyncEvents({String? since}) async {
+    try {
+      final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final uri = Uri.parse('$apiUrl/sync/events');
+      final uriWithParams = since != null
+          ? uri.replace(queryParameters: {'since': since})
+          : uri;
+
+      final response = await http.get(
+        uriWithParams,
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((e) => e as Map<String, dynamic>).toList();
+      } else {
+        throw Exception('Failed to get sync events: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error getting sync events: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>> postSyncEvents(List<Map<String, dynamic>> events) async {
+    try {
+      final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final response = await http.post(
+        Uri.parse('$apiUrl/sync/events'),
+        headers: headers,
+        body: json.encode(events),
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      } else {
+        throw Exception('Failed to post sync events: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error posting sync events: $e');
+      rethrow;
+    }
+  }
 }

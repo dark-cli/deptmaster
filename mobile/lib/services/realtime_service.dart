@@ -12,9 +12,15 @@ class RealtimeService {
   static StreamSubscription? _subscription;
   static bool _isConnected = false;
   static final List<Function(Map<String, dynamic>)> _listeners = [];
+  static Function(String)? _onConnectionError;
 
   /// Check if WebSocket is connected
   static bool get isConnected => _isConnected;
+
+  /// Set callback for connection errors (e.g., to show toast)
+  static void setErrorCallback(Function(String) callback) {
+    _onConnectionError = callback;
+  }
 
   static Future<String> get _wsUrl async {
     return await BackendConfigService.getWebSocketUrl();
@@ -25,25 +31,41 @@ class RealtimeService {
       return;
     }
 
+    // Wrap entire connection in try-catch to catch all exceptions
     try {
       final wsUrl = await _wsUrl;
       
-      // Wrap connection in try-catch to handle immediate connection failures
+      // Create channel - this may throw synchronously or asynchronously
+      WebSocketChannel? channel;
       try {
-        _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+        channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       } catch (e) {
-        // Connection failed immediately (e.g., invalid URL)
-        _isConnected = false;
-        if (!e.toString().contains('Connection refused')) {
-          print('Failed to create WebSocket connection: $e');
-        }
+        // Connection failed immediately
+        _handleConnectionError(_formatConnectionError(e));
         return;
       }
 
       // Set up stream listener with error handling
+      // Use a flag to track if we've set up the listener
+      bool listenerSetup = false;
+      
       try {
-        _subscription = _channel!.stream.listen(
+        _subscription = channel.stream.listen(
           (message) {
+            // First message confirms connection is successful
+            if (!_isConnected) {
+              _isConnected = true;
+              _channel = channel;
+              print('✅ WebSocket connected');
+              
+              // Trigger sync when connection is established
+              if (!kIsWeb) {
+                SyncService.fullSync().catchError((e) {
+                  // Silently handle sync errors
+                });
+              }
+            }
+            
             try {
               final data = json.decode(message as String);
               _notifyListeners(data);
@@ -53,24 +75,25 @@ class RealtimeService {
             }
           },
           onError: (error) {
-            // Silently handle connection refused errors (backend not running)
-            final errorStr = error.toString();
-            if (errorStr.contains('Connection refused') || 
-                errorStr.contains('Failed host lookup') ||
-                errorStr.contains('Network is unreachable')) {
-              _isConnected = false;
-              _channel = null;
-              _subscription = null;
-              return; // Don't try to reconnect if server is not available
-            }
-            print('WebSocket error: $error');
+            // Handle connection errors - this catches async exceptions
             _isConnected = false;
             _channel = null;
             _subscription = null;
-            _reconnect();
+            
+            // Extract error code and create simple message
+            String message = _formatConnectionError(error);
+            _handleConnectionError(message);
+            
+            // Only reconnect for non-network errors
+            final errorStr = error.toString();
+            if (!errorStr.contains('Connection refused') && 
+                !errorStr.contains('Failed host lookup') &&
+                !errorStr.contains('Network is unreachable') &&
+                !errorStr.contains('SocketException')) {
+              _reconnect();
+            }
           },
           onDone: () {
-            // Only log if we were previously connected
             if (_isConnected) {
               print('WebSocket closed');
             }
@@ -82,38 +105,75 @@ class RealtimeService {
           cancelOnError: false,
         );
         
-        // Mark as connected only after listener is set up successfully
-        _isConnected = true;
-        print('✅ WebSocket connected');
-
-        // Trigger sync when connection is established
-        if (!kIsWeb) {
-          // Sync in background when connected
-          SyncService.fullSync().catchError((e) {
-            // Silently handle sync errors when offline
-            if (!e.toString().contains('Connection refused')) {
-              print('Background sync error: $e');
-            }
-          });
-        }
+        listenerSetup = true;
+        _channel = channel;
+        
+        // Give a small delay to catch immediate connection failures
+        await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         // Stream setup failed
         _isConnected = false;
         _channel = null;
         _subscription = null;
-        if (!e.toString().contains('Connection refused')) {
-          print('Failed to set up WebSocket stream: $e');
+        if (listenerSetup) {
+          _subscription?.cancel();
         }
+        _handleConnectionError(_formatConnectionError(e));
       }
     } catch (e) {
-      // General error
+      // Catch any other exceptions (including async ones that bubble up)
       _isConnected = false;
       _channel = null;
       _subscription = null;
-      if (!e.toString().contains('Connection refused')) {
-        print('Failed to connect WebSocket: $e');
-      }
+      _handleConnectionError(_formatConnectionError(e));
     }
+  }
+
+  static void _handleConnectionError(String message) {
+    // Notify callback if set (for showing toast)
+    _onConnectionError?.call(message);
+  }
+
+  static String _formatConnectionError(dynamic error) {
+    // Extract error code if available (works for SocketException)
+    String? errorCode;
+    String simpleMessage = 'Cannot connect to server';
+    
+    // Try to extract error code using reflection (works on all platforms)
+    try {
+      // Check if error has osError property (SocketException)
+      if (error != null) {
+        final errorStr = error.toString();
+        // Extract errno from error message if present (e.g., "errno = 111")
+        final errnoMatch = RegExp(r'errno\s*=\s*(\d+)').firstMatch(errorStr);
+        if (errnoMatch != null) {
+          errorCode = errnoMatch.group(1);
+        }
+      }
+    } catch (_) {
+      // Ignore if reflection fails
+    }
+    
+    // Determine simple message based on error content
+    final errorStr = error.toString().toLowerCase();
+    
+    if (errorStr.contains('connection refused')) {
+      simpleMessage = 'Connection refused';
+    } else if (errorStr.contains('failed host lookup') || errorStr.contains('name resolution')) {
+      simpleMessage = 'Server not found';
+    } else if (errorStr.contains('network is unreachable')) {
+      simpleMessage = 'Network unreachable';
+    } else if (errorStr.contains('timeout')) {
+      simpleMessage = 'Connection timeout';
+    } else {
+      simpleMessage = 'Connection failed';
+    }
+    
+    // Add error code if available
+    if (errorCode != null) {
+      return '$simpleMessage (Error: $errorCode)';
+    }
+    return simpleMessage;
   }
 
   static void _reconnect() {
