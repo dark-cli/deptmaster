@@ -5,8 +5,8 @@ class BackendConfigService {
   static const String _keyBackendPort = 'backend_port';
   static const String _keyBackendConfigured = 'backend_configured';
 
-  // Default values
-  static String get defaultIp => 'localhost';
+  // Default values (temporary defaults for development)
+  static String get defaultIp => '10.95.12.45';
 
   static int get defaultPort => 8000;
 

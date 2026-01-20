@@ -55,7 +55,7 @@ class ApiService {
     return [];
   }
 
-  static Future<Contact?> createContact(Contact contact) async {
+  static Future<Contact?> createContact(Contact contact, {String? comment}) async {
     try {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
@@ -68,6 +68,7 @@ class ApiService {
           'phone': contact.phone,
           'email': contact.email,
           'notes': contact.notes,
+          'comment': comment ?? 'Contact created via mobile app',
         }),
       );
       if (response.statusCode == 201 || response.statusCode == 200) {
@@ -99,7 +100,7 @@ class ApiService {
   }
 
   // Update contact
-  static Future<void> updateContact(String contactId, Contact contact) async {
+  static Future<void> updateContact(String contactId, Contact contact, {String? comment}) async {
     try {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
@@ -112,6 +113,7 @@ class ApiService {
           'phone': contact.phone,
           'email': contact.email,
           'notes': contact.notes,
+          'comment': comment ?? 'Contact updated via mobile app',
         }),
       );
       if (response.statusCode == 200) {
@@ -132,7 +134,7 @@ class ApiService {
   }
 
   // Delete contact
-  static Future<void> deleteContact(String contactId) async {
+  static Future<void> deleteContact(String contactId, {String? comment}) async {
     try {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
@@ -140,6 +142,9 @@ class ApiService {
       final response = await http.delete(
         Uri.parse('$apiUrl/contacts/$contactId'),
         headers: headers,
+        body: json.encode({
+          'comment': comment ?? 'Contact deleted via mobile app',
+        }),
       );
       if (response.statusCode == 200) {
         return;
@@ -159,11 +164,11 @@ class ApiService {
   }
 
   // Bulk delete contacts
-  static Future<void> bulkDeleteContacts(List<String> contactIds) async {
+  static Future<void> bulkDeleteContacts(List<String> contactIds, {String? comment}) async {
     try {
       // Delete contacts one by one (could be optimized with a bulk endpoint)
       for (final contactId in contactIds) {
-        await deleteContact(contactId);
+        await deleteContact(contactId, comment: comment);
       }
     } catch (e) {
       print('Error bulk deleting contacts: $e');
@@ -172,11 +177,11 @@ class ApiService {
   }
 
   // Bulk delete transactions
-  static Future<void> bulkDeleteTransactions(List<String> transactionIds) async {
+  static Future<void> bulkDeleteTransactions(List<String> transactionIds, {String? comment}) async {
     try {
       // Delete transactions one by one (could be optimized with a bulk endpoint)
       for (final transactionId in transactionIds) {
-        await deleteTransaction(transactionId);
+        await deleteTransaction(transactionId, comment: comment);
       }
     } catch (e) {
       print('Error bulk deleting transactions: $e');
@@ -233,7 +238,7 @@ class ApiService {
     return [];
   }
 
-  static Future<Transaction?> createTransaction(Transaction transaction) async {
+  static Future<Transaction?> createTransaction(Transaction transaction, {String? comment}) async {
     try {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
@@ -250,6 +255,7 @@ class ApiService {
           'description': transaction.description,
           'transaction_date': transaction.transactionDate.toIso8601String().split('T')[0],
           'due_date': transaction.dueDate?.toIso8601String().split('T')[0],
+          'comment': comment ?? 'Transaction created via mobile app',
         }),
       );
       if (response.statusCode == 201 || response.statusCode == 200) {
@@ -290,6 +296,7 @@ class ApiService {
     DateTime? transactionDate,
     String? contactId,
     DateTime? dueDate,
+    String? comment,
   }) async {
     try {
       final body = <String, dynamic>{};
@@ -305,6 +312,8 @@ class ApiService {
       if (dueDate != null) {
         body['due_date'] = dueDate.toIso8601String().split('T')[0];
       }
+      // Comment is required for updates
+      body['comment'] = comment ?? 'Transaction updated via mobile app';
 
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
@@ -330,7 +339,7 @@ class ApiService {
     }
   }
 
-  static Future<void> deleteTransaction(String transactionId) async {
+  static Future<void> deleteTransaction(String transactionId, {String? comment}) async {
     try {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
@@ -338,6 +347,9 @@ class ApiService {
       final response = await http.delete(
         Uri.parse('$apiUrl/transactions/$transactionId'),
         headers: headers,
+        body: json.encode({
+          'comment': comment ?? 'Transaction deleted via mobile app',
+        }),
       );
 
       if (response.statusCode != 200) {

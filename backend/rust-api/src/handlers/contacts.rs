@@ -10,6 +10,27 @@ use chrono::Utc;
 use crate::AppState;
 use crate::websocket;
 
+/// Calculate total debt (sum of all contact balances) at current time
+async fn calculate_total_debt(state: &AppState) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE(SUM(
+            CASE 
+                WHEN t.direction = 'lent' THEN t.amount
+                WHEN t.direction = 'owed' THEN -t.amount
+                ELSE 0
+            END
+        )::BIGINT, 0)
+        FROM contacts_projection c
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
+        WHERE c.is_deleted = false
+        "#
+    )
+    .fetch_one(&*state.db_pool)
+    .await
+    .unwrap_or(0)
+}
+
 #[derive(Deserialize)]
 pub struct CreateContactRequest {
     pub name: String,
@@ -27,12 +48,12 @@ pub struct UpdateContactRequest {
     pub phone: Option<String>,
     pub email: Option<String>,
     pub notes: Option<String>,
-    pub comment: Option<String>, // Optional: explanation for why this contact is being updated
+    pub comment: String, // Required: explanation for why this contact is being updated
 }
 
 #[derive(Deserialize)]
 pub struct DeleteContactRequest {
-    pub comment: Option<String>, // Optional but recommended: explanation for why this contact is being deleted
+    pub comment: String, // Required: explanation for why this contact is being deleted
 }
 
 #[derive(Serialize)]
@@ -93,8 +114,8 @@ pub async fn create_contact(
         .and_then(|s| Uuid::parse_str(s).ok())
         .unwrap_or_else(|| Uuid::new_v4());
 
-    // Create event data with full audit trail information
-    let event_data = serde_json::json!({
+    // Create event data with full audit trail information (without total_debt initially)
+    let mut event_data = serde_json::json!({
         "user_id": user_id.to_string(),
         "name": payload.name,
         "username": payload.username,
@@ -170,7 +191,36 @@ pub async fn create_contact(
         }
     }
 
-    // Also write to PostgreSQL events table for backward compatibility (dual-write)
+    // Create projection FIRST
+    sqlx::query(
+        r#"
+        INSERT INTO contacts_projection 
+        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW(), NOW(), 0)
+        "#
+    )
+    .bind(contact_id)
+    .bind(user_id)
+    .bind(payload.name.trim())
+    .bind(payload.username.as_deref())
+    .bind(payload.phone.as_deref())
+    .bind(payload.email.as_deref())
+    .bind(payload.notes.as_deref())
+    .execute(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating contact projection: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create contact"})),
+        )
+    })?;
+
+    // Calculate total debt AFTER creating the contact (contact creation doesn't change debt, but we record the state AFTER the action)
+    let total_debt_after = calculate_total_debt(&state).await;
+    event_data["total_debt"] = serde_json::json!(total_debt_after);
+    
+    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
     // TODO: Remove this once fully migrated to EventStore
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
@@ -192,31 +242,15 @@ pub async fn create_contact(
         )
     })?;
 
-    // Create projection
+    // Update projection with event_id
     sqlx::query(
-        r#"
-        INSERT INTO contacts_projection 
-        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW(), NOW(), $8)
-        "#
+        "UPDATE contacts_projection SET last_event_id = $1 WHERE id = $2"
     )
-    .bind(contact_id)
-    .bind(user_id)
-    .bind(payload.name.trim())
-    .bind(payload.username.as_deref())
-    .bind(payload.phone.as_deref())
-    .bind(payload.email.as_deref())
-    .bind(payload.notes.as_deref())
     .bind(event_id)
+    .bind(contact_id)
     .execute(&*state.db_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Error creating contact projection: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create contact"})),
-        )
-    })?;
+    .ok(); // Non-blocking update
 
     let response = CreateContactResponse {
         id: contact_id.to_string(),
@@ -319,7 +353,7 @@ pub async fn update_contact(
         "phone": new_phone,
         "email": new_email,
         "notes": new_notes,
-        "comment": payload.comment.unwrap_or_else(|| "No comment provided".to_string()), // Optional comment
+        "comment": payload.comment, // Required comment
         "timestamp": Utc::now().to_rfc3339(), // When the action was performed
         "previous_values": { // Track what changed
             "name": current_name,
@@ -365,7 +399,7 @@ pub async fn update_contact(
             )
         })?;
 
-    // Update projection
+    // Update projection FIRST
     sqlx::query(
         r#"
         UPDATE contacts_projection 
@@ -389,6 +423,24 @@ pub async fn update_contact(
             Json(serde_json::json!({"error": "Failed to update contact"})),
         )
     })?;
+
+    // Calculate total debt AFTER updating the contact (contact update doesn't change debt, but we record the state AFTER the action)
+    let total_debt_after = calculate_total_debt(&state).await;
+    let mut event_data_with_debt = event_data.clone();
+    event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
+    
+    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
+    sqlx::query(
+        r#"
+        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_UPDATED', 1, $2, NOW())
+        "#
+    )
+    .bind(contact_uuid)
+    .bind(&event_data_with_debt)
+    .execute(&*state.db_pool)
+    .await
+    .ok(); // Non-blocking update
 
     let response = UpdateContactResponse {
         id: contact_id.clone(),
@@ -474,7 +526,7 @@ pub async fn delete_contact(
     let stream_name = format!("contact-{}", contact_uuid);
     let event_id = Uuid::new_v4();
     let event_data = serde_json::json!({
-        "comment": payload.comment.unwrap_or_else(|| "No comment provided".to_string()),
+        "comment": payload.comment,
         "timestamp": Utc::now().to_rfc3339(),
         "deleted_contact": contact_data.map(|row| serde_json::json!({
             "name": row.get::<String, _>("name"),
@@ -485,46 +537,15 @@ pub async fn delete_contact(
         }))
     });
     
-    // Get current stream version for optimistic concurrency
-    let current_version = state.eventstore
-        .get_stream_version(&stream_name)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error getting stream version: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to get stream version"})),
-            )
-        })?;
-
-    // Append event to EventStore (use -1 if stream doesn't exist, otherwise use current version)
-    let expected_version = current_version.unwrap_or(-1);
-    let stream_version = state.eventstore
-        .write_event(
-            &stream_name,
-            "ContactDeleted",
-            event_id,
-            event_data.clone(),
-            expected_version,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Error writing event to EventStore: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to delete contact event"})),
-            )
-        })?;
-
-    // Soft delete in projection (set is_deleted = true)
+    // Soft delete in projection FIRST (set is_deleted = true)
+    // We do this first so the delete succeeds even if EventStore fails
     sqlx::query(
         r#"
         UPDATE contacts_projection 
-        SET is_deleted = true, updated_at = NOW(), last_event_id = $1
-        WHERE id = $2
+        SET is_deleted = true, updated_at = NOW()
+        WHERE id = $1
         "#
     )
-    .bind(stream_version) // Use stream version from EventStore
     .bind(contact_uuid)
     .execute(&*state.db_pool)
     .await
@@ -535,6 +556,57 @@ pub async fn delete_contact(
             Json(serde_json::json!({"error": "Failed to delete contact"})),
         )
     })?;
+
+    // Write delete event to EventStore (non-blocking - don't fail if EventStore is down)
+    let eventstore_clone = state.eventstore.clone();
+    let stream_name_clone = stream_name.clone();
+    let event_id_clone = event_id;
+    let event_data_clone = event_data.clone();
+    
+    tokio::spawn(async move {
+        // Get current stream version for optimistic concurrency
+        let current_version = eventstore_clone
+            .get_stream_version(&stream_name_clone)
+            .await;
+        
+        let expected_version = current_version.unwrap_or(Some(-1)).unwrap_or(-1);
+        match eventstore_clone
+            .write_event(
+                &stream_name_clone,
+                "ContactDeleted",
+                event_id_clone,
+                event_data_clone,
+                expected_version,
+            )
+            .await
+        {
+            Ok(version) => {
+                tracing::info!("EventStore delete event written successfully to stream {} at version {}", stream_name_clone, version);
+            }
+            Err(e) => {
+                tracing::warn!("EventStore write failed (non-blocking): {:?}. Contact deletion still succeeded.", e);
+                // Continue - contact deletion already succeeded in PostgreSQL
+            }
+        }
+    });
+
+    // Calculate total debt AFTER deleting the contact (contact deletion doesn't change debt if balance is 0, but we record the state AFTER the action)
+    let total_debt_after = calculate_total_debt(&state).await;
+    let mut event_data_with_debt = event_data.clone();
+    event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
+    
+    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
+    sqlx::query(
+        r#"
+        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_DELETED', 1, $2, NOW())
+        "#
+    )
+    .bind(contact_uuid)
+    .bind(&event_data_with_debt)
+    .execute(&*state.db_pool)
+    .await
+    .ok(); // Non-blocking update
 
     let response = serde_json::json!({
         "id": contact_id,

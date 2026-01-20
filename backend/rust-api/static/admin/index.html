@@ -793,6 +793,29 @@
         }
         
         // Extract event rendering to separate function for reuse
+        // Cache for contact names (to avoid repeated lookups)
+        let contactNameCache = {};
+        
+        async function getContactName(contactId) {
+            if (!contactId) return null;
+            if (contactNameCache[contactId]) return contactNameCache[contactId];
+            
+            try {
+                const response = await fetch(`${API_URL}/admin/contacts`);
+                if (response.ok) {
+                    const contacts = await response.json();
+                    const contact = contacts.find(c => c.id === contactId);
+                    if (contact) {
+                        contactNameCache[contactId] = contact.name;
+                        return contact.name;
+                    }
+                }
+            } catch (e) {
+                console.error('Error fetching contact name:', e);
+            }
+            return null;
+        }
+        
         function renderEvents(events) {
             return events.map(event => {
                     const eventData = event.event_data || {};
@@ -802,6 +825,34 @@
                     const direction = eventData.direction || null;
                     const type = eventData.type || null;
                     const description = eventData.description || null;
+                    const contactId = eventData.contact_id || null;
+                    const username = eventData.username || eventData.Username || null;
+                    const totalDebt = eventData.total_debt !== undefined ? eventData.total_debt : null;
+                    
+                    // Determine contact name
+                    let contactName = null;
+                    if (event.aggregate_type === 'contact') {
+                        contactName = name;
+                    } else if (contactId) {
+                        // For transactions, we'll show contact ID for now (could be enhanced with async lookup)
+                        contactName = contactNameCache[contactId] || `${contactId.substring(0, 8)}...`;
+                    }
+                    
+                    // Build summary based on event type
+                    let summary = '';
+                    if (event.aggregate_type === 'transaction') {
+                        if (amount !== null && direction) {
+                            const amountStr = type === 'money' ? 
+                                `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : 
+                                `${amount} item(s)`;
+                            const directionText = direction === 'lent' ? 'Lent' : 'Owed';
+                            summary = `${directionText} ${amountStr}`;
+                        }
+                    } else if (event.aggregate_type === 'contact') {
+                        const contactNameText = name || 'Unknown';
+                        const userText = username || 'N/A';
+                        summary = `${contactNameText} (User: ${userText})`;
+                    }
                     
                     // Get event type badge color
                     let badgeClass = 'badge';
@@ -827,15 +878,27 @@
                     // User display
                     const userDisplay = event.user_email || event.user_id.substring(0, 8) + '...';
                     
+                    // Format total debt
+                    const totalDebtDisplay = totalDebt !== null ? 
+                        `${totalDebt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : 
+                        'Calculating...';
+                    
                     // Build details summary (show key fields inline)
                     let detailsSummary = [];
-                    if (name) detailsSummary.push(`Name: ${name}`);
-                    if (amount !== null) {
-                        const amountStr = type === 'money' ? `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : `${amount} item(s)`;
+                    if (contactName) detailsSummary.push(`Contact: ${contactName}`);
+                    if (summary) detailsSummary.push(`Summary: ${summary}`);
+                    if (amount !== null && event.aggregate_type === 'transaction') {
+                        const amountStr = type === 'money' ? 
+                            `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : 
+                            `${amount} item(s)`;
                         detailsSummary.push(`Amount: ${amountStr}`);
                     }
-                    if (direction) detailsSummary.push(`Direction: ${direction}`);
-                    if (description) detailsSummary.push(`Description: ${description.substring(0, 50)}${description.length > 50 ? '...' : ''}`);
+                    if (direction && event.aggregate_type === 'transaction') {
+                        detailsSummary.push(`Direction: ${direction}`);
+                    }
+                    if (description) {
+                        detailsSummary.push(`Description: ${description.substring(0, 50)}${description.length > 50 ? '...' : ''}`);
+                    }
                     
                     // Format event data for full display
                     const displayData = {...eventData};
@@ -853,7 +916,15 @@
                             </td>
                             <td>
                                 <div><strong>${aggregateDisplay}</strong></div>
-                                ${name ? `<div class="event-name" style="font-size: 0.85rem; color: #79747E;">${name}</div>` : ''}
+                                ${contactName ? `<div class="event-name" style="font-size: 0.85rem; color: #79747E; margin-top: 0.25rem;">
+                                    <span style="color: #938F99;">👤</span> ${contactName}
+                                </div>` : ''}
+                                ${summary ? `<div class="event-summary" style="font-size: 0.85rem; color: #6750A4; font-weight: 500; margin-top: 0.25rem;">
+                                    ${summary}
+                                </div>` : ''}
+                                ${totalDebt !== null ? `<div class="total-debt-stamp" style="display: inline-block; margin-top: 0.5rem; padding: 0.25rem 0.5rem; background: rgba(103, 80, 164, 0.15); border: 1px solid #6750A4; border-radius: 4px; font-size: 0.75rem; font-weight: 600; color: #6750A4;">
+                                    💰 Total Debt: ${totalDebtDisplay}
+                                </div>` : ''}
                             </td>
                             <td style="font-size: 0.9rem;">
                                 <div style="font-weight: 500;">${userDisplay}</div>

@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'models/contact.dart';
 import 'models/transaction.dart'; // This imports the generated adapters too
+import 'models/event.dart';
+import 'services/event_store_service.dart';
+import 'services/projection_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/backend_setup_screen.dart';
@@ -32,10 +35,14 @@ void main() async {
     Hive.registerAdapter(TransactionAdapter());
     Hive.registerAdapter(TransactionTypeAdapter());
     Hive.registerAdapter(TransactionDirectionAdapter());
+    Hive.registerAdapter(EventAdapter());
     
     // Open boxes
     await Hive.openBox<Contact>(DummyDataService.contactsBoxName);
     await Hive.openBox<Transaction>(DummyDataService.transactionsBoxName);
+    
+    // Initialize EventStore for event sourcing
+    await EventStoreService.initialize();
     
     // Initialize SyncService for local-first architecture
     await SyncService.initialize();
@@ -54,15 +61,15 @@ void main() async {
             !errorStr.contains('Network is unreachable')) {
           print('⚠️ Could not load from API, using local data: $e');
         }
-        // Ensure we have dummy data if local database is empty
+        // Rebuild projections from events if we have events but no projections
         if (!kIsWeb) {
+          final eventCount = await EventStoreService.getEventCount();
           final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
           final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-          if (contactsBox.isEmpty && transactionsBox.isEmpty) {
-            await DummyDataService.initialize();
+          // Only rebuild if we have events but no projections
+          if (eventCount > 0 && contactsBox.isEmpty && transactionsBox.isEmpty) {
+            await ProjectionService.rebuildProjections();
           }
-        } else {
-          await DummyDataService.initialize();
         }
       }
       
@@ -76,8 +83,9 @@ void main() async {
         // Silently handle connection errors
       });
     } else {
-      // Use dummy data if backend is not configured
-      await DummyDataService.initialize();
+      // Backend not configured - just open boxes, no dummy data
+      // User will need to configure backend or import data
+      await DummyDataService.initialize(); // Just opens boxes, doesn't create dummy data
     }
   }
   

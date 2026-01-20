@@ -62,6 +62,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   List<Contact> _contacts = [];
   List<Contact> _filteredContacts = [];
   bool _showContactSuggestions = false;
+  bool _loadingContacts = true; // Track loading state
 
   @override
   void initState() {
@@ -153,12 +154,17 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   }
 
   Future<void> _loadContacts() async {
+    setState(() {
+      _loadingContacts = true;
+    });
+    
     try {
       // Always use local database - never call API from UI
       final contacts = await LocalDatabaseService.getContacts();
       if (mounted) {
         setState(() {
           _contacts = contacts;
+          _loadingContacts = false;
           // If contact is provided, find it in the loaded list by ID
           if (widget.contact != null && _contacts.isNotEmpty) {
             _selectedContact = _contacts.firstWhere(
@@ -170,7 +176,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         });
       }
     } catch (e) {
+      print('Error loading contacts: $e');
       if (mounted) {
+        setState(() {
+          _loadingContacts = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading contacts: $e')),
         );
@@ -331,7 +341,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
             // Contact search field
-            _contacts.isEmpty
+            _loadingContacts
                 ? const Center(child: CircularProgressIndicator())
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

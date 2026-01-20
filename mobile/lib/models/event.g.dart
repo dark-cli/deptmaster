@@ -1,59 +1,53 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'contact.dart';
+part of 'event.dart';
 
 // **************************************************************************
 // TypeAdapterGenerator
 // **************************************************************************
 
-class ContactAdapter extends TypeAdapter<Contact> {
+class EventAdapter extends TypeAdapter<Event> {
   @override
-  final int typeId = 0;
+  final int typeId = 4;
 
   @override
-  Contact read(BinaryReader reader) {
+  Event read(BinaryReader reader) {
     final numOfFields = reader.readByte();
     final fields = <int, dynamic>{
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
-    return Contact(
+    return Event(
       id: fields[0] as String,
-      name: fields[1] as String,
-      username: fields[9] as String?,
-      phone: fields[2] as String?,
-      email: fields[3] as String?,
-      notes: fields[4] as String?,
-      createdAt: fields[5] as DateTime,
-      updatedAt: fields[6] as DateTime,
-      isSynced: fields[7] as bool,
-      balance: fields[8] as int,
+      aggregateType: fields[1] as String,
+      aggregateId: fields[2] as String,
+      eventType: fields[3] as String,
+      eventData: (fields[4] as Map).cast<String, dynamic>(),
+      timestamp: fields[5] as DateTime,
+      version: fields[6] as int,
+      synced: fields[7] as bool,
     );
   }
 
   @override
-  void write(BinaryWriter writer, Contact obj) {
+  void write(BinaryWriter writer, Event obj) {
     writer
-      ..writeByte(10)
+      ..writeByte(8)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
-      ..write(obj.name)
-      ..writeByte(9)
-      ..write(obj.username)
+      ..write(obj.aggregateType)
       ..writeByte(2)
-      ..write(obj.phone)
+      ..write(obj.aggregateId)
       ..writeByte(3)
-      ..write(obj.email)
+      ..write(obj.eventType)
       ..writeByte(4)
-      ..write(obj.notes)
+      ..write(obj.eventData)
       ..writeByte(5)
-      ..write(obj.createdAt)
+      ..write(obj.timestamp)
       ..writeByte(6)
-      ..write(obj.updatedAt)
+      ..write(obj.version)
       ..writeByte(7)
-      ..write(obj.isSynced)
-      ..writeByte(8)
-      ..write(obj.balance);
+      ..write(obj.synced);
   }
 
   @override
@@ -62,7 +56,7 @@ class ContactAdapter extends TypeAdapter<Contact> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is ContactAdapter &&
+      other is EventAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }

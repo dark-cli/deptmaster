@@ -10,6 +10,27 @@ use chrono::Utc;
 use crate::AppState;
 use crate::websocket;
 
+/// Calculate total debt (sum of all contact balances) at current time
+async fn calculate_total_debt(state: &AppState) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE(SUM(
+            CASE 
+                WHEN t.direction = 'lent' THEN t.amount
+                WHEN t.direction = 'owed' THEN -t.amount
+                ELSE 0
+            END
+        )::BIGINT, 0)
+        FROM contacts_projection c
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
+        WHERE c.is_deleted = false
+        "#
+    )
+    .fetch_one(&*state.db_pool)
+    .await
+    .unwrap_or(0)
+}
+
 #[derive(Deserialize)]
 pub struct CreateTransactionRequest {
     pub contact_id: String,
@@ -33,12 +54,12 @@ pub struct UpdateTransactionRequest {
     pub description: Option<String>,
     pub transaction_date: Option<String>,
     pub due_date: Option<String>,
-    pub comment: Option<String>, // Optional: explanation for why this transaction is being updated
+    pub comment: String, // Required: explanation for why this transaction is being updated
 }
 
 #[derive(Deserialize)]
 pub struct DeleteTransactionRequest {
-    pub comment: Option<String>, // Optional but recommended: explanation for why this transaction is being deleted
+    pub comment: String, // Required: explanation for why this transaction is being deleted
 }
 
 #[derive(Serialize)]
@@ -193,8 +214,8 @@ pub async fn create_transaction(
     let due_date = payload.due_date.as_ref()
         .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
     
-    // Create event data with full audit trail
-    let event_data = serde_json::json!({
+    // Create event data with full audit trail (without total_debt initially)
+    let mut event_data = serde_json::json!({
         "contact_id": payload.contact_id,
         "type": payload.r#type,
         "direction": payload.direction,
@@ -227,7 +248,39 @@ pub async fn create_transaction(
             0 // Default version if EventStore fails
         });
 
-    // Also write to PostgreSQL events table for backward compatibility (dual-write)
+    // Create projection FIRST
+    sqlx::query(
+        r#"
+        INSERT INTO transactions_projection 
+        (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, NOW(), NOW(), 0)
+        "#
+    )
+    .bind(transaction_id)
+    .bind(user_id)
+    .bind(contact_uuid)
+    .bind(&payload.r#type)
+    .bind(&payload.direction)
+    .bind(payload.amount)
+    .bind(payload.currency.as_deref().unwrap_or("USD"))
+    .bind(payload.description.as_deref())
+    .bind(transaction_date)
+    .bind(due_date)
+    .execute(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating transaction projection: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create transaction"})),
+        )
+    })?;
+
+    // Calculate total debt AFTER creating the transaction (this changes total debt - we want the value AFTER the action)
+    let total_debt_after = calculate_total_debt(&state).await;
+    event_data["total_debt"] = serde_json::json!(total_debt_after);
+    
+    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
     // TODO: Remove this once fully migrated to EventStore
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
@@ -249,34 +302,15 @@ pub async fn create_transaction(
         )
     })?;
 
-    // Create projection
+    // Update projection with event_id
     sqlx::query(
-        r#"
-        INSERT INTO transactions_projection 
-        (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, NOW(), NOW(), $11)
-        "#
+        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2"
     )
+    .bind(event_id)
     .bind(transaction_id)
-    .bind(user_id)
-    .bind(contact_uuid)
-    .bind(&payload.r#type)
-    .bind(&payload.direction)
-    .bind(payload.amount)
-    .bind(payload.currency.as_deref().unwrap_or("USD"))
-    .bind(payload.description.as_deref())
-    .bind(transaction_date)
-    .bind(due_date)
-    .bind(event_id) // Use PostgreSQL event ID for last_event_id
     .execute(&*state.db_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Error creating transaction projection: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create transaction"})),
-        )
-    })?;
+    .ok(); // Non-blocking update
 
     let response = CreateTransactionResponse {
         id: transaction_id.to_string(),
@@ -433,7 +467,7 @@ pub async fn update_transaction(
         "description": new_description,
         "transaction_date": new_date.format("%Y-%m-%d").to_string(),
         "due_date": new_due_date.map(|d| d.format("%Y-%m-%d").to_string()),
-        "comment": payload.comment.unwrap_or_else(|| "No comment provided".to_string()), // Optional comment
+        "comment": payload.comment, // Required comment
         "timestamp": chrono::Utc::now().to_rfc3339(), // When the action was performed
         "previous_values": current_txn.map(|row| serde_json::json!({
             "contact_id": row.get::<Uuid, _>("contact_id").to_string(),
@@ -479,34 +513,13 @@ pub async fn update_transaction(
             expected_version + 1 // Increment version if EventStore fails
         });
 
-    // Also write to PostgreSQL events table for backward compatibility (dual-write)
-    let update_event_id = sqlx::query_scalar::<_, i64>(
-        r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_UPDATED', 1, $3, NOW())
-        RETURNING id
-        "#
-    )
-    .bind(user_id)
-    .bind(transaction_uuid)
-    .bind(&event_data)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error creating update event in PostgreSQL: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create transaction update event"})),
-        )
-    })?;
-
-    // Update projection
+    // Update projection FIRST
     sqlx::query(
         r#"
         UPDATE transactions_projection 
         SET contact_id = $1, type = $2, direction = $3, amount = $4, currency = $5, 
-            description = $6, transaction_date = $7, due_date = $8, updated_at = NOW(), last_event_id = $9
-        WHERE id = $10
+            description = $6, transaction_date = $7, due_date = $8, updated_at = NOW(), last_event_id = 0
+        WHERE id = $9
         "#
     )
     .bind(new_contact_id)
@@ -517,7 +530,6 @@ pub async fn update_transaction(
     .bind(new_description)
     .bind(new_date)
     .bind(new_due_date)
-    .bind(update_event_id) // Use PostgreSQL event ID
     .bind(transaction_uuid)
     .execute(&*state.db_pool)
     .await
@@ -528,6 +540,42 @@ pub async fn update_transaction(
             Json(serde_json::json!({"error": "Failed to update transaction"})),
         )
     })?;
+
+    // Calculate total debt AFTER updating the transaction (this changes total debt - we want the value AFTER the action)
+    let total_debt_after = calculate_total_debt(&state).await;
+    let mut event_data_with_debt = event_data.clone();
+    event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
+    
+    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
+    let update_event_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ($1, 'transaction', $2, 'TRANSACTION_UPDATED', 1, $3, NOW())
+        RETURNING id
+        "#
+    )
+    .bind(user_id)
+    .bind(transaction_uuid)
+    .bind(&event_data_with_debt)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating update event in PostgreSQL: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create transaction update event"})),
+        )
+    })?;
+
+    // Update projection with event_id
+    sqlx::query(
+        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2"
+    )
+    .bind(update_event_id)
+    .bind(transaction_uuid)
+    .execute(&*state.db_pool)
+    .await
+    .ok(); // Non-blocking update
 
     let response = UpdateTransactionResponse {
         id: transaction_id,
@@ -580,6 +628,14 @@ pub async fn delete_transaction(
             Json(serde_json::json!({"error": "Transaction not found"})),
         ));
     }
+    
+    // Validate comment is required for delete operations
+    if payload.comment.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Comment is required. Please explain why you are deleting this transaction."})),
+        ));
+    }
 
     let user_id = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM users_projection LIMIT 1"
@@ -613,7 +669,7 @@ pub async fn delete_transaction(
     let stream_name = format!("transaction-{}", transaction_uuid);
     let event_uuid = Uuid::new_v4();
     let event_data = serde_json::json!({
-        "comment": payload.comment.unwrap_or_else(|| "No comment provided".to_string()),
+        "comment": payload.comment,
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "deleted_transaction": transaction_data.map(|row| serde_json::json!({
             "contact_id": row.get::<Uuid, _>("contact_id").to_string(),
@@ -655,36 +711,14 @@ pub async fn delete_transaction(
             expected_version + 1 // Increment version if EventStore fails
         });
 
-    // Also write to PostgreSQL events table for backward compatibility (dual-write)
-    let delete_event_id = sqlx::query_scalar::<_, i64>(
-        r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_DELETED', 1, $3, NOW())
-        RETURNING id
-        "#
-    )
-    .bind(user_id)
-    .bind(transaction_uuid)
-    .bind(&event_data)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error creating delete event in PostgreSQL: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create transaction delete event"})),
-        )
-    })?;
-
-    // Soft delete in projection (set is_deleted = true)
+    // Soft delete in projection FIRST (set is_deleted = true)
     sqlx::query(
         r#"
         UPDATE transactions_projection 
-        SET is_deleted = true, updated_at = NOW(), last_event_id = $1
-        WHERE id = $2
+        SET is_deleted = true, updated_at = NOW(), last_event_id = 0
+        WHERE id = $1
         "#
     )
-    .bind(delete_event_id) // Use PostgreSQL event ID
     .bind(transaction_uuid)
     .execute(&*state.db_pool)
     .await
@@ -695,6 +729,42 @@ pub async fn delete_transaction(
             Json(serde_json::json!({"error": "Failed to delete transaction"})),
         )
     })?;
+
+    // Calculate total debt AFTER deleting the transaction (this changes total debt - we want the value AFTER the action)
+    let total_debt_after = calculate_total_debt(&state).await;
+    let mut event_data_with_debt = event_data.clone();
+    event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
+    
+    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
+    let delete_event_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ($1, 'transaction', $2, 'TRANSACTION_DELETED', 1, $3, NOW())
+        RETURNING id
+        "#
+    )
+    .bind(user_id)
+    .bind(transaction_uuid)
+    .bind(&event_data_with_debt)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating delete event in PostgreSQL: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create transaction delete event"})),
+        )
+    })?;
+
+    // Update projection with event_id
+    sqlx::query(
+        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2"
+    )
+    .bind(delete_event_id)
+    .bind(transaction_uuid)
+    .execute(&*state.db_pool)
+    .await
+    .ok(); // Non-blocking update
 
     let response = serde_json::json!({
         "id": transaction_id,

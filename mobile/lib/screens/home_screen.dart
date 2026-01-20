@@ -10,6 +10,7 @@ import 'add_contact_screen.dart';
 import 'add_transaction_screen.dart';
 import 'backend_setup_screen.dart';
 import 'login_screen.dart';
+import 'events_log_screen.dart';
 import '../services/auth_service.dart';
 import '../services/settings_service.dart';
 import '../services/backend_config_service.dart';
@@ -188,6 +189,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ],
             ),
           ),
+          // Events Log
+          ListTile(
+            leading: const Icon(Icons.event_note),
+            title: const Text('Events Log'),
+            subtitle: const Text('View all local events'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const EventsLogScreen(),
+                ),
+              );
+            },
+          ),
+          const Divider(),
           // Settings content (without Scaffold wrapper)
           const _SettingsContent(),
         ],
