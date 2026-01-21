@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Debt Tracker - Admin Panel</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -524,6 +525,66 @@
             </div>
         </div>
 
+        <!-- Debt Over Time Chart -->
+        <div class="chart-container" style="background: #FFFBFE; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 2rem; transition: background-color 0.3s;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2 style="margin: 0; color: #1C1B1F; font-size: 1.25rem;">Total Debt Over Time</h2>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="chart-period-btn active" onclick="setChartPeriod('day')" data-period="day">Day</button>
+                    <button class="chart-period-btn" onclick="setChartPeriod('week')" data-period="week">Week</button>
+                    <button class="chart-period-btn" onclick="setChartPeriod('month')" data-period="month">Month</button>
+                    <button class="chart-period-btn" onclick="setChartPeriod('year')" data-period="year">Year</button>
+                </div>
+            </div>
+            <div style="position: relative; height: 400px;">
+                <canvas id="debtChart"></canvas>
+            </div>
+        </div>
+
+        body.dark-mode .chart-container {
+            background: #1C1B1F;
+        }
+
+        body.dark-mode .chart-container h2 {
+            color: #E6E1E5;
+        }
+
+        .chart-period-btn {
+            padding: 0.5rem 1rem;
+            border: 1px solid #E7E0EC;
+            background: #FFFBFE;
+            color: #1C1B1F;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+
+        body.dark-mode .chart-period-btn {
+            background: #1C1B1F;
+            border-color: #49454F;
+            color: #E6E1E5;
+        }
+
+        .chart-period-btn:hover {
+            background: #E7E0EC;
+        }
+
+        body.dark-mode .chart-period-btn:hover {
+            background: #49454F;
+        }
+
+        .chart-period-btn.active {
+            background: #6750A4;
+            color: white;
+            border-color: #6750A4;
+        }
+
+        body.dark-mode .chart-period-btn.active {
+            background: #6750A4;
+            color: white;
+        }
+
         <div class="tabs">
             <button class="tab active" onclick="switchTab('events')">PostgreSQL Events</button>
             <button class="tab" onclick="switchTab('contacts')">Contacts</button>
@@ -701,6 +762,10 @@
         let pollingInterval = null;
         let isUpdating = false;
         let currentTotalDebt = null; // Store current total debt for fallback in events
+        
+        // Chart state
+        let debtChart = null;
+        let chartPeriod = 'month'; // Default to month
 
         async function loadData() {
             // Load stats first to populate currentTotalDebt
@@ -710,7 +775,8 @@
                 loadEvents(),
                 loadContacts(),
                 loadTransactions(),
-                loadProjections()
+                loadProjections(),
+                loadDebtChart()
             ]);
         }
 
@@ -1406,7 +1472,204 @@
             loadStats();
             loadContacts();
             loadTransactions();
+            loadDebtChart();
         }, 10000);
+        
+        // Chart functions
+        let debtChart = null;
+        let chartPeriod = 'month'; // Default to month
+        
+        function setChartPeriod(period) {
+            chartPeriod = period;
+            // Update button states
+            document.querySelectorAll('.chart-period-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-period') === period) {
+                    btn.classList.add('active');
+                }
+            });
+            loadDebtChart();
+        }
+        
+        async function loadDebtChart() {
+            try {
+                // Calculate date range based on period
+                const now = new Date();
+                let startDate = new Date();
+                
+                switch (chartPeriod) {
+                    case 'day':
+                        startDate.setDate(now.getDate() - 1);
+                        break;
+                    case 'week':
+                        startDate.setDate(now.getDate() - 7);
+                        break;
+                    case 'month':
+                        startDate.setMonth(now.getMonth() - 1);
+                        break;
+                    case 'year':
+                        startDate.setFullYear(now.getFullYear() - 1);
+                        break;
+                }
+                
+                // Fetch all events since start date
+                const params = new URLSearchParams();
+                params.append('date_from', startDate.toISOString().split('T')[0] + 'T00:00:00');
+                params.append('limit', '10000'); // Get all events in range
+                
+                const response = await fetch(`${API_URL}/admin/events?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const events = await response.json();
+                
+                // Sort events by timestamp
+                events.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                
+                // Build data points: time and total_debt
+                const dataPoints = [];
+                const labels = [];
+                
+                for (const event of events) {
+                    const eventData = event.event_data || {};
+                    const totalDebt = eventData.total_debt;
+                    
+                    if (totalDebt !== null && totalDebt !== undefined) {
+                        const debt = Number(totalDebt);
+                        if (!isNaN(debt) && isFinite(debt)) {
+                            const date = new Date(event.created_at);
+                            labels.push(date.toLocaleString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric',
+                                hour: date.getHours() === 0 && date.getMinutes() === 0 ? undefined : 'numeric',
+                                minute: date.getHours() === 0 && date.getMinutes() === 0 ? undefined : '2-digit'
+                            }));
+                            dataPoints.push(debt);
+                        }
+                    }
+                }
+                
+                // If no data points, use current total debt
+                if (dataPoints.length === 0 && currentTotalDebt !== null) {
+                    labels.push(new Date().toLocaleString('en-US', { month: 'short', day: 'numeric' }));
+                    dataPoints.push(currentTotalDebt);
+                }
+                
+                // Create or update chart
+                const ctx = document.getElementById('debtChart');
+                const isDark = document.body.classList.contains('dark-mode');
+                
+                const chartConfig = {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Total Debt (IQD)',
+                            data: dataPoints,
+                            borderColor: '#6750A4',
+                            backgroundColor: 'rgba(103, 80, 164, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 3,
+                            pointHoverRadius: 5,
+                            pointBackgroundColor: '#6750A4',
+                            pointBorderColor: isDark ? '#1C1B1F' : '#FFFBFE',
+                            pointBorderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: isDark ? '#E6E1E5' : '#1C1B1F',
+                                    font: {
+                                        size: 12
+                                    }
+                                }
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                backgroundColor: isDark ? '#49454F' : '#FFFBFE',
+                                titleColor: isDark ? '#E6E1E5' : '#1C1B1F',
+                                bodyColor: isDark ? '#E6E1E5' : '#1C1B1F',
+                                borderColor: '#6750A4',
+                                borderWidth: 1,
+                                callbacks: {
+                                    label: function(context) {
+                                        return `Total Debt: ${Math.round(context.parsed.y).toLocaleString('en-US')} IQD`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                ticks: {
+                                    color: isDark ? '#938F99' : '#79747E',
+                                    maxRotation: 45,
+                                    minRotation: 45
+                                },
+                                grid: {
+                                    color: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                                }
+                            },
+                            y: {
+                                ticks: {
+                                    color: isDark ? '#938F99' : '#79747E',
+                                    callback: function(value) {
+                                        return Math.round(value).toLocaleString('en-US') + ' IQD';
+                                    }
+                                },
+                                grid: {
+                                    color: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                };
+                
+                if (debtChart) {
+                    // Update existing chart
+                    debtChart.data.labels = labels;
+                    debtChart.data.datasets[0].data = dataPoints;
+                    debtChart.options.plugins.legend.labels.color = isDark ? '#E6E1E5' : '#1C1B1F';
+                    debtChart.options.plugins.tooltip.backgroundColor = isDark ? '#49454F' : '#FFFBFE';
+                    debtChart.options.plugins.tooltip.titleColor = isDark ? '#E6E1E5' : '#1C1B1F';
+                    debtChart.options.plugins.tooltip.bodyColor = isDark ? '#E6E1E5' : '#1C1B1F';
+                    debtChart.options.scales.x.ticks.color = isDark ? '#938F99' : '#79747E';
+                    debtChart.options.scales.x.grid.color = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+                    debtChart.options.scales.y.ticks.color = isDark ? '#938F99' : '#79747E';
+                    debtChart.options.scales.y.grid.color = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+                    debtChart.update();
+                } else {
+                    // Create new chart
+                    debtChart = new Chart(ctx, chartConfig);
+                }
+            } catch (error) {
+                console.error('Error loading debt chart:', error);
+            }
+        }
+        
+        // Update chart when dark mode changes
+        const darkModeToggle = document.querySelector('.dark-mode-toggle');
+        if (darkModeToggle) {
+            darkModeToggle.addEventListener('click', () => {
+                setTimeout(() => {
+                    if (debtChart) {
+                        loadDebtChart();
+                    }
+                }, 100);
+            });
+        }
     </script>
 </body>
 </html>
