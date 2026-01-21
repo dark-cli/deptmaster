@@ -13,7 +13,7 @@ import uuid
 import zipfile
 import tempfile
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 API_BASE_URL = "http://localhost:8000"
@@ -131,9 +131,10 @@ def migrate_debitum(debitum_db_path):
         
         contact_map = {}  # Map old person ID to new contact UUID
         events = []
-        timestamp = datetime.utcnow()
+        # Use a base timestamp - we'll use actual timestamps from transactions for ordering
+        base_timestamp = datetime.utcnow() - timedelta(days=365)  # Start from a year ago
         
-        for person in persons:
+        for idx, person in enumerate(persons):
             # Extract username from name
             original_name = person['name'] or ''
             contact_name, username = split_name_and_username(original_name)
@@ -151,6 +152,10 @@ def migrate_debitum(debitum_db_path):
             if phone and len(phone) > 50:
                 phone = None
             
+            # Use base timestamp with small increments to maintain order
+            # Contacts are created before their transactions
+            contact_timestamp = base_timestamp + timedelta(seconds=idx)
+            
             event_data = {
                 "name": contact_name,
                 "username": username,
@@ -158,7 +163,7 @@ def migrate_debitum(debitum_db_path):
                 "email": None,
                 "notes": person['note'] if person['note'] else '',
                 "comment": f"Migrated from Debitum backup - Person ID: {person['id_person']}",
-                "timestamp": timestamp.isoformat() + "Z"
+                "timestamp": contact_timestamp.isoformat() + "Z"
             }
             
             # Create CREATED event
@@ -168,13 +173,10 @@ def migrate_debitum(debitum_db_path):
                 "aggregate_id": contact_id,
                 "event_type": "CREATED",
                 "event_data": event_data,
-                "timestamp": timestamp.isoformat() + "Z",
+                "timestamp": contact_timestamp.isoformat() + "Z",
                 "version": 1
             }
             events.append(event)
-            
-            # Increment timestamp slightly for ordering
-            timestamp += timedelta(milliseconds=1)
         
         print(f"✅ Prepared {len(events)} contact events")
         
@@ -229,11 +231,14 @@ def migrate_debitum(debitum_db_path):
             direction = "lent" if txn['amount'] > 0 else "owed"
             amount = abs(txn['amount'])
             
-            # Convert timestamp
+            # Use actual timestamp from database (convert from milliseconds to datetime)
             if txn['timestamp']:
-                txn_date = datetime.fromtimestamp(txn['timestamp'] / 1000.0).date().isoformat()
+                txn_timestamp = datetime.fromtimestamp(txn['timestamp'] / 1000.0, tz=timezone.utc)
+                txn_date = txn_timestamp.date().isoformat()
             else:
-                txn_date = datetime.now().date().isoformat()
+                # Fallback to current time if no timestamp
+                txn_timestamp = datetime.utcnow().replace(tzinfo=timezone.utc)
+                txn_date = txn_timestamp.date().isoformat()
             
             # Prepare transaction event data
             transaction_id = str(uuid.uuid4())
@@ -246,23 +251,20 @@ def migrate_debitum(debitum_db_path):
                 "description": txn['description'] if txn['description'] else None,
                 "transaction_date": txn_date,
                 "comment": f"Migrated from Debitum backup - Transaction ID: {txn['id_transaction']}",
-                "timestamp": timestamp.isoformat() + "Z"
+                "timestamp": txn_timestamp.isoformat().replace('+00:00', 'Z')
             }
             
-            # Create CREATED event
+            # Create CREATED event with actual timestamp from database
             event = {
                 "id": str(uuid.uuid4()),
                 "aggregate_type": "transaction",
                 "aggregate_id": transaction_id,
                 "event_type": "CREATED",
                 "event_data": event_data,
-                "timestamp": timestamp.isoformat() + "Z",
+                "timestamp": txn_timestamp.isoformat().replace('+00:00', 'Z'),
                 "version": 1
             }
             transaction_events.append(event)
-            
-            # Increment timestamp slightly for ordering
-            timestamp += timedelta(milliseconds=1)
         
         monetary_transactions = [t for t in transactions if t['is_monetary']]
         print(f"✅ Prepared {len(transaction_events)} transaction events ({skipped_count} items skipped)")

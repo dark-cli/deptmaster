@@ -98,6 +98,102 @@
             color: #6750A4; /* Material 3 light primary */
         }
 
+        /* Event detail modal */
+        .event-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .event-modal.active {
+            display: flex;
+        }
+
+        .event-modal-content {
+            background: #FFFBFE;
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            position: relative;
+        }
+
+        body.dark-mode .event-modal-content {
+            background: #1C1B1F;
+            color: #E6E1E5;
+        }
+
+        .event-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #E7E0EC;
+        }
+
+        body.dark-mode .event-modal-header {
+            border-bottom-color: #49454F;
+        }
+
+        .event-modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6750A4;
+            padding: 0.5rem;
+            line-height: 1;
+        }
+
+        .event-modal-close:hover {
+            opacity: 0.7;
+        }
+
+        .event-modal-field {
+            margin-bottom: 1rem;
+        }
+
+        .event-modal-field-label {
+            font-weight: 600;
+            color: #6750A4;
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .event-modal-field-value {
+            font-size: 1rem;
+            color: #1C1B1F;
+            word-break: break-word;
+        }
+
+        body.dark-mode .event-modal-field-value {
+            color: #E6E1E5;
+        }
+
+        .event-row {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .event-row:hover {
+            background-color: rgba(103, 80, 164, 0.05);
+        }
+
+        body.dark-mode .event-row:hover {
+            background-color: rgba(103, 80, 164, 0.15);
+        }
+
         body.dark-mode .stat-card .value {
             color: #D0BCFF; /* Material 3 dark primary */
         }
@@ -617,6 +713,28 @@
         </div>
     </div>
 
+    <!-- Event Detail Modal -->
+    <div id="eventModal" class="event-modal" onclick="closeEventModal(event)">
+        <div class="event-modal-content" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <h2>Event Details</h2>
+                <button class="event-modal-close" onclick="closeEventModal()">&times;</button>
+            </div>
+            <div id="eventModalBody"></div>
+        </div>
+    </div>
+
+    <!-- Event Detail Modal -->
+    <div id="eventModal" class="event-modal" onclick="closeEventModal(event)">
+        <div class="event-modal-content" onclick="event.stopPropagation()">
+            <div class="event-modal-header">
+                <h2>Event Details</h2>
+                <button class="event-modal-close" onclick="closeEventModal()">&times;</button>
+            </div>
+            <div id="eventModalBody"></div>
+        </div>
+    </div>
+
     <script>
         const API_URL = 'http://localhost:8000/api';
         const WS_URL = 'ws://localhost:8000/ws';
@@ -773,6 +891,35 @@
                 }
                 const events = await response.json();
 
+                // Pre-load contact names for all events
+                const contactIds = new Set();
+                events.forEach(event => {
+                    if (event.aggregate_type === 'contact') {
+                        const name = event.event_data?.name;
+                        if (name) contactNameCache[event.aggregate_id] = name;
+                    } else if (event.aggregate_type === 'transaction') {
+                        const contactId = event.event_data?.contact_id;
+                        if (contactId) contactIds.add(contactId);
+                    }
+                });
+                
+                // Fetch missing contact names
+                if (contactIds.size > 0) {
+                    try {
+                        const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
+                        if (contactsResponse.ok) {
+                            const contacts = await contactsResponse.json();
+                            contacts.forEach(contact => {
+                                if (contactIds.has(contact.id)) {
+                                    contactNameCache[contact.id] = contact.name;
+                                }
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Error pre-loading contacts:', e);
+                    }
+                }
+
                 if (!silent) {
                 loading.style.display = 'none';
                 }
@@ -841,6 +988,76 @@
             return null;
         }
         
+        // Event modal functions
+        function showEventModal(event) {
+            const modal = document.getElementById('eventModal');
+            const body = document.getElementById('eventModalBody');
+            
+            const eventData = event.event_data || {};
+            const contactId = eventData.contact_id || null;
+            const contactName = contactId ? (contactNameCache[contactId] || 'Unknown') : null;
+            
+            let html = '';
+            
+            // Basic Info
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">Event ID</div><div class="event-modal-field-value" style="font-family: monospace; font-size: 0.9rem;">' + escapeHtml(event.event_id) + '</div></div>';
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">Event Type</div><div class="event-modal-field-value">' + escapeHtml(event.event_type) + '</div></div>';
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">Aggregate Type</div><div class="event-modal-field-value">' + escapeHtml(event.aggregate_type) + '</div></div>';
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">Aggregate ID</div><div class="event-modal-field-value" style="font-family: monospace; font-size: 0.9rem;">' + escapeHtml(event.aggregate_id) + '</div></div>';
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">Created At</div><div class="event-modal-field-value">' + formatDateTime(event.created_at) + '</div></div>';
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">User</div><div class="event-modal-field-value">' + escapeHtml(eventData.username || event.user_email || event.user_id) + '</div></div>';
+            
+            // Contact Info
+            if (event.aggregate_type === 'contact') {
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Contact Name</div><div class="event-modal-field-value">' + escapeHtml(eventData.name || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Username</div><div class="event-modal-field-value">' + escapeHtml(eventData.username || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Phone</div><div class="event-modal-field-value">' + escapeHtml(eventData.phone || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Email</div><div class="event-modal-field-value">' + escapeHtml(eventData.email || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Notes</div><div class="event-modal-field-value">' + escapeHtml(eventData.notes || 'N/A') + '</div></div>';
+            } else if (event.aggregate_type === 'transaction') {
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Contact</div><div class="event-modal-field-value">' + escapeHtml(contactName || 'Unknown') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Type</div><div class="event-modal-field-value">' + escapeHtml(eventData.type || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Direction</div><div class="event-modal-field-value">' + escapeHtml(eventData.direction || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Amount</div><div class="event-modal-field-value">' + (eventData.amount ? eventData.amount.toLocaleString('en-US') + ' ' + (eventData.currency || 'IQD') : 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Transaction Date</div><div class="event-modal-field-value">' + escapeHtml(eventData.transaction_date || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Due Date</div><div class="event-modal-field-value">' + escapeHtml(eventData.due_date || 'N/A') + '</div></div>';
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Description</div><div class="event-modal-field-value">' + escapeHtml(eventData.description || 'N/A') + '</div></div>';
+            }
+            
+            // Total Debt
+            if (eventData.total_debt !== null && eventData.total_debt !== undefined) {
+                const debt = Number(eventData.total_debt);
+                if (!isNaN(debt) && isFinite(debt)) {
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Total Debt (after this event)</div><div class="event-modal-field-value" style="font-weight: 600; color: #6750A4; font-size: 1.1rem;">' + Math.round(debt).toLocaleString('en-US') + ' IQD</div></div>';
+                }
+            }
+            
+            // Comment
+            if (eventData.comment) {
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Comment</div><div class="event-modal-field-value">' + escapeHtml(eventData.comment) + '</div></div>';
+            }
+            
+            // Full Event Data
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">Full Event Data (JSON)</div><pre style="background: #E7E0EC; padding: 1rem; border-radius: 4px; overflow: auto; max-height: 300px; font-size: 0.85rem; margin-top: 0.5rem;">' + escapeHtml(JSON.stringify(event, null, 2)) + '</pre></div>';
+            
+            body.innerHTML = html;
+            modal.classList.add('active');
+        }
+        
+        function closeEventModal(e) {
+            if (e && e.target.id !== 'eventModal' && !e.target.classList.contains('event-modal-close')) {
+                return;
+            }
+            const modal = document.getElementById('eventModal');
+            modal.classList.remove('active');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
         function renderEvents(events) {
             return events.map(event => {
                     // event.event_data is already a parsed JSON object from the API
@@ -893,29 +1110,24 @@
                         }
                     }
                     
-                    // Determine contact name
+                    // Determine contact name - show name instead of ID
                     let contactName = null;
                     if (event.aggregate_type === 'contact') {
-                        contactName = name;
+                        contactName = name || 'Unknown';
                     } else if (contactId) {
-                        // For transactions, we'll show contact ID for now (could be enhanced with async lookup)
-                        contactName = contactNameCache[contactId] || `${contactId.substring(0, 8)}...`;
+                        contactName = contactNameCache[contactId] || 'Unknown Contact';
                     }
                     
-                    // Build summary based on event type
-                    let summary = '';
-                    if (event.aggregate_type === 'transaction') {
-                        if (amount !== null && direction) {
-                            const amountStr = type === 'money' ? 
-                                `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : 
-                                `${amount} item(s)`;
-                            const directionText = direction === 'lent' ? 'Gave' : 'Received';
-                            summary = `${directionText} ${amountStr}`;
+                    // User display - show username only (no ID)
+                    const userDisplay = username || event.user_email || 'N/A';
+                    
+                    // Format total debt - show the value saved in database at event execution time
+                    let totalDebtDisplay = 'N/A';
+                    if (totalDebt !== null && totalDebt !== undefined) {
+                        const num = Number(totalDebt);
+                        if (!isNaN(num) && isFinite(num)) {
+                            totalDebtDisplay = `${Math.round(num).toLocaleString('en-US')} IQD`;
                         }
-                    } else if (event.aggregate_type === 'contact') {
-                        const contactNameText = name || 'Unknown';
-                        const userText = username || 'N/A';
-                        summary = `${contactNameText} (User: ${userText})`;
                     }
                     
                     // Get event type badge color
@@ -939,77 +1151,31 @@
                     // Format aggregate type
                     const aggregateDisplay = event.aggregate_type.charAt(0).toUpperCase() + event.aggregate_type.slice(1);
                     
-                    // User display
-                    const userDisplay = event.user_email || event.user_id.substring(0, 8) + '...';
-                    
-                    // Format total debt - show the value saved in database at event execution time
-                    let totalDebtDisplay = 'N/A';
-                    if (totalDebt !== null && totalDebt !== undefined) {
-                        const num = Number(totalDebt);
-                        if (!isNaN(num) && isFinite(num)) {
-                            totalDebtDisplay = `${Math.round(num).toLocaleString('en-US')} IQD`;
-                        }
-                    }
-                    
-                    // Build details summary (show key fields inline)
-                    let detailsSummary = [];
-                    if (contactName) detailsSummary.push(`Contact: ${contactName}`);
-                    if (summary) detailsSummary.push(`Summary: ${summary}`);
-                    if (amount !== null && event.aggregate_type === 'transaction') {
-                        const amountStr = type === 'money' ? 
-                            `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : 
-                            `${amount} item(s)`;
-                        detailsSummary.push(`Amount: ${amountStr}`);
-                    }
-                    if (direction && event.aggregate_type === 'transaction') {
-                        detailsSummary.push(`Direction: ${direction}`);
-                    }
-                    if (description) {
-                        detailsSummary.push(`Description: ${description.substring(0, 50)}${description.length > 50 ? '...' : ''}`);
-                    }
-                    
-                    // Format event data for full display
-                    const displayData = {...eventData};
-                    delete displayData.comment;
-                    delete displayData.timestamp;
-                    delete displayData.user_id;
+                    // Store event data as JSON for modal (properly escaped)
+                    const eventJson = JSON.stringify(event).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
                     
                     return `
-                        <tr>
-                            <td style="white-space: nowrap; font-size: 0.8rem;">
+                        <tr class="event-row" onclick='showEventModal(${JSON.stringify(event)})' data-event-id="${event.event_id}">
+                            <td style="white-space: nowrap; font-size: 0.75rem; padding: 0.4rem 0.5rem;">
                                 ${formatDateTime(event.created_at)}
                             </td>
-                            <td>
-                                <span class="${badgeClass}">${displayEventType}</span>
+                            <td style="padding: 0.4rem 0.5rem;">
+                                <span class="${badgeClass}" style="font-size: 0.7rem;">${displayEventType}</span>
                             </td>
-                            <td style="font-size: 0.85rem;">
-                                <div><strong>${aggregateDisplay}</strong></div>
-                                ${contactName ? `<div class="event-name" style="font-size: 0.75rem; color: #79747E; margin-top: 0.15rem;">
-                                    <span style="color: #938F99;">👤</span> ${contactName}
-                                </div>` : ''}
-                                ${summary ? `<div class="event-summary" style="font-size: 0.75rem; color: #6750A4; font-weight: 500; margin-top: 0.15rem;">
-                                    ${summary}
-                                </div>` : ''}
+                            <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
+                                ${contactName || aggregateDisplay}
                             </td>
-                            <td style="font-size: 0.8rem; font-weight: 600; color: #6750A4; white-space: nowrap;">
+                            <td style="font-size: 0.75rem; font-weight: 600; color: #6750A4; white-space: nowrap; padding: 0.4rem 0.5rem;">
                                 ${totalDebtDisplay}
                             </td>
-                            <td style="font-size: 0.8rem;">
-                                <div style="font-weight: 500;">${userDisplay}</div>
-                                ${event.user_email ? `<div class="user-id" style="font-size: 0.7rem; color: #938F99; font-family: monospace;">${event.user_id.substring(0, 8)}...</div>` : ''}
+                            <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
+                                ${userDisplay}
                             </td>
-                            <td style="max-width: 200px; font-size: 0.8rem;">
-                                ${comment ? `
-                                    <div class="comment-box" style="padding: 0.35rem; background: rgba(103, 80, 164, 0.1); border-left: 2px solid #6750A4; border-radius: 4px; font-size: 0.8rem;">
-                                        ${comment}
-                                    </div>
-                                ` : '<em class="no-comment" style="color: #938F99; font-size: 0.75rem;">No comment</em>'}
+                            <td style="max-width: 150px; font-size: 0.7rem; padding: 0.4rem 0.5rem;">
+                                ${comment ? `<div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${comment.replace(/"/g, '&quot;')}">${comment.substring(0, 30)}${comment.length > 30 ? '...' : ''}</div>` : '<em style="color: #938F99;">-</em>'}
                             </td>
-                            <td style="font-size: 0.8rem;">
-                                <details style="cursor: pointer;">
-                                    <summary class="details-summary-link" style="color: #6750A4; user-select: none; font-size: 0.75rem;">View Data</summary>
-                                    <pre class="details-pre" style="max-width: 400px; max-height: 200px; overflow: auto; margin-top: 0.25rem; padding: 0.5rem; background: #E7E0EC; border-radius: 4px; font-size: 0.7rem; border: 1px solid #E7E0EC;">${JSON.stringify(displayData, null, 2)}</pre>
-                                </details>
+                            <td style="font-size: 0.7rem; padding: 0.4rem 0.5rem;">
+                                <span style="color: #6750A4; cursor: pointer;">View</span>
                             </td>
                         </tr>
                     `;
