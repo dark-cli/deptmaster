@@ -130,7 +130,7 @@ pub async fn get_events(
     // Filter by event_type (case-insensitive)
     if let Some(event_type) = &params.event_type {
         if !event_type.is_empty() {
-            query_builder.push(" AND UPPER(event_type) = UPPER(");
+            query_builder.push(" AND UPPER(e.event_type) = UPPER(");
             query_builder.push_bind(event_type);
             query_builder.push(")");
         }
@@ -139,7 +139,7 @@ pub async fn get_events(
     // Filter by aggregate_type
     if let Some(aggregate_type) = &params.aggregate_type {
         if !aggregate_type.is_empty() {
-            query_builder.push(" AND aggregate_type = ");
+            query_builder.push(" AND e.aggregate_type = ");
             query_builder.push_bind(aggregate_type);
         }
     }
@@ -147,7 +147,7 @@ pub async fn get_events(
     // Filter by user_id
     if let Some(user_id) = &params.user_id {
         if !user_id.is_empty() {
-            query_builder.push(" AND user_id::text = ");
+            query_builder.push(" AND e.user_id::text = ");
             query_builder.push_bind(user_id);
         }
     }
@@ -155,14 +155,14 @@ pub async fn get_events(
     // Filter by date range
     if let Some(date_from) = &params.date_from {
         if !date_from.is_empty() {
-            query_builder.push(" AND created_at >= ");
+            query_builder.push(" AND e.created_at >= ");
             query_builder.push_bind(date_from);
         }
     }
     
     if let Some(date_to) = &params.date_to {
         if !date_to.is_empty() {
-            query_builder.push(" AND created_at <= ");
+            query_builder.push(" AND e.created_at <= ");
             query_builder.push_bind(date_to);
         }
     }
@@ -171,17 +171,17 @@ pub async fn get_events(
     if let Some(search) = &params.search {
         if !search.is_empty() {
             let search_pattern = format!("%{}%", search);
-            query_builder.push(" AND (event_data::text ILIKE ");
+            query_builder.push(" AND (e.event_data::text ILIKE ");
             query_builder.push_bind(search_pattern.clone());
-            query_builder.push(" OR event_type ILIKE ");
+            query_builder.push(" OR e.event_type ILIKE ");
             query_builder.push_bind(search_pattern.clone());
-            query_builder.push(" OR aggregate_type ILIKE ");
+            query_builder.push(" OR e.aggregate_type ILIKE ");
             query_builder.push_bind(search_pattern);
             query_builder.push(")");
         }
     }
     
-    query_builder.push(" ORDER BY created_at DESC LIMIT ");
+    query_builder.push(" ORDER BY e.created_at DESC LIMIT ");
     query_builder.push_bind(limit);
     query_builder.push(" OFFSET ");
     query_builder.push_bind(offset);
