@@ -607,6 +607,7 @@
                             <th>When</th>
                             <th>Event Type</th>
                             <th>Aggregate</th>
+                            <th>Amount</th>
                             <th>Debt</th>
                             <th>User</th>
                             <th>Comment</th>
@@ -1038,7 +1039,7 @@
             }
             
             // Full Event Data
-            html += '<div class="event-modal-field"><div class="event-modal-field-label">Full Event Data (JSON)</div><pre style="background: #E7E0EC; padding: 1rem; border-radius: 4px; overflow: auto; max-height: 300px; font-size: 0.85rem; margin-top: 0.5rem;">' + escapeHtml(JSON.stringify(event, null, 2)) + '</pre></div>';
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">Full Event Data (JSON)</div><pre class="details-pre" style="padding: 1rem; border-radius: 4px; overflow: auto; max-height: 300px; font-size: 0.85rem; margin-top: 0.5rem;">' + escapeHtml(JSON.stringify(event, null, 2)) + '</pre></div>';
             
             body.innerHTML = html;
             modal.classList.add('active');
@@ -1151,6 +1152,17 @@
                     // Format aggregate type
                     const aggregateDisplay = event.aggregate_type.charAt(0).toUpperCase() + event.aggregate_type.slice(1);
                     
+                    // Format amount display
+                    let amountDisplay = '-';
+                    if (event.aggregate_type === 'transaction' && amount !== null) {
+                        const amountNum = Number(amount);
+                        if (!isNaN(amountNum) && isFinite(amountNum)) {
+                            const currency = eventData.currency || 'IQD';
+                            const directionText = direction === 'lent' ? 'Gave' : 'Received';
+                            amountDisplay = `${directionText} ${Math.round(amountNum).toLocaleString('en-US')} ${currency}`;
+                        }
+                    }
+                    
                     // Store event data as JSON for modal (properly escaped)
                     const eventJson = JSON.stringify(event).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
                     
@@ -1164,6 +1176,9 @@
                             </td>
                             <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
                                 ${contactName || aggregateDisplay}
+                            </td>
+                            <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
+                                ${amountDisplay}
                             </td>
                             <td style="font-size: 0.75rem; font-weight: 600; color: #6750A4; white-space: nowrap; padding: 0.4rem 0.5rem;">
                                 ${totalDebtDisplay}
