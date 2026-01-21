@@ -1459,6 +1459,12 @@
             const isDark = document.body.classList.toggle('dark-mode');
             localStorage.setItem('darkMode', isDark);
             darkModeToggle.textContent = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+            // Update chart colors when dark mode changes
+            setTimeout(() => {
+                if (debtChart) {
+                    loadDebtChart();
+                }
+            }, 100);
         });
 
         // Load data on page load
