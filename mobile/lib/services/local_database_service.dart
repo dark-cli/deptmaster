@@ -339,7 +339,7 @@ class LocalDatabaseService {
         eventType: 'CREATED',
         eventData: eventData,
       );
-
+      
       // Rebuild projection (this will recalculate balances)
       await ProjectionService.rebuildProjections();
       
@@ -426,7 +426,7 @@ class LocalDatabaseService {
         eventType: 'UPDATED',
         eventData: eventData,
       );
-
+      
       // Rebuild projection (this will recalculate balances)
       await ProjectionService.rebuildProjections();
       
@@ -499,7 +499,7 @@ class LocalDatabaseService {
         eventType: 'DELETED',
         eventData: eventData,
       );
-
+      
       // Rebuild projection (this will recalculate balances)
       await ProjectionService.rebuildProjections();
       

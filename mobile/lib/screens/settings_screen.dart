@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../utils/app_colors.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -92,8 +93,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           Consumer(
             builder: (context, ref, child) {
               final flipColors = ref.watch(flipColorsProvider);
-              final giveColor = flipColors ? Colors.red : Colors.green;
-              final receivedColor = flipColors ? Colors.green : Colors.red;
+              final isDark = Theme.of(context).brightness == Brightness.dark;
+              // Standardized colors: Received = green (positive), Gave = red (negative)
+              final gaveColor = AppColors.getGiveColor(flipColors, isDark);
+              final receivedColor = AppColors.getReceivedColor(flipColors, isDark);
               
               return SwitchListTile(
                 title: const Text('Flip Colors'),
@@ -108,15 +111,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           width: 16,
                           height: 16,
                           decoration: BoxDecoration(
-                            color: giveColor,
+                            color: gaveColor,
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.grey, width: 1),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        const Text(
-                          'Give',
-                          style: TextStyle(fontSize: 12),
+                        Text(
+                          '(-) Gave',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: gaveColor,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                         const SizedBox(width: 16),
                         Container(
@@ -129,9 +136,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        const Text(
-                          'Received',
-                          style: TextStyle(fontSize: 12),
+                        Text(
+                          '(+) Received',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: receivedColor,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ],
                     ),

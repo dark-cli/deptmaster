@@ -31,6 +31,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
   final _descriptionController = TextEditingController();
+  bool _amountHasText = false;
   
   Contact? _selectedContact;
   TransactionDirection _direction = TransactionDirection.owed;
@@ -61,8 +62,16 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
     _selectedDate = widget.transaction.transactionDate;
     _dueDate = widget.transaction.dueDate;
     _dueDateSwitchEnabled = widget.transaction.dueDate != null;
+    _amountHasText = _amountController.text.isNotEmpty;
+    _amountController.addListener(_onAmountChanged);
     _loadContacts();
     _loadSettings();
+  }
+
+  void _onAmountChanged() {
+    setState(() {
+      _amountHasText = _amountController.text.isNotEmpty;
+    });
   }
 
   Future<void> _loadSettings() async {
@@ -191,6 +200,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
   @override
   void dispose() {
+    _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     _descriptionController.dispose();
     super.dispose();
@@ -326,20 +336,21 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                   ),
             const SizedBox(height: 16),
             
-            // Direction selector - "Give" or "Received"
+            // Direction selector - "Gave" or "Received"
             Consumer(
               builder: (context, ref, child) {
                 final flipColors = ref.watch(flipColorsProvider);
                 final isDark = Theme.of(context).brightness == Brightness.dark;
-                final giveColor = AppColors.getGiveColor(flipColors, isDark);
+                // Standardized: Gave (lent) = red, Received (owed) = green
+                final gaveColor = AppColors.getGiveColor(flipColors, isDark);
                 final receivedColor = AppColors.getReceivedColor(flipColors, isDark);
                 
                 return SegmentedButton<TransactionDirection>(
                   segments: [
                     ButtonSegment(
                       value: TransactionDirection.lent,
-                      label: const Text('Give'),
-                      icon: Icon(Icons.arrow_upward, color: giveColor),
+                      label: const Text('Gave'),
+                      icon: Icon(Icons.arrow_upward, color: gaveColor),
                     ),
                     ButtonSegment(
                       value: TransactionDirection.owed,
@@ -362,9 +373,21 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
             TextFormField(
               controller: _amountController,
               autofocus: true,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Amount (IQD) *',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                suffixIcon: _amountHasText
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 20),
+                        onPressed: () {
+                          _amountController.clear();
+                          setState(() {
+                            _amountHasText = false;
+                          });
+                        },
+                        tooltip: 'Clear',
+                      )
+                    : null,
               ),
               keyboardType: TextInputType.number,
               inputFormatters: [

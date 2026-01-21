@@ -28,6 +28,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedIndex = 2; // Dashboard is default (index 2)
   bool _biometricEnabled = false;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
@@ -62,17 +63,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     return GradientBackground(
       child: Scaffold(
+        key: _scaffoldKey,
         backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(_getAppBarTitle()),
-        ),
         drawer: _buildDrawer(),
         body: IndexedStack(
           index: _selectedIndex,
-          children: const [
-            TransactionsScreen(), // Transactions tab (index 0)
-            ContactsScreen(), // Contacts tab (index 1)
-            DashboardScreen(), // Dashboard tab (index 2)
+          children: [
+            TransactionsScreen(
+              onOpenDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+            ), // Transactions tab (index 0)
+            ContactsScreen(
+              onOpenDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+            ), // Contacts tab (index 1)
+            DashboardScreen(
+              onOpenDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+            ), // Dashboard tab (index 2)
           ],
         ),
         floatingActionButton: _buildFloatingActionButton(),

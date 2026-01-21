@@ -26,11 +26,11 @@ class ContactListItem extends StatelessWidget {
     if (balance == 0) {
       return 'NO DEBT';
     } else if (balance < 0) {
-      // Negative balance = they owe you (you lent)
-      return flipColors ? 'YOU OWE' : 'YOU LENT';
+      // Negative balance = they owe you = Received (positive for you)
+      return 'RECEIVED';
     } else {
-      // Positive balance = you owe them (you received)
-      return flipColors ? 'YOU LENT' : 'YOU OWE';
+      // Positive balance = you owe them = Gave (negative for you)
+      return 'GAVE';
     }
   }
 
@@ -39,10 +39,10 @@ class ContactListItem extends StatelessWidget {
     if (balance == 0) {
       return ThemeColors.gray(context, shade: 600);
     } else if (balance < 0) {
-      // Negative balance = money received (owed to us)
+      // Negative balance = Received (positive for you) = green
       return AppColors.getReceivedColor(flipColors, isDark);
     } else {
-      // Positive balance = money given (we owe)
+      // Positive balance = Gave (negative for you) = red
       return AppColors.getGiveColor(flipColors, isDark);
     }
   }

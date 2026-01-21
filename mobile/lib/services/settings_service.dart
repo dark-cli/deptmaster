@@ -45,7 +45,7 @@ class SettingsService {
   // Default direction: 'give' or 'received'
   static Future<String> getDefaultDirection() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyDefaultDirection) ?? 'give';
+    return prefs.getString(_keyDefaultDirection) ?? 'give'; // Default to 'give' (Gave)
   }
 
   static Future<void> setDefaultDirection(String direction) async {
@@ -103,7 +103,7 @@ class SettingsService {
   // Due date enabled
   static Future<bool> getDueDateEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyDueDateEnabled) ?? false;
+    return prefs.getBool(_keyDueDateEnabled) ?? true; // Default ON
   }
 
   static Future<void> setDueDateEnabled(bool enabled) async {
@@ -132,7 +132,7 @@ class SettingsService {
   // Default due date days
   static Future<int> getDefaultDueDateDays() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_keyDefaultDueDateDays) ?? 30;
+    return prefs.getInt(_keyDefaultDueDateDays) ?? 14; // Default 14 days (2 weeks)
   }
 
   static Future<void> setDefaultDueDateDays(int days) async {
@@ -161,7 +161,7 @@ class SettingsService {
   // Default due date switch state (on/off in transaction form)
   static Future<bool> getDefaultDueDateSwitch() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyDefaultDueDateSwitch) ?? false;
+    return prefs.getBool(_keyDefaultDueDateSwitch) ?? true; // Default ON
   }
 
   static Future<void> setDefaultDueDateSwitch(bool enabled) async {
@@ -211,9 +211,9 @@ class SettingsService {
         await prefs.setBool(_keyDarkMode, data['dark_mode'] ?? true);
         await prefs.setString(_keyDefaultDirection, data['default_direction'] ?? 'give');
         await prefs.setBool(_keyFlipColors, data['flip_colors'] ?? false);
-        await prefs.setBool(_keyDueDateEnabled, data['due_date_enabled'] ?? false);
-        await prefs.setInt(_keyDefaultDueDateDays, data['default_due_date_days'] ?? 30);
-        await prefs.setBool(_keyDefaultDueDateSwitch, data['default_due_date_switch'] ?? false);
+        await prefs.setBool(_keyDueDateEnabled, data['due_date_enabled'] ?? true); // Default ON
+        await prefs.setInt(_keyDefaultDueDateDays, data['default_due_date_days'] ?? 14); // Default 14 days
+        await prefs.setBool(_keyDefaultDueDateSwitch, data['default_due_date_switch'] ?? true); // Default ON
       }
     } catch (e) {
       print('⚠️ Failed to load settings from backend: $e');

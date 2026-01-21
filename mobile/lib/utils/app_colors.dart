@@ -53,13 +53,14 @@ class AppColors {
   static const Color darkGrayDark = Color(0xFFCAC4D0); // On surface variant
 
   // Semantic Colors for Give/Received - Material 3 defaults
-  // Light Mode: Give = red (error), Received = green (success)
-  static const Color lightGive = Color(0xFFBA1A1A); // Material 3 error - red
-  static const Color lightReceived = Color(0xFF16A34A); // Green 600 - success
+  // Standardized: Received = green (positive), Gave = red (negative)
+  // Light Mode: Gave = red (negative), Received = green (positive)
+  static const Color lightGive = Color(0xFFBA1A1A); // Material 3 error - red (negative)
+  static const Color lightReceived = Color(0xFF16A34A); // Green 600 - success (positive)
   
-  // Dark Mode: Give = red (error), Received = green (success)
-  static const Color darkGive = Color(0xFFFFB4AB); // Material 3 error - light red
-  static const Color darkReceived = Color(0xFF4ADE80); // Green 400 - success
+  // Dark Mode: Gave = red (negative), Received = green (positive)
+  static const Color darkGive = Color(0xFFFFB4AB); // Material 3 error - light red (negative)
+  static const Color darkReceived = Color(0xFF4ADE80); // Green 400 - success (positive)
   
   // Semantic Colors (Balance) - Respects flipColors setting
   // These will be used with Consumer to watch flipColorsProvider
@@ -75,18 +76,22 @@ class AppColors {
     }
   }
   
-  // Get Give color (money going out)
+  // Get Gave color (negative, red) - maps to TransactionDirection.lent
   static Color getGiveColor(bool flipColors, bool isDark) {
-    return flipColors
-        ? (isDark ? darkReceived : lightReceived)
-        : (isDark ? darkGive : lightGive);
+    // When flipColors is true, swap the colors
+    if (flipColors) {
+      return isDark ? darkReceived : lightReceived; // Swapped to green
+    }
+    return isDark ? darkGive : lightGive; // Default: red
   }
   
-  // Get Received color (money coming in)
+  // Get Received color (positive, green) - maps to TransactionDirection.owed
   static Color getReceivedColor(bool flipColors, bool isDark) {
-    return flipColors
-        ? (isDark ? darkGive : lightGive)
-        : (isDark ? darkReceived : lightReceived);
+    // When flipColors is true, swap the colors
+    if (flipColors) {
+      return isDark ? darkGive : lightGive; // Swapped to red
+    }
+    return isDark ? darkReceived : lightReceived; // Default: green
   }
 
   // Legacy support (deprecated - use theme colors instead)

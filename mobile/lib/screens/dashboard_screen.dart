@@ -19,7 +19,9 @@ import 'add_transaction_screen.dart';
 import '../utils/bottom_sheet_helper.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
-  const DashboardScreen({super.key});
+  final VoidCallback? onOpenDrawer;
+  
+  const DashboardScreen({super.key, this.onOpenDrawer});
 
   @override
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
@@ -177,6 +179,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dashboard'),
+        leading: widget.onOpenDrawer != null
+            ? IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: widget.onOpenDrawer,
+              )
+            : null,
       ),
       body: RefreshIndicator(
         onRefresh: () => _loadData(sync: true),
@@ -239,9 +247,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         );
         final balanceText = totalBalance < 0 ? '-$formatted' : '$formatted';
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final balanceColor = totalBalance < 0
-            ? AppColors.getReceivedColor(flipColors, isDark)
-            : AppColors.getGiveColor(flipColors, isDark);
+        // Standardized: Positive balance = Received (green), Negative balance = Gave (red)
+        final balanceColor = totalBalance >= 0
+            ? AppColors.getReceivedColor(flipColors, isDark) // Positive = Received = green
+            : AppColors.getGiveColor(flipColors, isDark); // Negative = Gave = red
         
         return GradientCard(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -308,9 +317,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         final topCredits = positiveBalances.take(5).toList();
         
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        // Apply flip colors: debts should be opposite of credits
-        final debtColor = AppColors.getReceivedColor(flipColors, isDark);
-        final creditColor = AppColors.getGiveColor(flipColors, isDark);
+        // Standardized: Debts (negative balance, you owe) = Gave = red, Credits (positive balance, they owe you) = Received = green
+        final debtColor = AppColors.getGiveColor(flipColors, isDark); // Debts = Gave = red
+        final creditColor = AppColors.getReceivedColor(flipColors, isDark); // Credits = Received = green
         
         return GradientCard(
           padding: const EdgeInsets.all(16),
@@ -365,7 +374,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         mainAxisAlignment: MainAxisAlignment.start,
         children: [
                       Text(
-                        'You Owe',
+                        'Gave',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -465,7 +474,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         mainAxisAlignment: MainAxisAlignment.start,
         children: [
                       Text(
-                        'Owed to You',
+                        'Received',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),

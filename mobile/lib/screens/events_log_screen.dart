@@ -784,10 +784,28 @@ class _EventCardState extends State<_EventCard> {
       }
     } catch (e) {
       print('Error calculating total debt: $e');
-      if (mounted) {
-        setState(() {
-          _loadingTotalDebt = false;
-        });
+      // Fallback: Calculate current total debt if time-based calculation fails
+      try {
+        final contacts = await LocalDatabaseServiceV2.getContacts();
+        final transactions = await LocalDatabaseServiceV2.getTransactions();
+        int calculatedTotalDebt = 0;
+        for (final contact in contacts) {
+          calculatedTotalDebt += contact.balance;
+        }
+        if (mounted) {
+          setState(() {
+            _totalDebt = calculatedTotalDebt;
+            _loadingTotalDebt = false;
+          });
+        }
+      } catch (e2) {
+        print('Error calculating fallback total debt: $e2');
+        if (mounted) {
+          setState(() {
+            _totalDebt = 0; // Show 0 as last resort
+            _loadingTotalDebt = false;
+          });
+        }
       }
     }
   }
@@ -845,15 +863,15 @@ class _EventCardState extends State<_EventCard> {
     }
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         leading: Container(
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
             color: _getEventColor(event.eventType, isDark).withOpacity(0.2),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(6),
           ),
           child: Center(
             child: Text(
@@ -861,7 +879,7 @@ class _EventCardState extends State<_EventCard> {
               style: TextStyle(
                 color: _getEventColor(event.eventType, isDark),
                 fontWeight: FontWeight.bold,
-                fontSize: 14,
+                fontSize: 12,
               ),
             ),
           ),
@@ -876,36 +894,36 @@ class _EventCardState extends State<_EventCard> {
                     _formatEventType(event.eventType),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                      fontSize: 13,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                   decoration: BoxDecoration(
                     color: isDark
                         ? AppColors.darkSurfaceVariant
                         : AppColors.lightSurfaceVariant,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     event.aggregateType.toUpperCase(),
                     style: const TextStyle(
-                      fontSize: 9,
+                      fontSize: 8,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(
               widget.dateFormat.format(event.timestamp),
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 10,
                 color: ThemeColors.gray(context),
               ),
             ),
@@ -958,59 +976,58 @@ class _EventCardState extends State<_EventCard> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              // Total Debt stamp
-              if (_totalDebt != null || _loadingTotalDebt)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
+              // Total Debt stamp - always show
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? AppColors.darkPrimary.withOpacity(0.2)
+                      : AppColors.lightPrimary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
                     color: isDark
-                        ? AppColors.darkPrimary.withOpacity(0.2)
-                        : AppColors.lightPrimary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
+                        ? AppColors.darkPrimary
+                        : AppColors.lightPrimary,
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.account_balance_wallet,
+                      size: 10,
                       color: isDark
                           ? AppColors.darkPrimary
                           : AppColors.lightPrimary,
-                      width: 1,
                     ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.account_balance_wallet,
-                        size: 12,
-                        color: isDark
-                            ? AppColors.darkPrimary
-                            : AppColors.lightPrimary,
-                      ),
-                      const SizedBox(width: 4),
-                      _loadingTotalDebt
-                          ? SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  isDark
-                                      ? AppColors.darkPrimary
-                                      : AppColors.lightPrimary,
-                                ),
-                              ),
-                            )
-                          : Text(
-                              'Total Debt: ${NumberFormat('#,###').format(_totalDebt ?? 0)} IQD',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
+                    const SizedBox(width: 3),
+                    _loadingTotalDebt
+                        ? SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                isDark
                                     ? AppColors.darkPrimary
                                     : AppColors.lightPrimary,
                               ),
                             ),
-                    ],
-                  ),
+                          )
+                        : Text(
+                            '${NumberFormat('#,###').format(_totalDebt ?? 0)} IQD',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? AppColors.darkPrimary
+                                  : AppColors.lightPrimary,
+                            ),
+                          ),
+                  ],
                 ),
+              ),
               const SizedBox(height: 4),
               // Sync status
               Row(

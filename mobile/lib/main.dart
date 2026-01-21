@@ -73,7 +73,7 @@ void main() async {
       // Connect to WebSocket for real-time updates (silently fails if offline)
       // Use runZoned to catch async exceptions
       runZoned(() {
-        RealtimeService.connect().catchError((e) {
+      RealtimeService.connect().catchError((e) {
           // Error is handled by RealtimeService error callback
         });
       }, onError: (error, stack) {
@@ -95,7 +95,7 @@ void main() async {
   // For web, also connect WebSocket (only if backend is configured)
   if (kIsWeb && isBackendConfigured) {
     runZoned(() {
-      RealtimeService.connect().catchError((e) {
+    RealtimeService.connect().catchError((e) {
         // Error is handled by RealtimeService error callback
       });
     }, onError: (error, stack) {

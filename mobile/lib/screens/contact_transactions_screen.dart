@@ -299,11 +299,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                       const SizedBox(height: 4),
                       Consumer(
                         builder: (context, ref, child) {
-                          final flipColors = ref.watch(flipColorsProvider);
                           final isDark = Theme.of(context).brightness == Brightness.dark;
-                          final balanceColor = totalBalance < 0
-                              ? AppColors.getReceivedColor(flipColors, isDark)
-                              : AppColors.getGiveColor(flipColors, isDark);
+                          // Standardized: Positive balance = Received (green), Negative balance = Gave (red)
+                          final balanceColor = totalBalance >= 0
+                              ? AppColors.getReceivedColor(false, isDark) // Positive = Received = green
+                              : AppColors.getGiveColor(false, isDark); // Negative = Gave = red
                           return Text(
                             _formatBalance(totalBalance),
                             style: Theme.of(context).textTheme.headlineLarge?.copyWith(
@@ -548,17 +548,15 @@ class _TransactionListItem extends StatelessWidget {
       builder: (context, ref, child) {
         final flipColors = ref.watch(flipColorsProvider);
         final dateFormat = DateFormat('MMM d, y');
-        final isOwed = transaction.direction == TransactionDirection.owed;
+        final isReceived = transaction.direction == TransactionDirection.owed; // owed = Received (positive, green)
+        final isGave = transaction.direction == TransactionDirection.lent; // lent = Gave (negative, red)
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        final color = flipColors
-            ? (isOwed 
-                ? AppColors.getReceivedColor(flipColors, isDark)
-                : AppColors.getGiveColor(flipColors, isDark))
-            : (isOwed 
-                ? AppColors.getGiveColor(flipColors, isDark)
-                : AppColors.getReceivedColor(flipColors, isDark));
+        // Standardized: Received (owed) = green, Gave (lent) = red (respects flipColors)
+        final color = isReceived 
+            ? AppColors.getReceivedColor(flipColors, isDark) // Received = green (positive)
+            : AppColors.getGiveColor(flipColors, isDark); // Gave = red (negative)
         
-        return _buildTransactionItem(context, dateFormat, color, flipColors);
+        return _buildTransactionItem(context, dateFormat, color);
       },
     );
   }
@@ -571,18 +569,18 @@ class _TransactionListItem extends StatelessWidget {
     );
   }
 
-  String _getStatus(TransactionDirection direction, bool flipColors) {
-    // For transactions: "owed" = you owe them (GIVE), "lent" = they owe you (RECEIVED)
+  String _getStatus(TransactionDirection direction) {
+    // Standardized: owed = Received (positive), lent = Gave (negative)
     if (direction == TransactionDirection.owed) {
-      return flipColors ? 'YOU LENT' : 'YOU OWE';
+      return 'RECEIVED'; // Received = positive
     } else {
-      return flipColors ? 'YOU OWE' : 'YOU LENT';
+      return 'GAVE'; // Gave = negative
     }
   }
 
-  Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color, bool flipColors) {
+  Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color) {
     final amount = transaction.amount;
-    final status = _getStatus(transaction.direction, flipColors);
+    final status = _getStatus(transaction.direction);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),

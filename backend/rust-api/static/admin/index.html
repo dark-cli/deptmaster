@@ -28,6 +28,9 @@
             color: white;
             padding: 1rem 2rem;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         body.dark-mode .header {
@@ -36,6 +39,22 @@
 
         .header h1 {
             font-size: 1.5rem;
+            margin: 0;
+        }
+
+        .header .dark-mode-toggle {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.3s;
+        }
+
+        .header .dark-mode-toggle:hover {
+            background: rgba(255,255,255,0.3);
         }
 
         .container {
@@ -146,7 +165,7 @@
         }
 
         th, td {
-            padding: 1rem;
+            padding: 0.5rem 0.75rem;
             text-align: left;
             border-bottom: 1px solid #E7E0EC; /* Material 3 light surface variant */
         }
@@ -382,7 +401,7 @@
 <body>
     <div class="header">
         <h1>🔍 Debt Tracker - Admin Panel</h1>
-        <button id="darkModeToggle" style="position: absolute; right: 2rem; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.2); border: none; color: white; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;">
+        <button id="darkModeToggle" class="dark-mode-toggle">
             🌙 Dark Mode
         </button>
     </div>
@@ -492,6 +511,7 @@
                             <th>When</th>
                             <th>Event Type</th>
                             <th>Aggregate</th>
+                            <th>Debt</th>
                             <th>User</th>
                             <th>Comment</th>
                             <th>Details</th>
@@ -606,10 +626,13 @@
         let wsConnection = null;
         let pollingInterval = null;
         let isUpdating = false;
+        let currentTotalDebt = null; // Store current total debt for fallback in events
 
         async function loadData() {
+            // Load stats first to populate currentTotalDebt
+            await loadStats();
+            // Then load events (which will use currentTotalDebt as fallback)
             await Promise.all([
-                loadStats(),
                 loadEvents(),
                 loadEventStoreStreams(),
                 loadContacts(),
@@ -644,7 +667,9 @@
 
                 document.getElementById('totalContacts').textContent = contacts.length;
                 document.getElementById('totalTransactions').textContent = transactions.length;
-                document.getElementById('totalDebt').textContent = `${formatAmount(totalDebt)} IQD`;
+                const totalDebtText = `${formatAmount(totalDebt)} IQD`;
+                document.getElementById('totalDebt').textContent = totalDebtText;
+                currentTotalDebt = totalDebt; // Store for fallback in events
                 document.getElementById('pendingReminders').textContent = '0'; // TODO
             } catch (error) {
                 console.error('Error loading stats:', error);
@@ -818,6 +843,7 @@
         
         function renderEvents(events) {
             return events.map(event => {
+                    // event.event_data is already a parsed JSON object from the API
                     const eventData = event.event_data || {};
                     const comment = eventData.comment || eventData.Comment || null;
                     const name = eventData.name || eventData.Name || null;
@@ -827,7 +853,45 @@
                     const description = eventData.description || null;
                     const contactId = eventData.contact_id || null;
                     const username = eventData.username || eventData.Username || null;
-                    const totalDebt = eventData.total_debt !== undefined ? eventData.total_debt : null;
+                    // Get total_debt from event_data (this is the value saved in the database at event execution time)
+                    let totalDebt = null;
+                    
+                    // eventData is already a parsed JSON object from the database
+                    if (eventData && typeof eventData === 'object') {
+                        // Check for total_debt (snake_case - as stored in database)
+                        if (eventData.hasOwnProperty('total_debt')) {
+                            totalDebt = eventData.total_debt;
+                        }
+                        // Also check for totalDebt (camelCase - just in case)
+                        else if (eventData.hasOwnProperty('totalDebt')) {
+                            totalDebt = eventData.totalDebt;
+                        }
+                    }
+                    
+                    // Convert to number if needed (handle string, number, or other types)
+                    if (totalDebt !== null && totalDebt !== undefined) {
+                        if (typeof totalDebt === 'number') {
+                            // Already a number, check if valid
+                            if (isNaN(totalDebt) || !isFinite(totalDebt)) {
+                                totalDebt = null;
+                            }
+                        } else if (typeof totalDebt === 'string') {
+                            const parsed = parseFloat(totalDebt);
+                            if (!isNaN(parsed) && isFinite(parsed)) {
+                                totalDebt = parsed;
+                            } else {
+                                totalDebt = null;
+                            }
+                        } else {
+                            // Try to convert other types to number
+                            const num = Number(totalDebt);
+                            if (!isNaN(num) && isFinite(num)) {
+                                totalDebt = num;
+                            } else {
+                                totalDebt = null;
+                            }
+                        }
+                    }
                     
                     // Determine contact name
                     let contactName = null;
@@ -845,7 +909,7 @@
                             const amountStr = type === 'money' ? 
                                 `${amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : 
                                 `${amount} item(s)`;
-                            const directionText = direction === 'lent' ? 'Lent' : 'Owed';
+                            const directionText = direction === 'lent' ? 'Gave' : 'Received';
                             summary = `${directionText} ${amountStr}`;
                         }
                     } else if (event.aggregate_type === 'contact') {
@@ -878,10 +942,14 @@
                     // User display
                     const userDisplay = event.user_email || event.user_id.substring(0, 8) + '...';
                     
-                    // Format total debt
-                    const totalDebtDisplay = totalDebt !== null ? 
-                        `${totalDebt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')} IQD` : 
-                        'Calculating...';
+                    // Format total debt - show the value saved in database at event execution time
+                    let totalDebtDisplay = 'N/A';
+                    if (totalDebt !== null && totalDebt !== undefined) {
+                        const num = Number(totalDebt);
+                        if (!isNaN(num) && isFinite(num)) {
+                            totalDebtDisplay = `${Math.round(num).toLocaleString('en-US')} IQD`;
+                        }
+                    }
                     
                     // Build details summary (show key fields inline)
                     let detailsSummary = [];
@@ -908,44 +976,39 @@
                     
                     return `
                         <tr>
-                            <td style="white-space: nowrap; font-size: 0.9rem;">
+                            <td style="white-space: nowrap; font-size: 0.8rem;">
                                 ${formatDateTime(event.created_at)}
                             </td>
                             <td>
                                 <span class="${badgeClass}">${displayEventType}</span>
                             </td>
-                            <td>
+                            <td style="font-size: 0.85rem;">
                                 <div><strong>${aggregateDisplay}</strong></div>
-                                ${contactName ? `<div class="event-name" style="font-size: 0.85rem; color: #79747E; margin-top: 0.25rem;">
+                                ${contactName ? `<div class="event-name" style="font-size: 0.75rem; color: #79747E; margin-top: 0.15rem;">
                                     <span style="color: #938F99;">👤</span> ${contactName}
                                 </div>` : ''}
-                                ${summary ? `<div class="event-summary" style="font-size: 0.85rem; color: #6750A4; font-weight: 500; margin-top: 0.25rem;">
+                                ${summary ? `<div class="event-summary" style="font-size: 0.75rem; color: #6750A4; font-weight: 500; margin-top: 0.15rem;">
                                     ${summary}
                                 </div>` : ''}
-                                ${totalDebt !== null ? `<div class="total-debt-stamp" style="display: inline-block; margin-top: 0.5rem; padding: 0.25rem 0.5rem; background: rgba(103, 80, 164, 0.15); border: 1px solid #6750A4; border-radius: 4px; font-size: 0.75rem; font-weight: 600; color: #6750A4;">
-                                    💰 Total Debt: ${totalDebtDisplay}
-                                </div>` : ''}
                             </td>
-                            <td style="font-size: 0.9rem;">
+                            <td style="font-size: 0.8rem; font-weight: 600; color: #6750A4; white-space: nowrap;">
+                                ${totalDebtDisplay}
+                            </td>
+                            <td style="font-size: 0.8rem;">
                                 <div style="font-weight: 500;">${userDisplay}</div>
-                                ${event.user_email ? `<div class="user-id" style="font-size: 0.75rem; color: #938F99; font-family: monospace;">${event.user_id.substring(0, 8)}...</div>` : ''}
+                                ${event.user_email ? `<div class="user-id" style="font-size: 0.7rem; color: #938F99; font-family: monospace;">${event.user_id.substring(0, 8)}...</div>` : ''}
                             </td>
-                            <td style="max-width: 250px;">
+                            <td style="max-width: 200px; font-size: 0.8rem;">
                                 ${comment ? `
-                                    <div class="comment-box" style="padding: 0.5rem; background: rgba(103, 80, 164, 0.1); border-left: 3px solid #6750A4; border-radius: 4px; font-size: 0.9rem;">
+                                    <div class="comment-box" style="padding: 0.35rem; background: rgba(103, 80, 164, 0.1); border-left: 2px solid #6750A4; border-radius: 4px; font-size: 0.8rem;">
                                         ${comment}
                                     </div>
-                                ` : '<em class="no-comment" style="color: #938F99; font-size: 0.85rem;">No comment</em>'}
+                                ` : '<em class="no-comment" style="color: #938F99; font-size: 0.75rem;">No comment</em>'}
                             </td>
-                            <td>
-                                ${detailsSummary.length > 0 ? `
-                                    <div class="details-summary" style="font-size: 0.85rem; color: #79747E; margin-bottom: 0.25rem;">
-                                        ${detailsSummary.join(' • ')}
-                                    </div>
-                                ` : ''}
-                                <details style="cursor: pointer; font-size: 0.85rem;">
-                                    <summary class="details-summary-link" style="color: #6750A4; user-select: none;">View Full Data</summary>
-                                    <pre class="details-pre" style="max-width: 500px; max-height: 300px; overflow: auto; margin-top: 0.5rem; padding: 0.75rem; background: #E7E0EC; border-radius: 4px; font-size: 0.8rem; border: 1px solid #E7E0EC;">${JSON.stringify(displayData, null, 2)}</pre>
+                            <td style="font-size: 0.8rem;">
+                                <details style="cursor: pointer;">
+                                    <summary class="details-summary-link" style="color: #6750A4; user-select: none; font-size: 0.75rem;">View Data</summary>
+                                    <pre class="details-pre" style="max-width: 400px; max-height: 200px; overflow: auto; margin-top: 0.25rem; padding: 0.5rem; background: #E7E0EC; border-radius: 4px; font-size: 0.7rem; border: 1px solid #E7E0EC;">${JSON.stringify(displayData, null, 2)}</pre>
                                 </details>
                             </td>
                         </tr>

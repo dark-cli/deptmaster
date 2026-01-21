@@ -628,7 +628,7 @@ pub async fn delete_transaction(
             Json(serde_json::json!({"error": "Transaction not found"})),
         ));
     }
-    
+
     // Validate comment is required for delete operations
     if payload.comment.trim().is_empty() {
         return Err((

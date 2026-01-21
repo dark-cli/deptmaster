@@ -8,6 +8,27 @@ use sqlx::Row;
 use crate::AppState;
 use sha2::{Sha256, Digest};
 
+/// Calculate total debt (sum of all contact balances) at current time
+async fn calculate_total_debt(state: &AppState) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE(SUM(
+            CASE 
+                WHEN t.direction = 'lent' THEN t.amount
+                WHEN t.direction = 'owed' THEN -t.amount
+                ELSE 0
+            END
+        )::BIGINT, 0)
+        FROM contacts_projection c
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
+        WHERE c.is_deleted = false
+        "#
+    )
+    .fetch_one(&*state.db_pool)
+    .await
+    .unwrap_or(0)
+}
+
 #[derive(Serialize)]
 pub struct SyncHashResponse {
     pub hash: String,
@@ -249,12 +270,13 @@ pub async fn post_sync_events(
             continue;
         }
 
-        // Insert new event
-        let result = sqlx::query(
+        // Insert event first (without total_debt - we'll add it after execution)
+        let insert_result = sqlx::query(
             r#"
             INSERT INTO events (event_id, user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (event_id) DO NOTHING
+            RETURNING event_id
             "#
         )
         .bind(event_id)
@@ -265,30 +287,45 @@ pub async fn post_sync_events(
         .bind(event.version)
         .bind(&event.event_data)
         .bind(timestamp)
-        .execute(&*state.db_pool)
+        .fetch_optional(&*state.db_pool)
         .await;
 
-        match result {
-            Ok(result) => {
-                if result.rows_affected() > 0 {
-                    accepted.push(event.id);
-                } else {
-                    // Conflict (duplicate)
-                    conflicts.push(event.id);
+        match insert_result {
+            Ok(Some(_)) => {
+                // Event inserted successfully - now apply it and calculate total_debt
+                accepted.push(event.id.clone());
+                
+                // Apply this single event to projections
+                if let Err(e) = apply_single_event_to_projections(&state, &event, aggregate_id, user_id, timestamp).await {
+                    tracing::error!("Error applying event to projections: {:?}", e);
+                    // Continue anyway - event is inserted
                 }
+                
+                // Calculate total_debt AFTER this event is applied
+                let total_debt_after = calculate_total_debt(&state).await;
+                
+                // Update this event with total_debt
+                sqlx::query(
+                    r#"
+                    UPDATE events
+                    SET event_data = jsonb_set(event_data, '{total_debt}', $1::jsonb)
+                    WHERE event_id = $2
+                    "#
+                )
+                .bind(serde_json::json!(total_debt_after))
+                .bind(event_id)
+                .execute(&*state.db_pool)
+                .await
+                .ok(); // Don't fail if update fails
+            }
+            Ok(None) => {
+                // Conflict (duplicate)
+                conflicts.push(event.id);
             }
             Err(e) => {
                 tracing::error!("Error inserting event: {:?}", e);
                 conflicts.push(event.id);
             }
-        }
-    }
-
-    // After inserting events, rebuild projections
-    if !accepted.is_empty() {
-        if let Err(e) = rebuild_projections_from_events(&state).await {
-            tracing::error!("Error rebuilding projections after sync: {:?}", e);
-            // Don't fail the sync, but log the error
         }
     }
 
@@ -578,5 +615,205 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     // So we don't need to update it here
 
     tracing::info!("Projections rebuilt successfully");
+    Ok(())
+}
+
+/// Apply a single event to projections (for incremental updates during sync)
+async fn apply_single_event_to_projections(
+    state: &AppState,
+    event: &SyncEventRequest,
+    aggregate_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    created_at: chrono::NaiveDateTime,
+) -> Result<(), sqlx::Error> {
+    let event_data = &event.event_data;
+    
+    match event.aggregate_type.as_str() {
+        "contact" => {
+            match event.event_type.as_str() {
+                "CREATED" => {
+                    let name = event_data.get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    
+                    sqlx::query(
+                        r#"
+                        INSERT INTO contacts_projection 
+                        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $8, 0)
+                        ON CONFLICT (id) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            username = EXCLUDED.username,
+                            phone = EXCLUDED.phone,
+                            email = EXCLUDED.email,
+                            notes = EXCLUDED.notes,
+                            updated_at = EXCLUDED.updated_at
+                        "#
+                    )
+                    .bind(aggregate_id)
+                    .bind(user_id)
+                    .bind(name)
+                    .bind(event_data.get("username").and_then(|v| v.as_str()))
+                    .bind(event_data.get("phone").and_then(|v| v.as_str()))
+                    .bind(event_data.get("email").and_then(|v| v.as_str()))
+                    .bind(event_data.get("notes").and_then(|v| v.as_str()))
+                    .bind(created_at)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                "UPDATED" => {
+                    sqlx::query(
+                        r#"
+                        UPDATE contacts_projection 
+                        SET name = COALESCE($1, name),
+                            username = COALESCE($2, username),
+                            phone = COALESCE($3, phone),
+                            email = COALESCE($4, email),
+                            notes = COALESCE($5, notes),
+                            updated_at = $6
+                        WHERE id = $7
+                        "#
+                    )
+                    .bind(event_data.get("name").and_then(|v| v.as_str()))
+                    .bind(event_data.get("username").and_then(|v| v.as_str()))
+                    .bind(event_data.get("phone").and_then(|v| v.as_str()))
+                    .bind(event_data.get("email").and_then(|v| v.as_str()))
+                    .bind(event_data.get("notes").and_then(|v| v.as_str()))
+                    .bind(created_at)
+                    .bind(aggregate_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                "DELETED" => {
+                    sqlx::query(
+                        "UPDATE contacts_projection SET is_deleted = true, updated_at = $1 WHERE id = $2"
+                    )
+                    .bind(created_at)
+                    .bind(aggregate_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                _ => {}
+            }
+        }
+        "transaction" => {
+            match event.event_type.as_str() {
+                "CREATED" => {
+                    let amount = event_data.get("amount")
+                        .and_then(|v| v.as_i64())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let direction = event_data.get("direction")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let txn_type = event_data.get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("money");
+                    
+                    let contact_id = event_data.get("contact_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    
+                    let transaction_date = event_data.get("transaction_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                        .unwrap_or_else(|| created_at.date());
+                    
+                    let due_date = event_data.get("due_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+                    
+                    sqlx::query(
+                        r#"
+                        INSERT INTO transactions_projection 
+                        (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $11, 0)
+                        ON CONFLICT (id) DO UPDATE SET
+                            contact_id = EXCLUDED.contact_id,
+                            type = EXCLUDED.type,
+                            direction = EXCLUDED.direction,
+                            amount = EXCLUDED.amount,
+                            currency = EXCLUDED.currency,
+                            description = EXCLUDED.description,
+                            transaction_date = EXCLUDED.transaction_date,
+                            due_date = EXCLUDED.due_date,
+                            updated_at = EXCLUDED.updated_at
+                        "#
+                    )
+                    .bind(aggregate_id)
+                    .bind(user_id)
+                    .bind(contact_id)
+                    .bind(txn_type)
+                    .bind(direction)
+                    .bind(amount)
+                    .bind(event_data.get("currency").and_then(|v| v.as_str()).unwrap_or("USD"))
+                    .bind(event_data.get("description").and_then(|v| v.as_str()))
+                    .bind(transaction_date)
+                    .bind(due_date)
+                    .bind(created_at)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                "UPDATED" => {
+                    let amount = event_data.get("amount")
+                        .and_then(|v| v.as_i64())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let direction = event_data.get("direction")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let txn_type = event_data.get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("money");
+                    
+                    let contact_id = event_data.get("contact_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    
+                    let transaction_date = event_data.get("transaction_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                        .unwrap_or_else(|| created_at.date());
+                    
+                    let due_date = event_data.get("due_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+                    
+                    sqlx::query(
+                        r#"
+                        UPDATE transactions_projection 
+                        SET contact_id = $1, type = $2, direction = $3, amount = $4, currency = $5, 
+                            description = $6, transaction_date = $7, due_date = $8, updated_at = $9
+                        WHERE id = $10
+                        "#
+                    )
+                    .bind(contact_id)
+                    .bind(txn_type)
+                    .bind(direction)
+                    .bind(amount)
+                    .bind(event_data.get("currency").and_then(|v| v.as_str()).unwrap_or("USD"))
+                    .bind(event_data.get("description").and_then(|v| v.as_str()))
+                    .bind(transaction_date)
+                    .bind(due_date)
+                    .bind(created_at)
+                    .bind(aggregate_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                "DELETED" => {
+                    sqlx::query(
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE id = $2"
+                    )
+                    .bind(created_at)
+                    .bind(aggregate_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    
     Ok(())
 }

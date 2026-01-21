@@ -16,7 +16,9 @@ import '../services/realtime_service.dart';
 import '../utils/bottom_sheet_helper.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
-  const ContactsScreen({super.key});
+  final VoidCallback? onOpenDrawer;
+  
+  const ContactsScreen({super.key, this.onOpenDrawer});
 
   @override
   ConsumerState<ContactsScreen> createState() => _ContactsScreenState();
@@ -243,7 +245,12 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                       });
                     },
                   )
-                : null,
+                : widget.onOpenDrawer != null
+                    ? IconButton(
+                        icon: const Icon(Icons.menu),
+                        onPressed: widget.onOpenDrawer,
+                      )
+                    : null,
         actions: [
           if (!_selectionMode && !_isSearching) ...[
             IconButton(

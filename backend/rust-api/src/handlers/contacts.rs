@@ -207,14 +207,14 @@ pub async fn create_contact(
     .bind(payload.email.as_deref())
     .bind(payload.notes.as_deref())
     .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
+        .await
+        .map_err(|e| {
         tracing::error!("Error creating contact projection: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to create contact"})),
-        )
-    })?;
+            )
+        })?;
 
     // Calculate total debt AFTER creating the contact (contact creation doesn't change debt, but we record the state AFTER the action)
     let total_debt_after = calculate_total_debt(&state).await;
@@ -536,7 +536,7 @@ pub async fn delete_contact(
             "notes": row.get::<Option<String>, _>("notes")
         }))
     });
-    
+
     // Soft delete in projection FIRST (set is_deleted = true)
     // We do this first so the delete succeeds even if EventStore fails
     sqlx::query(

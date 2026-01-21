@@ -40,7 +40,7 @@ final dueDateEnabledProvider = StateNotifierProvider<DueDateEnabledNotifier, boo
 });
 
 class DueDateEnabledNotifier extends StateNotifier<bool> {
-  DueDateEnabledNotifier() : super(false) {
+  DueDateEnabledNotifier() : super(true) { // Default ON
     // Load initial value asynchronously
     _loadDueDateEnabled();
   }
