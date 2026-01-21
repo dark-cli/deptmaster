@@ -247,7 +247,7 @@ def migrate_debitum(debitum_db_path):
                 "type": "money",
                 "direction": direction,
                 "amount": amount,
-                "currency": "USD",
+                "currency": "IQD",  # Iraqi Dinar - default currency
                 "description": txn['description'] if txn['description'] else None,
                 "transaction_date": txn_date,
                 "comment": f"Migrated from Debitum backup - Transaction ID: {txn['id_transaction']}",

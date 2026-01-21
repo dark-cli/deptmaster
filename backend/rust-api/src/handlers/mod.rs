@@ -9,8 +9,6 @@ pub use admin::{
     admin_panel,
     backfill_transaction_events,
     get_events,
-    get_eventstore_events,
-    get_eventstore_streams,
     get_contacts,
     get_latest_event_id,
     get_projection_status,

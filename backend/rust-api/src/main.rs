@@ -94,8 +94,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/events", get(handlers::get_events))
         .route("/api/admin/events/latest", get(handlers::get_latest_event_id))
         .route("/api/admin/events/backfill-transactions", post(handlers::backfill_transaction_events))
-        .route("/api/admin/eventstore/events", get(handlers::get_eventstore_events))
-        .route("/api/admin/eventstore/streams", get(handlers::get_eventstore_streams))
         .route("/api/admin/contacts", get(handlers::get_contacts))
         .route("/api/admin/transactions", get(handlers::get_transactions))
         .route("/api/admin/projections/status", get(handlers::get_projection_status))

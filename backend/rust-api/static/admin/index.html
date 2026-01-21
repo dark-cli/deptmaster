@@ -526,8 +526,6 @@
 
         <div class="tabs">
             <button class="tab active" onclick="switchTab('events')">PostgreSQL Events</button>
-            <button class="tab" onclick="switchTab('eventstore')">EventStore Events</button>
-            <button class="tab" onclick="switchTab('streams')">EventStore Streams</button>
             <button class="tab" onclick="switchTab('contacts')">Contacts</button>
             <button class="tab" onclick="switchTab('transactions')">Transactions</button>
             <button class="tab" onclick="switchTab('projections')">Projections</button>
@@ -660,49 +658,6 @@
             </div>
         </div>
 
-        <div id="eventstore" class="tab-content">
-            <div class="table-container">
-                <div class="filter-section" style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC;">
-                    <label for="streamSelect" class="form-label" style="margin-right: 1rem; color: #1C1B1F;">Select Stream:</label>
-                    <select id="streamSelect" class="form-input" onchange="loadEventStoreEvents()" style="padding: 0.5rem; min-width: 300px; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;">
-                        <option value="">-- Select a stream --</option>
-                    </select>
-                    <button class="refresh-btn" onclick="loadEventStoreStreams()" style="margin-left: 1rem;">🔄 Refresh Streams</button>
-                </div>
-                <div class="loading" id="eventstoreLoading">Select a stream to view events...</div>
-                <table id="eventstoreTable" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>Stream</th>
-                            <th>Event ID</th>
-                            <th>Event Type</th>
-                            <th>Stream Version</th>
-                            <th>Data</th>
-                            <th>Metadata</th>
-                        </tr>
-                    </thead>
-                    <tbody id="eventstoreBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="streams" class="tab-content">
-            <div class="table-container">
-                <div class="loading" id="streamsLoading">Loading streams...</div>
-                <table id="streamsTable" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>Stream Name</th>
-                            <th>Version</th>
-                            <th>Event Count</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="streamsBody"></tbody>
-                </table>
-            </div>
-        </div>
-
         <div id="projections" class="tab-content">
             <div class="table-container">
                 <div class="loading" id="projectionsLoading">Loading projections...</div>
@@ -753,7 +708,6 @@
             // Then load events (which will use currentTotalDebt as fallback)
             await Promise.all([
                 loadEvents(),
-                loadEventStoreStreams(),
                 loadContacts(),
                 loadTransactions(),
                 loadProjections()
@@ -1411,108 +1365,6 @@
             }
         }
 
-        async function loadEventStoreStreams() {
-            const loading = document.getElementById('streamsLoading');
-            const table = document.getElementById('streamsTable');
-            const body = document.getElementById('streamsBody');
-            const select = document.getElementById('streamSelect');
-
-            try {
-                const response = await fetch(`${API_URL}/admin/eventstore/streams`);
-                if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${text}`);
-                }
-                const streams = await response.json();
-
-                // Update dropdown
-                if (select) {
-                    select.innerHTML = '<option value="">-- Select a stream --</option>';
-                    streams.forEach(stream => {
-                        const option = document.createElement('option');
-                        option.value = stream.stream_name;
-                        option.textContent = `${stream.stream_name} (v${stream.version !== null ? stream.version : '?'}, ${stream.event_count} events)`;
-                        select.appendChild(option);
-                    });
-                }
-
-                // Update table
-                if (loading) loading.style.display = 'none';
-                if (table) table.style.display = 'table';
-                if (body) {
-                    body.innerHTML = streams.map(stream => `
-                        <tr>
-                            <td><code>${stream.stream_name}</code></td>
-                            <td>${stream.version !== null ? stream.version : 'N/A'}</td>
-                            <td>${stream.event_count}</td>
-                            <td>
-                                <button onclick="selectStream('${stream.stream_name}')" class="btn-pagination" style="padding: 0.25rem 0.75rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">
-                                    View Events
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
-                }
-            } catch (error) {
-                if (loading) loading.innerHTML = `<div class="error">Error loading streams: ${error.message}</div>`;
-                console.error('Error:', error);
-            }
-        }
-
-        function selectStream(streamName) {
-            const select = document.getElementById('streamSelect');
-            if (select) {
-                select.value = streamName;
-            }
-            switchTab('eventstore');
-            loadEventStoreEvents();
-        }
-
-        async function loadEventStoreEvents() {
-            const streamName = document.getElementById('streamSelect')?.value;
-            const loading = document.getElementById('eventstoreLoading');
-            const table = document.getElementById('eventstoreTable');
-            const body = document.getElementById('eventstoreBody');
-
-            if (!streamName) {
-                if (loading) loading.innerHTML = 'Select a stream to view events...';
-                if (table) table.style.display = 'none';
-                return;
-            }
-
-            try {
-                if (loading) {
-                    loading.innerHTML = 'Loading events...';
-                    loading.style.display = 'block';
-                }
-                if (table) table.style.display = 'none';
-
-                const response = await fetch(`${API_URL}/admin/eventstore/events?stream_name=${encodeURIComponent(streamName)}&limit=100`);
-                if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${text}`);
-                }
-                const events = await response.json();
-
-                if (loading) loading.style.display = 'none';
-                if (table) table.style.display = 'table';
-                if (body) {
-                    body.innerHTML = events.map(event => `
-                        <tr>
-                            <td><code>${event.stream_name}</code></td>
-                            <td>${event.event_id.substring(0, 8)}...</td>
-                            <td><strong>${event.event_type}</strong></td>
-                            <td>${event.stream_version}</td>
-                            <td><pre class="details-pre" style="max-width: 400px; overflow: auto; max-height: 200px;">${JSON.stringify(event.data, null, 2)}</pre></td>
-                            <td>${event.metadata ? `<pre class="details-pre" style="max-width: 200px; overflow: auto; max-height: 200px;">${JSON.stringify(event.metadata, null, 2)}</pre>` : '-'}</td>
-                        </tr>
-                    `).join('');
-                }
-            } catch (error) {
-                if (loading) loading.innerHTML = `<div class="error">Error loading events: ${error.message}</div>`;
-                console.error('Error:', error);
-            }
-        }
 
         function switchTab(tabName) {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
@@ -1520,13 +1372,6 @@
             
             event.target.classList.add('active');
             document.getElementById(tabName).classList.add('active');
-            
-            // Load data for specific tabs
-            if (tabName === 'streams') {
-                loadEventStoreStreams();
-            } else if (tabName === 'eventstore') {
-                loadEventStoreEvents();
-            }
         }
 
         // Dark mode toggle - default to dark mode
