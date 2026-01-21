@@ -1463,7 +1463,12 @@
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
-            event.target.classList.add('active');
+            // Find and activate the clicked tab button
+            document.querySelectorAll('.tab').forEach(tab => {
+                if (tab.getAttribute('onclick') && tab.getAttribute('onclick').includes(tabName)) {
+                    tab.classList.add('active');
+                }
+            });
             document.getElementById(tabName).classList.add('active');
         }
 
