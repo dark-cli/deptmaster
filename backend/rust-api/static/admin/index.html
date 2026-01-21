@@ -1152,14 +1152,18 @@
                     // Format aggregate type
                     const aggregateDisplay = event.aggregate_type.charAt(0).toUpperCase() + event.aggregate_type.slice(1);
                     
-                    // Format amount display
+                    // Format amount display with +/- and colors
                     let amountDisplay = '-';
+                    let amountColor = '';
                     if (event.aggregate_type === 'transaction' && amount !== null) {
                         const amountNum = Number(amount);
                         if (!isNaN(amountNum) && isFinite(amountNum)) {
                             const currency = eventData.currency || 'IQD';
-                            const directionText = direction === 'lent' ? 'Gave' : 'Received';
-                            amountDisplay = `${directionText} ${Math.round(amountNum).toLocaleString('en-US')} ${currency}`;
+                            // lent = Gave = negative (red), owed = Received = positive (green)
+                            const isPositive = direction === 'owed'; // Received is positive
+                            const sign = isPositive ? '+' : '-';
+                            amountColor = isPositive ? 'color: #16A34A;' : 'color: #BA1A1A;'; // Green for positive, red for negative
+                            amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign}</span> ${Math.round(amountNum).toLocaleString('en-US')} ${currency}`;
                         }
                     }
                     
@@ -1178,7 +1182,7 @@
                                 ${contactName || aggregateDisplay}
                             </td>
                             <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
-                                ${amountDisplay}
+                                ${amountDisplay !== '-' ? amountDisplay : '-'}
                             </td>
                             <td style="font-size: 0.75rem; font-weight: 600; color: #6750A4; white-space: nowrap; padding: 0.4rem 0.5rem;">
                                 ${totalDebtDisplay}
