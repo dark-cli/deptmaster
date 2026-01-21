@@ -1154,7 +1154,6 @@
                     
                     // Format amount display with +/- and colors
                     let amountDisplay = '-';
-                    let amountColor = '';
                     if (event.aggregate_type === 'transaction' && amount !== null) {
                         const amountNum = Number(amount);
                         if (!isNaN(amountNum) && isFinite(amountNum)) {
@@ -1162,8 +1161,8 @@
                             // lent = Gave = negative (red), owed = Received = positive (green)
                             const isPositive = direction === 'owed'; // Received is positive
                             const sign = isPositive ? '+' : '-';
-                            amountColor = isPositive ? 'color: #16A34A;' : 'color: #BA1A1A;'; // Green for positive, red for negative
-                            amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign}</span> ${Math.round(amountNum).toLocaleString('en-US')} ${currency}`;
+                            const amountColor = isPositive ? 'color: #16A34A;' : 'color: #BA1A1A;'; // Green for positive, red for negative
+                            amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign} ${Math.round(amountNum).toLocaleString('en-US')} ${currency}</span>`;
                         }
                     }
                     
