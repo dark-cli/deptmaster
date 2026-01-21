@@ -28,13 +28,19 @@ export PGPASSWORD="$DB_PASSWORD"
 
 # Verbose mode flag (set via --verbose or -v)
 VERBOSE=false
+# Skip build flag (set via --no-build or --skip-build)
+SKIP_BUILD=false
 
-# Parse command line arguments for verbose flag
+# Parse command line arguments for flags
 ARGS=()
 while [[ $# -gt 0 ]]; do
     case $1 in
         --verbose|-v)
             VERBOSE=true
+            shift
+            ;;
+        --no-build|--skip-build)
+            SKIP_BUILD=true
             shift
             ;;
         *)
@@ -148,7 +154,11 @@ cmd_full_flash() {
     
     # Start server (needed for import and rebuild)
     print_info "Starting server..."
-    cmd_start_server > /dev/null 2>&1 || cmd_start_server
+    if [ "$SKIP_BUILD" = true ]; then
+        cmd_start_server_no_build > /dev/null 2>&1 || cmd_start_server_no_build
+    else
+        cmd_start_server > /dev/null 2>&1 || cmd_start_server
+    fi
     
     # If import file provided, import data (import already rebuilds projections)
     if [ -n "$import_file" ]; then
@@ -407,6 +417,32 @@ cmd_start_server() {
     fi
 }
 
+cmd_start_server_no_build() {
+    print_info "Starting API server (skipping build)..."
+    
+    # Stop any existing server
+    pkill -f "debt-tracker-api" > /dev/null 2>&1 || true
+    sleep 2
+    
+    # Ensure services are running
+    cmd_start_services > /dev/null 2>&1 || cmd_start_services
+    
+    # Check if binary exists
+    if [ ! -f "backend/rust-api/target/release/debt-tracker-api" ]; then
+        print_error "Server binary not found. Please build first: $0 build"
+        exit 1
+    fi
+    
+    # Start server
+    print_info "Starting server..."
+    nohup backend/rust-api/target/release/debt-tracker-api > /tmp/debt-tracker-api.log 2>&1 &
+    
+    wait_for_service "http://localhost:8000/health" "API Server" 30 1 > /dev/null 2>&1
+    if [ "$VERBOSE" = true ]; then
+        print_success "Server started! Logs: /tmp/debt-tracker-api.log"
+    fi
+}
+
 cmd_stop_server() {
     print_info "Stopping API server..."
     
@@ -528,13 +564,15 @@ cmd_help() {
     cat <<EOF
 Debt Tracker Management Script
 
-Usage: $0 [--verbose|-v] <command> [options]
+Usage: $0 [--verbose|-v] [--no-build] <command> [options]
 
 Options:
   --verbose, -v              Show detailed output (default: minimal output)
+  --no-build, --skip-build   Skip building server binary (faster, requires existing build)
 
 Commands:
   full-flash [backup.zip]     Complete reset + rebuild + optional import (recommended)
+                              Use --no-build to skip server build (faster if binary exists)
   reset [backup.zip]          Reset database + EventStore, optionally import data
   reset-db                    Reset PostgreSQL database only
   reset-eventstore            Reset EventStore only
@@ -555,6 +593,8 @@ Commands:
 Examples:
   $0 full-flash                      # Complete reset + rebuild (clean system)
   $0 full-flash backup.zip           # Complete reset + import + rebuild (recommended)
+  $0 --no-build full-flash           # Fast reset (skip server build)
+  $0 --no-build full-flash backup.zip # Fast reset + import (skip server build)
   $0 reset                           # Clean reset (no data)
   $0 reset backup.zip                # Reset and import from backup
   $0 import backup.zip               # Import data (keeps existing data)

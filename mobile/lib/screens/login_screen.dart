@@ -41,9 +41,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
       if (mounted) {
         if (result['success'] == true) {
-          // Navigate to home
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
+          // Navigate to home - use pushNamedAndRemoveUntil to ensure clean navigation stack
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            '/',
+            (route) => false, // Remove all previous routes
           );
         } else {
           setState(() {

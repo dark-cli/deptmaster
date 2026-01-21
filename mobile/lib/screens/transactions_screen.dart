@@ -57,6 +57,42 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
     
     // Connect WebSocket if not connected
     RealtimeService.connect();
+    
+    // Listen to local Hive box changes for offline updates
+    _setupLocalListeners();
+  }
+
+  void _setupLocalListeners() {
+    if (kIsWeb) return;
+    
+    // Listen to local Hive box changes for offline updates
+    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+    
+    contactsBox.listenable().addListener(_onLocalDataChanged);
+    transactionsBox.listenable().addListener(_onLocalDataChanged);
+  }
+
+  void _onLocalDataChanged() {
+    // Reload transactions when local database changes (works offline)
+    // Contacts affect transaction display (contact names), so reload when either changes
+    if (mounted) {
+      _loadData();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (!kIsWeb) {
+      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
+      contactsBox.listenable().removeListener(_onLocalDataChanged);
+      transactionsBox.listenable().removeListener(_onLocalDataChanged);
+    }
+    RealtimeService.removeListener(_onRealtimeUpdate);
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -145,13 +181,6 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
 
   List<Transaction> _getTransactions() {
     return _filteredTransactions ?? [];
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    RealtimeService.removeListener(_onRealtimeUpdate);
-    super.dispose();
   }
 
   Future<void> _loadData({bool sync = false}) async {
