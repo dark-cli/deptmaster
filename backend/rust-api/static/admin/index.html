@@ -493,6 +493,77 @@
             background: #49454F;
             color: #E6E1E5;
         }
+
+        .chart-container {
+            background: #FFFBFE;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            transition: background-color 0.3s;
+        }
+
+        body.dark-mode .chart-container {
+            background: #1C1B1F;
+        }
+
+        .chart-container h2 {
+            margin: 0 0 1rem 0;
+            color: #1C1B1F;
+            font-size: 1.25rem;
+        }
+
+        body.dark-mode .chart-container h2 {
+            color: #E6E1E5;
+        }
+
+        .chart-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .chart-period-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .chart-period-btn {
+            padding: 0.5rem 1rem;
+            border: 1px solid #E7E0EC;
+            background: #FFFBFE;
+            color: #1C1B1F;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+
+        body.dark-mode .chart-period-btn {
+            background: #1C1B1F;
+            border-color: #49454F;
+            color: #E6E1E5;
+        }
+
+        .chart-period-btn:hover {
+            background: #E7E0EC;
+        }
+
+        body.dark-mode .chart-period-btn:hover {
+            background: #49454F;
+        }
+
+        .chart-period-btn.active {
+            background: #6750A4;
+            color: white;
+            border-color: #6750A4;
+        }
+
+        body.dark-mode .chart-period-btn.active {
+            background: #6750A4;
+            color: white;
+        }
     </style>
 </head>
 <body>
