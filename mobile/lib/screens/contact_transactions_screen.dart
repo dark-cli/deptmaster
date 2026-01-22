@@ -506,6 +506,7 @@ class _TransactionListItem extends StatelessWidget {
   final VoidCallback? onDelete;
   final bool? isSelected;
   final VoidCallback? onSelectionChanged;
+  final bool selectionMode; // Track if we're in selection mode
 
   const _TransactionListItem({
     required this.transaction,
@@ -513,6 +514,7 @@ class _TransactionListItem extends StatelessWidget {
     this.onDelete,
     this.isSelected,
     this.onSelectionChanged,
+    this.selectionMode = false,
   });
 
   @override
