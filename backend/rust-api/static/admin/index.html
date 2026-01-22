@@ -612,9 +612,9 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h2>Total Debt Over Time</h2>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button class="chart-period-btn active" onclick="setChartPeriod('day')" data-period="day">Day</button>
+                    <button class="chart-period-btn" onclick="setChartPeriod('day')" data-period="day">Day</button>
                     <button class="chart-period-btn" onclick="setChartPeriod('week')" data-period="week">Week</button>
-                    <button class="chart-period-btn" onclick="setChartPeriod('month')" data-period="month">Month</button>
+                    <button class="chart-period-btn active" onclick="setChartPeriod('month')" data-period="month">Month</button>
                     <button class="chart-period-btn" onclick="setChartPeriod('year')" data-period="year">Year</button>
                 </div>
             </div>
@@ -801,6 +801,7 @@
         // Chart state
         let debtChart = null;
         let chartPeriod = 'month'; // Default to month
+        let currentChartData = []; // Store chart data for click handler
         
         function setChartPeriod(period) {
             chartPeriod = period;
@@ -812,6 +813,11 @@
                 }
             });
             loadDebtChart();
+        }
+        
+        // Initialize chart period button state on page load
+        function initializeChartPeriod() {
+            setChartPeriod('month'); // Set default to month
         }
         
         async function loadDebtChart() {
@@ -958,6 +964,7 @@
                     
                     let avgDebt = null;
                     let intervalEvents = []; // Store all events in this interval for tooltip
+                    let hasTransactions = false; // Track if this interval has actual transactions
                     
                     if (eventsInInterval.length > 0) {
                         // Calculate average debt for this interval
@@ -965,6 +972,7 @@
                         avgDebt = sum / eventsInInterval.length;
                         // Store all events in this interval for tooltip
                         intervalEvents = eventsInInterval.map(evt => evt.event).filter(e => e !== null);
+                        hasTransactions = true; // This interval has transactions
                     } else {
                         // No events in this interval - find the closest event before this interval
                         const beforeEvents = rawEventData.filter(evt => evt.timestamp < intervalStart);
@@ -972,24 +980,34 @@
                             // Use the debt value from the most recent event before this interval
                             const closestBefore = beforeEvents[beforeEvents.length - 1];
                             avgDebt = closestBefore.debt;
-                            intervalEvents = [closestBefore.event].filter(e => e !== null);
+                            // Don't store events - this interval has no transactions
+                            intervalEvents = [];
+                            hasTransactions = false;
                         } else if (rawEventData.length > 0) {
                             // Use the first event's debt if no events before
                             avgDebt = rawEventData[0].debt;
-                            intervalEvents = [rawEventData[0].event].filter(e => e !== null);
+                            intervalEvents = [];
+                            hasTransactions = false;
                         } else {
                             // No data at all
                             avgDebt = currentTotalDebt || 0;
                             intervalEvents = [];
+                            hasTransactions = false;
                         }
                     }
                     
                     chartData.push({
                         x: intervalCenter,
                         y: avgDebt,
-                        events: intervalEvents // Store all events in interval for tooltip
+                        events: intervalEvents, // Store all events in interval for tooltip
+                        hasTransactions: hasTransactions, // Flag to show/hide point
+                        intervalStart: intervalStart, // Store for click handler
+                        intervalEnd: intervalEnd // Store for click handler
                     });
                 }
+                
+                // Store chart data globally for click handler
+                currentChartData = chartData;
                 
                 // Create or update chart
                 const ctx = document.getElementById('debtChart');
@@ -1006,8 +1024,14 @@
                             borderWidth: 2,
                             fill: false, // No fill - just line connecting actual events
                             tension: 0.4, // Smooth curves passing through actual event points
-                            pointRadius: 4, // Larger points to show actual events
-                            pointHoverRadius: 6,
+                            pointRadius: function(context) {
+                                // Hide points where no transactions occurred
+                                return context.raw?.hasTransactions ? 4 : 0;
+                            },
+                            pointHoverRadius: function(context) {
+                                // Only allow hover on points with transactions
+                                return context.raw?.hasTransactions ? 6 : 0;
+                            },
                             pointBackgroundColor: '#6750A4',
                             pointBorderColor: isDark ? '#1C1B1F' : '#FFFBFE',
                             pointBorderWidth: 2
@@ -1043,6 +1067,12 @@
                                 callbacks: {
                                     title: function(context) {
                                         const point = context[0];
+                                        const hasTransactions = point.raw?.hasTransactions || false;
+                                        
+                                        // Only show tooltip if there are transactions in this interval
+                                        if (!hasTransactions) {
+                                            return null; // Hide tooltip for intervals with no transactions
+                                        }
                                         
                                         // Calculate interval size based on chart period
                                         let intervalSize = 0;
@@ -1086,6 +1116,13 @@
                                     label: function(context) {
                                         const point = context;
                                         const events = point.raw?.events || [];
+                                        const hasTransactions = point.raw?.hasTransactions || false;
+                                        
+                                        // Only show tooltip if there are transactions in this interval
+                                        if (!hasTransactions || events.length === 0) {
+                                            return null; // Hide tooltip for intervals with no transactions
+                                        }
+                                        
                                         const debt = Math.round(context.parsed.y);
                                         const lines = [`Avg: ${debt.toLocaleString('en-US')} IQD • ${events.length} tx`];
                                         
@@ -1106,7 +1143,8 @@
                                                 
                                                 if (eventData.amount !== null && eventData.amount !== undefined) {
                                                     const amount = Number(eventData.amount);
-                                                    const sign = eventData.direction === 'owed' ? '+' : '-';
+                                                    // Standardization: Received (owed) = -, Gave (lent) = +
+                                                    const sign = eventData.direction === 'lent' ? '+' : '-';
                                                     const currency = eventData.currency || 'IQD';
                                                     txLine += `${sign}${Math.round(amount).toLocaleString('en-US')} ${currency}`;
                                                 } else {
@@ -1186,6 +1224,34 @@
                             mode: 'nearest',
                             axis: 'x',
                             intersect: false
+                        },
+                        onClick: function(event, elements) {
+                            if (elements.length > 0) {
+                                const element = elements[0];
+                                const point = currentChartData[element.index];
+                                
+                                // Only filter if this point has transactions
+                                if (point && point.hasTransactions) {
+                                    // Format dates for input fields (YYYY-MM-DD)
+                                    const formatDate = (timestamp) => {
+                                        const date = new Date(timestamp);
+                                        const year = date.getFullYear();
+                                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                                        const day = String(date.getDate()).padStart(2, '0');
+                                        return `${year}-${month}-${day}`;
+                                    };
+                                    
+                                    // Set filter dates using stored interval boundaries
+                                    document.getElementById('dateFromFilter').value = formatDate(point.intervalStart);
+                                    document.getElementById('dateToFilter').value = formatDate(point.intervalEnd);
+                                    
+                                    // Switch to Events tab if not already there
+                                    switchTab('events');
+                                    
+                                    // Apply filters to show events in this time period
+                                    applyFilters();
+                                }
+                            }
                         }
                     }
                 };
@@ -1614,10 +1680,11 @@
                         const amountNum = Number(amount);
                         if (!isNaN(amountNum) && isFinite(amountNum)) {
                             const currency = eventData.currency || 'IQD';
-                            // lent = Gave = negative (red), owed = Received = positive (green)
-                            const isPositive = direction === 'owed'; // Received is positive
-                            const sign = isPositive ? '+' : '-';
-                            const amountColor = isPositive ? 'color: #16A34A;' : 'color: #BA1A1A;'; // Green for positive, red for negative
+                            // Standardization: Received (owed) = red (negative) = -, Gave (lent) = green (positive) = +
+                            const isReceived = direction === 'owed'; // owed = Received
+                            const isGave = direction === 'lent'; // lent = Gave
+                            const sign = isGave ? '+' : '-'; // Gave = +, Received = -
+                            const amountColor = isGave ? 'color: #16A34A;' : 'color: #BA1A1A;'; // Gave = green, Received = red
                             amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign} ${Math.round(amountNum).toLocaleString('en-US')} ${currency}</span>`;
                         }
                     }
@@ -1908,6 +1975,9 @@
             }
         });
 
+        // Initialize chart period button state
+        initializeChartPeriod();
+        
         // Load data on page load
         loadData();
         

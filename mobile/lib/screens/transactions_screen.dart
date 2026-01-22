@@ -646,13 +646,13 @@ class TransactionListItem extends StatelessWidget {
       builder: (context, ref, child) {
         final flipColors = ref.watch(flipColorsProvider);
         final dateFormat = DateFormat('MMM d, y');
-        final isReceived = transaction.direction == TransactionDirection.owed; // owed = Received (positive, green)
-        final isGave = transaction.direction == TransactionDirection.lent; // lent = Gave (negative, red)
+        final isReceived = transaction.direction == TransactionDirection.owed; // owed = Received (negative, red)
+        final isGave = transaction.direction == TransactionDirection.lent; // lent = Gave (positive, green)
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        // Standardized: Received (owed) = green, Gave (lent) = red (respects flipColors)
+        // Standardized: Received (owed) = red (negative), Gave (lent) = green (positive) (respects flipColors)
         final color = isReceived 
-            ? AppColors.getReceivedColor(flipColors, isDark) // Received = green (positive)
-            : AppColors.getGiveColor(flipColors, isDark); // Gave = red (negative)
+            ? AppColors.getReceivedColor(flipColors, isDark) // Received = red (negative)
+            : AppColors.getGiveColor(flipColors, isDark); // Gave = green (positive)
         
         return _buildTransactionItem(context, dateFormat, color);
       },
@@ -668,11 +668,11 @@ class TransactionListItem extends StatelessWidget {
   }
 
   String _getStatus(TransactionDirection direction) {
-    // Standardized: owed = Received (positive), lent = Gave (negative)
+    // Standardized: owed = Received (negative), lent = Gave (positive)
     if (direction == TransactionDirection.owed) {
-      return 'RECEIVED'; // Received = positive
+      return 'RECEIVED'; // Received = negative
     } else {
-      return 'GAVE'; // Gave = negative
+      return 'GAVE'; // Gave = positive
     }
   }
 

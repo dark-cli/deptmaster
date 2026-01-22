@@ -53,14 +53,14 @@ class AppColors {
   static const Color darkGrayDark = Color(0xFFCAC4D0); // On surface variant
 
   // Semantic Colors for Give/Received - Material 3 defaults
-  // Standardized: Received = green (positive), Gave = red (negative)
-  // Light Mode: Gave = red (negative), Received = green (positive)
-  static const Color lightGive = Color(0xFFBA1A1A); // Material 3 error - red (negative)
-  static const Color lightReceived = Color(0xFF16A34A); // Green 600 - success (positive)
+  // Standardized: Received = red (negative), Gave = green (positive)
+  // Light Mode: Gave = green (positive), Received = red (negative)
+  static const Color lightGive = Color(0xFF16A34A); // Green 600 - success (positive)
+  static const Color lightReceived = Color(0xFFBA1A1A); // Material 3 error - red (negative)
   
-  // Dark Mode: Gave = red (negative), Received = green (positive)
-  static const Color darkGive = Color(0xFFFFB4AB); // Material 3 error - light red (negative)
-  static const Color darkReceived = Color(0xFF4ADE80); // Green 400 - success (positive)
+  // Dark Mode: Gave = green (positive), Received = red (negative)
+  static const Color darkGive = Color(0xFF4ADE80); // Green 400 - success (positive)
+  static const Color darkReceived = Color(0xFFFFB4AB); // Material 3 error - light red (negative)
   
   // Semantic Colors (Balance) - Respects flipColors setting
   // These will be used with Consumer to watch flipColorsProvider
@@ -76,22 +76,22 @@ class AppColors {
     }
   }
   
-  // Get Gave color (negative, red) - maps to TransactionDirection.lent
+  // Get Gave color (positive, green) - maps to TransactionDirection.lent
   static Color getGiveColor(bool flipColors, bool isDark) {
     // When flipColors is true, swap the colors
     if (flipColors) {
-      return isDark ? darkReceived : lightReceived; // Swapped to green
+      return isDark ? darkReceived : lightReceived; // Swapped to red
     }
-    return isDark ? darkGive : lightGive; // Default: red
+    return isDark ? darkGive : lightGive; // Default: green
   }
   
-  // Get Received color (positive, green) - maps to TransactionDirection.owed
+  // Get Received color (negative, red) - maps to TransactionDirection.owed
   static Color getReceivedColor(bool flipColors, bool isDark) {
     // When flipColors is true, swap the colors
     if (flipColors) {
-      return isDark ? darkGive : lightGive; // Swapped to red
+      return isDark ? darkGive : lightGive; // Swapped to green
     }
-    return isDark ? darkReceived : lightReceived; // Default: green
+    return isDark ? darkReceived : lightReceived; // Default: red
   }
 
   // Legacy support (deprecated - use theme colors instead)
