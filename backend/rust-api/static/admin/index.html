@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Debt Tracker - Admin Panel</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -511,10 +512,20 @@
             margin: 0 0 1rem 0;
             color: #1C1B1F;
             font-size: 1.25rem;
+            transition: color 0.3s;
         }
 
         body.dark-mode .chart-container h2 {
             color: #E6E1E5;
+        }
+
+        .chart-container canvas {
+            background: #FFFBFE;
+            transition: background-color 0.3s;
+        }
+
+        body.dark-mode .chart-container canvas {
+            background: #1C1B1F;
         }
 
         .chart-controls {
@@ -597,9 +608,9 @@
         </div>
 
         <!-- Debt Over Time Chart -->
-        <div class="chart-container" style="background: #FFFBFE; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 2rem; transition: background-color 0.3s;">
+        <div class="chart-container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h2 style="margin: 0; color: #1C1B1F; font-size: 1.25rem;">Total Debt Over Time</h2>
+                <h2>Total Debt Over Time</h2>
                 <div style="display: flex; gap: 0.5rem;">
                     <button class="chart-period-btn active" onclick="setChartPeriod('day')" data-period="day">Day</button>
                     <button class="chart-period-btn" onclick="setChartPeriod('week')" data-period="week">Week</button>
@@ -634,13 +645,10 @@
                         <div>
                             <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Event Type</label>
                             <select id="eventTypeFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyFilters()">
-                                <option value="">All Types</option>
-                                <option value="CONTACT_CREATED">Contact Created</option>
-                                <option value="CONTACT_UPDATED">Contact Updated</option>
-                                <option value="CONTACT_DELETED">Contact Deleted</option>
-                                <option value="TRANSACTION_CREATED">Transaction Created</option>
-                                <option value="TRANSACTION_UPDATED">Transaction Updated</option>
-                                <option value="TRANSACTION_DELETED">Transaction Deleted</option>
+                                <option value="">All Event Types</option>
+                                <option value="CREATED">CREATED</option>
+                                <option value="UPDATED">UPDATED</option>
+                                <option value="DELETED">DELETED</option>
                             </select>
                         </div>
                         <div>
@@ -808,28 +816,32 @@
         
         async function loadDebtChart() {
             try {
-                // Calculate date range based on period
+                // Calculate date range based on period (rolling periods: last 24h, 7d, 30d, 365d)
                 const now = new Date();
-                let startDate = new Date();
+                let periodStart = new Date();
                 
                 switch (chartPeriod) {
                     case 'day':
-                        startDate.setDate(now.getDate() - 1);
+                        // Last 24 hours
+                        periodStart = new Date(now.getTime() - (24 * 60 * 60 * 1000));
                         break;
                     case 'week':
-                        startDate.setDate(now.getDate() - 7);
+                        // Last 7 days
+                        periodStart = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
                         break;
                     case 'month':
-                        startDate.setMonth(now.getMonth() - 1);
+                        // Last 30 days
+                        periodStart = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
                         break;
                     case 'year':
-                        startDate.setFullYear(now.getFullYear() - 1);
+                        // Last 365 days
+                        periodStart = new Date(now.getTime() - (365 * 24 * 60 * 60 * 1000));
                         break;
                 }
                 
-                // Fetch all events since start date
+                // Fetch all events since period start
                 const params = new URLSearchParams();
-                params.append('date_from', startDate.toISOString().split('T')[0] + 'T00:00:00');
+                params.append('date_from', periodStart.toISOString());
                 params.append('limit', '10000'); // Get all events in range
                 
                 const response = await fetch(`${API_URL}/admin/events?${params.toString()}`);
@@ -841,33 +853,142 @@
                 // Sort events by timestamp
                 events.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                 
-                // Build data points: time and total_debt
-                const dataPoints = [];
-                const labels = [];
+                // Build raw event data: time and total_debt
+                // Only include transaction events (CREATED, UPDATED, DELETED) - exclude contact events
+                const rawEventData = [];
                 
                 for (const event of events) {
-                    const eventData = event.event_data || {};
-                    const totalDebt = eventData.total_debt;
+                    // Filter: only transaction events
+                    if (event.aggregate_type !== 'transaction') {
+                        continue; // Skip contact events
+                    }
+                    
+                    const eventDataObj = event.event_data || {};
+                    const totalDebt = eventDataObj.total_debt;
                     
                     if (totalDebt !== null && totalDebt !== undefined) {
                         const debt = Number(totalDebt);
                         if (!isNaN(debt) && isFinite(debt)) {
-                            const date = new Date(event.created_at);
-                            labels.push(date.toLocaleString('en-US', { 
-                                month: 'short', 
-                                day: 'numeric',
-                                hour: date.getHours() === 0 && date.getMinutes() === 0 ? undefined : 'numeric',
-                                minute: date.getHours() === 0 && date.getMinutes() === 0 ? undefined : '2-digit'
-                            }));
-                            dataPoints.push(debt);
+                            rawEventData.push({
+                                timestamp: new Date(event.created_at).getTime(),
+                                debt: debt,
+                                event: event // Store full event for tooltip
+                            });
                         }
                     }
                 }
                 
                 // If no data points, use current total debt
-                if (dataPoints.length === 0 && currentTotalDebt !== null) {
-                    labels.push(new Date().toLocaleString('en-US', { month: 'short', day: 'numeric' }));
-                    dataPoints.push(currentTotalDebt);
+                if (rawEventData.length === 0 && currentTotalDebt !== null) {
+                    rawEventData.push({
+                        timestamp: new Date().getTime(),
+                        debt: currentTotalDebt
+                    });
+                }
+                
+                // Determine time scale configuration based on period
+                let timeUnit = 'day';
+                let timeStepSize = 1;
+                let minorUnit = null;
+                let minorStepSize = null;
+                let displayFormats = {};
+                let intervalMs = 0; // Interval size in milliseconds
+                
+                switch (chartPeriod) {
+                    case 'day':
+                        timeUnit = 'hour';
+                        timeStepSize = 1;
+                        minorUnit = 'minute';
+                        minorStepSize = 15;
+                        intervalMs = 60 * 60 * 1000; // 1 hour intervals
+                        displayFormats = {
+                            hour: 'HH:mm',
+                            minute: 'mm'
+                        };
+                        break;
+                    case 'week':
+                        timeUnit = 'day';
+                        timeStepSize = 1;
+                        intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals
+                        displayFormats = {
+                            day: 'EEE d'
+                        };
+                        break;
+                    case 'month':
+                        timeUnit = 'week';
+                        timeStepSize = 1;
+                        minorUnit = 'day';
+                        minorStepSize = 1;
+                        intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals (average per day)
+                        displayFormats = {
+                            week: 'MMM d',
+                            day: 'd'
+                        };
+                        break;
+                    case 'year':
+                        timeUnit = 'month';
+                        timeStepSize = 1;
+                        minorUnit = 'week';
+                        minorStepSize = 1;
+                        intervalMs = 7 * 24 * 60 * 60 * 1000; // 1 week intervals (average per week)
+                        displayFormats = {
+                            month: 'MMM yyyy',
+                            week: 'w'
+                        };
+                        break;
+                }
+                
+                // Set date range - always start from period start, even if no data
+                const maxDate = now.getTime();
+                const minDate = periodStart.getTime();
+                
+                // Calculate average debt for each time interval
+                const chartData = [];
+                const numIntervals = Math.ceil((maxDate - minDate) / intervalMs);
+                
+                for (let i = 0; i <= numIntervals; i++) {
+                    const intervalStart = minDate + (i * intervalMs);
+                    const intervalEnd = Math.min(intervalStart + intervalMs, maxDate);
+                    const intervalCenter = intervalStart + (intervalMs / 2);
+                    
+                    // Find all events in this interval
+                    const eventsInInterval = rawEventData.filter(evt => 
+                        evt.timestamp >= intervalStart && evt.timestamp < intervalEnd
+                    );
+                    
+                    let avgDebt = null;
+                    let intervalEvents = []; // Store all events in this interval for tooltip
+                    
+                    if (eventsInInterval.length > 0) {
+                        // Calculate average debt for this interval
+                        const sum = eventsInInterval.reduce((acc, evt) => acc + evt.debt, 0);
+                        avgDebt = sum / eventsInInterval.length;
+                        // Store all events in this interval for tooltip
+                        intervalEvents = eventsInInterval.map(evt => evt.event).filter(e => e !== null);
+                    } else {
+                        // No events in this interval - find the closest event before this interval
+                        const beforeEvents = rawEventData.filter(evt => evt.timestamp < intervalStart);
+                        if (beforeEvents.length > 0) {
+                            // Use the debt value from the most recent event before this interval
+                            const closestBefore = beforeEvents[beforeEvents.length - 1];
+                            avgDebt = closestBefore.debt;
+                            intervalEvents = [closestBefore.event].filter(e => e !== null);
+                        } else if (rawEventData.length > 0) {
+                            // Use the first event's debt if no events before
+                            avgDebt = rawEventData[0].debt;
+                            intervalEvents = [rawEventData[0].event].filter(e => e !== null);
+                        } else {
+                            // No data at all
+                            avgDebt = currentTotalDebt || 0;
+                            intervalEvents = [];
+                        }
+                    }
+                    
+                    chartData.push({
+                        x: intervalCenter,
+                        y: avgDebt,
+                        events: intervalEvents // Store all events in interval for tooltip
+                    });
                 }
                 
                 // Create or update chart
@@ -877,17 +998,16 @@
                 const chartConfig = {
                     type: 'line',
                     data: {
-                        labels: labels,
                         datasets: [{
                             label: 'Total Debt (IQD)',
-                            data: dataPoints,
+                            data: chartData,
                             borderColor: '#6750A4',
                             backgroundColor: 'rgba(103, 80, 164, 0.1)',
                             borderWidth: 2,
-                            fill: true,
-                            tension: 0.4,
-                            pointRadius: 3,
-                            pointHoverRadius: 5,
+                            fill: false, // No fill - just line connecting actual events
+                            tension: 0.4, // Smooth curves passing through actual event points
+                            pointRadius: 4, // Larger points to show actual events
+                            pointHoverRadius: 6,
                             pointBackgroundColor: '#6750A4',
                             pointBorderColor: isDark ? '#1C1B1F' : '#FFFBFE',
                             pointBorderWidth: 2
@@ -914,25 +1034,143 @@
                                 bodyColor: isDark ? '#E6E1E5' : '#1C1B1F',
                                 borderColor: '#6750A4',
                                 borderWidth: 1,
+                                padding: 8,
+                                titleFont: { size: 12, weight: '600' },
+                                bodyFont: { size: 11 },
+                                titleSpacing: 4,
+                                bodySpacing: 3,
+                                displayColors: false,
                                 callbacks: {
+                                    title: function(context) {
+                                        const point = context[0];
+                                        
+                                        // Calculate interval size based on chart period
+                                        let intervalSize = 0;
+                                        switch (chartPeriod) {
+                                            case 'day': intervalSize = 60 * 60 * 1000; break; // 1 hour
+                                            case 'week': intervalSize = 24 * 60 * 60 * 1000; break; // 1 day
+                                            case 'month': intervalSize = 24 * 60 * 60 * 1000; break; // 1 day
+                                            case 'year': intervalSize = 7 * 24 * 60 * 60 * 1000; break; // 1 week
+                                        }
+                                        
+                                        // Show interval time range
+                                        const intervalStart = new Date(point.parsed.x - (intervalSize / 2));
+                                        const intervalEnd = new Date(point.parsed.x + (intervalSize / 2));
+                                        
+                                        let title = intervalStart.toLocaleString('en-US', {
+                                            month: 'short',
+                                            day: 'numeric',
+                                            hour: 'numeric',
+                                            minute: '2-digit'
+                                        });
+                                        
+                                        // Determine format based on interval size
+                                        if (intervalSize <= 60 * 60 * 1000) {
+                                            // Hour or smaller intervals - show time only for end
+                                            title += ' - ' + intervalEnd.toLocaleTimeString('en-US', {
+                                                hour: 'numeric',
+                                                minute: '2-digit'
+                                            });
+                                        } else {
+                                            // Day or larger intervals - show full date/time
+                                            title += ' - ' + intervalEnd.toLocaleString('en-US', {
+                                                month: 'short',
+                                                day: 'numeric',
+                                                hour: 'numeric',
+                                                minute: '2-digit'
+                                            });
+                                        }
+                                        
+                                        return title;
+                                    },
                                     label: function(context) {
-                                        return `Total Debt: ${Math.round(context.parsed.y).toLocaleString('en-US')} IQD`;
+                                        const point = context;
+                                        const events = point.raw?.events || [];
+                                        const debt = Math.round(context.parsed.y);
+                                        const lines = [`Avg: ${debt.toLocaleString('en-US')} IQD • ${events.length} tx`];
+                                        
+                                        if (events.length > 0) {
+                                            // Show up to 4 transactions in compact format
+                                            const maxShow = 4;
+                                            const eventsToShow = events.slice(0, maxShow);
+                                            
+                                            eventsToShow.forEach((event) => {
+                                                const eventData = event.event_data || {};
+                                                const date = new Date(event.created_at);
+                                                const timeStr = date.toLocaleTimeString('en-US', {
+                                                    hour: 'numeric',
+                                                    minute: '2-digit'
+                                                });
+                                                
+                                                let txLine = `${timeStr} `;
+                                                
+                                                if (eventData.amount !== null && eventData.amount !== undefined) {
+                                                    const amount = Number(eventData.amount);
+                                                    const sign = eventData.direction === 'owed' ? '+' : '-';
+                                                    const currency = eventData.currency || 'IQD';
+                                                    txLine += `${sign}${Math.round(amount).toLocaleString('en-US')} ${currency}`;
+                                                } else {
+                                                    txLine += event.event_type;
+                                                }
+                                                
+                                                if (contactNameCache[eventData.contact_id]) {
+                                                    txLine += ` • ${contactNameCache[eventData.contact_id]}`;
+                                                }
+                                                
+                                                lines.push(txLine);
+                                            });
+                                            
+                                            if (events.length > maxShow) {
+                                                lines.push(`+${events.length - maxShow} more`);
+                                            }
+                                        }
+                                        
+                                        return lines;
                                     }
                                 }
                             }
                         },
                         scales: {
                             x: {
+                                type: 'time',
+                                time: {
+                                    unit: timeUnit,
+                                    stepSize: timeStepSize,
+                                    displayFormats: displayFormats,
+                                    tooltipFormat: 'PPpp'
+                                },
+                                min: minDate,
+                                max: maxDate,
                                 ticks: {
                                     color: isDark ? '#938F99' : '#79747E',
                                     maxRotation: 45,
-                                    minRotation: 45
+                                    minRotation: 45,
+                                    source: 'auto',
+                                    autoSkip: true
                                 },
                                 grid: {
-                                    color: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
-                                }
+                                    color: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+                                    drawOnChartArea: true
+                                },
+                                ...(minorUnit && minorStepSize ? {
+                                    minor: {
+                                        unit: minorUnit,
+                                        stepSize: minorStepSize,
+                                        display: true
+                                    },
+                                    grid: {
+                                        ...(isDark ? {
+                                            color: 'rgba(255, 255, 255, 0.05)'
+                                        } : {
+                                            color: 'rgba(0, 0, 0, 0.05)'
+                                        }),
+                                        drawOnChartArea: true,
+                                        drawTicks: false
+                                    }
+                                } : {})
                             },
                             y: {
+                                reverse: true, // Zero at bottom
                                 ticks: {
                                     color: isDark ? '#938F99' : '#79747E',
                                     callback: function(value) {
@@ -953,22 +1191,13 @@
                 };
                 
                 if (debtChart) {
-                    // Update existing chart
-                    debtChart.data.labels = labels;
-                    debtChart.data.datasets[0].data = dataPoints;
-                    debtChart.options.plugins.legend.labels.color = isDark ? '#E6E1E5' : '#1C1B1F';
-                    debtChart.options.plugins.tooltip.backgroundColor = isDark ? '#49454F' : '#FFFBFE';
-                    debtChart.options.plugins.tooltip.titleColor = isDark ? '#E6E1E5' : '#1C1B1F';
-                    debtChart.options.plugins.tooltip.bodyColor = isDark ? '#E6E1E5' : '#1C1B1F';
-                    debtChart.options.scales.x.ticks.color = isDark ? '#938F99' : '#79747E';
-                    debtChart.options.scales.x.grid.color = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-                    debtChart.options.scales.y.ticks.color = isDark ? '#938F99' : '#79747E';
-                    debtChart.options.scales.y.grid.color = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-                    debtChart.update();
-                } else {
-                    // Create new chart
-                    debtChart = new Chart(ctx, chartConfig);
+                    // Destroy and recreate chart to ensure all colors update properly
+                    debtChart.destroy();
+                    debtChart = null;
                 }
+                
+                // Create new chart with current dark mode state
+                debtChart = new Chart(ctx, chartConfig);
             } catch (error) {
                 console.error('Error loading debt chart:', error);
             }
@@ -1507,6 +1736,8 @@
                     lastEventId = data.latest_event_id;
                     // Smoothly update without page reload
                     await loadEvents(true); // true = silent update
+                    // Update chart only when there are new events
+                    await loadDebtChart();
                 }
             } catch (err) {
                 console.error('Error checking for updates:', err);
@@ -1671,12 +1902,10 @@
             const isDark = document.body.classList.toggle('dark-mode');
             localStorage.setItem('darkMode', isDark);
             darkModeToggle.textContent = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
-            // Update chart colors when dark mode changes
-            setTimeout(() => {
-                if (debtChart) {
-                    loadDebtChart();
-                }
-            }, 100);
+            // Recreate chart with new dark mode state
+            if (debtChart) {
+                loadDebtChart();
+            }
         });
 
         // Load data on page load
@@ -1685,12 +1914,12 @@
         // Start smart updates (WebSocket + polling fallback)
         startSmartUpdates();
         
-        // Auto-refresh other data every 10 seconds
+        // Auto-refresh other data every 10 seconds (chart excluded - only updates on data changes)
         setInterval(() => {
             loadStats();
             loadContacts();
             loadTransactions();
-            loadDebtChart();
+            // Chart is only updated when events change (via smart updates)
         }, 10000);
     </script>
 </body>

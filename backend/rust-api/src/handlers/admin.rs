@@ -157,6 +157,7 @@ pub async fn get_events(
         if !date_from.is_empty() {
             query_builder.push(" AND e.created_at >= ");
             query_builder.push_bind(date_from);
+            query_builder.push("::timestamp");
         }
     }
     
@@ -164,6 +165,7 @@ pub async fn get_events(
         if !date_to.is_empty() {
             query_builder.push(" AND e.created_at <= ");
             query_builder.push_bind(date_to);
+            query_builder.push("::timestamp");
         }
     }
     
