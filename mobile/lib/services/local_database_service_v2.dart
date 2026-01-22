@@ -275,7 +275,7 @@ class LocalDatabaseServiceV2 {
     }
   }
 
-  static Future<void> deleteTransaction(String transactionId, {String? comment, bool isUndo = false}) async {
+  static Future<void> deleteTransaction(String transactionId, {String? comment}) async {
     if (kIsWeb) return;
     
     try {
@@ -294,7 +294,7 @@ class LocalDatabaseServiceV2 {
       final isWithinUndoWindow = timeSinceLastEvent.inSeconds < 5;
       
       // If within undo window and not synced, remove the last event (undo)
-      if (isWithinUndoWindow && !lastEvent.synced && !isUndo) {
+      if (isWithinUndoWindow && !lastEvent.synced) {
         // Remove the last event (this effectively undoes the last action)
         final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
         await eventsBox.delete(lastEvent.id);
@@ -337,7 +337,31 @@ class LocalDatabaseServiceV2 {
   
   /// Undo the last action for a transaction (remove the last event)
   static Future<void> undoTransactionAction(String transactionId) async {
-    await deleteTransaction(transactionId, isUndo: true);
+    if (kIsWeb) return;
+    
+    try {
+      // Get all events for this transaction, sorted by timestamp
+      final events = await EventStoreService.getEventsForAggregate('transaction', transactionId);
+      if (events.isEmpty) {
+        print('⚠️ No events found for transaction: $transactionId');
+        return;
+      }
+      
+      // Get the most recent event (last in sorted list)
+      final lastEvent = events.last;
+      
+      // Remove the last event (this effectively undoes the last action)
+      final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+      await eventsBox.delete(lastEvent.id);
+      
+      // Rebuild state
+      await _rebuildState();
+      
+      print('✅ Transaction action undone (removed last event): $transactionId, event type: ${lastEvent.eventType}');
+    } catch (e) {
+      print('Error undoing transaction action: $e');
+      rethrow;
+    }
   }
 
   static Future<void> bulkDeleteContacts(List<String> contactIds) async {

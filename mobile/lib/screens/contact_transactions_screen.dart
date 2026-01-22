@@ -325,6 +325,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                         child: _TransactionListItem(
                           transaction: transaction,
                           isSelected: _selectionMode ? isSelected : null,
+                          selectionMode: _selectionMode,
                           onSelectionChanged: _selectionMode
                               ? () {
                                   setState(() {
@@ -607,7 +608,11 @@ class _TransactionListItem extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: InkWell(
-        onTap: onSelectionChanged ?? onEdit,
+        onTap: selectionMode ? onSelectionChanged : onEdit,
+        onLongPress: onSelectionChanged != null ? () {
+          // Long press starts selection mode
+          onSelectionChanged?.call();
+        } : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(

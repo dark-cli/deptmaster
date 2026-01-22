@@ -462,7 +462,13 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                                   }
                                 });
                               }
-                            : null,
+                            : () {
+                                // Long press starts selection mode
+                                setState(() {
+                                  _selectionMode = true;
+                                  _selectedContacts.add(contact.id);
+                                });
+                              },
                         onTap: _selectionMode
                             ? () {
                                 setState(() {
