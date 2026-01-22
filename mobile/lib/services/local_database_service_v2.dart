@@ -234,6 +234,10 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return transaction;
     
     try {
+      // Store previous state for undo (get last event before update)
+      final events = await EventStoreService.getEventsForAggregate('transaction', transaction.id);
+      final lastEventBeforeUpdate = events.isNotEmpty ? events.last : null;
+      
       // 1. Create event
       final eventData = {
         'contact_id': transaction.contactId,
@@ -248,7 +252,7 @@ class LocalDatabaseServiceV2 {
         'timestamp': DateTime.now().toIso8601String(),
       };
 
-      await EventStoreService.appendEvent(
+      final updateEvent = await EventStoreService.appendEvent(
         aggregateType: 'transaction',
         aggregateId: transaction.id,
         eventType: 'UPDATED',
@@ -271,31 +275,34 @@ class LocalDatabaseServiceV2 {
     }
   }
 
-  static Future<void> deleteTransaction(String transactionId, {String? comment}) async {
+  static Future<void> deleteTransaction(String transactionId, {String? comment, bool isUndo = false}) async {
     if (kIsWeb) return;
     
     try {
-      // Check if transaction was created less than 5 seconds ago (for undo window)
+      // Get all events for this transaction, sorted by timestamp
       final events = await EventStoreService.getEventsForAggregate('transaction', transactionId);
-      final createdEvent = events.firstWhere(
-        (e) => e.eventType == 'CREATED',
-        orElse: () => events.first,
-      );
+      if (events.isEmpty) {
+        print('⚠️ No events found for transaction: $transactionId');
+        return;
+      }
+      
+      // Get the most recent event (last in sorted list)
+      final lastEvent = events.last;
       
       final now = DateTime.now();
-      final timeSinceCreation = now.difference(createdEvent.timestamp);
-      final isWithinUndoWindow = timeSinceCreation.inSeconds < 5;
+      final timeSinceLastEvent = now.difference(lastEvent.timestamp);
+      final isWithinUndoWindow = timeSinceLastEvent.inSeconds < 5;
       
-      // If within undo window and not synced, just remove the event locally
-      if (isWithinUndoWindow && !createdEvent.synced) {
-        // Remove the CREATED event (this effectively undoes the transaction)
+      // If within undo window and not synced, remove the last event (undo)
+      if (isWithinUndoWindow && !lastEvent.synced && !isUndo) {
+        // Remove the last event (this effectively undoes the last action)
         final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
-        await eventsBox.delete(createdEvent.id);
+        await eventsBox.delete(lastEvent.id);
         
         // Rebuild state
         await _rebuildState();
         
-        print('✅ Transaction undone (removed local event): $transactionId');
+        print('✅ Transaction undone (removed last event): $transactionId, event type: ${lastEvent.eventType}');
         return;
       }
       
@@ -326,6 +333,11 @@ class LocalDatabaseServiceV2 {
       print('Error deleting transaction: $e');
       rethrow;
     }
+  }
+  
+  /// Undo the last action for a transaction (remove the last event)
+  static Future<void> undoTransactionAction(String transactionId) async {
+    await deleteTransaction(transactionId, isUndo: true);
   }
 
   static Future<void> bulkDeleteContacts(List<String> contactIds) async {

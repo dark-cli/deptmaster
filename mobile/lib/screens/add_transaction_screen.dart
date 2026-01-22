@@ -293,9 +293,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
               label: 'UNDO',
               textColor: Colors.white,
               onPressed: () async {
-                // Undo: delete the transaction
+                // Undo: remove the last event (CREATED)
                 try {
-                  await LocalDatabaseServiceV2.deleteTransaction(transactionId);
+                  await LocalDatabaseServiceV2.undoTransactionAction(transactionId);
                   scaffoldMessenger.showSnackBar(
                     const SnackBar(content: Text('Transaction undone')),
                   );

@@ -179,8 +179,31 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
       if (mounted) {
         Navigator.of(context).pop(true); // Return true to indicate success
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Transaction updated!')),
+        
+        // Show undo toast
+        final scaffoldMessenger = ScaffoldMessenger.of(context);
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: const Text('✅ Transaction updated!'),
+            action: SnackBarAction(
+              label: 'UNDO',
+              textColor: Colors.white,
+              onPressed: () async {
+                // Undo: remove the last event (UPDATED)
+                try {
+                  await LocalDatabaseServiceV2.undoTransactionAction(updatedTransaction.id);
+                  scaffoldMessenger.showSnackBar(
+                    const SnackBar(content: Text('Transaction update undone')),
+                  );
+                } catch (e) {
+                  scaffoldMessenger.showSnackBar(
+                    SnackBar(content: Text('Error undoing: $e')),
+                  );
+                }
+              },
+            ),
+            duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
+          ),
         );
       }
     } catch (e) {

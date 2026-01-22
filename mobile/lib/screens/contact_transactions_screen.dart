@@ -343,7 +343,13 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                     }
                                   });
                                 }
-                              : null,
+                              : () {
+                                  // Long press starts selection mode
+                                  setState(() {
+                                    _selectionMode = true;
+                                    _selectedTransactions.add(transaction.id);
+                                  });
+                                },
                           onEdit: () async {
                             final result = await showScreenAsBottomSheet(
                               context: context,
@@ -384,8 +390,32 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                 if (!mounted) return;
                                 _loadTransactions();
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('✅ Transaction deleted!')),
+                                
+                                // Show undo toast
+                                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                                scaffoldMessenger.showSnackBar(
+                                  SnackBar(
+                                    content: const Text('✅ Transaction deleted!'),
+                                    action: SnackBarAction(
+                                      label: 'UNDO',
+                                      textColor: Colors.white,
+                                      onPressed: () async {
+                                        // Undo: remove the last event (DELETED)
+                                        try {
+                                          await LocalDatabaseServiceV2.undoTransactionAction(transaction.id);
+                                          _loadTransactions();
+                                          scaffoldMessenger.showSnackBar(
+                                            const SnackBar(content: Text('Transaction deletion undone')),
+                                          );
+                                        } catch (e) {
+                                          scaffoldMessenger.showSnackBar(
+                                            SnackBar(content: Text('Error undoing: $e')),
+                                          );
+                                        }
+                                      },
+                                    ),
+                                    duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
+                                  ),
                                 );
                               } catch (e) {
                                 if (!mounted) return;
