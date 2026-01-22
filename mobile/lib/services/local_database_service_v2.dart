@@ -350,14 +350,65 @@ class LocalDatabaseServiceV2 {
       // Get the most recent event (last in sorted list)
       final lastEvent = events.last;
       
-      // Remove the last event (this effectively undoes the last action)
+      // Remove the last event locally (this effectively undoes the last action)
       final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
       await eventsBox.delete(lastEvent.id);
+      
+      // If the event was synced, we need to compensate on the server
+      if (lastEvent.synced) {
+        // Create a compensating event based on what we're undoing:
+        // - If undoing CREATED: create DELETED event
+        // - If undoing UPDATED: create DELETED event (simplest approach)
+        // - If undoing DELETED: remove DELETED event (recreate transaction - handled by state rebuild)
+        if (lastEvent.eventType == 'CREATED' || lastEvent.eventType == 'UPDATED') {
+          // Create a DELETED event to compensate on server
+          final eventData = {
+            'comment': 'Undo: ${lastEvent.eventType.toLowerCase()}',
+            'timestamp': DateTime.now().toIso8601String(),
+          };
+          
+          await EventStoreService.appendEvent(
+            aggregateType: 'transaction',
+            aggregateId: transactionId,
+            eventType: 'DELETED',
+            eventData: eventData,
+          );
+          
+          // Trigger sync to send DELETED event to server
+          SyncServiceV2.manualSync().catchError((e) {
+            // Silently handle sync errors
+          });
+        } else if (lastEvent.eventType == 'DELETED') {
+          // Undoing a DELETE means we need to recreate the transaction
+          // Get the CREATED event to recreate it
+          final createdEvent = events.firstWhere(
+            (e) => e.eventType == 'CREATED',
+            orElse: () => events.first,
+          );
+          
+          // Recreate the transaction using the CREATED event data
+          final eventData = Map<String, dynamic>.from(createdEvent.eventData);
+          eventData['comment'] = 'Undo: deleted';
+          eventData['timestamp'] = DateTime.now().toIso8601String();
+          
+          await EventStoreService.appendEvent(
+            aggregateType: 'transaction',
+            aggregateId: transactionId,
+            eventType: 'CREATED',
+            eventData: eventData,
+          );
+          
+          // Trigger sync to send CREATED event to server
+          SyncServiceV2.manualSync().catchError((e) {
+            // Silently handle sync errors
+          });
+        }
+      }
       
       // Rebuild state
       await _rebuildState();
       
-      print('✅ Transaction action undone (removed last event): $transactionId, event type: ${lastEvent.eventType}');
+      print('✅ Transaction action undone (removed last event): $transactionId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
     } catch (e) {
       print('Error undoing transaction action: $e');
       rethrow;

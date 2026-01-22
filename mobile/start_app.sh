@@ -18,9 +18,27 @@ fi
 echo "✅ Flutter found"
 echo ""
 
+# Check for --clear flag
+CLEAR_DATA=false
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--clear" ]; then
+        CLEAR_DATA=true
+    else
+        ARGS+=("$arg")
+    fi
+done
+
 # Check which platform to use
-PLATFORM="${1:-web}"
-MODE="${2:-prod}"
+PLATFORM="${ARGS[0]:-web}"
+MODE="${ARGS[1]:-prod}"
+
+# Clear data if requested (only for Linux)
+if [ "$CLEAR_DATA" = true ] && [ "$PLATFORM" = "linux" ]; then
+    echo "🧹 Clearing app data..."
+    ./clear_data.sh
+    echo ""
+fi
 
 if [ "$PLATFORM" = "web" ]; then
     if [ "$MODE" = "dev" ]; then
@@ -61,15 +79,17 @@ elif [ "$PLATFORM" = "linux" ]; then
     flutter run -d linux
 
 else
-    echo "Usage: $0 [web|linux] [dev|prod]"
+    echo "Usage: $0 [web|linux] [dev|prod] [--clear]"
     echo ""
     echo "  web [dev]   - Run web app with hot reload (default: prod)"
     echo "  web [prod]  - Build and serve web app (default)"
     echo "  linux       - Run Linux desktop app"
+    echo "  --clear     - Clear app data before running (Linux only)"
     echo ""
     echo "Examples:"
-    echo "  $0 web dev   - Development mode with hot reload"
-    echo "  $0 web prod  - Production build (current default)"
-    echo "  $0 web       - Production build (same as 'prod')"
+    echo "  $0 web dev        - Development mode with hot reload"
+    echo "  $0 web prod       - Production build (current default)"
+    echo "  $0 web            - Production build (same as 'prod')"
+    echo "  $0 linux --clear  - Run Linux app with cleared data"
     exit 1
 fi

@@ -166,11 +166,40 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             });
                             _loadTransactions();
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('✅ $deletedCount transaction(s) deleted'),
-                              ),
-                            );
+                            
+                            // Show undo toast (only for single delete - bulk delete is complex to undo)
+                            if (deletedCount == 1) {
+                              final scaffoldMessenger = ScaffoldMessenger.of(context);
+                              scaffoldMessenger.showSnackBar(
+                                SnackBar(
+                                  content: Text('✅ $deletedCount transaction(s) deleted'),
+                                  action: SnackBarAction(
+                                    label: 'UNDO',
+                                    textColor: Colors.white,
+                                    onPressed: () async {
+                                      try {
+                                        await LocalDatabaseServiceV2.undoTransactionAction(deletedIds.first);
+                                        _loadTransactions();
+                                        scaffoldMessenger.showSnackBar(
+                                          const SnackBar(content: Text('Transaction deletion undone')),
+                                        );
+                                      } catch (e) {
+                                        scaffoldMessenger.showSnackBar(
+                                          SnackBar(content: Text('Error undoing: $e')),
+                                        );
+                                      }
+                                    },
+                                  ),
+                                  duration: const Duration(seconds: 5),
+                                ),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('✅ $deletedCount transaction(s) deleted'),
+                                ),
+                              );
+                            }
                           } catch (e) {
                             if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
