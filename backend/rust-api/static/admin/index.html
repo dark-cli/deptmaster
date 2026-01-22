@@ -996,13 +996,27 @@
                         }
                     }
                     
+                    // Store label colors for tooltip (for per-transaction coloring)
+                    const labelColors = [];
+                    if (hasTransactions && intervalEvents.length > 0) {
+                        // First label is average (default color)
+                        labelColors.push(null); // null = use default
+                        // Then each transaction gets its color
+                        intervalEvents.forEach((event) => {
+                            const eventData = event.event_data || {};
+                            const isGave = eventData.direction === 'lent';
+                            labelColors.push(isGave ? '#16A34A' : '#BA1A1A'); // Gave = green, Received = red
+                        });
+                    }
+                    
                     chartData.push({
                         x: intervalCenter,
                         y: avgDebt,
                         events: intervalEvents, // Store all events in interval for tooltip
                         hasTransactions: hasTransactions, // Flag to show/hide point
                         intervalStart: intervalStart, // Store for click handler
-                        intervalEnd: intervalEnd // Store for click handler
+                        intervalEnd: intervalEnd, // Store for click handler
+                        labelColors: labelColors // Store colors for each label line
                     });
                 }
                 
@@ -1051,8 +1065,13 @@
                                 }
                             },
                             tooltip: {
+                                enabled: true,
                                 mode: 'index',
                                 intersect: false,
+                                filter: function(tooltipItem) {
+                                    // Hide tooltip completely for points without transactions
+                                    return tooltipItem.raw?.hasTransactions === true;
+                                },
                                 backgroundColor: isDark ? '#49454F' : '#FFFBFE',
                                 titleColor: isDark ? '#E6E1E5' : '#1C1B1F',
                                 bodyColor: isDark ? '#E6E1E5' : '#1C1B1F',
@@ -1064,6 +1083,7 @@
                                 titleSpacing: 4,
                                 bodySpacing: 3,
                                 displayColors: false,
+                                usePointStyle: false,
                                 callbacks: {
                                     title: function(context) {
                                         const point = context[0];
@@ -1744,25 +1764,28 @@
                 wsConnection.onmessage = (event) => {
                     try {
                         const message = JSON.parse(event.data);
-                        // When we receive a WebSocket event, check if it's an event-related change
-                        if (message.type && (message.type.includes('contact') || message.type.includes('transaction'))) {
-                            // New event created, update the list
-                            checkForUpdates();
-                        }
+                        // When we receive ANY WebSocket event, immediately check for updates
+                        // This ensures hot updates without delay
+                        checkForUpdates();
                     } catch (e) {
                         console.error('Error parsing WebSocket message:', e);
                     }
                 };
                 
                 wsConnection.onerror = (error) => {
-                    console.log('WebSocket error, falling back to polling:', error);
-                    // Fallback to polling if WebSocket fails
-                    startPolling();
+                    console.log('WebSocket error, will reconnect:', error);
+                    // Auto-reconnect after short delay (like Firebase)
+                    setTimeout(() => {
+                        startSmartUpdates();
+                    }, 1000);
                 };
                 
                 wsConnection.onclose = () => {
-                    console.log('WebSocket closed, falling back to polling');
-                    startPolling();
+                    console.log('WebSocket closed, will reconnect');
+                    // Auto-reconnect after short delay (like Firebase)
+                    setTimeout(() => {
+                        startSmartUpdates();
+                    }, 1000);
                 };
             } catch (e) {
                 console.log('WebSocket not available, using polling:', e);
@@ -1770,25 +1793,12 @@
             }
         }
         
-        // Smart polling - only updates when there are changes
+        // No polling - WebSocket handles all updates (like Firebase)
+        // Only reconnect WebSocket if it fails
         function startPolling() {
-            if (pollingInterval) clearInterval(pollingInterval);
-            
-            pollingInterval = setInterval(async () => {
-                // Only check if events tab is active and no filters are applied
-                const hasFilters = document.getElementById('eventSearch')?.value.trim() ||
-                                  document.getElementById('eventTypeFilter')?.value ||
-                                  document.getElementById('aggregateTypeFilter')?.value ||
-                                  document.getElementById('dateFromFilter')?.value ||
-                                  document.getElementById('dateToFilter')?.value;
-                
-                if (hasFilters || !document.getElementById('events')?.classList.contains('active')) {
-                    return; // Don't auto-update if filters are active or tab is not visible
-                }
-                
-                // Check for changes
-                await checkForUpdates();
-            }, 3000); // Check every 3 seconds
+            // No polling timer - WebSocket is the only update mechanism
+            // If WebSocket fails, it will reconnect automatically
+            console.log('WebSocket-only mode: No polling timers');
         }
         
         // Check for updates (used by WebSocket and polling)
@@ -1798,13 +1808,17 @@
                 const data = await response.json();
                 
                 if (data.latest_event_id !== null && data.latest_event_id !== lastEventId) {
-                    // There are new events!
-                    console.log('🔄 New events detected, updating...');
+                    // There are new events! Update everything immediately (like Firebase)
+                    console.log('🔄 New events detected, updating all data...');
                     lastEventId = data.latest_event_id;
-                    // Smoothly update without page reload
-                    await loadEvents(true); // true = silent update
-                    // Update chart only when there are new events
-                    await loadDebtChart();
+                    // Refresh all data immediately when WebSocket detects changes
+                    await Promise.all([
+                        loadStats(),
+                        loadContacts(),
+                        loadTransactions(),
+                        loadEvents(true), // true = silent update
+                        loadDebtChart()
+                    ]);
                 }
             } catch (err) {
                 console.error('Error checking for updates:', err);
@@ -1981,16 +1995,12 @@
         // Load data on page load
         loadData();
         
-        // Start smart updates (WebSocket + polling fallback)
+        // Start smart updates (WebSocket-only, no timers - like Firebase)
         startSmartUpdates();
         
-        // Auto-refresh other data every 10 seconds (chart excluded - only updates on data changes)
-        setInterval(() => {
-            loadStats();
-            loadContacts();
-            loadTransactions();
-            // Chart is only updated when events change (via smart updates)
-        }, 10000);
+        // No auto-refresh timer - WebSocket handles all real-time updates
+        // Stats/contacts/transactions will update when WebSocket sends events
+        // Chart is only updated when events change (via WebSocket smart updates)
     </script>
 </body>
 </html>

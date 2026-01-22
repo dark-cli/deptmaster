@@ -18,18 +18,9 @@ class SyncServiceV2 {
   static Future<void> initialize() async {
     if (kIsWeb) return;
     
-    // Start periodic sync
-    _startPeriodicSync();
-    print('✅ SyncServiceV2 initialized');
-  }
-
-  /// Start periodic sync check
-  static void _startPeriodicSync() {
-    _periodicSyncTimer?.cancel();
-    // Sync every 30 seconds (can be adjusted based on needs)
-    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      sync();
-    });
+    // No periodic sync - WebSocket handles all real-time updates
+    // WebSocket will trigger sync immediately when server sends updates
+    print('✅ SyncServiceV2 initialized (WebSocket-only, no timers)');
   }
 
   /// Perform full sync (hash-based comparison)

@@ -6,6 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use crate::AppState;
+use crate::websocket;
 use sha2::{Sha256, Digest};
 
 /// Calculate total debt (sum of all contact balances) at current time
@@ -327,6 +328,18 @@ pub async fn post_sync_events(
                 conflicts.push(event.id);
             }
         }
+    }
+
+    // Broadcast WebSocket message when events are synced (so other clients get notified immediately)
+    if !accepted.is_empty() {
+        websocket::broadcast_change(
+            &state.broadcast_tx,
+            "events_synced",
+            &serde_json::json!({
+                "accepted_count": accepted.len(),
+                "conflicts_count": conflicts.len()
+            }).to_string(),
+        );
     }
 
     Ok(Json(SyncEventsResponse {

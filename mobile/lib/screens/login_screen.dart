@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/auth_service.dart';
+import '../services/sync_service_v2.dart';
+import '../services/realtime_service.dart';
 import 'home_screen.dart';
 import 'backend_setup_screen.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
+import 'dart:async';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -43,6 +46,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
       if (mounted) {
         if (result['success'] == true) {
+          // After successful login, start sync and WebSocket connection
+          // This ensures sync starts immediately after login (like Firebase)
+          try {
+            // Connect WebSocket for real-time updates
+            RealtimeService.connect().catchError((e) {
+              // Silently handle connection errors
+            });
+            
+            // Trigger initial sync to get server data
+            SyncServiceV2.manualSync().catchError((e) {
+              // Silently handle sync errors - will retry later
+            });
+          } catch (e) {
+            // Silently handle initialization errors
+          }
+          
           // Navigate to home - use pushNamedAndRemoveUntil to ensure clean navigation stack
           Navigator.of(context).pushNamedAndRemoveUntil(
             '/',

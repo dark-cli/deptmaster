@@ -96,11 +96,12 @@ class RealtimeService {
           },
           onDone: () {
             if (_isConnected) {
-              print('WebSocket closed');
+              print('WebSocket closed - will auto-reconnect');
             }
             _isConnected = false;
             _channel = null;
             _subscription = null;
+            // Auto-reconnect immediately (like Firebase)
             _reconnect();
           },
           cancelOnError: false,
@@ -178,50 +179,23 @@ class RealtimeService {
   }
 
   static void _reconnect() {
-    Future.delayed(const Duration(seconds: 5), () {
+    // Auto-reconnect immediately (like Firebase) - no delay
+    // Keep trying until connected
+    Future.delayed(const Duration(seconds: 1), () {
       if (!_isConnected) {
         // Silently attempt reconnect - don't spam console if server is down
         connect().catchError((e) {
-          // Silently handle reconnection errors
+          // Retry connection after short delay
+          _reconnect();
         });
       }
     });
   }
 
   static void _handleRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    if (type == null) return;
-
-    switch (type) {
-      case 'contact_created':
-      case 'contact_updated':
-        _syncContact(data['data']);
-        break;
-      case 'transaction_created':
-      case 'transaction_updated':
-      case 'transaction_deleted':
-        _syncTransaction(data['data']);
-        break;
-    }
-  }
-
-  static Future<void> _syncContact(Map<String, dynamic>? contactData) async {
-    if (contactData == null) return;
-    
-    // In new architecture, we sync events, not entities
-    // Just trigger a sync to pull new events from server
-    if (!kIsWeb) {
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors
-      });
-    }
-  }
-
-  static Future<void> _syncTransaction(Map<String, dynamic>? transactionData) async {
-    if (transactionData == null) return;
-    
-    // In new architecture, we sync events, not entities
-    // Just trigger a sync to pull new events from server
+    // Trigger immediate sync for ANY WebSocket message
+    // This ensures hot updates without waiting for periodic sync
+    // WebSocket messages indicate server-side changes, so sync immediately
     if (!kIsWeb) {
       SyncServiceV2.manualSync().catchError((e) {
         // Silently handle sync errors
