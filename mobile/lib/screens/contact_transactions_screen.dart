@@ -471,32 +471,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             }
                             return false; // Don't dismiss
                           },
-                          child: GestureDetector(
-                            onTap: () async {
-                              // Open edit transaction screen
-                              final result = await showScreenAsBottomSheet(
-                                context: context,
-                                screen: EditTransactionScreen(
-                                  transaction: transaction,
-                                  contact: widget.contact,
-                                ),
-                              );
-                              if (result == true && mounted) {
-                                _loadTransactions();
-                              }
-                            },
-                            onLongPress: () {
-                              setState(() {
-                                _selectionMode = true;
-                                if (_selectedTransactions.contains(transaction.id)) {
-                                  _selectedTransactions.remove(transaction.id);
-                                } else {
-                                  _selectedTransactions.add(transaction.id);
-                                }
-                              });
-                            },
-                            child: transactionItem,
-                          ),
+                          child: transactionItem,
                         );
                       }
                       
