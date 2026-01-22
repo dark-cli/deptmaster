@@ -233,48 +233,6 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
             onPressed: _saving ? null : _saveTransaction,
             tooltip: 'Update Transaction',
           ),
-          IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('Delete Transaction'),
-                  content: const Text('Are you sure you want to delete this transaction?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(false),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(true),
-                      style: TextButton.styleFrom(foregroundColor: Colors.red),
-                      child: const Text('Delete'),
-                    ),
-                  ],
-                ),
-              );
-
-              if (confirm == true && mounted) {
-                try {
-                  // Delete from local database (creates event, rebuilds state)
-                  await LocalDatabaseServiceV2.deleteTransaction(widget.transaction.id);
-                  
-                  if (!mounted) return;
-                  Navigator.of(context).pop(true); // Return true to refresh
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('✅ Transaction deleted!')),
-                  );
-                } catch (e) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error deleting: $e')),
-                  );
-                }
-              }
-            },
-          ),
         ],
       ),
       body: Form(
@@ -336,34 +294,55 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                   ),
             const SizedBox(height: 16),
             
-            // Direction selector - "Gave" or "Received"
+            // Direction selector - Simple radio buttons for "Gave" or "Received"
             Consumer(
               builder: (context, ref, child) {
                 final flipColors = ref.watch(flipColorsProvider);
                 final isDark = Theme.of(context).brightness == Brightness.dark;
-                // Standardized: Gave (lent) = red, Received (owed) = green
+                // Standardized: Received (owed) = red, Gave (lent) = green
                 final gaveColor = AppColors.getGiveColor(flipColors, isDark);
                 final receivedColor = AppColors.getReceivedColor(flipColors, isDark);
                 
-                return SegmentedButton<TransactionDirection>(
-                  segments: [
-                    ButtonSegment(
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    RadioListTile<TransactionDirection>(
+                      title: Row(
+                        children: [
+                          Icon(Icons.arrow_upward, color: gaveColor, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Gave', style: TextStyle(color: gaveColor)),
+                        ],
+                      ),
                       value: TransactionDirection.lent,
-                      label: const Text('Gave'),
-                      icon: Icon(Icons.arrow_upward, color: gaveColor),
+                      groupValue: _direction,
+                      onChanged: (TransactionDirection? value) {
+                        if (value != null) {
+                          setState(() {
+                            _direction = value;
+                          });
+                        }
+                      },
                     ),
-                    ButtonSegment(
+                    RadioListTile<TransactionDirection>(
+                      title: Row(
+                        children: [
+                          Icon(Icons.arrow_downward, color: receivedColor, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Received', style: TextStyle(color: receivedColor)),
+                        ],
+                      ),
                       value: TransactionDirection.owed,
-                      label: const Text('Received'),
-                      icon: Icon(Icons.arrow_downward, color: receivedColor),
+                      groupValue: _direction,
+                      onChanged: (TransactionDirection? value) {
+                        if (value != null) {
+                          setState(() {
+                            _direction = value;
+                          });
+                        }
+                      },
                     ),
                   ],
-                  selected: {_direction},
-                  onSelectionChanged: (Set<TransactionDirection> newSelection) {
-                    setState(() {
-                      _direction = newSelection.first;
-                    });
-                  },
                 );
               },
             ),
@@ -390,6 +369,11 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                     : null,
               ),
               keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.done,
+              onFieldSubmitted: (value) {
+                // Enter key pressed - save and finish
+                _saveTransaction();
+              },
               inputFormatters: [
                 // Allow digits and commas
                 FilteringTextInputFormatter.allow(RegExp(r'[\d,]')),

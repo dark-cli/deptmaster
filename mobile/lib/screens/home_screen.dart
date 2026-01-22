@@ -424,18 +424,6 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         // Backend Configuration
         _buildSectionHeader('Backend Configuration'),
         ListTile(
-          title: const Text('Server IP'),
-          subtitle: Text(_backendIp),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showBackendConfigDialog(),
-        ),
-        ListTile(
-          title: const Text('Port'),
-          subtitle: Text(_backendPort.toString()),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showBackendConfigDialog(),
-        ),
-        ListTile(
           title: const Text('Change Backend Settings'),
           subtitle: const Text('Update server IP and port'),
           leading: const Icon(Icons.settings_ethernet),

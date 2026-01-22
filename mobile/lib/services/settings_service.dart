@@ -45,7 +45,7 @@ class SettingsService {
   // Default direction: 'give' or 'received'
   static Future<String> getDefaultDirection() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyDefaultDirection) ?? 'give'; // Default to 'give' (Gave)
+    return prefs.getString(_keyDefaultDirection) ?? 'received'; // Default to 'received'
   }
 
   static Future<void> setDefaultDirection(String direction) async {
@@ -209,7 +209,7 @@ class SettingsService {
         final data = json.decode(response.body);
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_keyDarkMode, data['dark_mode'] ?? true);
-        await prefs.setString(_keyDefaultDirection, data['default_direction'] ?? 'give');
+        await prefs.setString(_keyDefaultDirection, data['default_direction'] ?? 'received');
         await prefs.setBool(_keyFlipColors, data['flip_colors'] ?? false);
         await prefs.setBool(_keyDueDateEnabled, data['due_date_enabled'] ?? true); // Default ON
         await prefs.setInt(_keyDefaultDueDateDays, data['default_due_date_days'] ?? 14); // Default 14 days

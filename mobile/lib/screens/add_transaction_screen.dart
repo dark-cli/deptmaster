@@ -133,6 +133,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
           }
           if (dataWidget.description != null) {
             _descriptionController.text = dataWidget.description!;
+            // If description starts with "Close:", disable due date (it's a closing transaction)
+            if (dataWidget.description!.startsWith('Close:')) {
+              _dueDateSwitchEnabled = false;
+              _dueDate = null;
+            }
           }
         });
       }
@@ -147,11 +152,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     if (mounted) {
       setState(() {
         // Only set default direction if not pre-filled
+        // Default: 'received' maps to TransactionDirection.owed, 'give' maps to TransactionDirection.lent
         if (widget is! AddTransactionScreenWithData || 
             (widget as AddTransactionScreenWithData).direction == null) {
-          _direction = defaultDir == 'give' 
-              ? TransactionDirection.lent 
-              : TransactionDirection.owed;
+          _direction = defaultDir == 'received' 
+              ? TransactionDirection.owed 
+              : TransactionDirection.lent;
         }
         _dueDateSwitchEnabled = defaultDueDateSwitch;
         if (defaultDueDateSwitch) {
@@ -474,34 +480,55 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                   ),
             const SizedBox(height: 16),
             
-            // Direction selector - "Gave" or "Received"
+            // Direction selector - Simple radio buttons for "Gave" or "Received"
             Consumer(
               builder: (context, ref, child) {
                 final flipColors = ref.watch(flipColorsProvider);
                 final isDark = Theme.of(context).brightness == Brightness.dark;
-                // Standardized: Gave (lent) = red, Received (owed) = green
+                // Standardized: Received (owed) = red, Gave (lent) = green
                 final gaveColor = AppColors.getGiveColor(flipColors, isDark);
                 final receivedColor = AppColors.getReceivedColor(flipColors, isDark);
                 
-                return SegmentedButton<TransactionDirection>(
-                  segments: [
-                    ButtonSegment(
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    RadioListTile<TransactionDirection>(
+                      title: Row(
+                        children: [
+                          Icon(Icons.arrow_upward, color: gaveColor, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Gave', style: TextStyle(color: gaveColor)),
+                        ],
+                      ),
                       value: TransactionDirection.lent,
-                      label: const Text('Gave'),
-                      icon: Icon(Icons.arrow_upward, color: gaveColor),
+                      groupValue: _direction,
+                      onChanged: (TransactionDirection? value) {
+                        if (value != null) {
+                          setState(() {
+                            _direction = value;
+                          });
+                        }
+                      },
                     ),
-                    ButtonSegment(
+                    RadioListTile<TransactionDirection>(
+                      title: Row(
+                        children: [
+                          Icon(Icons.arrow_downward, color: receivedColor, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Received', style: TextStyle(color: receivedColor)),
+                        ],
+                      ),
                       value: TransactionDirection.owed,
-                      label: const Text('Received'),
-                      icon: Icon(Icons.arrow_downward, color: receivedColor),
+                      groupValue: _direction,
+                      onChanged: (TransactionDirection? value) {
+                        if (value != null) {
+                          setState(() {
+                            _direction = value;
+                          });
+                        }
+                      },
                     ),
                   ],
-                  selected: {_direction},
-                  onSelectionChanged: (Set<TransactionDirection> newSelection) {
-                    setState(() {
-                      _direction = newSelection.first;
-                    });
-                  },
                 );
               },
             ),
@@ -529,6 +556,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                     : null,
               ),
               keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.done,
+              onFieldSubmitted: (value) {
+                // Enter key pressed - save and finish
+                _saveTransaction();
+              },
               inputFormatters: [
                 // Allow digits and commas
                 FilteringTextInputFormatter.allow(RegExp(r'[\d,]')),
