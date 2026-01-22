@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
+import '../models/event.dart';
 import 'event_store_service.dart';
 import 'state_builder.dart';
 import 'sync_service_v2.dart';
