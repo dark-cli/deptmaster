@@ -202,15 +202,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
             },
             tooltip: 'Edit Contact',
           ),
-          IconButton(
-            icon: const Icon(Icons.check_box_outline_blank),
-            onPressed: () {
-              setState(() {
-                _selectionMode = true;
-              });
-            },
-            tooltip: 'Select',
-          ),
+          // Selection button removed - use long press on transaction items instead
           ],
         ],
       ),
