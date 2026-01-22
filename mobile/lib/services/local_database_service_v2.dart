@@ -274,6 +274,31 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return;
     
     try {
+      // Check if transaction was created less than 5 seconds ago (for undo window)
+      final events = await EventStoreService.getEventsForAggregate('transaction', transactionId);
+      final createdEvent = events.firstWhere(
+        (e) => e.eventType == 'CREATED',
+        orElse: () => events.first,
+      );
+      
+      final now = DateTime.now();
+      final timeSinceCreation = now.difference(createdEvent.timestamp);
+      final isWithinUndoWindow = timeSinceCreation.inSeconds < 5;
+      
+      // If within undo window and not synced, just remove the event locally
+      if (isWithinUndoWindow && !createdEvent.synced) {
+        // Remove the CREATED event (this effectively undoes the transaction)
+        final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+        await eventsBox.delete(createdEvent.id);
+        
+        // Rebuild state
+        await _rebuildState();
+        
+        print('✅ Transaction undone (removed local event): $transactionId');
+        return;
+      }
+      
+      // Otherwise, create a DELETED event (normal deletion)
       // 1. Create event
       final eventData = {
         'comment': comment ?? 'Transaction deleted',

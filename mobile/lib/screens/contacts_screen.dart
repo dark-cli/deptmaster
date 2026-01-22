@@ -8,12 +8,15 @@ import '../models/transaction.dart';
 import '../services/dummy_data_service.dart';
 import '../services/local_database_service_v2.dart';
 import '../services/sync_service_v2.dart';
+import '../services/settings_service.dart';
 import '../widgets/contact_list_item.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
 import '../services/realtime_service.dart';
 import '../utils/bottom_sheet_helper.dart';
+import '../providers/settings_provider.dart';
+import '../utils/app_colors.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -43,6 +46,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   bool _selectionMode = false;
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
+  Color? _defaultDirectionColor; // Color for default direction (for swipe background)
 
   @override
   void initState() {
@@ -81,7 +85,18 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    // Settings are now managed by providers, no need to load here
+    // Load default direction to set swipe background color
+    final defaultDir = await SettingsService.getDefaultDirection();
+    final flipColors = ref.read(flipColorsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (mounted) {
+      setState(() {
+        // Set color based on default direction: received = red, give = green
+        _defaultDirectionColor = defaultDir == 'received'
+            ? AppColors.getReceivedColor(flipColors, isDark)
+            : AppColors.getGiveColor(flipColors, isDark);
+      });
+    }
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -380,18 +395,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
               },
               tooltip: 'Add Contact',
             ),
-            IconButton(
-              icon: Icon(_selectionMode ? Icons.check_box : Icons.check_box_outline_blank),
-              onPressed: () {
-                setState(() {
-                  _selectionMode = !_selectionMode;
-                  if (!_selectionMode) {
-                    _selectedContacts.clear();
-                  }
-                });
-              },
-              tooltip: 'Select',
-            ),
+            // Selection button removed - use long press on contact items instead
           ],
         ],
       ),
@@ -492,14 +496,21 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           background: Container(
                             alignment: Alignment.centerLeft,
                             padding: const EdgeInsets.only(left: 20),
-                            color: Colors.green,
+                            color: _defaultDirectionColor ?? Colors.green, // Use default direction color
                             child: const Icon(Icons.add, color: Colors.white),
                           ),
                           confirmDismiss: (direction) async {
-                            // Open new transaction screen with this contact (swipe right)
+                            // Open new transaction screen with this contact (swipe right) using default direction
+                            final defaultDir = await SettingsService.getDefaultDirection();
+                            final defaultDirection = defaultDir == 'received' 
+                                ? TransactionDirection.owed 
+                                : TransactionDirection.lent;
                             final result = await showScreenAsBottomSheet(
                               context: context,
-                              screen: AddTransactionScreen(contact: contact),
+                              screen: AddTransactionScreenWithData(
+                                contact: contact,
+                                direction: defaultDirection,
+                              ),
                             );
                             if (result == true && mounted) {
                               _loadContacts();

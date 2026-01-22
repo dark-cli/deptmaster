@@ -247,10 +247,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         );
         final balanceText = totalBalance < 0 ? '-$formatted' : '$formatted';
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        // Standardized: Positive balance = Received (green), Negative balance = Gave (red)
+        // Standardized: Positive balance = Gave (green), Negative balance = Received (red)
         final balanceColor = totalBalance >= 0
-            ? AppColors.getReceivedColor(flipColors, isDark) // Positive = Received = green
-            : AppColors.getGiveColor(flipColors, isDark); // Negative = Gave = red
+            ? AppColors.getGiveColor(flipColors, isDark) // Positive = Gave = green
+            : AppColors.getReceivedColor(flipColors, isDark); // Negative = Received = red
         
         return GradientCard(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -317,9 +317,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         final topCredits = positiveBalances.take(5).toList();
         
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        // Standardized: Debts (negative balance, you owe) = Gave = red, Credits (positive balance, they owe you) = Received = green
-        final debtColor = AppColors.getGiveColor(flipColors, isDark); // Debts = Gave = red
-        final creditColor = AppColors.getReceivedColor(flipColors, isDark); // Credits = Received = green
+        // Standardized: Debts (negative balance, you owe) = Received = red, Credits (positive balance, they owe you) = Gave = green
+        final debtColor = AppColors.getReceivedColor(flipColors, isDark); // Debts = Received = red
+        final creditColor = AppColors.getGiveColor(flipColors, isDark); // Credits = Gave = green
         
         return GradientCard(
           padding: const EdgeInsets.all(16),

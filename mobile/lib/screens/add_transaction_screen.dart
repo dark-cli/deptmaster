@@ -283,8 +283,31 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
       if (mounted) {
         Navigator.of(context).pop(true); // Return true to indicate success
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Transaction created!')),
+        
+        // Show undo toast
+        final scaffoldMessenger = ScaffoldMessenger.of(context);
+        scaffoldMessenger.showSnackBar(
+          SnackBar(
+            content: const Text('✅ Transaction created!'),
+            action: SnackBarAction(
+              label: 'UNDO',
+              textColor: Colors.white,
+              onPressed: () async {
+                // Undo: delete the transaction
+                try {
+                  await LocalDatabaseServiceV2.deleteTransaction(transactionId);
+                  scaffoldMessenger.showSnackBar(
+                    const SnackBar(content: Text('Transaction undone')),
+                  );
+                } catch (e) {
+                  scaffoldMessenger.showSnackBar(
+                    SnackBar(content: Text('Error undoing: $e')),
+                  );
+                }
+              },
+            ),
+            duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
+          ),
         );
       }
     } catch (e) {
