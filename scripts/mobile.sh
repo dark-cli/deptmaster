@@ -176,13 +176,19 @@ EOF
 case "${1:-help}" in
     run)
         CLEAR_DATA=false
-        PLATFORM="${2:-android}"
-        DEVICE_ID="${3:-}"
+        PLATFORM="android"
+        DEVICE_ID=""
         
-        # Check for --clear flag
+        # Parse arguments - handle --clear flag, platform, and device ID
+        shift  # Skip 'run' command
         for arg in "$@"; do
             if [ "$arg" = "--clear" ]; then
                 CLEAR_DATA=true
+            elif [ "$arg" = "android" ] || [ "$arg" = "web" ] || [ "$arg" = "linux" ]; then
+                PLATFORM="$arg"
+            elif [ "$arg" != "--clear" ] && [ -n "$arg" ] && [ "$arg" != "android" ] && [ "$arg" != "web" ] && [ "$arg" != "linux" ]; then
+                # If it's not a flag or platform, treat it as device ID
+                DEVICE_ID="$arg"
             fi
         done
         
