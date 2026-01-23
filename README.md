@@ -54,7 +54,10 @@ A modern debt management application with event-sourced architecture, offline-fi
 ```
 .
 ├── backend/          # Rust backend server
-│   └── rust-api/    # API server + admin panel
+│   └── rust-api/    # API server
+│       └── static/   # Static web files
+│           ├── admin/  # Admin panel
+│           └── app/    # Standalone web app
 ├── mobile/          # Flutter mobile/web app
 ├── scripts/         # Management scripts
 │   ├── manage.sh    # Server management
@@ -65,7 +68,7 @@ A modern debt management application with event-sourced architecture, offline-fi
 │   ├── API.md
 │   ├── DEVELOPMENT.md
 │   └── DEPLOYMENT.md
-└── docker-compose.yml
+└── LICENSE
 ```
 
 ## Scripts
