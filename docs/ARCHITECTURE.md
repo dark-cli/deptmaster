@@ -6,6 +6,7 @@ Debt Tracker is a cross-platform debt management application built with:
 - **Backend**: Rust (Axum web framework)
 - **Frontend**: Flutter (Dart)
 - **Database**: PostgreSQL with event sourcing
+- **Event Store**: EventStore DB
 - **Real-time**: WebSocket connections
 
 ## Architecture Diagram
@@ -47,7 +48,7 @@ Debt Tracker is a cross-platform debt management application built with:
 │  ┌─────────▼──────────────────────────────────────────────┐  │
 │  │         Event Sourcing Layer                          │  │
 │  │  ┌──────────────┐  ┌──────────────┐                   │  │
-│  │  │ Event Store  │  │ Projections  │                   │  │
+│  │  │ EventStore  │  │ Projections  │                   │  │
 │  │  │ (Write-only) │  │ (Read views) │                   │  │
 │  │  └──────┬───────┘  └──────┬───────┘                   │  │
 │  └─────────┼─────────────────┼───────────────────────────┘  │
@@ -64,102 +65,128 @@ Debt Tracker is a cross-platform debt management application built with:
 
 ## Event Sourcing
 
-### Event Store
-- **Write-only**: All changes stored as immutable events
-- **Append-only**: Events never deleted or modified
+### Event Store (EventStore DB)
+
+EventStore provides reliable, idempotent event sourcing:
+
+- **Append-only**: Events are never deleted or modified
+- **Idempotency**: Built-in idempotency key support prevents duplicates
+- **Version tracking**: Optimistic locking with stream versions
 - **Complete audit trail**: Full history of all changes
 
+#### Setup
+
+```bash
+./manage.sh start-services eventstore
+```
+
+EventStore is available at:
+- **HTTP API**: http://localhost:2113
+- **Web UI**: http://localhost:2113 (admin/changeit)
+
+#### Features
+
+**Idempotency**: Every write operation can include an `Idempotency-Key` header:
+```http
+POST /api/contacts
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+```
+
+**Version Tracking**: Updates use optimistic locking:
+```rust
+let version = eventstore.get_stream_version("contact-{id}").await?;
+eventstore.write_event("contact-{id}", "ContactUpdated", event_id, data, version).await?;
+```
+
 ### Projections
+
 - **Materialized views**: Derived from event store
 - **Optimized for reads**: Fast querying of current state
 - **Updated on events**: Automatically maintained
+- **PostgreSQL**: Used for projections (read models)
 
 ### Event Types
+
 - `CONTACT_CREATED` - New contact added
+- `CONTACT_UPDATED` - Contact modified
+- `CONTACT_DELETED` - Contact deleted (soft delete)
 - `TRANSACTION_CREATED` - New transaction added
-- Future: `CONTACT_UPDATED`, `TRANSACTION_UPDATED`, `CONTACT_DELETED`, etc.
+- `TRANSACTION_UPDATED` - Transaction modified
+- `TRANSACTION_DELETED` - Transaction deleted (soft delete)
 
 ## Real-Time Updates
 
 ### WebSocket Flow
+
 1. Client connects to `/ws` endpoint
 2. Server subscribes client to broadcast channel
 3. On data change, server broadcasts to all clients
 4. Clients receive update and refresh data
 5. UI updates automatically
 
-### Broadcast Channel
-- Tokio broadcast channel (100 message buffer)
-- All connected clients receive updates
-- Non-blocking, efficient distribution
+### Implementation
+
+**Backend (Rust)**:
+- File: `backend/rust-api/src/websocket.rs`
+- Endpoint: `ws://localhost:8000/ws`
+- Technology: Axum WebSocket with Tokio broadcast channels
+- Broadcast channel: 100 message buffer
+
+**Frontend (Flutter)**:
+- File: `mobile/lib/services/realtime_service.dart`
+- Auto-connects on app start
+- Auto-reconnects if connection drops (1-second delay)
+- Platform-aware URL selection
+
+### Broadcast Function
+
+```rust
+pub fn broadcast_change(channel: &BroadcastChannel, event_type: &str, data: &str) {
+    let message = format!(r#"{{"type":"{}","data":{}}}"#, event_type, data);
+    let _ = channel.send(message);
+}
+```
 
 ## Offline-First Architecture
 
 ### Mobile/Desktop
 - **Hive**: Local NoSQL database
 - **Primary**: API for online data
-- **Fallback**: Hive for offline data
-- **Sync**: Automatic when connection restored
+- **Fallback**: Hive for offline access
+- **Sync**: Automatic sync when online
 
 ### Web
-- **State**: In-memory state management
-- **Primary**: API for data
-- **No offline**: Web requires connection (by design)
+- **API**: Direct API calls
+- **No offline storage**: Web requires internet connection
 
 ## Data Flow
 
-### Creating Contact
-```
-1. User fills form → Flutter UI
-2. POST /api/contacts → Rust backend
-3. Create CONTACT_CREATED event → Event store
-4. Update contacts_projection → Projection
-5. Broadcast via WebSocket → All clients
-6. Clients fetch latest data → API
-7. Update local state/Hive → Client storage
-8. UI refreshes → Automatic update
-```
+### Creating a Contact
 
-### Reading Contacts
-```
-1. GET /api/contacts → Rust backend
-2. Query contacts_projection → Fast read
-3. Return JSON → Client
-4. Update state/Hive → Client storage
-5. Display in UI → Flutter widgets
-```
+1. Client sends `POST /api/contacts`
+2. Backend validates request
+3. Backend writes `CONTACT_CREATED` event to EventStore
+4. Backend updates `contacts_projection` in PostgreSQL
+5. Backend broadcasts change via WebSocket
+6. All connected clients receive update
+7. Clients refresh data and update UI
 
-## Technology Stack
+### Reading Data
 
-### Backend
-- **Rust**: Systems programming language
-- **Axum**: Modern web framework
-- **Tokio**: Async runtime
-- **SQLx**: Type-safe SQL
-- **PostgreSQL**: Relational database
+1. Client requests `GET /api/contacts`
+2. Backend queries `contacts_projection` (fast read)
+3. Backend returns current state
+4. Client displays data
 
-### Frontend
-- **Flutter**: Cross-platform UI framework
-- **Dart**: Programming language
-- **Riverpod**: State management
-- **Hive**: Local storage
-- **WebSocket**: Real-time communication
+## Security
 
-## Security (Future)
+- **Authentication**: JWT tokens (planned)
+- **Authorization**: User-scoped data access
+- **Event Store**: Idempotency prevents duplicate operations
+- **Version Tracking**: Prevents concurrent modification conflicts
 
-- JWT authentication
-- Biometric authentication (mobile)
-- Encrypted backups
-- HTTPS/WSS for production
+## Related Documentation
 
-## Scalability
-
-### Current
-- Single server instance
-- In-memory broadcast channel
-- Direct database connections
-
-### Future
-- Redis for distributed broadcast
-- Connection pooling
-- Horizontal scaling support
+- [API Reference](./API.md) - API endpoints
+- [Development Guide](./DEVELOPMENT.md) - Development setup
+- [Deployment Guide](./DEPLOYMENT.md) - Production deployment
