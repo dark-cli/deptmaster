@@ -285,8 +285,11 @@
         🔄
     </button>
 
+    <!-- Load configuration (if exists) -->
+    <script src="config.js" onerror="window.APP_CONFIG = window.APP_CONFIG || { API_URL: 'http://localhost:8000/api/admin', WS_URL: 'ws://localhost:8000/ws' };"></script>
     <script>
-        const API_URL = 'http://localhost:8000/api/admin';
+        // Use config from config.js if available, otherwise use defaults
+        const API_URL = window.APP_CONFIG?.API_URL || 'http://localhost:8000/api/admin';
 
         let contacts = [];
         let transactions = [];
