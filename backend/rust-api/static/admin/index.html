@@ -1691,8 +1691,35 @@
                         badgeClass += ' error';
                     }
                     
-                    // Format event type for display
-                    const displayEventType = event.event_type
+                    // Format event type for display - make it more specific
+                    let displayEventType = event.event_type;
+                    
+                    // If event type is generic (CREATED, UPDATED, DELETED), make it specific based on aggregate_type
+                    const genericTypes = ['CREATED', 'UPDATED', 'DELETED', 'CREATE', 'UPDATE', 'DELETE'];
+                    const isGeneric = genericTypes.some(gt => event.event_type.toUpperCase() === gt || 
+                                                              event.event_type.toUpperCase().includes(gt));
+                    
+                    if (isGeneric && event.aggregate_type) {
+                        // Convert to specific format: CREATED_TRANSACTION, UPDATE_TRANSACTION, etc.
+                        const action = event.event_type.toUpperCase();
+                        let specificAction = '';
+                        
+                        if (action.includes('CREATED') || action.includes('CREATE')) {
+                            specificAction = 'CREATED';
+                        } else if (action.includes('UPDATED') || action.includes('UPDATE')) {
+                            specificAction = 'UPDATE';
+                        } else if (action.includes('DELETED') || action.includes('DELETE')) {
+                            specificAction = 'DELETE';
+                        } else {
+                            specificAction = action;
+                        }
+                        
+                        const aggregateUpper = event.aggregate_type.toUpperCase();
+                        displayEventType = `${specificAction}_${aggregateUpper}`;
+                    }
+                    
+                    // Format for display (replace underscores with spaces, capitalize words)
+                    displayEventType = displayEventType
                         .replace(/_/g, ' ')
                         .split(' ')
                         .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())

@@ -137,30 +137,56 @@ pub async fn get_events(
             // - CONTACT_CREATED, CONTACT_UPDATED, CONTACT_DELETED
             // - CREATED, UPDATED, DELETED (generic)
             
-            // Convert user-friendly format to database format
-            let db_event_type = if event_type == "CREATED_TRANSACTION" {
-                "TRANSACTION_CREATED"
-            } else if event_type == "UPDATE_TRANSACTION" || event_type == "UPDATED_TRANSACTION" {
-                "TRANSACTION_UPDATED"
-            } else if event_type == "DELETE_TRANSACTION" || event_type == "DELETED_TRANSACTION" {
-                "TRANSACTION_DELETED"
-            } else if event_type == "CREATED_CONTACT" {
-                "CONTACT_CREATED"
-            } else if event_type == "UPDATE_CONTACT" || event_type == "UPDATED_CONTACT" {
-                "CONTACT_UPDATED"
-            } else if event_type == "DELETE_CONTACT" || event_type == "DELETED_CONTACT" {
-                "CONTACT_DELETED"
+            // Parse user-friendly format (CREATED_TRANSACTION) to extract action and aggregate
+            let (action, aggregate_opt) = if event_type.contains("_") {
+                let parts: Vec<&str> = event_type.split("_").collect();
+                if parts.len() >= 2 {
+                    let action_part = parts[0].to_uppercase();
+                    let aggregate_part = parts[1..].join("_").to_uppercase();
+                    (action_part, Some(aggregate_part))
+                } else {
+                    (event_type.to_uppercase(), None)
+                }
             } else {
-                // Use as-is (might be TRANSACTION_CREATED, CREATED, etc.)
-                event_type
+                (event_type.to_uppercase(), None)
             };
             
-            // Match exact or with LIKE pattern for flexibility
-            query_builder.push(" AND (UPPER(e.event_type) = UPPER(");
-            query_builder.push_bind(db_event_type);
-            query_builder.push(") OR UPPER(e.event_type) LIKE UPPER(");
-            query_builder.push_bind(format!("%{}%", db_event_type));
-            query_builder.push("))");
+            // Convert action to database format
+            let db_action = if action == "CREATED" || action == "CREATE" {
+                "CREATED".to_string()
+            } else if action == "UPDATE" || action == "UPDATED" {
+                "UPDATED".to_string()
+            } else if action == "DELETE" || action == "DELETED" {
+                "DELETED".to_string()
+            } else {
+                action
+            };
+            
+            // Build query to match both specific and generic formats
+            if let Some(aggregate) = aggregate_opt {
+                // User selected CREATED_TRANSACTION - match:
+                // 1. TRANSACTION_CREATED (server format)
+                // 2. CREATED with aggregate_type = transaction (mobile app format)
+                let db_action_clone = db_action.clone();
+                query_builder.push(" AND (");
+                query_builder.push("(UPPER(e.event_type) = UPPER(");
+                query_builder.push_bind(format!("{}_{}", aggregate, db_action_clone.clone()));
+                query_builder.push(") OR UPPER(e.event_type) LIKE UPPER(");
+                query_builder.push_bind(format!("%{}_{}%", aggregate, db_action_clone.clone()));
+                query_builder.push(")) OR (UPPER(e.event_type) = UPPER(");
+                query_builder.push_bind(db_action_clone.clone());
+                query_builder.push(") AND e.aggregate_type = ");
+                query_builder.push_bind(aggregate.to_lowercase());
+                query_builder.push("))");
+            } else {
+                // Generic filter (CREATED, UPDATED, DELETED) - match any format
+                let db_action_clone = db_action.clone();
+                query_builder.push(" AND (UPPER(e.event_type) = UPPER(");
+                query_builder.push_bind(db_action_clone.clone());
+                query_builder.push(") OR UPPER(e.event_type) LIKE UPPER(");
+                query_builder.push_bind(format!("%{}%", db_action_clone));
+                query_builder.push("))");
+            }
         }
     }
     
