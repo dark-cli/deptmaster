@@ -1,8 +1,8 @@
-# EventStore Setup and Integration Guide
+# EventStore Integration Guide
 
 ## Overview
 
-This guide explains how to set up and use EventStore for reliable, idempotent event sourcing in the Debt Tracker application.
+EventStore is used for reliable, idempotent event sourcing in the Debt Tracker application. It provides append-only event storage with built-in versioning and idempotency support.
 
 ## Architecture
 
@@ -11,17 +11,23 @@ Flutter App → Rust Backend (HTTP API) → EventStore → PostgreSQL (Projectio
 ```
 
 - **Flutter App**: No changes needed - continues using existing HTTP API
-- **Rust Backend**: Now writes events to EventStore instead of direct PostgreSQL
+- **Rust Backend**: Writes events to EventStore
 - **EventStore**: Stores all events (append-only, versioned, idempotent)
-- **PostgreSQL**: Still used for projections (read models) for fast queries
+- **PostgreSQL**: Used for projections (read models) for fast queries
 
 ## Setup
 
 ### 1. Start EventStore
 
-EventStore is already configured in `docker-compose.yml`. Start it:
+EventStore is configured in `docker-compose.yml`. Start it:
 
 ```bash
+./manage.sh start-services eventstore
+```
+
+Or manually:
+```bash
+cd backend
 docker-compose up -d eventstore
 ```
 
@@ -40,16 +46,15 @@ Should return HTTP 200.
 ### 3. Build and Run Rust Backend
 
 ```bash
-cd backend/rust-api
-cargo build
-cargo run
+./manage.sh build
+./manage.sh start-server
 ```
 
-The backend will automatically connect to EventStore using the configuration from environment variables.
+The backend will automatically connect to EventStore using configuration from environment variables.
 
 ## Features
 
-### ✅ Idempotency
+### Idempotency
 
 Every write operation can include an `Idempotency-Key` header:
 
@@ -66,7 +71,7 @@ Content-Type: application/json
 
 If the same key is used again, EventStore returns the existing result (no duplicate creation).
 
-### ✅ Version Tracking
+### Version Tracking
 
 EventStore automatically tracks stream versions. Updates use optimistic locking:
 
@@ -86,11 +91,11 @@ eventstore.write_event(
 
 If version doesn't match, EventStore returns a conflict error.
 
-### ✅ Append-Only
+### Append-Only
 
 Events are never deleted or modified. All history is preserved.
 
-### ✅ Soft Deletes
+### Soft Deletes
 
 Deletes are implemented as events:
 
@@ -108,36 +113,22 @@ The projection marks `is_deleted = true` but the event remains in EventStore.
 
 ## Migration Strategy
 
-### Phase 1: Dual-Write (Current)
-
+### Phase 1: Dual-Write (Completed)
 - Write to both EventStore AND PostgreSQL events table
 - Read from PostgreSQL (backward compatible)
 - Allows gradual migration
 
-### Phase 2: EventStore Primary
-
+### Phase 2: EventStore Primary (Current)
 - Write only to EventStore
 - Read events from EventStore
 - Rebuild projections from EventStore events
-- Remove PostgreSQL events table
-
-### Phase 3: Full Migration
-
-- All event operations use EventStore
 - PostgreSQL only for projections
-- Event replay for sync
 
-## API Changes
+## API Usage
 
 ### Creating Contacts
 
-**Before:**
-```http
-POST /api/contacts
-Content-Type: application/json
-```
-
-**After (with idempotency):**
+**With idempotency:**
 ```http
 POST /api/contacts
 Idempotency-Key: {uuid}
@@ -148,7 +139,7 @@ The `Idempotency-Key` is optional. If not provided, a new UUID is generated.
 
 ### Updating Contacts
 
-Updates now use optimistic locking. The backend checks the stream version before updating.
+Updates use optimistic locking. The backend checks the stream version before updating.
 
 ## Flutter Client
 
@@ -199,37 +190,26 @@ docker-compose logs eventstore
 lsof -i :2113
 ```
 
-### Connection Errors
+### Reset EventStore
 
-Check environment variables:
-- `EVENTSTORE_URL`: Should be `http://eventstore:2113` (in Docker) or `http://localhost:2113` (local)
-- `EVENTSTORE_USERNAME`: Default is `admin`
-- `EVENTSTORE_PASSWORD`: Default is `changeit`
-
-### Event Write Failures
-
-Check EventStore logs:
 ```bash
-docker-compose logs -f eventstore
+./manage.sh reset-eventstore
 ```
 
-Common issues:
-- Stream already exists (use correct expected version)
-- Authentication failed (check credentials)
-- Network issues (check Docker network)
+This will:
+- Stop EventStore container
+- Remove EventStore data volume
+- Start fresh EventStore instance
 
-## Next Steps
+## Configuration
 
-1. ✅ EventStore Docker setup - DONE
-2. ✅ Rust EventStore client - DONE
-3. 🔄 Update all handlers to use EventStore - IN PROGRESS
-4. ⏳ Add idempotency to all endpoints
-5. ⏳ Update sync protocol
-6. ⏳ Migrate existing events
-7. ⏳ Remove dual-write (PostgreSQL events table)
+Environment variables:
+- `EVENTSTORE_URL` - EventStore HTTP API URL (default: http://localhost:2113)
+- `EVENTSTORE_USERNAME` - EventStore username (default: admin)
+- `EVENTSTORE_PASSWORD` - EventStore password (default: changeit)
 
-## Resources
+## Related Documentation
 
-- [EventStore Documentation](https://developers.eventstore.com)
-- [EventStore HTTP API](https://developers.eventstore.com/server/v23.10/http-api/)
-- [EventStore Docker](https://hub.docker.com/r/eventstore/eventstore)
+- [Architecture](./ARCHITECTURE.md) - Overall system architecture
+- [Event Audit Trail](./EVENT_AUDIT_TRAIL.md) - Event sourcing patterns
+- [Real-Time Sync](./REALTIME.md) - WebSocket integration

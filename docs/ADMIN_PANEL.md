@@ -10,7 +10,7 @@ The Debt Tracker application includes a web-based admin panel for monitoring and
 
 1. **Backend server must be running**
    ```bash
-   ./START_SERVER.sh
+   ./manage.sh start-server
    ```
 
 2. **Server runs on port 8000 by default**
@@ -32,6 +32,8 @@ http://localhost:8000/admin
 - View all events from the event store
 - See complete audit trail of all changes
 - Events are immutable and append-only
+- Filter by event type, aggregate type, date range
+- Click chart points to filter events
 
 **API Endpoint**: `GET /api/admin/events`
 
@@ -51,84 +53,152 @@ http://localhost:8000/admin
 **API Endpoint**: `GET /api/admin/transactions`
 
 ### 4. Projection Status
-- View status of all projections
-- Check projection health
-- Verify event processing
+- View projection rebuild status
+- See last processed event ID
+- Check if projections are up to date
+- Manually trigger projection rebuild
 
 **API Endpoint**: `GET /api/admin/projections/status`
 
-## API Endpoints
-
-All admin endpoints are prefixed with `/api/admin/`:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/admin/events` | GET | Get all events from event store |
-| `/api/admin/contacts` | GET | Get all contacts from projection |
-| `/api/admin/transactions` | GET | Get all transactions from projection |
-| `/api/admin/projections/status` | GET | Get projection status |
-
-## Example: Direct API Access
-
-You can also access the API directly using `curl`:
-
-```bash
-# Get all contacts
-curl http://localhost:8000/api/admin/contacts
-
-# Get all transactions
-curl http://localhost:8000/api/admin/transactions
-
-# Get all events
-curl http://localhost:8000/api/admin/events
-
-# Get projection status
-curl http://localhost:8000/api/admin/projections/status
-```
+### 5. Statistics Dashboard
+- View debt chart (monthly view)
+- See total contacts and transactions
+- View balance statistics
 
 ## Troubleshooting
 
-### Admin Panel Not Loading
+### Issue: http://localhost:8000/ Not Working
 
-1. **Check if server is running**:
+The root path `/` redirects to `/admin`. Use one of these URLs:
+
+1. **Admin Panel** (recommended):
+   ```
+   http://localhost:8000/admin
+   ```
+
+2. **Health Check**:
+   ```
+   http://localhost:8000/health
+   ```
+
+### Check if Server is Running
+
+1. **Check port 8000**:
+   ```bash
+   lsof -ti:8000
+   # Should show a process ID if server is running
+   ```
+
+2. **Test health endpoint**:
    ```bash
    curl http://localhost:8000/health
    # Should return: "OK"
    ```
 
-2. **Check server logs**:
-   - Look for errors in the terminal where `START_SERVER.sh` is running
-   - Verify database connection is working
+3. **Check server process**:
+   ```bash
+   ps aux | grep "debt-tracker-api"
+   # Should show the Rust server process
+   ```
 
-3. **Check port**:
-   - Default port is 8000
-   - Can be changed via `PORT` environment variable
-   - Check `.env` file or environment variables
+4. **Check server status**:
+   ```bash
+   ./manage.sh status
+   ```
 
-### CORS Issues
+### Start the Server
 
-- Admin panel should work from `localhost:8000`
-- CORS is configured to be permissive in development
-- If accessing from different origin, check CORS settings
+If the server is not running:
 
-## Development
-
-The admin panel HTML is located at:
-```
-backend/rust-api/static/admin/index.html
+```bash
+./manage.sh start-server
 ```
 
-The admin panel handler is in:
+Wait for the message:
 ```
-backend/rust-api/src/handlers/admin.rs
+Server listening on http://0.0.0.0:8000
 ```
 
-## Security Note
+### Available Routes
 
-⚠️ **Important**: The admin panel is currently **unauthenticated** and should only be used in development or behind proper authentication in production.
+| Route | Description |
+|-------|-------------|
+| `/` | Redirects to `/admin` |
+| `/admin` | Admin panel HTML interface |
+| `/health` | Health check endpoint |
+| `/api/admin/contacts` | Get all contacts (JSON) |
+| `/api/admin/transactions` | Get all transactions (JSON) |
+| `/api/admin/events` | Get all events (JSON) |
+| `/api/admin/projections/status` | Get projection status (JSON) |
+| `/api/admin/projections/rebuild` | Rebuild projections (POST) |
+| `/api/contacts` | Create contact (POST) |
+| `/api/transactions` | Create transaction (POST) |
+| `/ws` | WebSocket connection |
 
-For production deployment:
-- Add authentication (JWT tokens)
-- Restrict access to authorized users only
-- Consider IP whitelisting
-- Use HTTPS
+### Common Issues
+
+#### 1. Port Already in Use
+
+If you see "Address already in use":
+```bash
+# Kill process on port 8000
+lsof -ti:8000 | xargs kill -9
+
+# Or use the start script which handles this
+./manage.sh start-server
+```
+
+#### 2. Database Not Running
+
+If you see database connection errors:
+```bash
+# Start Docker services
+./manage.sh start-services
+```
+
+#### 3. Server Crashed
+
+Check server logs:
+```bash
+./manage.sh logs
+```
+
+Or check the terminal where you ran `./manage.sh start-server` for error messages.
+
+#### 4. Browser Cache
+
+Try:
+- Hard refresh: `Ctrl+Shift+R` (Linux) or `Cmd+Shift+R` (Mac)
+- Clear browser cache
+- Try incognito/private mode
+
+### Testing with curl
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Get contacts (JSON)
+curl http://localhost:8000/api/admin/contacts
+
+# Get transactions (JSON)
+curl http://localhost:8000/api/admin/transactions
+
+# Get events (JSON)
+curl http://localhost:8000/api/admin/events
+```
+
+### Next Steps
+
+Once the server is running:
+1. Open browser: `http://localhost:8000/admin`
+2. You should see the admin panel interface
+3. Click tabs to view Events, Contacts, Transactions
+4. Use filters to narrow down results
+5. Click chart points to filter events by date
+
+## Related Documentation
+
+- [API Reference](./API_REFERENCE.md) - Complete API documentation
+- [Architecture](./ARCHITECTURE.md) - System architecture overview
+- [Deployment](./DEPLOYMENT.md) - Production deployment guide
