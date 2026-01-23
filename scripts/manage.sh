@@ -183,7 +183,7 @@ cmd_reset_database() {
         cd "$ROOT_DIR/backend"
         docker-compose up -d postgres > /dev/null 2>&1
         sleep 5
-        cd ..
+        cd "$ROOT_DIR"
     fi
     
     print_info "Terminating all connections..."
@@ -258,7 +258,7 @@ cmd_reset_eventstore() {
     print_info "Starting fresh EventStore..."
     cd "$ROOT_DIR/backend"
     docker-compose up -d eventstore > /dev/null 2>&1
-    cd ..
+    cd "$ROOT_DIR"
     
     wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
     print_success "EventStore reset complete"
@@ -285,7 +285,7 @@ cmd_import() {
         cd "$ROOT_DIR/backend"
         docker-compose up -d eventstore > /dev/null 2>&1
         wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
-        cd ..
+        cd "$ROOT_DIR"
     fi
     
     # Ensure server is running
@@ -359,7 +359,7 @@ cmd_start_services() {
         docker-compose up -d postgres eventstore redis > /dev/null 2>&1
     fi
     
-    cd ..
+    cd "$ROOT_DIR"
     if [ "$VERBOSE" = true ]; then
         print_success "Services started"
     fi
@@ -382,7 +382,7 @@ cmd_stop_services() {
         docker-compose stop
     fi
     
-    cd ..
+    cd "$ROOT_DIR"
     print_success "Services stopped"
 }
 
