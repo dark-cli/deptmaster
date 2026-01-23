@@ -67,9 +67,10 @@ cmd_run() {
             flutter run -d "$device_id"
         else
             # Auto-select first Android device if available
-            local android_device=$(flutter devices | grep -E "android.*•.*• android" | head -1 | awk '{print $5}')
-            if [ -n "$android_device" ]; then
-                print_info "Auto-selected device: $android_device"
+            # Flutter devices output format: "Device Name (type) • ID • arch • OS"
+            local android_device=$(flutter devices 2>/dev/null | grep -E "•.*• android" | head -1 | awk -F'•' '{print $2}' | xargs)
+            if [ -n "$android_device" ] && [ "$android_device" != "linux" ]; then
+                print_info "Auto-selected Android device: $android_device"
                 flutter run -d "$android_device"
             else
                 print_info "No Android device specified, letting Flutter auto-detect..."
