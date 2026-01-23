@@ -16,7 +16,7 @@ Simple HTML/JavaScript web client for Debt Tracker.
 ### Option 1: Python HTTP Server (Simple)
 
 ```bash
-cd web/app
+cd backend/rust-api/static/app
 python3 -m http.server 8080
 ```
 
