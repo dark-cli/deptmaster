@@ -7,6 +7,7 @@ import '../models/event.dart';
 import 'event_store_service.dart';
 import 'state_builder.dart';
 import 'sync_service_v2.dart';
+import 'api_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// Simplified Local Database Service - KISS approach
@@ -350,60 +351,31 @@ class LocalDatabaseServiceV2 {
       // Get the most recent event (last in sorted list)
       final lastEvent = events.last;
       
+      // Check if event is within undo window (5 seconds)
+      final now = DateTime.now();
+      final timeSinceEvent = now.difference(lastEvent.timestamp);
+      final isWithinUndoWindow = timeSinceEvent.inSeconds < 5;
+      
+      if (!isWithinUndoWindow) {
+        print('⚠️ Event is too old to undo (${timeSinceEvent.inSeconds} seconds old)');
+        return;
+      }
+      
+      // If the event was synced, try to delete it from the server first
+      if (lastEvent.synced) {
+        try {
+          final deleted = await ApiService.deleteEvent(lastEvent.id);
+          if (!deleted) {
+            print('⚠️ Could not delete event from server (may be too old), removing locally only');
+          }
+        } catch (e) {
+          print('⚠️ Error deleting event from server: $e, removing locally only');
+        }
+      }
+      
       // Remove the last event locally (this effectively undoes the last action)
       final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
       await eventsBox.delete(lastEvent.id);
-      
-      // If the event was synced, we need to compensate on the server
-      if (lastEvent.synced) {
-        // Create a compensating event based on what we're undoing:
-        // - If undoing CREATED: create DELETED event
-        // - If undoing UPDATED: create DELETED event (simplest approach)
-        // - If undoing DELETED: remove DELETED event (recreate transaction - handled by state rebuild)
-        if (lastEvent.eventType == 'CREATED' || lastEvent.eventType == 'UPDATED') {
-          // Create a DELETED event to compensate on server
-          final eventData = {
-            'comment': 'Undo: ${lastEvent.eventType.toLowerCase()}',
-            'timestamp': DateTime.now().toIso8601String(),
-          };
-          
-          await EventStoreService.appendEvent(
-            aggregateType: 'transaction',
-            aggregateId: transactionId,
-            eventType: 'DELETED',
-            eventData: eventData,
-          );
-          
-          // Trigger sync to send DELETED event to server
-          SyncServiceV2.manualSync().catchError((e) {
-            // Silently handle sync errors
-          });
-        } else if (lastEvent.eventType == 'DELETED') {
-          // Undoing a DELETE means we need to recreate the transaction
-          // Get the CREATED event to recreate it
-          final createdEvent = events.firstWhere(
-            (e) => e.eventType == 'CREATED',
-            orElse: () => events.first,
-          );
-          
-          // Recreate the transaction using the CREATED event data
-          final eventData = Map<String, dynamic>.from(createdEvent.eventData);
-          eventData['comment'] = 'Undo: deleted';
-          eventData['timestamp'] = DateTime.now().toIso8601String();
-          
-          await EventStoreService.appendEvent(
-            aggregateType: 'transaction',
-            aggregateId: transactionId,
-            eventType: 'CREATED',
-            eventData: eventData,
-          );
-          
-          // Trigger sync to send CREATED event to server
-          SyncServiceV2.manualSync().catchError((e) {
-            // Silently handle sync errors
-          });
-        }
-      }
       
       // Rebuild state
       await _rebuildState();

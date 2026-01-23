@@ -127,12 +127,18 @@ pub async fn get_events(
         "SELECT e.event_id, e.aggregate_type, e.event_type, e.user_id, u.email as user_email, e.created_at, e.event_data FROM events e LEFT JOIN users_projection u ON e.user_id = u.id WHERE 1=1"
     );
     
-    // Filter by event_type (case-insensitive)
+    // Filter by event_type (case-insensitive, supports both CREATED/DELETED and TRANSACTION_CREATED/TRANSACTION_DELETED formats)
     if let Some(event_type) = &params.event_type {
         if !event_type.is_empty() {
-            query_builder.push(" AND UPPER(e.event_type) = UPPER(");
+            // Use LIKE pattern matching to handle both formats:
+            // - "CREATED" matches both "CREATED" and "TRANSACTION_CREATED", "CONTACT_CREATED"
+            // - "DELETED" matches both "DELETED" and "TRANSACTION_DELETED", "CONTACT_DELETED"
+            // - "UPDATED" matches both "UPDATED" and "TRANSACTION_UPDATED", "CONTACT_UPDATED"
+            query_builder.push(" AND (UPPER(e.event_type) = UPPER(");
             query_builder.push_bind(event_type);
-            query_builder.push(")");
+            query_builder.push(") OR UPPER(e.event_type) LIKE UPPER(");
+            query_builder.push_bind(format!("%_{}", event_type));
+            query_builder.push("))");
         }
     }
     
@@ -223,6 +229,96 @@ pub async fn get_latest_event_id(
         "latest_event_id": latest_id,
         "timestamp": chrono::Utc::now().to_rfc3339()
     })))
+}
+
+// Delete an event if it's less than 5 seconds old (for undo functionality)
+#[derive(Deserialize)]
+pub struct DeleteEventRequest {
+    event_id: String,
+}
+
+pub async fn delete_event(
+    axum::extract::Path(event_id): axum::extract::Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let event_uuid = uuid::Uuid::parse_str(&event_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid event ID: {}", e)})),
+        )
+    })?;
+
+    // Check if event exists and get its creation time
+    let event_row = sqlx::query(
+        "SELECT created_at FROM events WHERE event_id = $1"
+    )
+    .bind(event_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching event: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
+
+    if let Some(row) = event_row {
+        let created_at: chrono::NaiveDateTime = row.get("created_at");
+        let now = chrono::Utc::now().naive_utc();
+        let age_seconds = (now - created_at).num_seconds();
+
+        // Only allow deletion if event is less than 5 seconds old
+        if age_seconds >= 5 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Event is too old to delete",
+                    "age_seconds": age_seconds
+                })),
+            ));
+        }
+
+        // Delete the event
+        let deleted = sqlx::query(
+            "DELETE FROM events WHERE event_id = $1"
+        )
+        .bind(event_uuid)
+        .execute(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error deleting event: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+        if deleted.rows_affected() == 0 {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Event not found"})),
+            ));
+        }
+
+        // Rebuild projections since we deleted an event
+        // Note: This is a simplified approach - in production you might want to rebuild more carefully
+        tokio::spawn(async move {
+            if let Err(e) = crate::handlers::sync::rebuild_projections_from_events(&state).await {
+                tracing::error!("Error rebuilding projections after event deletion: {:?}", e);
+            }
+        });
+
+        Ok(Json(serde_json::json!({
+            "success": true,
+            "message": "Event deleted successfully"
+        })))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Event not found"})),
+        ))
+    }
 }
 
 // Backfill events for transactions that don't have events

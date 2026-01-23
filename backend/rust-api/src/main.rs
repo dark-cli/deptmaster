@@ -93,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin", get(handlers::admin_panel))
         .route("/api/admin/events", get(handlers::get_events))
         .route("/api/admin/events/latest", get(handlers::get_latest_event_id))
+        .route("/api/admin/events/:event_id", axum::routing::delete(handlers::delete_event))
         .route("/api/admin/events/backfill-transactions", post(handlers::backfill_transaction_events))
         .route("/api/admin/contacts", get(handlers::get_contacts))
         .route("/api/admin/transactions", get(handlers::get_transactions))

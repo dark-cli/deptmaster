@@ -445,4 +445,34 @@ class ApiService {
       rethrow;
     }
   }
+
+  // Delete an event from the server (only if less than 5 seconds old)
+  static Future<bool> deleteEvent(String eventId) async {
+    try {
+      final headers = await _getHeaders();
+      final baseUrl = await BackendConfigService.getBaseUrl();
+      final response = await http.delete(
+        Uri.parse('$baseUrl/api/admin/events/$eventId'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        final errorBody = response.body;
+        try {
+          final errorJson = json.decode(errorBody);
+          if (errorJson is Map && errorJson.containsKey('error')) {
+            print('⚠️ Cannot delete event: ${errorJson['error']}');
+          }
+        } catch (_) {
+          print('⚠️ Cannot delete event: ${response.statusCode} - $errorBody');
+        }
+        return false;
+      }
+    } catch (e) {
+      print('Error deleting event: $e');
+      return false;
+    }
+  }
 }
