@@ -70,4 +70,33 @@ class ThemeColors {
   static Color background(BuildContext context) {
     return Theme.of(context).colorScheme.background;
   }
+
+  /// Get SnackBar background color from theme
+  static Color snackBarBackground(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark 
+        ? const Color(0xFF323232) // Dark surface for dark mode
+        : const Color(0xFF323232); // Dark surface for light mode (standard Material)
+  }
+
+  /// Get SnackBar text color from theme
+  static Color snackBarTextColor(BuildContext context) {
+    return Colors.white; // Always white for good contrast on dark SnackBar
+  }
+
+  /// Get accent color for SnackBar actions (UNDO button)
+  static Color snackBarActionColor(BuildContext context) {
+    return Theme.of(context).colorScheme.primary; // Use primary/accent color
+  }
+
+  /// Get SnackBar error background color from theme
+  static Color snackBarErrorBackground(BuildContext context) {
+    return Theme.of(context).colorScheme.error;
+  }
+
+  /// Get SnackBar success background color from theme
+  static Color snackBarSuccessBackground(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
+  }
 }

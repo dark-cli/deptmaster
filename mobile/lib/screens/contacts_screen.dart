@@ -17,6 +17,7 @@ import '../services/realtime_service.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
+import '../utils/theme_colors.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -87,11 +88,16 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   Future<void> _loadSettings() async {
     // Load default direction to set swipe background color
     final defaultDir = await SettingsService.getDefaultDirection();
+    _updateSwipeColor(defaultDir);
+  }
+
+  void _updateSwipeColor(String defaultDir) {
+    // Watch flipColors provider so it updates when settings change
     final flipColors = ref.read(flipColorsProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     if (mounted) {
       setState(() {
-        // Set color based on default direction: received = red, give = green
+        // Set color based on default direction: received = red, give = green (respects flipColors)
         _defaultDirectionColor = defaultDir == 'received'
             ? AppColors.getReceivedColor(flipColors, isDark)
             : AppColors.getGiveColor(flipColors, isDark);
@@ -323,9 +329,46 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             });
                             _loadContacts();
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            
+                            // Show undo toast for all deletes (single or bulk)
+                            final scaffoldMessenger = ScaffoldMessenger.of(context);
+                            scaffoldMessenger.showSnackBar(
                               SnackBar(
                                 content: Text('✅ $deletedCount contact(s) deleted'),
+                                backgroundColor: ThemeColors.snackBarBackground(context),
+                                action: SnackBarAction(
+                                  label: 'UNDO',
+                                  textColor: ThemeColors.snackBarActionColor(context),
+                                  onPressed: () async {
+                                    try {
+                                      if (deletedIds.length == 1) {
+                                        await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
+                                      } else {
+                                        await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
+                                      }
+                                      _loadContacts();
+                                      scaffoldMessenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text('${deletedIds.length} contact(s) deletion undone'),
+                                          backgroundColor: ThemeColors.snackBarBackground(context),
+                                          duration: const Duration(seconds: 3),
+                                          behavior: SnackBarBehavior.floating,
+                                        ),
+                                      );
+                                    } catch (e) {
+                                      scaffoldMessenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text('Error undoing: $e'),
+                                          backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                                          duration: const Duration(seconds: 3),
+                                          behavior: SnackBarBehavior.floating,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                ),
+                                duration: const Duration(seconds: 5),
+                                behavior: SnackBarBehavior.floating,
                               ),
                             );
                           }
@@ -334,7 +377,9 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('Error deleting contacts: $e'),
-                                backgroundColor: Colors.red,
+                                backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                                duration: const Duration(seconds: 4),
+                                behavior: SnackBarBehavior.floating,
                               ),
                             );
                             setState(() {
@@ -499,11 +544,38 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             DismissDirection.startToEnd: 0.7, // Require 70% swipe for add transaction
                           },
                           movementDuration: const Duration(milliseconds: 300), // Slower animation
-                          background: Container(
-                            alignment: Alignment.centerLeft,
-                            padding: const EdgeInsets.only(left: 20),
-                            color: _defaultDirectionColor ?? Colors.green, // Use default direction color
-                            child: const Icon(Icons.add, color: Colors.white),
+                          background: Consumer(
+                            builder: (context, ref, child) {
+                              final flipColors = ref.watch(flipColorsProvider);
+                              final isDark = Theme.of(context).brightness == Brightness.dark;
+                              return FutureBuilder<String>(
+                                future: SettingsService.getDefaultDirection(),
+                                builder: (context, snapshot) {
+                                  final defaultDir = snapshot.data ?? 'received';
+                                  // Set color based on default direction: received = red, give = green (respects flipColors)
+                                  final swipeColor = defaultDir == 'received'
+                                      ? AppColors.getReceivedColor(flipColors, isDark)
+                                      : AppColors.getGiveColor(flipColors, isDark);
+                                  // Capitalize first letter: "received" -> "Received", "give" -> "Gave"
+                                  final directionText = defaultDir == 'received' 
+                                      ? 'Received' 
+                                      : 'Gave';
+                                  return Container(
+                                    alignment: Alignment.centerLeft,
+                                    padding: const EdgeInsets.only(left: 20),
+                                    color: swipeColor,
+                                    child: Text(
+                                      directionText,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
                           ),
                           confirmDismiss: (direction) async {
                             // Open new transaction screen with this contact (swipe right) using default direction
@@ -521,7 +593,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             if (result == true && mounted) {
                               _loadContacts();
                             }
-                            return false; // Don't dismiss
+                            return false; // Don't dismiss the contact item
                           },
                           child: contactItem,
                         );

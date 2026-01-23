@@ -167,45 +167,53 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             _loadTransactions();
                             if (!mounted) return;
                             
-                            // Show undo toast (only for single delete - bulk delete is complex to undo)
-                            if (deletedCount == 1) {
-                              final scaffoldMessenger = ScaffoldMessenger.of(context);
-                              scaffoldMessenger.showSnackBar(
-                                SnackBar(
-                                  content: Text('✅ $deletedCount transaction(s) deleted'),
-                                  action: SnackBarAction(
-                                    label: 'UNDO',
-                                    textColor: Colors.white,
-                                    onPressed: () async {
-                                      try {
+                            // Show undo toast for all deletes (single or bulk)
+                            final scaffoldMessenger = ScaffoldMessenger.of(context);
+                            scaffoldMessenger.showSnackBar(
+                              SnackBar(
+                                content: Text('✅ $deletedCount transaction(s) deleted'),
+                                backgroundColor: ThemeColors.snackBarBackground(context),
+                                action: SnackBarAction(
+                                  label: 'UNDO',
+                                  textColor: ThemeColors.snackBarActionColor(context),
+                                  onPressed: () async {
+                                    try {
+                                      if (deletedIds.length == 1) {
                                         await LocalDatabaseServiceV2.undoTransactionAction(deletedIds.first);
-                                        _loadTransactions();
-                                        scaffoldMessenger.showSnackBar(
-                                          const SnackBar(content: Text('Transaction deletion undone')),
-                                        );
-                                      } catch (e) {
-                                        scaffoldMessenger.showSnackBar(
-                                          SnackBar(content: Text('Error undoing: $e')),
-                                        );
+                                      } else {
+                                        await LocalDatabaseServiceV2.undoBulkTransactionActions(deletedIds);
                                       }
-                                    },
-                                  ),
-                                  duration: const Duration(seconds: 5),
+                                      _loadTransactions();
+                                      scaffoldMessenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text('${deletedIds.length} transaction(s) deletion undone'),
+                                          backgroundColor: ThemeColors.snackBarBackground(context),
+                                          duration: const Duration(seconds: 3),
+                                        ),
+                                      );
+                                    } catch (e) {
+                                      scaffoldMessenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text('Error undoing: $e'),
+                                          backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                                          duration: const Duration(seconds: 3),
+                                        ),
+                                      );
+                                    }
+                                  },
                                 ),
-                              );
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('✅ $deletedCount transaction(s) deleted'),
-                                ),
-                              );
-                            }
+                                duration: const Duration(seconds: 5),
+                                behavior: SnackBarBehavior.floating, // Ensure it dismisses properly
+                              ),
+                            );
                           } catch (e) {
                             if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('Error deleting transactions: $e'),
-                                backgroundColor: Colors.red,
+                                backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                                duration: const Duration(seconds: 4),
+                                behavior: SnackBarBehavior.floating,
                               ),
                             );
                             setState(() {
@@ -320,11 +328,12 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                       const SizedBox(height: 4),
                       Consumer(
                         builder: (context, ref, child) {
+                          final flipColors = ref.watch(flipColorsProvider);
                           final isDark = Theme.of(context).brightness == Brightness.dark;
-                          // Standardized: Positive balance = Received (green), Negative balance = Gave (red)
+                          // Standardized: Positive balance = Gave (green), Negative balance = Received (red)
                           final balanceColor = totalBalance >= 0
-                              ? AppColors.getReceivedColor(false, isDark) // Positive = Received = green
-                              : AppColors.getGiveColor(false, isDark); // Negative = Gave = red
+                              ? AppColors.getGiveColor(flipColors, isDark) // Positive = Gave = green
+                              : AppColors.getReceivedColor(flipColors, isDark); // Negative = Received = red
                           return Text(
                             _formatBalance(totalBalance),
                             style: Theme.of(context).textTheme.headlineLarge?.copyWith(
@@ -418,31 +427,46 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                 scaffoldMessenger.showSnackBar(
                                   SnackBar(
                                     content: const Text('✅ Transaction deleted!'),
+                                    backgroundColor: ThemeColors.snackBarBackground(context),
                                     action: SnackBarAction(
                                       label: 'UNDO',
-                                      textColor: Colors.white,
+                                      textColor: ThemeColors.snackBarTextColor(context),
                                       onPressed: () async {
                                         // Undo: remove the last event (DELETED)
                                         try {
                                           await LocalDatabaseServiceV2.undoTransactionAction(transaction.id);
                                           _loadTransactions();
                                           scaffoldMessenger.showSnackBar(
-                                            const SnackBar(content: Text('Transaction deletion undone')),
+                                            SnackBar(
+                                              content: const Text('Transaction deletion undone'),
+                                              backgroundColor: ThemeColors.snackBarBackground(context),
+                                              duration: const Duration(seconds: 3),
+                                            ),
                                           );
                                         } catch (e) {
                                           scaffoldMessenger.showSnackBar(
-                                            SnackBar(content: Text('Error undoing: $e')),
+                                            SnackBar(
+                                              content: Text('Error undoing: $e'),
+                                              backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                                              duration: const Duration(seconds: 3),
+                                            ),
                                           );
                                         }
                                       },
                                     ),
                                     duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
+                                    behavior: SnackBarBehavior.floating, // Ensure it dismisses properly
                                   ),
                                 );
                               } catch (e) {
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error deleting: $e')),
+                                  SnackBar(
+                                    content: Text('Error deleting: $e'),
+                                    backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                                    duration: const Duration(seconds: 4),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
                                 );
                               }
                             }

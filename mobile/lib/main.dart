@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -139,6 +140,7 @@ class DebtTrackerApp extends ConsumerStatefulWidget {
 
 class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
   bool _darkMode = true; // Default to dark mode
+  DateTime? _lastBackPressTime;
 
   @override
   void initState() {
@@ -195,11 +197,29 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
       themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
       initialRoute: widget.initialRoute,
       routes: {
-        '/': (context) => const HomeScreen(),
+        '/': (context) => _DoubleBackToExitWrapper(child: const HomeScreen()),
         '/setup': (context) => const BackendSetupScreen(),
         '/login': (context) => const LoginScreen(),
       },
       debugShowCheckedModeBanner: false,
     );
+  }
+}
+
+// Widget to handle double-back-press to exit
+class _DoubleBackToExitWrapper extends StatefulWidget {
+  final Widget child;
+  
+  const _DoubleBackToExitWrapper({required this.child});
+
+  @override
+  State<_DoubleBackToExitWrapper> createState() => _DoubleBackToExitWrapperState();
+}
+
+class _DoubleBackToExitWrapperState extends State<_DoubleBackToExitWrapper> {
+  @override
+  Widget build(BuildContext context) {
+    // Just wrap the child - back button handling is done in HomeScreen
+    return widget.child;
   }
 }

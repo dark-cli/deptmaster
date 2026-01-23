@@ -1,6 +1,7 @@
 // ignore_for_file: unused_element
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'contacts_screen.dart';
@@ -17,6 +18,7 @@ import '../services/backend_config_service.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/gradient_background.dart';
 import '../utils/bottom_sheet_helper.dart';
+import '../utils/theme_colors.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -29,11 +31,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedIndex = 2; // Dashboard is default (index 2)
   bool _biometricEnabled = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  DateTime? _lastBackPressTime;
 
   @override
   void initState() {
     super.initState();
     _checkBiometricAvailability();
+  }
+
+  Future<bool> _onWillPop() async {
+    // If not at root route, allow normal back navigation
+    if (Navigator.of(context).canPop()) {
+      return true;
+    }
+
+    // If not on dashboard, navigate to dashboard
+    if (_selectedIndex != 2) {
+      setState(() {
+        _selectedIndex = 2; // Navigate to Dashboard
+      });
+      return false; // Don't exit
+    }
+
+    // Already on dashboard - require double back press to exit
+    final now = DateTime.now();
+    if (_lastBackPressTime == null || 
+        now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+      // First back press - show message and record time
+      _lastBackPressTime = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Press back again to exit'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return false; // Don't exit yet
+    }
+    
+    // Second back press within 2 seconds - exit app
+    SystemNavigator.pop();
+    return false;
   }
 
   Future<void> _checkBiometricAvailability() async {
@@ -54,15 +92,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (authenticated && mounted) {
       // User authenticated, app is already unlocked
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Authenticated')),
+        SnackBar(
+          content: const Text('✅ Authenticated'),
+          backgroundColor: ThemeColors.snackBarBackground(context),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: GradientBackground(
+        child: Scaffold(
         key: _scaffoldKey,
         backgroundColor: Colors.transparent,
         drawer: _buildDrawer(),
@@ -122,6 +167,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -568,7 +614,9 @@ class _BackendConfigDialogState extends State<_BackendConfigDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error saving configuration: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: ThemeColors.snackBarErrorBackground(context),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }

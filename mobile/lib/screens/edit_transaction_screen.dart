@@ -105,7 +105,12 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading contacts: $e')),
+          SnackBar(
+            content: Text('Error loading contacts: $e'),
+            backgroundColor: ThemeColors.snackBarErrorBackground(context),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
@@ -143,7 +148,12 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedContact == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a contact')),
+        SnackBar(
+          content: const Text('Please select a contact'),
+          backgroundColor: ThemeColors.snackBarBackground(context),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }
@@ -185,31 +195,48 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
         scaffoldMessenger.showSnackBar(
           SnackBar(
             content: const Text('✅ Transaction updated!'),
+            backgroundColor: ThemeColors.snackBarBackground(context),
             action: SnackBarAction(
               label: 'UNDO',
-              textColor: Colors.white,
+              textColor: ThemeColors.snackBarActionColor(context),
               onPressed: () async {
                 // Undo: remove the last event (UPDATED)
                 try {
                   await LocalDatabaseServiceV2.undoTransactionAction(updatedTransaction.id);
                   scaffoldMessenger.showSnackBar(
-                    const SnackBar(content: Text('Transaction update undone')),
+                    SnackBar(
+                      content: const Text('Transaction update undone'),
+                      backgroundColor: ThemeColors.snackBarBackground(context),
+                      duration: const Duration(seconds: 3),
+                      behavior: SnackBarBehavior.floating,
+                    ),
                   );
                 } catch (e) {
                   scaffoldMessenger.showSnackBar(
-                    SnackBar(content: Text('Error undoing: $e')),
+                    SnackBar(
+                      content: Text('Error undoing: $e'),
+                      backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                      duration: const Duration(seconds: 3),
+                      behavior: SnackBarBehavior.floating,
+                    ),
                   );
                 }
               },
             ),
             duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
+            behavior: SnackBarBehavior.floating, // Ensure it dismisses properly
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: ThemeColors.snackBarErrorBackground(context),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } finally {

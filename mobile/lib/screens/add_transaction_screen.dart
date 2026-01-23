@@ -58,6 +58,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   DateTime _selectedDate = DateTime.now();
   DateTime? _dueDate;
   bool _dueDateSwitchEnabled = false; // Switch state for due date
+  bool _isClosingTransaction = false; // Track if this is a closing transaction
   bool _saving = false;
   List<Contact> _contacts = [];
   List<Contact> _filteredContacts = [];
@@ -72,12 +73,25 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     _prefillData();
     _contactSearchController.addListener(_onContactSearchChanged);
     _amountController.addListener(_onAmountChanged);
+    _descriptionController.addListener(_onDescriptionChanged);
     _amountHasText = _amountController.text.isNotEmpty;
+    _isClosingTransaction = _descriptionController.text.startsWith('Close:');
   }
 
   void _onAmountChanged() {
     setState(() {
       _amountHasText = _amountController.text.isNotEmpty;
+    });
+  }
+
+  void _onDescriptionChanged() {
+    setState(() {
+      _isClosingTransaction = _descriptionController.text.startsWith('Close:');
+      if (_isClosingTransaction) {
+        // Disable due date when closing transaction
+        _dueDateSwitchEnabled = false;
+        _dueDate = null;
+      }
     });
   }
 
@@ -134,9 +148,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
           if (dataWidget.description != null) {
             _descriptionController.text = dataWidget.description!;
             // If description starts with "Close:", disable due date (it's a closing transaction)
-            if (dataWidget.description!.startsWith('Close:')) {
+            final isClosing = dataWidget.description!.startsWith('Close:');
+            if (isClosing) {
               _dueDateSwitchEnabled = false;
               _dueDate = null;
+              _isClosingTransaction = true;
             }
           }
         });
@@ -196,7 +212,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
           _loadingContacts = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading contacts: $e')),
+          SnackBar(
+            content: Text('Error loading contacts: $e'),
+            backgroundColor: ThemeColors.snackBarErrorBackground(context),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
@@ -245,7 +266,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedContact == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a contact')),
+        SnackBar(
+          content: const Text('Please select a contact'),
+          backgroundColor: ThemeColors.snackBarBackground(context),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }
@@ -289,31 +315,48 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         scaffoldMessenger.showSnackBar(
           SnackBar(
             content: const Text('✅ Transaction created!'),
+            backgroundColor: ThemeColors.snackBarBackground(context),
             action: SnackBarAction(
               label: 'UNDO',
-              textColor: Colors.white,
+              textColor: ThemeColors.snackBarActionColor(context),
               onPressed: () async {
                 // Undo: remove the last event (CREATED)
                 try {
                   await LocalDatabaseServiceV2.undoTransactionAction(transactionId);
                   scaffoldMessenger.showSnackBar(
-                    const SnackBar(content: Text('Transaction undone')),
+                    SnackBar(
+                      content: const Text('Transaction undone'),
+                      backgroundColor: ThemeColors.snackBarBackground(context),
+                      duration: const Duration(seconds: 3),
+                      behavior: SnackBarBehavior.floating,
+                    ),
                   );
                 } catch (e) {
                   scaffoldMessenger.showSnackBar(
-                    SnackBar(content: Text('Error undoing: $e')),
+                    SnackBar(
+                      content: Text('Error undoing: $e'),
+                      backgroundColor: ThemeColors.snackBarErrorBackground(context),
+                      duration: const Duration(seconds: 3),
+                      behavior: SnackBarBehavior.floating,
+                    ),
                   );
                 }
               },
             ),
             duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
+            behavior: SnackBarBehavior.floating, // Ensure it dismisses properly
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: ThemeColors.snackBarErrorBackground(context),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     } finally {
@@ -329,6 +372,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   void dispose() {
     _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
+    _descriptionController.removeListener(_onDescriptionChanged);
     _descriptionController.dispose();
     _contactSearchController.removeListener(_onContactSearchChanged);
     _contactSearchController.dispose();
@@ -682,25 +726,27 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                     : 'Not set',
               ),
               value: _dueDateSwitchEnabled,
-              onChanged: (value) async {
-                setState(() {
-                  _dueDateSwitchEnabled = value;
-                });
-                if (value && _dueDate == null) {
-                  // Set default due date when switch is turned on
-                  final defaultDays = await SettingsService.getDefaultDueDateDays();
-                  if (mounted) {
-                    setState(() {
-                      _dueDate = DateTime.now().add(Duration(days: defaultDays));
-                    });
-                  }
-                } else if (!value) {
-                  setState(() {
-                    _dueDate = null;
-                  });
-                }
-              },
-              secondary: _dueDateSwitchEnabled
+              onChanged: _isClosingTransaction 
+                  ? null // Disable switch when closing transaction
+                  : (value) async {
+                      setState(() {
+                        _dueDateSwitchEnabled = value;
+                      });
+                      if (value && _dueDate == null) {
+                        // Set default due date when switch is turned on
+                        final defaultDays = await SettingsService.getDefaultDueDateDays();
+                        if (mounted) {
+                          setState(() {
+                            _dueDate = DateTime.now().add(Duration(days: defaultDays));
+                          });
+                        }
+                      } else if (!value) {
+                        setState(() {
+                          _dueDate = null;
+                        });
+                      }
+                    },
+              secondary: _dueDateSwitchEnabled && !_isClosingTransaction
                   ? IconButton(
                       icon: const Icon(Icons.calendar_today),
                       onPressed: _selectDueDate,

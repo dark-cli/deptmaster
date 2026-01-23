@@ -395,11 +395,112 @@ class LocalDatabaseServiceV2 {
     }
   }
 
+  /// Undo the last action for a contact (remove the last event)
+  static Future<void> undoContactAction(String contactId) async {
+    if (kIsWeb) return;
+    
+    try {
+      // Get all events for this contact, sorted by timestamp
+      final events = await EventStoreService.getEventsForAggregate('contact', contactId);
+      if (events.isEmpty) {
+        print('⚠️ No events found for contact: $contactId');
+        return;
+      }
+      
+      // Get the most recent event (last in sorted list)
+      final lastEvent = events.last;
+      
+      // Check if event is within undo window (5 seconds)
+      final now = DateTime.now();
+      final timeSinceEvent = now.difference(lastEvent.timestamp);
+      final isWithinUndoWindow = timeSinceEvent.inSeconds < 5;
+      
+      if (!isWithinUndoWindow) {
+        print('⚠️ Event is too old to undo (${timeSinceEvent.inSeconds} seconds old)');
+        return;
+      }
+      
+      // If the event was synced, try to delete it from the server first
+      if (lastEvent.synced) {
+        try {
+          final deleted = await ApiService.deleteEvent(lastEvent.id);
+          if (!deleted) {
+            print('⚠️ Could not delete event from server (may be too old), removing locally only');
+          }
+        } catch (e) {
+          print('⚠️ Error deleting event from server: $e, removing locally only');
+        }
+      }
+      
+      // Remove the last event locally (this effectively undoes the last action)
+      final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+      await eventsBox.delete(lastEvent.id);
+      
+      // Rebuild state
+      await _rebuildState();
+      
+      print('✅ Contact action undone (removed last event): $contactId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
+    } catch (e) {
+      print('Error undoing contact action: $e');
+      rethrow;
+    }
+  }
+
+  /// Undo multiple contact actions (for bulk delete)
+  static Future<void> undoBulkContactActions(List<String> contactIds) async {
+    if (kIsWeb) return;
+    
+    try {
+      int successCount = 0;
+      int failCount = 0;
+      
+      for (final contactId in contactIds) {
+        try {
+          await undoContactAction(contactId);
+          successCount++;
+        } catch (e) {
+          print('⚠️ Failed to undo contact $contactId: $e');
+          failCount++;
+        }
+      }
+      
+      print('✅ Bulk undo complete: $successCount succeeded, $failCount failed');
+    } catch (e) {
+      print('Error undoing bulk contact actions: $e');
+      rethrow;
+    }
+  }
+
   static Future<void> bulkDeleteTransactions(List<String> transactionIds) async {
     if (kIsWeb) return;
     
     for (final id in transactionIds) {
       await deleteTransaction(id, comment: 'Bulk delete');
+    }
+  }
+
+  /// Undo multiple transaction actions (for bulk delete)
+  static Future<void> undoBulkTransactionActions(List<String> transactionIds) async {
+    if (kIsWeb) return;
+    
+    try {
+      int successCount = 0;
+      int failCount = 0;
+      
+      for (final transactionId in transactionIds) {
+        try {
+          await undoTransactionAction(transactionId);
+          successCount++;
+        } catch (e) {
+          print('⚠️ Failed to undo transaction $transactionId: $e');
+          failCount++;
+        }
+      }
+      
+      print('✅ Bulk undo complete: $successCount succeeded, $failCount failed');
+    } catch (e) {
+      print('Error undoing bulk transaction actions: $e');
+      rethrow;
     }
   }
 
