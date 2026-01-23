@@ -1,1 +1,0 @@
-- correzione: arresto anomalo del filtro per le persone senza debito o con nota (#34)

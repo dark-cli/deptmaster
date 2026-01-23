@@ -1,3 +1,0 @@
-# v1.7.1
-- corectat: accident la crearea unei noi tranzacții cu presetări (tranzacție de returnare sau când este selectată una existentă)
-- actualizare bibliotecă

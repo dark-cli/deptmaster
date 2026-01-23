@@ -1,24 +1,22 @@
-# Debt Tracker
+# Debt Tracker (IOU Tracker)
 
 A modern debt management application with event-sourced architecture, offline-first design, and cross-platform support.
 
 ## Features
 
-- 📱 **Cross-platform**: iOS, Android, and Web
+- 📱 **Cross-platform**: iOS, Android, Web, and Linux Desktop
 - 🔄 **Offline-first**: Works offline, syncs when online
-- 🔍 **Full-text search**: Find anything quickly
-- 🔔 **Automated reminders**: Never forget a debt
+- 🔍 **Real-time sync**: Firebase-like instant updates via WebSocket
 - 📊 **Event-sourced**: Complete audit trail, no data loss
-- 🔒 **Secure**: End-to-end encryption option
 - 🖥️ **Admin Panel**: Web-based monitoring and debugging
+- 🔒 **Secure**: Event sourcing with idempotency and version tracking
 
 ## Tech Stack
 
-- **Backend**: Rust (Axum) - Pure Rust, no Python
-- **Mobile**: Flutter (Dart)
-- **Web**: Flutter Web
-- **Database**: PostgreSQL (event store + projections)
-- **Cache**: Redis
+- **Backend**: Rust (Axum) - High-performance API server
+- **Mobile/Web**: Flutter (Dart) - Cross-platform UI
+- **Database**: PostgreSQL (projections) + EventStore DB (events)
+- **Real-time**: WebSocket with broadcast channels
 - **Deployment**: Docker
 
 ## Quick Start
@@ -28,47 +26,78 @@ A modern debt management application with event-sourced architecture, offline-fi
 - Rust (latest stable)
 - Flutter SDK (for mobile/web apps)
 - Docker & Docker Compose
-- PostgreSQL 14+
-- Redis
+- PostgreSQL 14+ (via Docker)
+- EventStore DB (via Docker)
 
 ### Setup
 
-1. **Clone and setup**:
+1. **Initial setup**:
    ```bash
    ./scripts/setup.sh
    ```
 
-2. **Start services**:
+2. **Start server**:
    ```bash
-   docker-compose up -d
+   ./scripts/manage.sh start-server
    ```
 
-3. **Run backend**:
+3. **Run mobile app**:
    ```bash
-   cd backend/rust-api
-   cargo run
+   ./scripts/mobile.sh run android
    ```
 
 4. **Access admin panel**:
    Open http://localhost:8000/admin in your browser
 
-5. **Run mobile app**:
-   ```bash
-   cd mobile
-   flutter pub get
-   flutter run
-   ```
-
 ## Project Structure
 
 ```
 .
-├── backend/rust-api/    # Rust API server + background tasks
-├── mobile/              # Flutter mobile app
-├── web/                 # Flutter web app
-├── web/admin/           # Admin panel (HTML/JS)
-├── scripts/             # Utility scripts
-└── docker-compose.yml   # Development environment
+├── backend/          # Rust backend server
+│   └── rust-api/    # API server + admin panel
+├── mobile/          # Flutter mobile/web app
+├── scripts/         # Management scripts
+│   ├── manage.sh    # Server management
+│   ├── mobile.sh    # Mobile app management
+│   └── setup.sh     # Initial setup
+├── docs/            # Documentation
+│   ├── ARCHITECTURE.md
+│   ├── API.md
+│   ├── DEVELOPMENT.md
+│   └── DEPLOYMENT.md
+└── docker-compose.yml
+```
+
+## Scripts
+
+All scripts are in the `scripts/` directory:
+
+### Server Management (`scripts/manage.sh`)
+
+```bash
+./scripts/manage.sh start-server    # Start API server
+./scripts/manage.sh stop-server     # Stop API server
+./scripts/manage.sh status          # Check system status
+./scripts/manage.sh full-flash      # Reset everything
+./scripts/manage.sh import backup.zip  # Import data
+./scripts/manage.sh help            # Show all commands
+```
+
+### Mobile App (`scripts/mobile.sh`)
+
+```bash
+./scripts/mobile.sh run android    # Run Android app
+./scripts/mobile.sh run web         # Run web app
+./scripts/mobile.sh run linux       # Run Linux desktop
+./scripts/mobile.sh build android   # Build Android APK
+./scripts/mobile.sh test            # Run tests
+./scripts/mobile.sh setup           # Setup Flutter app
+```
+
+### Setup (`scripts/setup.sh`)
+
+```bash
+./scripts/setup.sh                  # Initial project setup
 ```
 
 ## Admin Panel
@@ -78,26 +107,72 @@ The admin panel is available at `http://localhost:8000/admin` and provides:
 - Event store inspection
 - Contact and transaction views
 - Projection status
-- Auto-refresh every 30 seconds
-
-## Development Status
-
-- ✅ Project structure
-- ✅ Rust backend foundation
-- ✅ Flutter mobile app with dummy data
-- ✅ Web admin panel
-- ✅ Database schema
-- ✅ Docker setup
-- ⏳ Database connection (in progress)
-- ⏳ Authentication (pending)
+- Debt charts and statistics
 
 ## Documentation
 
-- [Project Plan](PROJECT_PLAN.md)
-- [Rust Backend Guide](RUST_BACKEND.md)
-- [Additional Considerations](ADDITIONAL_CONSIDERATIONS.md)
-- [Development Checklist](DEVELOPMENT_CHECKLIST.md)
+Complete documentation is available in the `docs/` directory:
+
+- **[Architecture](./docs/ARCHITECTURE.md)** - System architecture, event sourcing, real-time updates
+- **[API Reference](./docs/API.md)** - Complete API endpoint documentation
+- **[Development Guide](./docs/DEVELOPMENT.md)** - Development setup, testing, admin panel
+- **[Deployment Guide](./docs/DEPLOYMENT.md)** - Production deployment instructions
+
+## Development
+
+### Backend Development
+
+```bash
+# Start services
+./scripts/manage.sh start-services
+
+# Build server
+./scripts/manage.sh build
+
+# Start server
+./scripts/manage.sh start-server
+
+# View logs
+./scripts/manage.sh logs
+```
+
+### Mobile Development
+
+```bash
+# Setup Flutter app
+./scripts/mobile.sh setup
+
+# Run app
+./scripts/mobile.sh run android
+
+# Run tests
+./scripts/mobile.sh test
+```
+
+## Key Features
+
+### Event Sourcing
+- All changes stored as immutable events
+- Complete audit trail
+- Idempotency support
+- Version tracking for optimistic locking
+
+### Real-Time Updates
+- WebSocket-based instant updates
+- Firebase-like experience
+- Auto-reconnect on connection loss
+- Broadcast to all connected clients
+
+### Offline-First
+- Works without internet connection
+- Local storage with Hive (mobile/desktop)
+- Automatic sync when online
+- Seamless online/offline transition
 
 ## License
 
-[To be determined]
+GNU General Public License v3.0 - See [LICENSE](./LICENSE) file for details.
+
+## Contributing
+
+See [Development Guide](./docs/DEVELOPMENT.md) for contribution guidelines.

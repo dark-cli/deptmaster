@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="ThemeOverlay.Debitum.Avatar">
-        <item name="android:alpha">0.8</item>
-    </style>
-</resources>

@@ -1,3 +1,0 @@
-v1.5.1
-- aggiornamento delle traduzioni
-- rifattorizzazione interna

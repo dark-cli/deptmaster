@@ -1,3 +1,0 @@
-# v1.6.3
-- corretto: arresto anomalo durante l'inserimento di importi > 999 in locali con spazio come carattere di raggruppamento
-- aggiornamento delle transazioni

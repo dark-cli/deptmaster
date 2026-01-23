@@ -1,3 +1,0 @@
-# v1.6.3
-- fixo: crash ao introduzir montantes > 999 em locales com espaço como char de agrupamento
-- actualização de transöations

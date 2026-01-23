@@ -1,3 +1,0 @@
-# v1.7.1
-- corretto: crash durante la creazione di una nuova transazione con i preset (transazione di ritorno o quando ne viene selezionata una esistente)
-- aggiornamento della libreria

@@ -1,4 +1,0 @@
-# v1.6.4
-- corretto: le guide rapide non vengono visualizzate nelle versioni localizzate
-- aggiornamento delle traduzioni
-- nuova lingua: Ceco (@kudlav)

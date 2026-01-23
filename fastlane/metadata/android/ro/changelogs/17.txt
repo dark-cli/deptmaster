@@ -1,3 +1,0 @@
-# v1.6.2
-- corectat: sume greșite salvate atunci când nu se utilizează setarea 2 zecimale
-- fix: sume înmulțite cu 10 sau 100 atunci când se schimba setarea zecimale imediat după anularea unei astfel de modificări

@@ -1,3 +1,0 @@
-- adicionar: animação para mostrar/esconder entrada de itens devolvidos
-- acrescentar: dica separada para o reembolso de dinheiro
-- adicionar: nota sobre como lidar com o dinheiro reembolsado para orientar
