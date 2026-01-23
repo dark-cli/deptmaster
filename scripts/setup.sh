@@ -60,14 +60,10 @@ print_success "All prerequisites met"
 echo ""
 
 # Create .env file if it doesn't exist
-if [ ! -f .env ]; then
+if [ ! -f backend/.env ]; then
     print_step "Creating .env file..."
-    cat > .env <<EOF
+    cat > backend/.env <<EOF
 # Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=debt_tracker
-DB_USER=debt_tracker
 DB_PASSWORD=dev_password
 
 # Server
@@ -79,10 +75,10 @@ EVENTSTORE_URL=http://localhost:2113
 EVENTSTORE_USERNAME=admin
 EVENTSTORE_PASSWORD=changeit
 EOF
-    print_success ".env file created"
-    print_info "Please edit .env file with your configuration if needed"
+    print_success ".env file created in backend/"
+    print_info "Please edit backend/.env file with your configuration if needed"
 else
-    print_info ".env file already exists"
+    print_info ".env file already exists in backend/"
 fi
 echo ""
 
