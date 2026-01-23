@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<n!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -646,9 +646,16 @@
                             <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Event Type</label>
                             <select id="eventTypeFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyFilters()">
                                 <option value="">All Event Types</option>
-                                <option value="CREATED">CREATED</option>
-                                <option value="UPDATED">UPDATED</option>
-                                <option value="DELETED">DELETED</option>
+                                <optgroup label="Transaction Events">
+                                    <option value="CREATED_TRANSACTION">CREATED_TRANSACTION</option>
+                                    <option value="UPDATE_TRANSACTION">UPDATE_TRANSACTION</option>
+                                    <option value="DELETE_TRANSACTION">DELETE_TRANSACTION</option>
+                                </optgroup>
+                                <optgroup label="Contact Events">
+                                    <option value="CREATED_CONTACT">CREATED_CONTACT</option>
+                                    <option value="UPDATE_CONTACT">UPDATE_CONTACT</option>
+                                    <option value="DELETE_CONTACT">DELETE_CONTACT</option>
+                                </optgroup>
                             </select>
                         </div>
                         <div>

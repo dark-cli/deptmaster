@@ -127,17 +127,39 @@ pub async fn get_events(
         "SELECT e.event_id, e.aggregate_type, e.event_type, e.user_id, u.email as user_email, e.created_at, e.event_data FROM events e LEFT JOIN users_projection u ON e.user_id = u.id WHERE 1=1"
     );
     
-    // Filter by event_type (case-insensitive, supports both CREATED/DELETED and TRANSACTION_CREATED/TRANSACTION_DELETED formats)
+    // Filter by event_type (case-insensitive, supports multiple formats)
     if let Some(event_type) = &params.event_type {
         if !event_type.is_empty() {
-            // Use LIKE pattern matching to handle both formats:
-            // - "CREATED" matches both "CREATED" and "TRANSACTION_CREATED", "CONTACT_CREATED"
-            // - "DELETED" matches both "DELETED" and "TRANSACTION_DELETED", "CONTACT_DELETED"
-            // - "UPDATED" matches both "UPDATED" and "TRANSACTION_UPDATED", "CONTACT_UPDATED"
+            // Handle specific formats:
+            // - CREATED_TRANSACTION, UPDATE_TRANSACTION, DELETE_TRANSACTION
+            // - CREATED_CONTACT, UPDATE_CONTACT, DELETE_CONTACT
+            // - TRANSACTION_CREATED, TRANSACTION_UPDATED, TRANSACTION_DELETED
+            // - CONTACT_CREATED, CONTACT_UPDATED, CONTACT_DELETED
+            // - CREATED, UPDATED, DELETED (generic)
+            
+            // Convert user-friendly format to database format
+            let db_event_type = if event_type == "CREATED_TRANSACTION" {
+                "TRANSACTION_CREATED"
+            } else if event_type == "UPDATE_TRANSACTION" || event_type == "UPDATED_TRANSACTION" {
+                "TRANSACTION_UPDATED"
+            } else if event_type == "DELETE_TRANSACTION" || event_type == "DELETED_TRANSACTION" {
+                "TRANSACTION_DELETED"
+            } else if event_type == "CREATED_CONTACT" {
+                "CONTACT_CREATED"
+            } else if event_type == "UPDATE_CONTACT" || event_type == "UPDATED_CONTACT" {
+                "CONTACT_UPDATED"
+            } else if event_type == "DELETE_CONTACT" || event_type == "DELETED_CONTACT" {
+                "CONTACT_DELETED"
+            } else {
+                // Use as-is (might be TRANSACTION_CREATED, CREATED, etc.)
+                event_type
+            };
+            
+            // Match exact or with LIKE pattern for flexibility
             query_builder.push(" AND (UPPER(e.event_type) = UPPER(");
-            query_builder.push_bind(event_type);
+            query_builder.push_bind(db_event_type);
             query_builder.push(") OR UPPER(e.event_type) LIKE UPPER(");
-            query_builder.push_bind(format!("%_{}", event_type));
+            query_builder.push_bind(format!("%{}%", db_event_type));
             query_builder.push("))");
         }
     }
