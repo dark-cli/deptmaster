@@ -171,18 +171,22 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
     return GradientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Backend Setup'),
-          centerTitle: true,
-        ),
         body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 32, // Account for padding
+                  ),
+                  child: IntrinsicHeight(
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
                         Icon(
                           Icons.settings_ethernet,
                           size: 64,
@@ -250,65 +254,67 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                           },
                           onFieldSubmitted: (_) => _handleSubmit(),
                         ),
-                        if (_error != null) ...[
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.errorContainer,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.error_outline,
-                                  color: Theme.of(context).colorScheme.onErrorContainer,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _error!,
-                                    style: TextStyle(
-                                      color: Theme.of(context).colorScheme.onErrorContainer,
-                                    ),
+                        // Always reserve space for error/success message to prevent layout shifts
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 56, // Fixed height to reserve space (12px padding * 2 + icon height + text height)
+                          child: _error != null
+                              ? Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.errorContainer,
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                        if (_successMessage != null) ...[
-                          const SizedBox(height: 16),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: Colors.green,
-                                width: 1,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.check_circle_outline,
-                                  color: Colors.green,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _successMessage!,
-                                    style: const TextStyle(
-                                      color: Colors.green,
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.error_outline,
+                                        color: Theme.of(context).colorScheme.onErrorContainer,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _error!,
+                                          style: TextStyle(
+                                            color: Theme.of(context).colorScheme.onErrorContainer,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                                )
+                              : _successMessage != null
+                                  ? Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.withOpacity(0.2),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: Colors.green,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.check_circle_outline,
+                                            color: Colors.green,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              _successMessage!,
+                                              style: const TextStyle(
+                                                color: Colors.green,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : const SizedBox.shrink(), // Empty space when no message
+                        ),
                         const SizedBox(height: 24),
                         // Stack buttons vertically on mobile
                         Column(
@@ -392,8 +398,12 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                           textAlign: TextAlign.center,
                         ),
                 ],
-              ),
-            ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ),
