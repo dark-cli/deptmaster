@@ -11,7 +11,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/backup.sh:/backup.sh:ro
+      - ../scripts/backup.sh:/backup.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U debt_tracker"]
       interval: 10s
@@ -52,7 +52,7 @@ services:
 
   api:
     build:
-      context: ./backend/rust-api
+      context: ./rust-api
       dockerfile: Dockerfile
     container_name: debt_tracker_api
     environment:
