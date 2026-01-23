@@ -232,11 +232,6 @@ pub async fn get_latest_event_id(
 }
 
 // Delete an event if it's less than 5 seconds old (for undo functionality)
-#[derive(Deserialize)]
-pub struct DeleteEventRequest {
-    event_id: String,
-}
-
 pub async fn delete_event(
     axum::extract::Path(event_id): axum::extract::Path<String>,
     State(state): State<AppState>,
@@ -303,8 +298,9 @@ pub async fn delete_event(
 
         // Rebuild projections since we deleted an event
         // Note: This is a simplified approach - in production you might want to rebuild more carefully
+        let state_clone = state.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::handlers::sync::rebuild_projections_from_events(&state).await {
+            if let Err(e) = crate::handlers::sync::rebuild_projections_from_events(&state_clone).await {
                 tracing::error!("Error rebuilding projections after event deletion: {:?}", e);
             }
         });
