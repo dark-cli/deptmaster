@@ -5,7 +5,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT_DIR"
 
 # Colors for output
 RED='\033[0;31m'
@@ -179,7 +180,7 @@ cmd_reset_database() {
     # Ensure PostgreSQL is running
     if ! docker ps | grep -q "debt_tracker_postgres"; then
         print_warning "PostgreSQL not running. Starting..."
-        cd backend
+        cd "$ROOT_DIR/backend"
         docker-compose up -d postgres > /dev/null 2>&1
         sleep 5
         cd ..
@@ -204,7 +205,7 @@ CREATE DATABASE $DB_NAME;
 EOF
     
     print_info "Running migrations..."
-    cd backend/rust-api
+    cd "$ROOT_DIR/backend/rust-api"
     
     if command -v sqlx &> /dev/null; then
         sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1 || {
@@ -236,7 +237,7 @@ SELECT
 WHERE NOT EXISTS (SELECT 1 FROM users_projection WHERE email = 'max');
 EOF
     
-    cd "$SCRIPT_DIR"
+    cd "$ROOT_DIR"
     print_success "Database reset complete"
 }
 
@@ -255,7 +256,7 @@ cmd_reset_eventstore() {
     docker volume rm eventstore_data > /dev/null 2>&1 || true
     
     print_info "Starting fresh EventStore..."
-    cd backend
+    cd "$ROOT_DIR/backend"
     docker-compose up -d eventstore > /dev/null 2>&1
     cd ..
     
@@ -281,7 +282,7 @@ cmd_import() {
     # Ensure EventStore is running
     if ! docker ps | grep -q "debt_tracker_eventstore"; then
         print_warning "EventStore not running. Starting..."
-        cd backend
+        cd "$ROOT_DIR/backend"
         docker-compose up -d eventstore > /dev/null 2>&1
         wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
         cd ..
@@ -333,7 +334,7 @@ cmd_start_services() {
     
     check_docker
     
-    cd backend
+    cd "$ROOT_DIR/backend"
     
     if [ "$1" = "postgres" ] || [ -z "$1" ]; then
         print_info "Starting PostgreSQL..."
@@ -369,7 +370,7 @@ cmd_stop_services() {
     
     check_docker
     
-    cd backend
+    cd "$ROOT_DIR/backend"
     
     if [ "$1" = "postgres" ]; then
         docker-compose stop postgres
@@ -396,20 +397,20 @@ cmd_start_server() {
     cmd_start_services > /dev/null 2>&1 || cmd_start_services
     
     # Build if needed
-    if [ ! -f "backend/rust-api/target/release/debt-tracker-api" ]; then
+    if [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
         print_step "Building server (this may take a minute)..."
-        cd backend/rust-api
+        cd "$ROOT_DIR/backend/rust-api"
         if [ "$VERBOSE" = true ]; then
             cargo build --release
         else
             cargo build --release > /dev/null 2>&1
         fi
-        cd "$SCRIPT_DIR"
+        cd "$ROOT_DIR"
     fi
     
     # Start server
     print_info "Starting server..."
-    nohup backend/rust-api/target/release/debt-tracker-api > /tmp/debt-tracker-api.log 2>&1 &
+    nohup "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" > /tmp/debt-tracker-api.log 2>&1 &
     
     wait_for_service "http://localhost:8000/health" "API Server" 30 1 > /dev/null 2>&1
     if [ "$VERBOSE" = true ]; then
@@ -428,14 +429,14 @@ cmd_start_server_no_build() {
     cmd_start_services > /dev/null 2>&1 || cmd_start_services
     
     # Check if binary exists
-    if [ ! -f "backend/rust-api/target/release/debt-tracker-api" ]; then
+    if [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
         print_error "Server binary not found. Please build first: $0 build"
         exit 1
     fi
     
     # Start server
     print_info "Starting server..."
-    nohup backend/rust-api/target/release/debt-tracker-api > /tmp/debt-tracker-api.log 2>&1 &
+    nohup "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" > /tmp/debt-tracker-api.log 2>&1 &
     
     wait_for_service "http://localhost:8000/health" "API Server" 30 1 > /dev/null 2>&1
     if [ "$VERBOSE" = true ]; then
@@ -463,9 +464,9 @@ cmd_restart_server() {
 cmd_build() {
     print_info "Building server..."
     
-    cd backend/rust-api
+    cd "$ROOT_DIR/backend/rust-api"
     cargo build --release
-    cd "$SCRIPT_DIR"
+    cd "$ROOT_DIR"
     
     print_success "Build complete"
 }
@@ -584,7 +585,7 @@ cmd_run_app() {
         exit 1
     fi
     
-    cd "$SCRIPT_DIR"
+    cd "$ROOT_DIR"
 }
 
 cmd_run_web() {
@@ -600,7 +601,7 @@ cmd_run_web() {
         flutter run -d chrome --release
     fi
     
-    cd "$SCRIPT_DIR"
+    cd "$ROOT_DIR"
 }
 
 cmd_test_app() {
@@ -614,7 +615,7 @@ cmd_test_app() {
         flutter test
     fi
     
-    cd "$SCRIPT_DIR"
+    cd "$ROOT_DIR"
     print_success "Tests complete"
 }
 
@@ -679,7 +680,7 @@ cmd_test_integration() {
         exit 1
     fi
     
-    cd "$SCRIPT_DIR"
+    cd "$ROOT_DIR"
     print_success "Integration tests complete"
 }
 
