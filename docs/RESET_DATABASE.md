@@ -1,23 +1,35 @@
-# Reset Database Script
+# Reset Database
 
 ## Overview
 
-The `RESET_DATABASE.sh` script resets the PostgreSQL database and imports data from a Debitum backup ZIP file.
+Use the unified `manage.sh` script to reset the PostgreSQL database and import data from a Debitum backup ZIP file.
 
 ## Usage
 
 ### Basic Usage (with default backup file)
 
 ```bash
-./RESET_DATABASE.sh
+./manage.sh reset
 ```
 
-This will use the default backup file: `debitum-backup-2026-01-18T05_51_03.zip`
+This will reset the database and EventStore.
 
-### Specify Custom Backup File
+### Reset and Import from Backup
 
 ```bash
-./RESET_DATABASE.sh /path/to/your/backup.zip
+./manage.sh reset /path/to/your/backup.zip
+```
+
+Or use the full-flash command (recommended):
+
+```bash
+./manage.sh full-flash /path/to/your/backup.zip
+```
+
+### Reset Database Only
+
+```bash
+./manage.sh reset-db
 ```
 
 ## What the Script Does
