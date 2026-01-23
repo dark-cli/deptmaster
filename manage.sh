@@ -560,6 +560,230 @@ cmd_rebuild_projections() {
     fi
 }
 
+cmd_run_app() {
+    local platform="${1:-android}"
+    local device_id="${2:-}"
+    
+    print_step "Running Flutter app ($platform)..."
+    
+    cd mobile
+    
+    if [ "$platform" = "android" ]; then
+        if [ -n "$device_id" ]; then
+            flutter run -d "$device_id"
+        else
+            flutter run
+        fi
+    elif [ "$platform" = "web" ]; then
+        flutter run -d chrome
+    elif [ "$platform" = "linux" ]; then
+        flutter run -d linux
+    else
+        print_error "Unknown platform: $platform"
+        echo "Supported platforms: android, web, linux"
+        exit 1
+    fi
+    
+    cd "$SCRIPT_DIR"
+}
+
+cmd_run_web() {
+    local mode="${1:-prod}"
+    
+    print_step "Running Flutter web app (mode: $mode)..."
+    
+    cd mobile
+    
+    if [ "$mode" = "dev" ]; then
+        flutter run -d chrome --dart-define=FLUTTER_WEB_USE_SKIA=true
+    else
+        flutter run -d chrome --release
+    fi
+    
+    cd "$SCRIPT_DIR"
+}
+
+cmd_test_app() {
+    print_step "Running Flutter tests..."
+    
+    cd mobile
+    
+    if [ -n "$1" ]; then
+        flutter test "$1"
+    else
+        flutter test
+    fi
+    
+    cd "$SCRIPT_DIR"
+    print_success "Tests complete"
+}
+
+cmd_test_server() {
+    print_step "Testing server endpoints..."
+    
+    check_docker
+    
+    # Check if server is running
+    if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
+        print_error "Server is not running. Please start it first: $0 start-server"
+        exit 1
+    fi
+    
+    print_info "Testing health endpoint..."
+    if curl -s http://localhost:8000/health | grep -q "OK"; then
+        print_success "Health endpoint: OK"
+    else
+        print_error "Health endpoint: FAILED"
+        exit 1
+    fi
+    
+    print_info "Testing admin API..."
+    if curl -s http://localhost:8000/api/admin/contacts > /dev/null 2>&1; then
+        print_success "Admin API: OK"
+    else
+        print_warning "Admin API: Not responding"
+    fi
+    
+    print_success "Server tests complete"
+}
+
+cmd_test_integration() {
+    local test_file="${1:-integration_test/ui_integration_test.dart}"
+    
+    print_step "Running integration tests..."
+    
+    # Support test name shortcuts
+    case "$test_file" in
+        "stress"|"stress_test")
+            test_file="integration_test/stress_test.dart"
+            ;;
+        "comprehensive"|"comprehensive_stress")
+            test_file="integration_test/comprehensive_stress_test.dart"
+            ;;
+        "ui"|"ui_test")
+            test_file="integration_test/ui_integration_test.dart"
+            ;;
+    esac
+    
+    # Run full-flash before tests
+    print_info "Resetting system before tests..."
+    cmd_full_flash > /dev/null 2>&1 || cmd_full_flash
+    
+    print_info "Running integration test: $test_file"
+    cd mobile
+    
+    if command -v flutter &> /dev/null; then
+        flutter test "$test_file" "${@:2}"
+    else
+        print_error "Flutter not found. Please install Flutter SDK."
+        exit 1
+    fi
+    
+    cd "$SCRIPT_DIR"
+    print_success "Integration tests complete"
+}
+
+cmd_check() {
+    print_info "Checking system requirements..."
+    echo ""
+    
+    local all_ok=true
+    
+    # Check Docker
+    if command -v docker &> /dev/null; then
+        if docker ps > /dev/null 2>&1; then
+            print_success "Docker: Installed and running"
+        else
+            print_error "Docker: Installed but not running"
+            all_ok=false
+        fi
+    else
+        print_error "Docker: Not installed"
+        all_ok=false
+    fi
+    
+    # Check Rust
+    if command -v cargo &> /dev/null; then
+        print_success "Rust: Installed ($(rustc --version 2>/dev/null | cut -d' ' -f2 || echo 'unknown'))"
+    else
+        print_error "Rust: Not installed"
+        all_ok=false
+    fi
+    
+    # Check Flutter
+    if command -v flutter &> /dev/null; then
+        print_success "Flutter: Installed ($(flutter --version 2>/dev/null | head -1 || echo 'unknown'))"
+    else
+        print_warning "Flutter: Not installed (required for mobile/web apps)"
+    fi
+    
+    # Check PostgreSQL client
+    if command -v psql &> /dev/null; then
+        print_success "PostgreSQL client: Installed"
+    else
+        print_warning "PostgreSQL client: Not installed (optional, Docker is used)"
+    fi
+    
+    # Check Python
+    if command -v python3 &> /dev/null; then
+        print_success "Python 3: Installed ($(python3 --version 2>/dev/null || echo 'unknown'))"
+    else
+        print_warning "Python 3: Not installed (required for import scripts)"
+    fi
+    
+    echo ""
+    if [ "$all_ok" = true ]; then
+        print_success "All required tools are available"
+    else
+        print_error "Some required tools are missing"
+        exit 1
+    fi
+}
+
+cmd_install_deps() {
+    print_step "Installing system dependencies..."
+    
+    # Detect OS
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+    else
+        print_error "Cannot detect OS"
+        exit 1
+    fi
+    
+    case "$OS" in
+        fedora|rhel|centos)
+            print_info "Detected Fedora/RHEL/CentOS"
+            print_info "Installing dependencies..."
+            sudo dnf install -y docker docker-compose postgresql rust cargo || {
+                print_error "Failed to install dependencies"
+                exit 1
+            }
+            ;;
+        ubuntu|debian)
+            print_info "Detected Ubuntu/Debian"
+            print_info "Installing dependencies..."
+            sudo apt-get update
+            sudo apt-get install -y docker.io docker-compose postgresql-client rust cargo || {
+                print_error "Failed to install dependencies"
+                exit 1
+            }
+            ;;
+        *)
+            print_warning "Unknown OS: $OS"
+            print_info "Please install manually: Docker, Docker Compose, PostgreSQL client, Rust"
+            exit 1
+            ;;
+    esac
+    
+    print_info "Starting Docker service..."
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    
+    print_success "Dependencies installed"
+}
+
 cmd_help() {
     cat <<EOF
 Debt Tracker Management Script
@@ -579,28 +803,41 @@ Commands:
   import <backup.zip>         Import data from Debitum backup (creates events)
   rebuild-projections         Rebuild projections from events (via API)
   
-  start-services [name]    Start Docker services (postgres/eventstore/redis/all)
-  stop-services [name]      Stop Docker services
-  start-server              Start API server
-  stop-server               Stop API server
-  restart-server            Restart API server
-  build                     Build the server (cargo build --release)
+  start-services [name]       Start Docker services (postgres/eventstore/redis/all)
+  stop-services [name]         Stop Docker services
+  start-server                 Start API server
+  stop-server                  Stop API server
+  restart-server               Restart API server
+  build                        Build the server (cargo build --release)
   
-  status                    Show system status
-  logs                      Show server logs (tail -f)
-  help                      Show this help message
+  run-app [platform] [device] Run Flutter app (android/web/linux)
+  run-web [mode]              Run Flutter web app (dev/prod)
+  test-app [test_file]         Run Flutter tests
+  test-server                  Test server endpoints
+  test-integration [test]      Run integration tests (with full-flash)
+  
+  check                        Check system requirements
+  install-deps                 Install system dependencies (Linux)
+  
+  status                       Show system status
+  logs                         Show server logs (tail -f)
+  help                         Show this help message
 
 Examples:
   $0 full-flash                      # Complete reset + rebuild (clean system)
   $0 full-flash backup.zip           # Complete reset + import + rebuild (recommended)
   $0 --no-build full-flash           # Fast reset (skip server build)
-  $0 --no-build full-flash backup.zip # Fast reset + import (skip server build)
   $0 reset                           # Clean reset (no data)
-  $0 reset backup.zip                # Reset and import from backup
   $0 import backup.zip               # Import data (keeps existing data)
   $0 start-server                    # Start everything
   $0 restart-server                  # Restart server
   $0 status                          # Check what's running
+  $0 run-app android                 # Run Android app
+  $0 run-web dev                     # Run web app in dev mode
+  $0 test-app                        # Run all Flutter tests
+  $0 test-server                     # Test server endpoints
+  $0 test-integration ui             # Run UI integration tests
+  $0 check                           # Check system requirements
 
 Environment Variables:
   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD  Database connection settings
@@ -658,6 +895,27 @@ case "${1:-help}" in
         ;;
     logs)
         cmd_logs
+        ;;
+    run-app)
+        cmd_run_app "${2:-android}" "${3:-}"
+        ;;
+    run-web)
+        cmd_run_web "${2:-prod}"
+        ;;
+    test-app)
+        cmd_test_app "${2:-}"
+        ;;
+    test-server)
+        cmd_test_server
+        ;;
+    test-integration)
+        cmd_test_integration "${2:-integration_test/ui_integration_test.dart}" "${@:3}"
+        ;;
+    check)
+        cmd_check
+        ;;
+    install-deps)
+        cmd_install_deps
         ;;
     help|--help|-h)
         cmd_help
