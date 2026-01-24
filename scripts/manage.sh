@@ -376,9 +376,16 @@ cmd_start_server() {
         print_step "Building server (this may take a minute)..."
         cd "$ROOT_DIR/backend/rust-api"
         if [ "$VERBOSE" = true ]; then
-            cargo build --release
+            cargo build --release || {
+                print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
+                exit 1
+            }
         else
-            cargo build --release > /dev/null 2>&1
+            if ! cargo build --release 2>&1 | tee /tmp/cargo-build.log | grep -E "error|Finished|Compiling" | head -20; then
+                print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
+                print_error "Build log: /tmp/cargo-build.log"
+                exit 1
+            fi
         fi
         cd "$ROOT_DIR"
     fi
