@@ -153,7 +153,7 @@ cmd_full_flash() {
     
     # Reset database
     print_info "Resetting database..."
-    cmd_reset_database > /dev/null 2>&1 || cmd_reset_database
+    cmd_reset_database
     
     # Start server (needed for import and rebuild)
     print_info "Starting server..."
