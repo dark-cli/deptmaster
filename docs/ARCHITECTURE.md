@@ -10,7 +10,7 @@ Debt Tracker is a debt management application with:
 **Tech Stack:**
 - **Backend**: Rust (Axum web framework)
 - **Frontend**: Flutter (Dart)
-- **Database**: PostgreSQL (projections) + EventStore DB (events)
+- **Database**: PostgreSQL (events and projections)
 - **Real-time**: WebSocket with broadcast channels
 
 ---
@@ -38,7 +38,7 @@ Debt Tracker is a debt management application with:
 4. Backend Server (Rust)
    ├─ Receives event via sync endpoint
    ├─ Validates event
-   ├─ Writes event to EventStore DB (immutable)
+   ├─ Writes event to PostgreSQL events table (immutable)
    ├─ Updates PostgreSQL projection (contacts_projection)
    ├─ Broadcasts change via WebSocket
    └─ Returns success to client
@@ -145,23 +145,19 @@ graph TD
         subgraph Storage ["DATA STORAGE"]
             direction TB
             
-            ES["EventStore DB (Primary Event Store)<br/>- External immutable event log<br/>- Write-only append log (non-blocking)<br/>- Idempotency & Audit trail"]
-
             subgraph Postgres ["PostgreSQL Database"]
                 direction TB
-                EL["events table (Event Log Mirror)<br/>- Duplicate of EventStore for queries<br/>- Indexed for fast admin/debug access"]
-                PR["Projections (Read-Optimized)<br/>- contacts_projection, transactions_projection<br/>- Updated directly for fast GET reads"]
+                EL["events table (Event Log)<br/>- Immutable event log<br/>- Idempotency keys for duplicate prevention<br/>- Version tracking for optimistic locking<br/>- Indexed for fast queries"]
+                PR["Projections (Read-Optimized)<br/>- contacts_projection, transactions_projection<br/>- Updated directly for fast GET reads<br/>- Version column for conflict detection"]
                 EL --> PR
             end
-            
-            ES --> EL
         end
 
         %% Cross-Layer Connections
         F_Protocols --> API_Service
         A_Protocols --> Admin_Service
-        API_Service --> ES
-        Admin_Service --> ES
+        API_Service --> Postgres
+        Admin_Service --> Postgres
     end
 ```
 
@@ -241,7 +237,7 @@ User Action
   ↓
 Create Event (CONTACT_CREATED, TRANSACTION_UPDATED, etc.)
   ↓
-Store Event (EventStore DB / Local Hive)
+Store Event (PostgreSQL / Local Hive)
   ↓
 Apply Events to Last Projection (incremental update)
   ↓
@@ -328,7 +324,7 @@ Client applies new events to last projection (incremental update)
 ```
 Server processes change
   ↓
-Server writes event to EventStore DB
+Server writes event to PostgreSQL events table
   ↓
 Server updates PostgreSQL projection
   ↓
@@ -391,7 +387,6 @@ Clients rebuild state and update UI
 2. Server subscribes client to broadcast channel
    ↓
 3. On data change:
-   ├─ Server writes event to EventStore DB
    ├─ Server writes event to PostgreSQL events table
    ├─ Server updates PostgreSQL projection
    ├─ Server broadcasts notification: {"type": "contact_created", "data": {...}}
@@ -583,11 +578,11 @@ Route Handler (contacts.rs, transactions.rs, sync.rs, admin.rs)
   ↓
 Validate Request
   ↓
-Write Event to EventStore DB (non-blocking, for audit/idempotency)
+Check Idempotency (PostgreSQL events table)
   ↓
 Update PostgreSQL Projection DIRECTLY (INSERT/UPDATE contacts_projection or transactions_projection)
   ↓
-Write Event to PostgreSQL events table (for querying/debugging)
+Write Event to PostgreSQL events table (immutable event log)
   ↓
 Broadcast via Broadcast Channel
   ↓
@@ -596,31 +591,6 @@ Return Response
 
 **Note:** Projections are updated directly (not rebuilt from events). This provides fast writes and reads.
 
-### EventStore DB (Primary Event Store)
-
-**Purpose:** External database for immutable event storage (write-only)
-
-**What it does:**
-- Stores events as append-only log
-- Provides idempotency checking (prevents duplicate operations)
-- Provides version tracking (optimistic locking for concurrent updates)
-- Complete audit trail
-
-**Features:**
-- Append-only (events never deleted or modified)
-- Idempotency key support (prevents duplicates)
-- Version tracking (optimistic locking)
-- Non-blocking writes (if EventStore fails, operation continues)
-
-**Setup:**
-```bash
-./scripts/manage.sh start-services eventstore
-```
-
-**Access:**
-- HTTP API: http://localhost:2113
-- Web UI: http://localhost:2113 (admin/changeit)
-
 ### PostgreSQL Database
 
 **Purpose:** Contains event log and read-optimized projections
@@ -628,15 +598,19 @@ Return Response
 #### events table (Event Log)
 
 **What it does:**
-- Stores all events (duplicate of EventStore DB)
-- Used for querying events (admin panel, debugging)
+- Stores all events as immutable append-only log
+- Provides idempotency checking via `idempotency_key` column (prevents duplicate operations)
+- Provides version tracking via `event_version` column (optimistic locking)
+- Used for querying events (admin panel, debugging, sync)
 - Indexed for fast queries by user, aggregate, type, timestamp
 - Contains full event data in JSONB format
+- Complete audit trail
 
-**Why duplicate EventStore DB?**
-- EventStore DB is optimized for writes, not queries
-- PostgreSQL events table is optimized for querying (indexes, SQL)
-- Admin panel needs to query events with filters
+**Features:**
+- Append-only (events never deleted or modified)
+- Idempotency key support (prevents duplicates)
+- Version tracking (optimistic locking)
+- Fast queries with proper indexes
 
 #### Projections (Read-Optimized Tables)
 

@@ -15,7 +15,7 @@ A modern debt management application with event-sourced architecture, offline-fi
 
 - **Backend**: Rust (Axum) - High-performance API server
 - **Mobile/Web**: Flutter (Dart) - Cross-platform UI
-- **Database**: PostgreSQL (projections) + EventStore DB (events)
+- **Database**: PostgreSQL (events and projections)
 - **Real-time**: WebSocket with broadcast channels
 - **Deployment**: Docker
 
