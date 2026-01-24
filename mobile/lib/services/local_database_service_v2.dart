@@ -529,124 +529,36 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return;
 
     try {
-      print('🔄 Starting state rebuild...');
-      
-      // Get all events
+      // Get all events ordered by timestamp (same as backend)
+      // Backend: SELECT ... FROM events ORDER BY created_at ASC
       final events = await EventStoreService.getAllEvents();
-      print('📊 Found ${events.length} events to process');
       
-      AppState state;
-      String? lastEventId;
+      // Always use the same algorithm as backend: full rebuild from all events
+      // Backend always does: rebuild_projections_from_events() which:
+      // 1. Gets all events ordered by timestamp
+      // 2. First pass: collect UNDO events to know which events to skip
+      // 3. Second pass: process events, skipping UNDO events and undone events
+      // 4. Clear projections and rebuild from scratch
+      // This ensures consistent behavior between offline, online, and backend
+      final state = StateBuilder.buildState(events);
+      final lastEventId = events.isNotEmpty ? events.last.id : null;
       
-      // Check for UNDO events - if present, always do full rebuild (same as when coming back online)
-      // This ensures UNDO works correctly offline, just like it does when syncing online
-      final undoEvents = events.where((e) => e.eventType == 'UNDO').toList();
-      
-      if (undoEvents.isNotEmpty) {
-        // UNDO events present - always do full rebuild (same logic as SyncServiceV2._rebuildState)
-        // This ensures correct handling of undone events, just like when coming back online
-        state = StateBuilder.buildState(events);
-        if (events.isNotEmpty) {
-          lastEventId = events.last.id;
-        }
-      } else {
-        // No UNDO events - safe to use snapshot optimization
-        try {
-          final latestSnapshot = await ProjectionSnapshotService.getLatestSnapshot();
-          
-          if (latestSnapshot != null && events.isNotEmpty) {
-            // Get events after the snapshot
-            final snapshotLastEvent = await EventStoreService.getEvent(latestSnapshot.lastEventId);
-            if (snapshotLastEvent != null) {
-              final eventsAfterSnapshot = events.where((e) => 
-                e.timestamp.isAfter(snapshotLastEvent.timestamp) || 
-                e.timestamp.isAtSameMomentAs(snapshotLastEvent.timestamp)
-              ).toList();
-              
-              // Only use snapshot if there are events after it (otherwise snapshot is up to date)
-              if (eventsAfterSnapshot.isNotEmpty) {
-                final snapshotState = await ProjectionSnapshotService.buildStateFromSnapshot(
-                  latestSnapshot,
-                  eventsAfterSnapshot,
-                );
-                
-                if (snapshotState != null) {
-                  state = snapshotState;
-                  lastEventId = events.last.id;
-                } else {
-                  // Snapshot build failed, fallback to full rebuild
-                  throw Exception('Snapshot build returned null');
-                }
-              } else {
-                // No new events, snapshot is current
-                state = latestSnapshot.state;
-                lastEventId = latestSnapshot.lastEventId;
-              }
-            } else {
-              // Snapshot's last event not found, fallback to full rebuild
-              throw Exception('Snapshot last event not found');
-            }
-          } else {
-            // No snapshot available, do full rebuild
-            throw Exception('No snapshot available');
-          }
-        } catch (e) {
-          // Fallback to full rebuild if snapshot fails - this is normal and expected
-          state = StateBuilder.buildState(events);
-          if (events.isNotEmpty) {
-            lastEventId = events.last.id;
-          }
-        }
-      }
-      
-      // Save to Hive boxes
+      // Save to Hive boxes (same algorithm as backend: clear then rebuild)
+      // Backend does: DELETE FROM transactions_projection, DELETE FROM contacts_projection, then INSERT
       final contactsBox = await Hive.openBox<Contact>('contacts');
       final transactionsBox = await Hive.openBox<Transaction>('transactions');
       
-      // Get existing keys to identify what needs to be deleted
-      final existingContactIds = contactsBox.keys.cast<String>().toSet();
-      final existingTransactionIds = transactionsBox.keys.cast<String>().toSet();
+      // Clear existing projections (same as backend: DELETE FROM ... WHERE true)
+      await contactsBox.clear();
+      await transactionsBox.clear();
       
-      // Get new state IDs
-      final newContactIds = state.contacts.map((c) => c.id).toSet();
-      final newTransactionIds = state.transactions.map((t) => t.id).toSet();
-      
-      // Identify keys to delete (exist in old state but not in new state)
-      final contactsToDelete = existingContactIds.difference(newContactIds);
-      final transactionsToDelete = existingTransactionIds.difference(newTransactionIds);
-      
-      // CRITICAL: Write all new data FIRST, then delete old data
-      // This ensures screens always see valid data, never empty state
-      final allOperations = <Future>[];
-      
-      // 1. Write all new/updated contacts and transactions FIRST
+      // Write new state (same as backend: INSERT INTO ...)
       for (final contact in state.contacts) {
-        allOperations.add(contactsBox.put(contact.id, contact));
+        await contactsBox.put(contact.id, contact);
       }
       for (final transaction in state.transactions) {
-        allOperations.add(transactionsBox.put(transaction.id, transaction));
+        await transactionsBox.put(transaction.id, transaction);
       }
-      
-      // 2. Wait for all writes to complete
-      await Future.wait(allOperations);
-      
-      // 3. Now delete removed items (after new data is written)
-      final deleteOperations = <Future>[];
-      for (final id in contactsToDelete) {
-        deleteOperations.add(contactsBox.delete(id));
-      }
-      for (final id in transactionsToDelete) {
-        deleteOperations.add(transactionsBox.delete(id));
-      }
-      
-      // 4. Wait for deletions to complete
-      if (deleteOperations.isNotEmpty) {
-        await Future.wait(deleteOperations);
-      }
-      
-      // 5. Small delay to ensure Hive listeners process all changes
-      // This ensures screens read data after all operations complete
-      await Future.delayed(const Duration(milliseconds: 50));
       
       // Save snapshot if needed (every 10 events or after UNDO)
       if (lastEventId != null) {
