@@ -149,9 +149,9 @@ cmd_full_flash() {
     # Start server (needed for import and rebuild)
     print_info "Starting server..."
     if [ "$SKIP_BUILD" = true ]; then
-        cmd_start_server_no_build > /dev/null 2>&1 || cmd_start_server_no_build
+        cmd_start_server_no_build
     else
-        cmd_start_server > /dev/null 2>&1 || cmd_start_server
+        cmd_start_server
     fi
     
     # If import file provided, import data (import already rebuilds projections)
@@ -360,7 +360,7 @@ cmd_start_server() {
     sleep 2
     
     # Ensure services are running
-    cmd_start_services > /dev/null 2>&1 || cmd_start_services
+    cmd_start_services
     
     # Build if needed
     if [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
@@ -378,7 +378,7 @@ cmd_start_server() {
     print_info "Starting server..."
     nohup "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" > /tmp/debt-tracker-api.log 2>&1 &
     
-    wait_for_service "http://localhost:8000/health" "API Server" 30 1 > /dev/null 2>&1
+    wait_for_service "http://localhost:8000/health" "API Server" 30 1
     if [ "$VERBOSE" = true ]; then
         print_success "Server started! Logs: /tmp/debt-tracker-api.log"
     fi
