@@ -165,3 +165,26 @@ pub async fn get_event_db_id(
 
     Ok(id.flatten())
 }
+
+/// Get snapshot with event_count less than target_count
+/// Returns the most recent snapshot where event_count < target_count
+pub async fn get_snapshot_before_event_count(
+    pool: &PgPool,
+    target_count: i64,
+) -> Result<Option<ProjectionSnapshot>, sqlx::Error> {
+    let snapshot = sqlx::query_as::<_, ProjectionSnapshot>(
+        r#"
+        SELECT id, snapshot_index, last_event_id, event_count, 
+               contacts_snapshot, transactions_snapshot, created_at
+        FROM projection_snapshots
+        WHERE event_count < $1
+        ORDER BY snapshot_index DESC
+        LIMIT 1
+        "#
+    )
+    .bind(target_count)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(snapshot)
+}

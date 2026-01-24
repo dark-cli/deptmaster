@@ -466,20 +466,21 @@ pub async fn get_transactions(
     let transactions = sqlx::query_as::<_, TransactionResponse>(
         r#"
         SELECT 
-            id,
-            contact_id,
-            type,
-            direction,
-            amount,
-            currency,
-            description,
-            transaction_date,
-            due_date,
-            created_at,
-            updated_at
-        FROM transactions_projection
-        WHERE is_deleted = false
-        ORDER BY transaction_date DESC
+            t.id,
+            t.contact_id,
+            t.type,
+            t.direction,
+            t.amount,
+            t.currency,
+            t.description,
+            t.transaction_date,
+            t.due_date,
+            t.created_at,
+            t.updated_at
+        FROM transactions_projection t
+        INNER JOIN contacts_projection c ON c.id = t.contact_id
+        WHERE t.is_deleted = false AND c.is_deleted = false
+        ORDER BY t.transaction_date DESC
         "#
     )
     .fetch_all(&*state.db_pool)

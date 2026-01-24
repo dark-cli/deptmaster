@@ -39,6 +39,8 @@ async fn test_update_transaction_updates_projection() {
         contact_id: None,
         r#type: None,
         currency: None,
+        comment: "Test update".to_string(),
+        due_date: None,
     };
 
     let result = debt_tracker_api::handlers::transactions::update_transaction(
@@ -97,6 +99,8 @@ async fn test_update_transaction_recalculates_contact_balance() {
         contact_id: None,
         r#type: None,
         currency: None,
+        comment: "Test update".to_string(),
+        due_date: None,
     };
 
     let result = debt_tracker_api::handlers::transactions::update_transaction(
@@ -131,9 +135,13 @@ async fn test_delete_transaction_soft_deletes() {
     };
 
     // Delete transaction
+    let delete_request = debt_tracker_api::handlers::transactions::DeleteTransactionRequest {
+        comment: "Test deletion".to_string(),
+    };
     let result = debt_tracker_api::handlers::transactions::delete_transaction(
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
+        axum::Json(delete_request),
     )
     .await;
 
@@ -178,9 +186,13 @@ async fn test_delete_transaction_recalculates_contact_balance() {
     };
 
     // Delete transaction
+    let delete_request = debt_tracker_api::handlers::transactions::DeleteTransactionRequest {
+        comment: "Test deletion".to_string(),
+    };
     let result = debt_tracker_api::handlers::transactions::delete_transaction(
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
+        axum::Json(delete_request),
     )
     .await;
 

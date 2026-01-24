@@ -643,6 +643,63 @@ Return Response
   - `GET /api/admin/contacts` → queries `contacts_projection`
 - Projections are the source of truth for current state
 
+### Projection Rebuilding Algorithm
+
+When projections need to be rebuilt (e.g., after UNDO events or manual rebuild), the system uses an optimized algorithm that leverages snapshots and handles UNDO events efficiently.
+
+#### Algorithm Overview
+
+1. **Snapshot Creation:**
+   - Snapshots are created every 10 events or after each UNDO event
+   - Each snapshot stores the complete state of contacts and transactions at that point
+   - Snapshots include: `event_count`, `last_event_id`, and JSON data of all projections
+
+2. **Rebuilding with UNDO Events:**
+   - When UNDO events are present:
+     a. Collect all undone event IDs (events that were undone by UNDO events)
+     b. Find the earliest undone event's position (event_count)
+     c. Search for a snapshot created before that undone event
+     d. If found: restore from snapshot, then apply cleaned events after snapshot
+     e. If not found: rebuild from scratch with cleaned events
+   - **Cleaned event list:** Excludes all UNDO events and all undone events
+
+3. **Rebuilding without UNDO Events:**
+   - Use snapshot optimization if available
+   - Restore from most recent snapshot, then apply events after snapshot
+
+4. **Snapshot Restoration:**
+   - When restoring from a snapshot, filter out any undone events that may be in the snapshot
+   - This ensures undone transactions/contacts are not accidentally restored
+
+#### Key Optimizations
+
+- **Fast Lookup:** Uses event ID → position mapping for O(1) lookup of undone event positions
+- **Snapshot Optimization:** Avoids reprocessing all events by using snapshots
+- **UNDO Handling:** Efficiently excludes undone events without searching one-by-one
+- **Consistency:** Ensures undone events are never included in projections, even when restoring from snapshots
+
+#### Example Flow
+
+```
+1. Events 1-10: Normal events → Snapshot at event 10
+2. Event 11: CREATED transaction (+300,000)
+3. Event 12: UNDO (undoes event 11)
+   → Snapshot saved (excludes event 11's transaction)
+4. Event 13: Another event
+5. Rebuild triggered:
+   → Finds undone event 11 at position 11
+   → Finds snapshot at event 10 (before position 11)
+   → Restores snapshot (already excludes undone transaction)
+   → Applies cleaned events after snapshot (excludes UNDO and undone events)
+   → Result: Correct state without undone transaction
+```
+
+#### Implementation Details
+
+- **Location:** `backend/rust-api/src/handlers/sync.rs` - `rebuild_projections_from_events()`
+- **Snapshot Service:** `backend/rust-api/src/services/projection_snapshot_service.rs`
+- **Snapshot Table:** `projection_snapshots` (stores snapshot JSON and metadata)
+
 ---
 
 ## Security

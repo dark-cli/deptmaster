@@ -442,6 +442,14 @@ pub async fn post_sync_events(
                     // Continue anyway - event is inserted
                 }
                 
+                // If this is an UNDO event, trigger a full rebuild to ensure consistency
+                if event.event_type == "UNDO" {
+                    tracing::info!("UNDO event processed, triggering full projection rebuild");
+                    if let Err(e) = rebuild_projections_from_events(&state).await {
+                        tracing::error!("Error rebuilding projections after UNDO: {:?}", e);
+                    }
+                }
+                
                 // Calculate total_debt AFTER this event is applied
                 let total_debt_after = calculate_total_debt(&state).await;
                 
@@ -520,6 +528,12 @@ pub async fn post_sync_events(
 }
 
 /// Rebuild projections from all events in the database
+/// Implements the optimized algorithm:
+/// 1. Create projection after any new event
+/// 2. Stack of snapshots (push after every 10 events or after UNDO event)
+/// 3. If UNDO event: find undone event position, find snapshot before it, create cleaned event list
+/// 4. Pass cleaned event list + snapshot to builder
+/// 5. Builder creates new snapshot, make it current projection, save to stack
 pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sqlx::Error> {
     tracing::info!("Rebuilding projections from events...");
     
@@ -530,7 +544,7 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     .fetch_one(&*state.db_pool)
     .await?;
 
-    // Get all events ordered by timestamp
+    // Get all events ordered by timestamp (chronological order)
     let events = sqlx::query(
         r#"
         SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
@@ -541,19 +555,115 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     .fetch_all(&*state.db_pool)
     .await?;
 
-    // Get event count and last event info before processing
+    // Get event count and last event info
     let event_count = events.len() as i64;
     let last_event_uuid = events.last().map(|row| row.get::<uuid::Uuid, _>("event_id"));
     let last_event_db_id = events.last().and_then(|row| row.get::<Option<i64>, _>("id"));
 
-    // Check for UNDO events - if present, always do full rebuild (same as client)
+    // Build a map of event_id (UUID) -> position (1-based index) for fast lookup
+    let mut event_id_to_position: std::collections::HashMap<uuid::Uuid, i64> = std::collections::HashMap::new();
+    for (index, row) in events.iter().enumerate() {
+        let event_id: uuid::Uuid = row.get("event_id");
+        event_id_to_position.insert(event_id, (index + 1) as i64);
+    }
+
+    // Check for UNDO events
     let has_undo_events = events.iter().any(|row| {
         let event_type: String = row.get("event_type");
         event_type == "UNDO"
     });
 
-    // Try to use snapshot optimization if no UNDO events
-    let used_snapshot = if !has_undo_events {
+    let used_snapshot = if has_undo_events {
+        // Step 3: If UNDO event exists, find undone event positions
+        let mut undone_event_positions = Vec::new();
+        let mut undone_event_ids = std::collections::HashSet::new();
+        
+        for row in &events {
+            let event_type: String = row.get("event_type");
+            if event_type == "UNDO" {
+                let event_data: serde_json::Value = row.get("event_data");
+                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                        undone_event_ids.insert(undone_id);
+                        // Find the undone event's position using the map (fast lookup by ID)
+                        if let Some(position) = event_id_to_position.get(&undone_id) {
+                            undone_event_positions.push(*position);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Find the minimum undone event position (earliest undone event)
+        let min_undone_position = undone_event_positions.iter().min().copied();
+
+        // Step 4: Search snapshot stack for snapshot with event_count < undone_event_count
+        let snapshot = if let Some(target_count) = min_undone_position {
+            projection_snapshot_service::get_snapshot_before_event_count(
+                &*state.db_pool,
+                target_count,
+            ).await.ok().flatten()
+        } else {
+            None
+        };
+
+        // Step 5: Create cleaned event list (remove UNDO and undone events)
+        let cleaned_events: Vec<_> = events.iter()
+            .filter(|row| {
+                let event_id: uuid::Uuid = row.get("event_id");
+                let event_type: String = row.get("event_type");
+                
+                // Skip UNDO events
+                if event_type == "UNDO" {
+                    return false;
+                }
+                
+                // Skip undone events
+                if undone_event_ids.contains(&event_id) {
+                    return false;
+                }
+                
+                true
+            })
+            .map(|row| row as &sqlx::postgres::PgRow)
+            .collect();
+
+        // Step 6: Use snapshot if found, otherwise use full cleaned event list
+        if let Some(snapshot) = snapshot {
+            // Restore from snapshot (pass undone_event_ids to filter them out)
+            if restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok() {
+                // Get events after the snapshot (from cleaned events)
+                let snapshot_last_db_id = snapshot.last_event_id;
+                let events_after_snapshot: Vec<_> = cleaned_events.iter()
+                    .filter(|row| {
+                        let event_db_id: Option<i64> = row.get("id");
+                        event_db_id.map_or(false, |id| id > snapshot_last_db_id)
+                    })
+                    .copied()
+                    .collect();
+
+                if !events_after_snapshot.is_empty() {
+                    // Apply cleaned events after snapshot
+                    let mut empty_undone_set = std::collections::HashSet::new();
+                    if apply_events_to_projections(state, &events_after_snapshot, user_id, &mut empty_undone_set).await.is_ok() {
+                        tracing::info!("Used snapshot optimization with UNDO: {} events after snapshot", events_after_snapshot.len());
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    // No events after snapshot, snapshot is current
+                    true
+                }
+            } else {
+                false
+            }
+        } else {
+            // No suitable snapshot found, rebuild from scratch with cleaned events
+            false
+        }
+    } else {
+        // No UNDO events - use snapshot optimization if available
         if let Some(last_id) = last_event_db_id {
             if let Ok(Some(snapshot)) = projection_snapshot_service::get_snapshot_before_event(
                 &*state.db_pool,
@@ -570,22 +680,26 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                     .collect();
 
                 if !events_after_snapshot.is_empty() {
-                    // Restore projections from snapshot
-                    if restore_projections_from_snapshot(state, &snapshot, user_id).await.is_ok() {
-                        // Apply events after snapshot (need to collect undone events from all events, not just after snapshot)
-                        let mut undone_event_ids = std::collections::HashSet::new();
-                        for row in events.iter() {
-                            let event_type: String = row.get("event_type");
-                            if event_type == "UNDO" {
-                                let event_data: serde_json::Value = row.get("event_data");
-                                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
-                                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
-                                        undone_event_ids.insert(undone_id);
-                                    }
+                    // Collect undone event IDs from all events (even if no UNDO in current set, 
+                    // snapshot might contain items undone by previous UNDO events)
+                    let mut undone_event_ids = std::collections::HashSet::new();
+                    for row in &events {
+                        let event_type: String = row.get("event_type");
+                        if event_type == "UNDO" {
+                            let event_data: serde_json::Value = row.get("event_data");
+                            if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                                if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                                    undone_event_ids.insert(undone_id);
                                 }
                             }
                         }
-                        if apply_events_to_projections(state, &events_after_snapshot, user_id, &mut undone_event_ids).await.is_ok() {
+                    }
+                    
+                    // Restore projections from snapshot (filter out undone events)
+                    if restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok() {
+                        // Apply events after snapshot
+                        let mut empty_undone_set = std::collections::HashSet::new();
+                        if apply_events_to_projections(state, &events_after_snapshot, user_id, &mut empty_undone_set).await.is_ok() {
                             tracing::info!("Used snapshot for optimization: {} events after snapshot", events_after_snapshot.len());
                             true
                         } else {
@@ -596,7 +710,20 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                     }
                 } else {
                     // No new events, snapshot is current - just restore it
-                    restore_projections_from_snapshot(state, &snapshot, user_id).await.is_ok()
+                    // Still need to check for undone events in case snapshot contains undone items
+                    let mut undone_event_ids = std::collections::HashSet::new();
+                    for row in &events {
+                        let event_type: String = row.get("event_type");
+                        if event_type == "UNDO" {
+                            let event_data: serde_json::Value = row.get("event_data");
+                            if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                                if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                                    undone_event_ids.insert(undone_id);
+                                }
+                            }
+                        }
+                    }
+                    restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok()
                 }
             } else {
                 false
@@ -604,11 +731,9 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
         } else {
             false
         }
-    } else {
-        false
     };
 
-    // If snapshot optimization failed or UNDO events present, do full rebuild
+    // If snapshot optimization failed or not used, do full rebuild
     if !used_snapshot {
         // Clear existing projections (delete transactions first due to foreign key constraints)
         sqlx::query("DELETE FROM transactions_projection WHERE true")
@@ -619,29 +744,56 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
             .execute(&*state.db_pool)
             .await?;
 
-        // First pass: collect UNDO events to know which events to skip
+        // Collect undone event IDs if UNDO events exist
         let mut undone_event_ids: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
-        for row in &events {
-            let event_type: String = row.get("event_type");
-            if event_type == "UNDO" {
-                let event_data: serde_json::Value = row.get("event_data");
-                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
-                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
-                        undone_event_ids.insert(undone_id);
+        if has_undo_events {
+            for row in &events {
+                let event_type: String = row.get("event_type");
+                if event_type == "UNDO" {
+                    let event_data: serde_json::Value = row.get("event_data");
+                    if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                        if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                            undone_event_ids.insert(undone_id);
+                        }
                     }
                 }
             }
         }
 
-        // Process events to rebuild projections (skipping undone events)
-        let events_refs: Vec<_> = events.iter().collect();
-        apply_events_to_projections(state, &events_refs, user_id, &mut undone_event_ids).await?;
+        // Use cleaned events if UNDO events exist, otherwise use all events
+        let events_to_process: Vec<_> = if has_undo_events {
+            tracing::info!("Filtering events: found {} undone event IDs", undone_event_ids.len());
+            let filtered: Vec<_> = events.iter()
+                .filter(|row| {
+                    let event_id: uuid::Uuid = row.get("event_id");
+                    let event_type: String = row.get("event_type");
+                    
+                    // Skip UNDO events
+                    if event_type == "UNDO" {
+                        return false;
+                    }
+                    
+                    // Skip undone events
+                    if undone_event_ids.contains(&event_id) {
+                        tracing::info!("Skipping undone event: {}", event_id);
+                        return false;
+                    }
+                    
+                    true
+                })
+                .map(|row| row as &sqlx::postgres::PgRow)
+                .collect();
+            tracing::info!("After filtering: {} events to process (from {} total)", filtered.len(), events.len());
+            filtered
+        } else {
+            events.iter().map(|row| row as &sqlx::postgres::PgRow).collect()
+        };
+
+        // Process events to rebuild projections
+        apply_events_to_projections(state, &events_to_process, user_id, &mut undone_event_ids).await?;
     }
 
-    // Note: Balance is calculated on-the-fly from transactions, not stored in contacts_projection
-    // So we don't need to update it here
-
-    // Save snapshot after rebuild if needed (every 10 events or after UNDO)
+    // Step 7: Save snapshot after rebuild if needed (every 10 events or after UNDO)
     if let Some(last_uuid) = last_event_uuid {
         if let Ok(Some(last_event_db_id)) = sqlx::query_scalar::<_, Option<i64>>(
             "SELECT id FROM events WHERE event_id = $1"
@@ -740,10 +892,12 @@ async fn create_snapshot_json(state: &AppState) -> Result<(serde_json::Value, se
 }
 
 /// Restore projections from snapshot JSON
+/// undone_event_ids: Set of event IDs that were undone - transactions/contacts created by these events should be excluded
 async fn restore_projections_from_snapshot(
     state: &AppState,
     snapshot: &projection_snapshot_service::ProjectionSnapshot,
     user_id: uuid::Uuid,
+    undone_event_ids: &std::collections::HashSet<uuid::Uuid>,
 ) -> Result<(), sqlx::Error> {
     // Clear existing projections
     sqlx::query("DELETE FROM transactions_projection WHERE true")
@@ -754,11 +908,48 @@ async fn restore_projections_from_snapshot(
         .execute(&*state.db_pool)
         .await?;
 
-    // Restore contacts from snapshot
+    // Get all undone aggregate IDs (transactions/contacts that were created by undone events)
+    let mut undone_transaction_ids = std::collections::HashSet::new();
+    let mut undone_contact_ids = std::collections::HashSet::new();
+    
+    if !undone_event_ids.is_empty() {
+        // Find all transactions/contacts created by undone events
+        let undone_event_ids_vec: Vec<uuid::Uuid> = undone_event_ids.iter().copied().collect();
+        let undone_aggregates = sqlx::query(
+            r#"
+            SELECT aggregate_type, aggregate_id
+            FROM events
+            WHERE event_id = ANY($1) AND event_type = 'CREATED'
+            "#
+        )
+        .bind(&undone_event_ids_vec[..])
+        .fetch_all(&*state.db_pool)
+        .await?;
+        
+        for row in undone_aggregates {
+            let aggregate_type: String = row.get("aggregate_type");
+            let aggregate_id: uuid::Uuid = row.get("aggregate_id");
+            match aggregate_type.as_str() {
+                "transaction" => {
+                    undone_transaction_ids.insert(aggregate_id);
+                }
+                "contact" => {
+                    undone_contact_ids.insert(aggregate_id);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Restore contacts from snapshot (excluding undone ones)
     if let Some(contacts_array) = snapshot.contacts_snapshot.as_array() {
         for contact_json in contacts_array {
             let id_str = contact_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
             if let Ok(contact_id) = uuid::Uuid::parse_str(id_str) {
+                // Skip if this contact was undone
+                if undone_contact_ids.contains(&contact_id) {
+                    continue;
+                }
                 let name = contact_json.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let username = contact_json.get("username").and_then(|v| v.as_str());
                 let phone = contact_json.get("phone").and_then(|v| v.as_str());
@@ -794,11 +985,16 @@ async fn restore_projections_from_snapshot(
         }
     }
 
-    // Restore transactions from snapshot
+    // Restore transactions from snapshot (excluding undone ones)
     if let Some(transactions_array) = snapshot.transactions_snapshot.as_array() {
         for transaction_json in transactions_array {
             let id_str = transaction_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
             if let Ok(transaction_id) = uuid::Uuid::parse_str(id_str) {
+                // Skip if this transaction was undone
+                if undone_transaction_ids.contains(&transaction_id) {
+                    continue;
+                }
+                
                 let contact_id_str = transaction_json.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
                 if let Ok(contact_id) = uuid::Uuid::parse_str(contact_id_str) {
                     let tx_type = transaction_json.get("type").and_then(|v| v.as_str()).unwrap_or("money");
@@ -1140,12 +1336,82 @@ async fn apply_single_event_to_projections(
     user_id: uuid::Uuid,
     created_at: chrono::NaiveDateTime,
 ) -> Result<(), sqlx::Error> {
-    // UNDO events don't modify projections directly - they mark other events as undone
-    // The undone event's effects are skipped during rebuild
+    // UNDO events need to remove the undone event's effects from projections
     if event.event_type == "UNDO" {
-        // When UNDO event is processed, we need to rebuild projections to skip the undone event
-        // For now, we'll handle this in the full rebuild - UNDO events trigger a rebuild
-        // This is a simplification - in production you might want incremental UNDO handling
+        let event_data = &event.event_data;
+        if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+            if let Ok(undone_event_id) = uuid::Uuid::parse_str(undone_id_str) {
+                // Find the undone event to determine what to remove
+                let undone_event = sqlx::query(
+                    r#"
+                    SELECT aggregate_type, aggregate_id, event_type
+                    FROM events
+                    WHERE event_id = $1
+                    "#
+                )
+                .bind(undone_event_id)
+                .fetch_optional(&*state.db_pool)
+                .await?;
+
+                if let Some(undone_row) = undone_event {
+                    let undone_aggregate_type: String = undone_row.get("aggregate_type");
+                    let undone_aggregate_id: uuid::Uuid = undone_row.get("aggregate_id");
+                    let undone_event_type: String = undone_row.get("event_type");
+
+                    tracing::info!("Processing UNDO: removing {} {} event for aggregate {}", 
+                        undone_event_type, undone_aggregate_type, undone_aggregate_id);
+
+                    // Remove the undone event's effects from projections
+                    match undone_aggregate_type.as_str() {
+                        "transaction" => {
+                            // If the undone event was a transaction CREATED, remove the transaction
+                            if undone_event_type == "CREATED" || undone_event_type == "TRANSACTION_CREATED" {
+                                let deleted = sqlx::query(
+                                    "DELETE FROM transactions_projection WHERE id = $1"
+                                )
+                                .bind(undone_aggregate_id)
+                                .execute(&*state.db_pool)
+                                .await?;
+                                
+                                tracing::info!("Deleted {} transaction(s) from projection", deleted.rows_affected());
+                            } else if undone_event_type == "UPDATED" {
+                                // For UPDATED events, we need to restore the previous state
+                                // This is complex - for now, trigger a full rebuild
+                                tracing::warn!("UNDO of transaction UPDATED event - triggering rebuild");
+                                // Note: Full rebuild will handle this correctly
+                            }
+                        }
+                        "contact" => {
+                            // If the undone event was a contact CREATED, remove the contact
+                            if undone_event_type == "CREATED" {
+                                let deleted = sqlx::query(
+                                    "DELETE FROM contacts_projection WHERE id = $1"
+                                )
+                                .bind(undone_aggregate_id)
+                                .execute(&*state.db_pool)
+                                .await?;
+                                
+                                tracing::info!("Deleted {} contact(s) from projection", deleted.rows_affected());
+                            } else if undone_event_type == "UPDATED" {
+                                // For UPDATED events, we need to restore the previous state
+                                // This is complex - for now, trigger a full rebuild
+                                tracing::warn!("UNDO of contact UPDATED event - triggering rebuild");
+                                // Note: Full rebuild will handle this correctly
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("UNDO event for unknown aggregate type: {}", undone_aggregate_type);
+                        }
+                    }
+                } else {
+                    tracing::warn!("UNDO event references non-existent event: {}", undone_id_str);
+                }
+            } else {
+                tracing::warn!("UNDO event has invalid undone_event_id UUID: {}", undone_id_str);
+            }
+        } else {
+            tracing::warn!("UNDO event missing undone_event_id in event_data");
+        }
         return Ok(());
     }
 
