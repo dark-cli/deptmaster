@@ -31,6 +31,8 @@ export PGPASSWORD="$DB_PASSWORD"
 VERBOSE=false
 # Skip build flag (set via --no-build or --skip-build)
 SKIP_BUILD=false
+# Clean app data flag (set via --clean, for Android only)
+CLEAN_APP_DATA=false
 
 # Parse command line arguments for flags
 ARGS=()
@@ -42,6 +44,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-build|--skip-build)
             SKIP_BUILD=true
+            shift
+            ;;
+        --clean)
+            CLEAN_APP_DATA=true
             shift
             ;;
         *)
@@ -541,14 +547,53 @@ cmd_run_app() {
     cd mobile
     
     if [ "$platform" = "android" ]; then
+        # Clean app data if --clean flag is set
+        if [ "$CLEAN_APP_DATA" = true ]; then
+            print_info "Clearing app data via adb..."
+            
+            # Check if adb is available
+            if ! command -v adb &> /dev/null; then
+                print_error "adb not found. Please install Android SDK platform-tools."
+                exit 1
+            fi
+            
+            # Check if device is connected
+            if ! adb devices | grep -q "device$"; then
+                print_error "No Android device connected. Please connect a device or start an emulator."
+                exit 1
+            fi
+            
+            # Clear app data
+            local package_name="com.example.debt_tracker_mobile"
+            if [ -n "$device_id" ]; then
+                adb -s "$device_id" shell pm clear "$package_name" > /dev/null 2>&1 || {
+                    print_error "Failed to clear app data. Make sure the app is installed."
+                    exit 1
+                }
+            else
+                adb shell pm clear "$package_name" > /dev/null 2>&1 || {
+                    print_error "Failed to clear app data. Make sure the app is installed."
+                    exit 1
+                }
+            fi
+            
+            print_success "App data cleared"
+        fi
+        
         if [ -n "$device_id" ]; then
             flutter run -d "$device_id"
         else
             flutter run
         fi
     elif [ "$platform" = "web" ]; then
+        if [ "$CLEAN_APP_DATA" = true ]; then
+            print_warning "--clean flag is only supported for Android platform"
+        fi
         flutter run -d chrome
     elif [ "$platform" = "linux" ]; then
+        if [ "$CLEAN_APP_DATA" = true ]; then
+            print_warning "--clean flag is only supported for Android platform"
+        fi
         flutter run -d linux
     else
         print_error "Unknown platform: $platform"
