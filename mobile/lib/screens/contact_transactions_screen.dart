@@ -96,8 +96,20 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
 
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
+    return PopScope(
+      canPop: !_selectionMode, // Block pop when in selection mode (swipe gesture blocked, but back button works)
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        // If pop was blocked (didPop = false) and we're in selection mode, cancel selection
+        if (!didPop && _selectionMode) {
+          setState(() {
+            _selectionMode = false;
+            _selectedTransactions.clear();
+          });
+        }
+        // If didPop is true, normal navigation happened (not in selection mode)
+      },
+      child: GradientBackground(
+        child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
         title: _selectionMode 
@@ -473,6 +485,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           );
         },
       ),
+        ),
       ),
     );
   }

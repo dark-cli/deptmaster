@@ -46,15 +46,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return true;
     }
 
-    // If not on dashboard, navigate to dashboard
-    if (_selectedIndex != 2) {
-      setState(() {
-        _selectedIndex = 2; // Navigate to Dashboard
-      });
-      return false; // Don't exit
+    // If on Contacts or Transactions tab, prevent pop to let child screen handle it
+    // (Child screens have PopScope that handles selection mode)
+    if (_selectedIndex == 0 || _selectedIndex == 1) {
+      // Return false to prevent pop, allowing child's PopScope to handle it
+      return false;
     }
 
-    // Already on dashboard - require double back press to exit
+    // Only on dashboard - require double back press to exit
     final now = DateTime.now();
     if (_lastBackPressTime == null || 
         now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
@@ -92,8 +91,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      // Block pop only when on dashboard (for double-back-to-exit)
+      // When on Contacts/Transactions, allow pop to propagate to child screens
+      canPop: _selectedIndex != 2,
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        // If we're on Contacts/Transactions, let the child screen handle it
+        if (_selectedIndex == 0 || _selectedIndex == 1) {
+          // Child screen's PopScope will handle the back button
+          return;
+        }
+        
+        // We're on dashboard - handle double-back-to-exit
+        if (_selectedIndex == 2 && !didPop) {
+          final now = DateTime.now();
+          if (_lastBackPressTime == null || 
+              now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+            // First back press - show message and record time
+            _lastBackPressTime = now;
+            ToastService.showInfoFromContext(context, 'Press back again to exit', duration: const Duration(seconds: 2));
+          } else {
+            // Second back press within 2 seconds - exit app
+            SystemNavigator.pop();
+          }
+        }
+      },
       child: GradientBackground(
         child: Scaffold(
         key: _scaffoldKey,
@@ -104,9 +126,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: [
             TransactionsScreen(
               onOpenDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+              onNavigateToDashboard: () {
+                setState(() {
+                  _selectedIndex = 2; // Navigate to Dashboard
+                });
+              },
             ), // Transactions tab (index 0)
             ContactsScreen(
               onOpenDrawer: () => _scaffoldKey.currentState?.openDrawer(),
+              onNavigateToDashboard: () {
+                setState(() {
+                  _selectedIndex = 2; // Navigate to Dashboard
+                });
+              },
             ), // Contacts tab (index 1)
             DashboardScreen(
               onOpenDrawer: () => _scaffoldKey.currentState?.openDrawer(),

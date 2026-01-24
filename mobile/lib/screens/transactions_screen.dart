@@ -21,8 +21,9 @@ import '../utils/bottom_sheet_helper.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
+  final VoidCallback? onNavigateToDashboard;
   
-  const TransactionsScreen({super.key, this.onOpenDrawer});
+  const TransactionsScreen({super.key, this.onOpenDrawer, this.onNavigateToDashboard});
 
   @override
   ConsumerState<TransactionsScreen> createState() => _TransactionsScreenState();
@@ -231,7 +232,19 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !_selectionMode, // Block pop when in selection mode (swipe gesture blocked, but back button works)
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        // If pop was blocked (didPop = false) and we're in selection mode, cancel selection
+        if (!didPop && _selectionMode) {
+          setState(() {
+            _selectionMode = false;
+            _selectedTransactions.clear();
+          });
+        }
+        // If didPop is true, normal navigation happened (not in selection mode)
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -615,6 +628,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
             ),
           );
         },
+      ),
       ),
     );
   }

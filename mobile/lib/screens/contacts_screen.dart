@@ -21,8 +21,9 @@ import '../utils/toast_service.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
+  final VoidCallback? onNavigateToDashboard;
   
-  const ContactsScreen({super.key, this.onOpenDrawer});
+  const ContactsScreen({super.key, this.onOpenDrawer, this.onNavigateToDashboard});
 
   @override
   ConsumerState<ContactsScreen> createState() => _ContactsScreenState();
@@ -225,7 +226,19 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !_selectionMode, // Block pop when in selection mode (swipe gesture blocked, but back button works)
+      onPopInvokedWithResult: (bool didPop, dynamic result) {
+        // If pop was blocked (didPop = false) and we're in selection mode, cancel selection
+        if (!didPop && _selectionMode) {
+          setState(() {
+            _selectionMode = false;
+            _selectedContacts.clear();
+          });
+        }
+        // If didPop is true, normal navigation happened (not in selection mode)
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -570,6 +583,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
           );
           },
         ),
+      ),
       ),
     );
   }
