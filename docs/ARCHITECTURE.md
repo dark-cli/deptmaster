@@ -145,7 +145,7 @@ graph TD
         subgraph Storage ["DATA STORAGE"]
             direction TB
             
-            ES[("EventStore DB (Primary Event Store)<br/>- External immutable event log<br/>- Write-only append log (non-blocking)<br/>- Idempotency & Audit trail")]
+            ES["EventStore DB (Primary Event Store)<br/>- External immutable event log<br/>- Write-only append log (non-blocking)<br/>- Idempotency & Audit trail"]
 
             subgraph Postgres ["PostgreSQL Database"]
                 direction TB
@@ -197,8 +197,8 @@ graph TD
         %% STORAGE
         subgraph Hive_Storage ["Local Storage (Hive)"]
             direction LR
-            EventsBox[("Events Box<br/>Immutable Log")]
-            ProjectionsBox[("Projections Box<br/>Contacts, Trans.")]
+            EventsBox["Events Box<br/>Immutable Log"]
+            ProjectionsBox["Projections Box<br/>Contacts, Trans."]
         end
 
         %% BACKGROUND SERVICES
