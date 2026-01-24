@@ -7,6 +7,8 @@ import 'backend_config_service.dart';
 import 'sync_service_v2.dart';
 import 'state_builder.dart';
 import 'event_store_service.dart';
+import 'connection_manager.dart';
+import 'connection_state_tracker.dart';
 
 class RealtimeService {
   static WebSocketChannel? _channel;
@@ -36,13 +38,28 @@ class RealtimeService {
     try {
       final wsUrl = await _wsUrl;
       
-      // Create channel - this may throw synchronously or asynchronously
+      // Create channel - WebSocketChannel.connect() throws asynchronously
+      // The PlatformDispatcher.onError in main.dart will catch and suppress it
       WebSocketChannel? channel;
       try {
         channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       } catch (e) {
-        // Connection failed immediately
-        _handleConnectionError(_formatConnectionError(e));
+        // Synchronous error - log state change if needed
+        if (_isConnected) {
+          ConnectionStateTracker.logStateChange(false);
+          _isConnected = false;
+        }
+        _reconnect();
+        return;
+      }
+      
+      // Check if channel is null (shouldn't happen, but safety check)
+      if (channel == null) {
+        if (_isConnected) {
+          ConnectionStateTracker.logStateChange(false);
+          _isConnected = false;
+        }
+        _reconnect();
         return;
       }
 
@@ -57,10 +74,13 @@ class RealtimeService {
             if (!_isConnected) {
               _isConnected = true;
               _channel = channel;
-              print('✅ WebSocket connected');
               
-              // Trigger sync when connection is established
+              // Log state change (offline -> online)
+              ConnectionStateTracker.logStateChange(true);
+              
+              // Trigger sync when connection is established to sync offline events
               if (!kIsWeb) {
+                // Check for unsynced events and sync them
                 SyncServiceV2.manualSync().catchError((e) {
                   // Silently handle sync errors
                 });
@@ -77,30 +97,29 @@ class RealtimeService {
           },
           onError: (error) {
             // Handle connection errors - this catches async exceptions
+            final wasConnected = _isConnected;
             _isConnected = false;
             _channel = null;
             _subscription = null;
             
-            // Extract error code and create simple message
-            String message = _formatConnectionError(error);
-            _handleConnectionError(message);
-            
-            // Only reconnect for non-network errors
-            final errorStr = error.toString();
-            if (!errorStr.contains('Connection refused') && 
-                !errorStr.contains('Failed host lookup') &&
-                !errorStr.contains('Network is unreachable') &&
-                !errorStr.contains('SocketException')) {
-              _reconnect();
+            // Log state change (online -> offline) only if we were connected
+            if (wasConnected) {
+              ConnectionStateTracker.logStateChange(false);
             }
+            
+            _reconnect();
           },
           onDone: () {
-            if (_isConnected) {
-              print('WebSocket closed - will auto-reconnect');
-            }
+            final wasConnected = _isConnected;
             _isConnected = false;
             _channel = null;
             _subscription = null;
+            
+            // Log state change (online -> offline) only if we were connected
+            if (wasConnected) {
+              ConnectionStateTracker.logStateChange(false);
+            }
+            
             // Auto-reconnect immediately (like Firebase)
             _reconnect();
           },
@@ -113,21 +132,27 @@ class RealtimeService {
         // Give a small delay to catch immediate connection failures
         await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
-        // Stream setup failed
+        // Stream setup failed - log state change if needed
+        if (_isConnected) {
+          ConnectionStateTracker.logStateChange(false);
+        }
         _isConnected = false;
         _channel = null;
         _subscription = null;
         if (listenerSetup) {
           _subscription?.cancel();
         }
-        _handleConnectionError(_formatConnectionError(e));
+        _reconnect();
       }
     } catch (e) {
-      // Catch any other exceptions (including async ones that bubble up)
+      // Catch any other exceptions - log state change if needed
+      if (_isConnected) {
+        ConnectionStateTracker.logStateChange(false);
+      }
       _isConnected = false;
       _channel = null;
       _subscription = null;
-      _handleConnectionError(_formatConnectionError(e));
+      _reconnect();
     }
   }
 
@@ -135,57 +160,15 @@ class RealtimeService {
     // Notify callback if set (for showing toast)
     _onConnectionError?.call(message);
   }
-
-  static String _formatConnectionError(dynamic error) {
-    // Extract error code if available (works for SocketException)
-    String? errorCode;
-    String simpleMessage = 'Cannot connect to server';
-    
-    // Try to extract error code using reflection (works on all platforms)
-    try {
-      // Check if error has osError property (SocketException)
-      if (error != null) {
-        final errorStr = error.toString();
-        // Extract errno from error message if present (e.g., "errno = 111")
-        final errnoMatch = RegExp(r'errno\s*=\s*(\d+)').firstMatch(errorStr);
-        if (errnoMatch != null) {
-          errorCode = errnoMatch.group(1);
-        }
-      }
-    } catch (_) {
-      // Ignore if reflection fails
-    }
-    
-    // Determine simple message based on error content
-    final errorStr = error.toString().toLowerCase();
-    
-    if (errorStr.contains('connection refused')) {
-      simpleMessage = 'Connection refused';
-    } else if (errorStr.contains('failed host lookup') || errorStr.contains('name resolution')) {
-      simpleMessage = 'Server not found';
-    } else if (errorStr.contains('network is unreachable')) {
-      simpleMessage = 'Network unreachable';
-    } else if (errorStr.contains('timeout')) {
-      simpleMessage = 'Connection timeout';
-    } else {
-      simpleMessage = 'Connection failed';
-    }
-    
-    // Add error code if available
-    if (errorCode != null) {
-      return '$simpleMessage (Error: $errorCode)';
-    }
-    return simpleMessage;
-  }
+  
 
   static void _reconnect() {
-    // Auto-reconnect immediately (like Firebase) - no delay
-    // Keep trying until connected
-    Future.delayed(const Duration(seconds: 1), () {
+    // Auto-reconnect with 5 second delay to avoid spamming server
+    Future.delayed(const Duration(seconds: 5), () {
       if (!_isConnected) {
         // Silently attempt reconnect - don't spam console if server is down
         connect().catchError((e) {
-          // Retry connection after short delay
+          // Retry connection after delay
           _reconnect();
         });
       }

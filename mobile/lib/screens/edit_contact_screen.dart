@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../services/local_database_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../utils/theme_colors.dart';
+import '../utils/toast_service.dart';
 
 class EditContactScreen extends ConsumerStatefulWidget {
   final Contact contact;
@@ -70,25 +70,11 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
 
       if (mounted) {
         Navigator.of(context).pop(true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('✅ Contact updated!'),
-            backgroundColor: ThemeColors.snackBarBackground(context),
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ToastService.showSuccessFromContext(context, '✅ Contact updated!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: ThemeColors.snackBarErrorBackground(context),
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ToastService.showErrorFromContext(context, 'Error: $e');
       }
     } finally {
       if (mounted) {

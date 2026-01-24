@@ -468,14 +468,14 @@ pub async fn update_transaction(
     )
     .bind(transaction_uuid)
     .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
+        .await
+        .map_err(|e| {
         tracing::error!("Error getting transaction version: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to get transaction version"})),
-        )
-    })?;
+            )
+        })?;
 
     let current_version = current_version.unwrap_or(1);
     let new_version = current_version + 1;
@@ -680,14 +680,14 @@ pub async fn delete_transaction(
     )
     .bind(transaction_uuid)
     .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
+        .await
+        .map_err(|e| {
         tracing::error!("Error getting transaction version: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to get transaction version"})),
-        )
-    })?;
+            )
+        })?;
 
     let current_version = current_version.unwrap_or(1);
     let new_version = current_version + 1;

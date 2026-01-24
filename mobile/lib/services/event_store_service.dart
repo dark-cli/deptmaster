@@ -40,6 +40,19 @@ class EventStoreService {
     }
   }
 
+  /// Get a single event by ID
+  static Future<Event?> getEvent(String eventId) async {
+    if (kIsWeb) return null;
+    if (_eventsBox == null) await initialize();
+    
+    try {
+      return _eventsBox!.get(eventId);
+    } catch (e) {
+      print('Error getting event: $e');
+      return null;
+    }
+  }
+
   /// Get events for a specific aggregate
   static Future<List<Event>> getEventsForAggregate(
     String aggregateType,

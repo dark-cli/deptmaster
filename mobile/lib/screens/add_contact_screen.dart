@@ -4,7 +4,7 @@ import '../models/contact.dart';
 import '../services/local_database_service_v2.dart';
 import '../services/dummy_data_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../utils/theme_colors.dart';
+import '../utils/toast_service.dart';
 
 class AddContactScreen extends ConsumerStatefulWidget {
   final String? initialName;
@@ -71,25 +71,11 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
 
       if (mounted) {
         Navigator.of(context).pop(createdContact); // Return the created contact
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('✅ Contact created!'),
-            backgroundColor: ThemeColors.snackBarBackground(context),
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ToastService.showSuccessFromContext(context, '✅ Contact created!');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: ThemeColors.snackBarErrorBackground(context),
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ToastService.showErrorFromContext(context, 'Error: $e');
       }
     } finally {
       if (mounted) {

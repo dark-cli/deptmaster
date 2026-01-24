@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use crate::AppState;
 use crate::websocket;
+use crate::services::projection_snapshot_service;
 use sha2::{Sha256, Digest};
 
 /// Calculate total debt (sum of all contact balances) at current time
@@ -157,7 +158,7 @@ pub async fn get_sync_events(
     Ok(Json(sync_events))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct SyncEventRequest {
     pub id: String,
     pub aggregate_type: String,
@@ -172,6 +173,91 @@ pub struct SyncEventRequest {
 pub struct SyncEventsResponse {
     pub accepted: Vec<String>,
     pub conflicts: Vec<String>,
+}
+
+/// Validate event structure and data
+/// Returns error message if validation fails, None if valid
+fn validate_event(event: &SyncEventRequest) -> Option<String> {
+    // Validate event_type
+    let allowed_event_types = ["CREATED", "UPDATED", "DELETED", "UNDO"];
+    if !allowed_event_types.contains(&event.event_type.as_str()) {
+        return Some(format!(
+            "Invalid event_type: '{}'. Allowed values: CREATED, UPDATED, DELETED, UNDO",
+            event.event_type
+        ));
+    }
+
+    // Validate aggregate_type
+    let allowed_aggregate_types = ["contact", "transaction"];
+    if !allowed_aggregate_types.contains(&event.aggregate_type.as_str()) {
+        return Some(format!(
+            "Invalid aggregate_type: '{}'. Allowed values: contact, transaction",
+            event.aggregate_type
+        ));
+    }
+
+    // Validate event_data structure based on event_type and aggregate_type
+    match event.event_type.as_str() {
+        "UNDO" => {
+            // UNDO events must have undone_event_id
+            if !event.event_data.get("undone_event_id").and_then(|v| v.as_str()).is_some() {
+                return Some("UNDO events must have 'undone_event_id' in event_data".to_string());
+            }
+            // Validate undone_event_id is a valid UUID string
+            if let Some(undone_id) = event.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                if uuid::Uuid::parse_str(undone_id).is_err() {
+                    return Some("UNDO event 'undone_event_id' must be a valid UUID".to_string());
+                }
+            }
+            // Note: 5-second validation is done in post_sync_events after we can query the undone event
+        }
+        "CREATED" | "UPDATED" => {
+            match event.aggregate_type.as_str() {
+                "contact" => {
+                    // CREATED contact must have name
+                    if event.event_type == "CREATED" {
+                        if !event.event_data.get("name").and_then(|v| v.as_str()).is_some() {
+                            return Some("CREATED contact events must have 'name' in event_data".to_string());
+                        }
+                    }
+                    // Optional fields: username, phone, email, notes (no validation needed)
+                }
+                "transaction" => {
+                    // CREATED/UPDATED transaction must have required fields
+                    if event.event_data.get("amount").and_then(|v| v.as_i64()).is_none() {
+                        return Some("Transaction events must have 'amount' in event_data".to_string());
+                    }
+                    if !event.event_data.get("direction").and_then(|v| v.as_str()).is_some() {
+                        return Some("Transaction events must have 'direction' in event_data".to_string());
+                    }
+                    if let Some(direction) = event.event_data.get("direction").and_then(|v| v.as_str()) {
+                        if direction != "lent" && direction != "owed" {
+                            return Some("Transaction 'direction' must be 'lent' or 'owed'".to_string());
+                        }
+                    }
+                    if event.event_type == "CREATED" {
+                        if !event.event_data.get("contact_id").and_then(|v| v.as_str()).is_some() {
+                            return Some("CREATED transaction events must have 'contact_id' in event_data".to_string());
+                        }
+                        // Validate contact_id is a valid UUID
+                        if let Some(contact_id) = event.event_data.get("contact_id").and_then(|v| v.as_str()) {
+                            if uuid::Uuid::parse_str(contact_id).is_err() {
+                                return Some("Transaction 'contact_id' must be a valid UUID".to_string());
+                            }
+                        }
+                    }
+                    // Optional fields: type, currency, description, transaction_date, due_date (no validation needed)
+                }
+                _ => {}
+            }
+        }
+        "DELETED" => {
+            // DELETED events have no specific requirements (may have comment)
+        }
+        _ => {}
+    }
+
+    None // Validation passed
 }
 
 /// Accept events from client and insert them
@@ -226,6 +312,60 @@ pub async fn post_sync_events(
                 )
             })?
             .naive_utc();
+
+        // Validate event structure and data
+        if let Some(validation_error) = validate_event(&event) {
+            let event_id_clone = event.id.clone();
+            conflicts.push(event.id);
+            tracing::warn!("Event validation failed for {}: {}", event_id_clone, validation_error);
+            continue;
+        }
+
+        // Special validation for UNDO events: check 5-second window
+        // The 5 seconds should be between when the original event was created and when the UNDO event is created
+        if event.event_type == "UNDO" {
+            if let Some(undone_event_id_str) = event.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                if let Ok(undone_event_uuid) = uuid::Uuid::parse_str(undone_event_id_str) {
+                    // Query the undone event to get its creation timestamp
+                    let undone_event = sqlx::query(
+                        "SELECT created_at FROM events WHERE event_id = $1"
+                    )
+                    .bind(undone_event_uuid)
+                    .fetch_optional(&*state.db_pool)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error querying undone event: {:?}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({"error": "Database error"})),
+                        )
+                    })?;
+
+                    if let Some(undone_row) = undone_event {
+                        let undone_created_at: chrono::NaiveDateTime = undone_row.get("created_at");
+                        let undo_event_created_at = timestamp;
+                        
+                        // Calculate time difference
+                        let time_diff = undo_event_created_at.signed_duration_since(undone_created_at);
+                        
+                        // Check if more than 5 seconds have passed
+                        if time_diff.num_seconds() > 5 {
+                            conflicts.push(event.id);
+                            tracing::warn!(
+                                "UNDO event rejected: original event is too old ({} seconds old, max 5 seconds)",
+                                time_diff.num_seconds()
+                            );
+                            continue;
+                        }
+                    } else {
+                        // Undone event doesn't exist - this is a conflict
+                        conflicts.push(event.id);
+                        tracing::warn!("UNDO event rejected: undone event {} does not exist", undone_event_id_str);
+                        continue;
+                    }
+                }
+            }
+        }
 
         // Check if event already exists (idempotency)
         let exists = sqlx::query_scalar::<_, bool>(
@@ -318,6 +458,37 @@ pub async fn post_sync_events(
                 .execute(&*state.db_pool)
                 .await
                 .ok(); // Don't fail if update fails
+                
+                // Save snapshot if needed (every 10 events or after UNDO)
+                if let Ok(Some(event_db_id)) = sqlx::query_scalar::<_, Option<i64>>(
+                    "SELECT id FROM events WHERE event_id = $1"
+                )
+                .bind(event_id)
+                .fetch_optional(&*state.db_pool)
+                .await {
+                    if let Some(db_id) = event_db_id {
+                        let event_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
+                            .fetch_one(&*state.db_pool)
+                            .await
+                            .unwrap_or(0);
+                        
+                        let should_save = crate::services::projection_snapshot_service::should_create_snapshot(event_count) 
+                            || event.event_type == "UNDO";
+                        
+                        if should_save {
+                            // Create snapshot JSON from current projections
+                            if let Ok(snapshot_json) = create_snapshot_json(&state).await {
+                                let _ = crate::services::projection_snapshot_service::save_snapshot(
+                                    &*state.db_pool,
+                                    db_id,
+                                    event_count,
+                                    snapshot_json.0,
+                                    snapshot_json.1,
+                                ).await;
+                            }
+                        }
+                    }
+                }
             }
             Ok(None) => {
                 // Conflict (duplicate)
@@ -370,6 +541,10 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     .fetch_all(&*state.db_pool)
     .await?;
 
+    // Get event count and last event info before processing (events will be moved in loop)
+    let event_count = events.len() as i64;
+    let last_event_uuid = events.last().map(|row| row.get::<uuid::Uuid, _>("event_id"));
+
     // Clear existing projections (delete transactions first due to foreign key constraints)
     sqlx::query("DELETE FROM transactions_projection WHERE true")
         .execute(&*state.db_pool)
@@ -379,13 +554,38 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
         .execute(&*state.db_pool)
         .await?;
 
-    // Process events to rebuild projections
+    // First pass: collect UNDO events to know which events to skip
+    let mut undone_event_ids: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+    for row in &events {
+        let event_type: String = row.get("event_type");
+        if event_type == "UNDO" {
+            let event_data: serde_json::Value = row.get("event_data");
+            if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                    undone_event_ids.insert(undone_id);
+                }
+            }
+        }
+    }
+
+    // Process events to rebuild projections (skipping undone events)
     for row in events {
+        let event_id: uuid::Uuid = row.get("event_id");
         let aggregate_type: String = row.get("aggregate_type");
         let aggregate_id: uuid::Uuid = row.get("aggregate_id");
         let event_type: String = row.get("event_type");
         let event_data: serde_json::Value = row.get("event_data");
         let created_at: chrono::NaiveDateTime = row.get("created_at");
+
+        // Skip UNDO events (they don't modify projections directly)
+        if event_type == "UNDO" {
+            continue;
+        }
+
+        // Skip events that have been undone
+        if undone_event_ids.contains(&event_id) {
+            continue;
+        }
 
         if aggregate_type == "contact" {
             match event_type.as_str() {
@@ -627,8 +827,99 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     // Note: Balance is calculated on-the-fly from transactions, not stored in contacts_projection
     // So we don't need to update it here
 
+    // Save snapshot after rebuild if needed
+    if let Some(last_uuid) = last_event_uuid {
+        if let Ok(Some(last_event_db_id)) = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT id FROM events WHERE event_id = $1"
+        )
+        .bind(last_uuid)
+        .fetch_optional(&*state.db_pool)
+        .await {
+            if let Some(db_id) = last_event_db_id {
+                if crate::services::projection_snapshot_service::should_create_snapshot(event_count) {
+                    if let Ok(snapshot_json) = create_snapshot_json(state).await {
+                        let _ = crate::services::projection_snapshot_service::save_snapshot(
+                            &*state.db_pool,
+                            db_id,
+                            event_count,
+                            snapshot_json.0,
+                            snapshot_json.1,
+                        ).await;
+                    }
+                }
+            }
+        }
+    }
+
     tracing::info!("Projections rebuilt successfully");
     Ok(())
+}
+
+/// Create snapshot JSON from current projections
+/// Returns (contacts_json, transactions_json)
+async fn create_snapshot_json(state: &AppState) -> Result<(serde_json::Value, serde_json::Value), sqlx::Error> {
+    // Get all contacts
+    let contacts = sqlx::query(
+        r#"
+        SELECT id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at
+        FROM contacts_projection
+        WHERE is_deleted = false
+        ORDER BY created_at
+        "#
+    )
+    .fetch_all(&*state.db_pool)
+    .await?;
+
+    let contacts_json: Vec<serde_json::Value> = contacts
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.get::<uuid::Uuid, _>("id").to_string(),
+                "name": row.get::<String, _>("name"),
+                "username": row.get::<Option<String>, _>("username"),
+                "phone": row.get::<Option<String>, _>("phone"),
+                "email": row.get::<Option<String>, _>("email"),
+                "notes": row.get::<Option<String>, _>("notes"),
+                "created_at": row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
+                "updated_at": row.get::<chrono::NaiveDateTime, _>("updated_at").to_string(),
+            })
+        })
+        .collect();
+
+    // Get all transactions
+    let transactions = sqlx::query(
+        r#"
+        SELECT id, user_id, contact_id, type, direction, amount, currency, description, 
+               transaction_date, due_date, is_deleted, created_at, updated_at
+        FROM transactions_projection
+        WHERE is_deleted = false
+        ORDER BY created_at
+        "#
+    )
+    .fetch_all(&*state.db_pool)
+    .await?;
+
+    let transactions_json: Vec<serde_json::Value> = transactions
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.get::<uuid::Uuid, _>("id").to_string(),
+                "contact_id": row.get::<uuid::Uuid, _>("contact_id").to_string(),
+                "type": row.get::<String, _>("type"),
+                "direction": row.get::<String, _>("direction"),
+                "amount": row.get::<i64, _>("amount"),
+                "currency": row.get::<Option<String>, _>("currency"),
+                "description": row.get::<Option<String>, _>("description"),
+                "transaction_date": row.get::<chrono::NaiveDate, _>("transaction_date").to_string(),
+                "due_date": row.get::<Option<chrono::NaiveDate>, _>("due_date")
+                    .map(|d| d.to_string()),
+                "created_at": row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
+                "updated_at": row.get::<chrono::NaiveDateTime, _>("updated_at").to_string(),
+            })
+        })
+        .collect();
+
+    Ok((serde_json::json!(contacts_json), serde_json::json!(transactions_json)))
 }
 
 /// Apply a single event to projections (for incremental updates during sync)
@@ -639,6 +930,35 @@ async fn apply_single_event_to_projections(
     user_id: uuid::Uuid,
     created_at: chrono::NaiveDateTime,
 ) -> Result<(), sqlx::Error> {
+    // UNDO events don't modify projections directly - they mark other events as undone
+    // The undone event's effects are skipped during rebuild
+    if event.event_type == "UNDO" {
+        // When UNDO event is processed, we need to rebuild projections to skip the undone event
+        // For now, we'll handle this in the full rebuild - UNDO events trigger a rebuild
+        // This is a simplification - in production you might want incremental UNDO handling
+        return Ok(());
+    }
+
+    // Check if this event has been undone by checking for UNDO events
+    let event_id = uuid::Uuid::parse_str(&event.id).map_err(|_| sqlx::Error::RowNotFound)?;
+    let undone_check = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM events 
+            WHERE event_type = 'UNDO' 
+            AND event_data->>'undone_event_id' = $1
+        )
+        "#
+    )
+    .bind(event_id.to_string())
+    .fetch_one(&*state.db_pool)
+    .await?;
+
+    if undone_check {
+        // This event has been undone, skip it
+        return Ok(());
+    }
+
     let event_data = &event.event_data;
     
     match event.aggregate_type.as_str() {

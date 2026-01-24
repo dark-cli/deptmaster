@@ -37,10 +37,31 @@ class StateBuilder {
     final sortedEvents = List<Event>.from(events)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
+    // First pass: collect UNDO events to know which events to skip
+    final undoneEventIds = <String>{};
+    for (final event in sortedEvents) {
+      if (event.eventType == 'UNDO') {
+        final undoneEventId = event.eventData['undone_event_id'] as String?;
+        if (undoneEventId != null) {
+          undoneEventIds.add(undoneEventId);
+        }
+      }
+    }
+
     final contacts = <String, Contact>{};
     final transactions = <String, Transaction>{};
 
+    // Second pass: apply events (skipping undone events and UNDO events themselves)
     for (final event in sortedEvents) {
+      // Skip UNDO events (they don't modify state directly)
+      if (event.eventType == 'UNDO') {
+        continue;
+      }
+      // Skip events that have been undone
+      if (undoneEventIds.contains(event.id)) {
+        continue;
+      }
+
       if (event.aggregateType == 'contact') {
         _applyContactEvent(contacts, event);
       } else if (event.aggregateType == 'transaction') {
@@ -66,6 +87,17 @@ class StateBuilder {
     final sortedNewEvents = List<Event>.from(newEvents)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
+    // First pass: collect UNDO events to know which events to skip
+    final undoneEventIds = <String>{};
+    for (final event in sortedNewEvents) {
+      if (event.eventType == 'UNDO') {
+        final undoneEventId = event.eventData['undone_event_id'] as String?;
+        if (undoneEventId != null) {
+          undoneEventIds.add(undoneEventId);
+        }
+      }
+    }
+
     // Convert current state to maps for easier manipulation
     final contacts = Map<String, Contact>.fromEntries(
       currentState.contacts.map((c) => MapEntry(c.id, c)),
@@ -74,8 +106,17 @@ class StateBuilder {
       currentState.transactions.map((t) => MapEntry(t.id, t)),
     );
 
-    // Apply new events
+    // Apply new events (skipping undone events and UNDO events themselves)
     for (final event in sortedNewEvents) {
+      // Skip UNDO events (they don't modify state directly)
+      if (event.eventType == 'UNDO') {
+        continue;
+      }
+      // Skip events that have been undone
+      if (undoneEventIds.contains(event.id)) {
+        continue;
+      }
+
       if (event.aggregateType == 'contact') {
         _applyContactEvent(contacts, event);
       } else if (event.aggregateType == 'transaction') {

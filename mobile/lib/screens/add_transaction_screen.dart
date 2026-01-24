@@ -12,6 +12,7 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
 import 'add_contact_screen.dart';
 import '../utils/bottom_sheet_helper.dart';
@@ -211,14 +212,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         setState(() {
           _loadingContacts = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading contacts: $e'),
-            backgroundColor: ThemeColors.snackBarErrorBackground(context),
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ToastService.showErrorFromContext(context, 'Error loading contacts: $e');
       }
     }
   }
@@ -265,14 +259,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   Future<void> _saveTransaction() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedContact == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please select a contact'),
-          backgroundColor: ThemeColors.snackBarBackground(context),
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      ToastService.showInfoFromContext(context, 'Please select a contact');
       return;
     }
 
@@ -311,53 +298,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         Navigator.of(context).pop(true); // Return true to indicate success
         
         // Show undo toast
-        final scaffoldMessenger = ScaffoldMessenger.of(context);
-        scaffoldMessenger.showSnackBar(
-          SnackBar(
-            content: const Text('✅ Transaction created!'),
-            backgroundColor: ThemeColors.snackBarBackground(context),
-            action: SnackBarAction(
-              label: 'UNDO',
-              textColor: ThemeColors.snackBarActionColor(context),
-              onPressed: () async {
-                // Undo: remove the last event (CREATED)
-                try {
-                  await LocalDatabaseServiceV2.undoTransactionAction(transactionId);
-                  scaffoldMessenger.showSnackBar(
-                    SnackBar(
-                      content: const Text('Transaction undone'),
-                      backgroundColor: ThemeColors.snackBarBackground(context),
-                      duration: const Duration(seconds: 3),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                } catch (e) {
-                  scaffoldMessenger.showSnackBar(
-                    SnackBar(
-                      content: Text('Error undoing: $e'),
-                      backgroundColor: ThemeColors.snackBarErrorBackground(context),
-                      duration: const Duration(seconds: 3),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
-            ),
-            duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
-            behavior: SnackBarBehavior.floating, // Ensure it dismisses properly
-          ),
+        ToastService.showUndoWithErrorHandlingFromContext(
+          context: context,
+          message: '✅ Transaction created!',
+          onUndo: () => LocalDatabaseServiceV2.undoTransactionAction(transactionId),
+          successMessage: 'Transaction undone',
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: ThemeColors.snackBarErrorBackground(context),
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ToastService.showErrorFromContext(context, 'Error: $e');
       }
     } finally {
       if (mounted) {

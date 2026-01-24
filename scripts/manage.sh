@@ -100,7 +100,7 @@ wait_for_service() {
     local delay=${4:-1}
     
     if [ "$VERBOSE" = true ]; then
-        print_info "Waiting for $name to be ready..."
+    print_info "Waiting for $name to be ready..."
     fi
     for i in $(seq 1 $max_retries); do
         if curl -f "$url" > /dev/null 2>&1; then

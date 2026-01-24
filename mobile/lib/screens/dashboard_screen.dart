@@ -162,19 +162,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final contactMap = _contacts != null
         ? Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c)))
         : <String, Contact>{};
-    
-    // Debug: Print due dates info
-    print('🔍 Dashboard Debug:');
-    print('  Due Date Enabled: $dueDateEnabled');
-    print('  Total Transactions: ${_transactions?.length ?? 0}');
-    final transactionsWithDueDates = _transactions?.where((t) => t.dueDate != null).toList() ?? [];
-    print('  Transactions with due dates: ${transactionsWithDueDates.length}');
-    if (transactionsWithDueDates.isNotEmpty) {
-      for (var t in transactionsWithDueDates.take(5)) {
-        print('    - ${t.id}: due_date=${t.dueDate}, days_until=${t.dueDate?.difference(DateTime.now()).inDays}');
-      }
-    }
-    print('  Upcoming Due Dates: ${upcomingDueDates.length}');
 
     return Scaffold(
       appBar: AppBar(

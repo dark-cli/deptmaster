@@ -8,6 +8,7 @@ import 'event_store_service.dart';
 import 'state_builder.dart';
 import 'sync_service_v2.dart';
 import 'api_service.dart';
+import 'projection_snapshot_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// Simplified Local Database Service - KISS approach
@@ -336,7 +337,7 @@ class LocalDatabaseServiceV2 {
     }
   }
   
-  /// Undo the last action for a transaction (remove the last event)
+  /// Undo the last action for a transaction (create UNDO event)
   static Future<void> undoTransactionAction(String transactionId) async {
     if (kIsWeb) return;
     
@@ -345,46 +346,47 @@ class LocalDatabaseServiceV2 {
       final events = await EventStoreService.getEventsForAggregate('transaction', transactionId);
       if (events.isEmpty) {
         print('⚠️ No events found for transaction: $transactionId');
-        return;
+        throw Exception('No events found for transaction');
       }
       
       // Get the most recent event (last in sorted list)
       final lastEvent = events.last;
       
-      // Check if event is within undo window (5 seconds)
+      // LOCAL CHECK FIRST - Check if event is within undo window (5 seconds)
       final now = DateTime.now();
       final timeSinceEvent = now.difference(lastEvent.timestamp);
       final isWithinUndoWindow = timeSinceEvent.inSeconds < 5;
       
+      // Always check locally first - if too old, throw error immediately
       if (!isWithinUndoWindow) {
-        print('⚠️ Event is too old to undo (${timeSinceEvent.inSeconds} seconds old)');
-        return;
+        throw Exception('Cannot undo: Action is too old (must be within 5 seconds)');
       }
       
-      // If the event was synced, try to delete it from the server first
-      if (lastEvent.synced) {
-        try {
-          final deleted = await ApiService.deleteEvent(lastEvent.id);
-          if (!deleted) {
-            print('⚠️ Could not delete event from server (may be too old), removing locally only');
-          }
-        } catch (e) {
-          print('⚠️ Error deleting event from server: $e, removing locally only');
-        }
-      }
+      // Create UNDO event
+      final undoEventData = {
+        'undone_event_id': lastEvent.id,
+        'comment': 'Action undone',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      final undoEvent = await EventStoreService.appendEvent(
+        aggregateType: lastEvent.aggregateType,
+        aggregateId: lastEvent.aggregateId,
+        eventType: 'UNDO',
+        eventData: undoEventData,
+      );
       
-      // Remove the last event locally (this effectively undoes the last action)
-      final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
-      await eventsBox.delete(lastEvent.id);
-      
-      // Rebuild state
+      // Rebuild state (which will skip the undone event)
       await _rebuildState();
       
-      // Note: If event was synced, we delete it from server via ApiService.deleteEvent()
-      // The server will automatically broadcast WebSocket notification, so no need to call manualSync()
-      // manualSync() should only be called when hash comparison shows we're out of sync
+      // If the original event was synced, sync the UNDO event to server
+      if (lastEvent.synced) {
+        SyncServiceV2.manualSync().catchError((e) {
+          print('⚠️ Error syncing UNDO event: $e');
+        });
+      }
       
-      print('✅ Transaction action undone (removed last event): $transactionId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
+      print('✅ Transaction action undone (created UNDO event): $transactionId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
     } catch (e) {
       print('Error undoing transaction action: $e');
       rethrow;
@@ -408,46 +410,47 @@ class LocalDatabaseServiceV2 {
       final events = await EventStoreService.getEventsForAggregate('contact', contactId);
       if (events.isEmpty) {
         print('⚠️ No events found for contact: $contactId');
-        return;
+        throw Exception('No events found for contact');
       }
       
       // Get the most recent event (last in sorted list)
       final lastEvent = events.last;
       
-      // Check if event is within undo window (5 seconds)
+      // Check if event is within undo window (5 seconds) - LOCAL CHECK FIRST
       final now = DateTime.now();
       final timeSinceEvent = now.difference(lastEvent.timestamp);
       final isWithinUndoWindow = timeSinceEvent.inSeconds < 5;
       
+      // Always check locally first - if too old, throw error immediately
       if (!isWithinUndoWindow) {
-        print('⚠️ Event is too old to undo (${timeSinceEvent.inSeconds} seconds old)');
-        return;
+        throw Exception('Cannot undo: Action is too old (must be within 5 seconds)');
       }
       
-      // If the event was synced, try to delete it from the server first
-      if (lastEvent.synced) {
-        try {
-          final deleted = await ApiService.deleteEvent(lastEvent.id);
-          if (!deleted) {
-            print('⚠️ Could not delete event from server (may be too old), removing locally only');
-          }
-        } catch (e) {
-          print('⚠️ Error deleting event from server: $e, removing locally only');
-        }
-      }
+      // Create UNDO event
+      final undoEventData = {
+        'undone_event_id': lastEvent.id,
+        'comment': 'Action undone',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+
+      final undoEvent = await EventStoreService.appendEvent(
+        aggregateType: lastEvent.aggregateType,
+        aggregateId: lastEvent.aggregateId,
+        eventType: 'UNDO',
+        eventData: undoEventData,
+      );
       
-      // Remove the last event locally (this effectively undoes the last action)
-      final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
-      await eventsBox.delete(lastEvent.id);
-      
-      // Rebuild state
+      // Rebuild state (which will skip the undone event)
       await _rebuildState();
       
-      // Note: If event was synced, we delete it from server via ApiService.deleteEvent()
-      // The server will automatically broadcast WebSocket notification, so no need to call manualSync()
-      // manualSync() should only be called when hash comparison shows we're out of sync
+      // If the original event was synced, sync the UNDO event to server
+      if (lastEvent.synced) {
+        SyncServiceV2.manualSync().catchError((e) {
+          print('⚠️ Error syncing UNDO event: $e');
+        });
+      }
       
-      print('✅ Contact action undone (removed last event): $contactId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
+      print('✅ Contact action undone (created UNDO event): $contactId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
     } catch (e) {
       print('Error undoing contact action: $e');
       rethrow;
@@ -521,37 +524,144 @@ class LocalDatabaseServiceV2 {
   }
 
   /// Rebuild state from all events
+  /// Works the same way online and offline - no network dependency
   static Future<void> _rebuildState() async {
     if (kIsWeb) return;
 
     try {
+      print('🔄 Starting state rebuild...');
+      
       // Get all events
       final events = await EventStoreService.getAllEvents();
+      print('📊 Found ${events.length} events to process');
       
-      // Build state using StateBuilder
-      final state = StateBuilder.buildState(events);
+      AppState state;
+      String? lastEventId;
+      
+      // Check for UNDO events - if present, always do full rebuild (same as when coming back online)
+      // This ensures UNDO works correctly offline, just like it does when syncing online
+      final undoEvents = events.where((e) => e.eventType == 'UNDO').toList();
+      
+      if (undoEvents.isNotEmpty) {
+        // UNDO events present - always do full rebuild (same logic as SyncServiceV2._rebuildState)
+        // This ensures correct handling of undone events, just like when coming back online
+        state = StateBuilder.buildState(events);
+        if (events.isNotEmpty) {
+          lastEventId = events.last.id;
+        }
+      } else {
+        // No UNDO events - safe to use snapshot optimization
+        try {
+          final latestSnapshot = await ProjectionSnapshotService.getLatestSnapshot();
+          
+          if (latestSnapshot != null && events.isNotEmpty) {
+            // Get events after the snapshot
+            final snapshotLastEvent = await EventStoreService.getEvent(latestSnapshot.lastEventId);
+            if (snapshotLastEvent != null) {
+              final eventsAfterSnapshot = events.where((e) => 
+                e.timestamp.isAfter(snapshotLastEvent.timestamp) || 
+                e.timestamp.isAtSameMomentAs(snapshotLastEvent.timestamp)
+              ).toList();
+              
+              // Only use snapshot if there are events after it (otherwise snapshot is up to date)
+              if (eventsAfterSnapshot.isNotEmpty) {
+                final snapshotState = await ProjectionSnapshotService.buildStateFromSnapshot(
+                  latestSnapshot,
+                  eventsAfterSnapshot,
+                );
+                
+                if (snapshotState != null) {
+                  state = snapshotState;
+                  lastEventId = events.last.id;
+                } else {
+                  // Snapshot build failed, fallback to full rebuild
+                  throw Exception('Snapshot build returned null');
+                }
+              } else {
+                // No new events, snapshot is current
+                state = latestSnapshot.state;
+                lastEventId = latestSnapshot.lastEventId;
+              }
+            } else {
+              // Snapshot's last event not found, fallback to full rebuild
+              throw Exception('Snapshot last event not found');
+            }
+          } else {
+            // No snapshot available, do full rebuild
+            throw Exception('No snapshot available');
+          }
+        } catch (e) {
+          // Fallback to full rebuild if snapshot fails - this is normal and expected
+          state = StateBuilder.buildState(events);
+          if (events.isNotEmpty) {
+            lastEventId = events.last.id;
+          }
+        }
+      }
       
       // Save to Hive boxes
       final contactsBox = await Hive.openBox<Contact>('contacts');
       final transactionsBox = await Hive.openBox<Transaction>('transactions');
       
-      // Clear existing data
-      await contactsBox.clear();
-      await transactionsBox.clear();
+      // Get existing keys to identify what needs to be deleted
+      final existingContactIds = contactsBox.keys.cast<String>().toSet();
+      final existingTransactionIds = transactionsBox.keys.cast<String>().toSet();
       
-      // Write new state
+      // Get new state IDs
+      final newContactIds = state.contacts.map((c) => c.id).toSet();
+      final newTransactionIds = state.transactions.map((t) => t.id).toSet();
+      
+      // Identify keys to delete (exist in old state but not in new state)
+      final contactsToDelete = existingContactIds.difference(newContactIds);
+      final transactionsToDelete = existingTransactionIds.difference(newTransactionIds);
+      
+      // CRITICAL: Write all new data FIRST, then delete old data
+      // This ensures screens always see valid data, never empty state
+      final allOperations = <Future>[];
+      
+      // 1. Write all new/updated contacts and transactions FIRST
       for (final contact in state.contacts) {
-        await contactsBox.put(contact.id, contact);
+        allOperations.add(contactsBox.put(contact.id, contact));
       }
-      
       for (final transaction in state.transactions) {
-        await transactionsBox.put(transaction.id, transaction);
+        allOperations.add(transactionsBox.put(transaction.id, transaction));
       }
       
-      print('✅ State rebuilt: ${state.contacts.length} contacts, ${state.transactions.length} transactions saved to Hive');
-    } catch (e) {
+      // 2. Wait for all writes to complete
+      await Future.wait(allOperations);
+      
+      // 3. Now delete removed items (after new data is written)
+      final deleteOperations = <Future>[];
+      for (final id in contactsToDelete) {
+        deleteOperations.add(contactsBox.delete(id));
+      }
+      for (final id in transactionsToDelete) {
+        deleteOperations.add(transactionsBox.delete(id));
+      }
+      
+      // 4. Wait for deletions to complete
+      if (deleteOperations.isNotEmpty) {
+        await Future.wait(deleteOperations);
+      }
+      
+      // 5. Small delay to ensure Hive listeners process all changes
+      // This ensures screens read data after all operations complete
+      await Future.delayed(const Duration(milliseconds: 50));
+      
+      // Save snapshot if needed (every 10 events or after UNDO)
+      if (lastEventId != null) {
+        final eventCount = events.length;
+        final shouldSave = ProjectionSnapshotService.shouldCreateSnapshot(eventCount) || 
+                         events.any((e) => e.eventType == 'UNDO');
+        
+        if (shouldSave) {
+          await ProjectionSnapshotService.saveSnapshot(state, lastEventId, eventCount);
+        }
+      }
+    } catch (e, stackTrace) {
       print('❌ Error rebuilding state: $e');
-      developer.log('State rebuild error', error: e, stackTrace: StackTrace.current);
+      print('Stack trace: $stackTrace');
+      developer.log('State rebuild error', error: e, stackTrace: stackTrace);
       rethrow;
     }
   }

@@ -8,7 +8,6 @@ pub mod sync;
 pub use admin::{
     admin_panel,
     backfill_transaction_events,
-    delete_event,
     get_events,
     get_contacts,
     get_latest_event_id,

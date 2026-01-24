@@ -17,7 +17,7 @@ import '../services/realtime_service.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
-import '../utils/theme_colors.dart';
+import '../utils/toast_service.dart';
 
 class ContactsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -331,57 +331,23 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             if (!mounted) return;
                             
                             // Show undo toast for all deletes (single or bulk)
-                            final scaffoldMessenger = ScaffoldMessenger.of(context);
-                            scaffoldMessenger.showSnackBar(
-                              SnackBar(
-                                content: Text('✅ $deletedCount contact(s) deleted'),
-                                backgroundColor: ThemeColors.snackBarBackground(context),
-                                action: SnackBarAction(
-                                  label: 'UNDO',
-                                  textColor: ThemeColors.snackBarActionColor(context),
-                                  onPressed: () async {
-                                    try {
-                                      if (deletedIds.length == 1) {
-                                        await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
-                                      } else {
-                                        await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
-                                      }
-                                      _loadContacts();
-                                      scaffoldMessenger.showSnackBar(
-                                        SnackBar(
-                                          content: Text('${deletedIds.length} contact(s) deletion undone'),
-                                          backgroundColor: ThemeColors.snackBarBackground(context),
-                                          duration: const Duration(seconds: 3),
-                                          behavior: SnackBarBehavior.floating,
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      scaffoldMessenger.showSnackBar(
-                                        SnackBar(
-                                          content: Text('Error undoing: $e'),
-                                          backgroundColor: ThemeColors.snackBarErrorBackground(context),
-                                          duration: const Duration(seconds: 3),
-                                          behavior: SnackBarBehavior.floating,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                ),
-                                duration: const Duration(seconds: 5),
-                                behavior: SnackBarBehavior.floating,
-                              ),
+                            ToastService.showUndoWithErrorHandlingFromContext(
+                              context: context,
+                              message: '✅ $deletedCount contact(s) deleted',
+                              onUndo: () async {
+                                if (deletedIds.length == 1) {
+                                  await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
+                                } else {
+                                  await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
+                                }
+                                _loadContacts();
+                              },
+                              successMessage: '${deletedIds.length} contact(s) deletion undone',
                             );
                           }
                           } catch (e) {
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error deleting contacts: $e'),
-                                backgroundColor: ThemeColors.snackBarErrorBackground(context),
-                                duration: const Duration(seconds: 4),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
+                            ToastService.showErrorFromContext(context, 'Error deleting contacts: $e');
                             setState(() {
                               _loading = false;
                             });

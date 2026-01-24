@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -27,6 +28,64 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Helper function to suppress network errors (no logging - ConnectionStateTracker handles it)
+  void _handleNetworkError(dynamic error, StackTrace? stack) {
+    final errorStr = error.toString().toLowerCase();
+    
+    // Check if it's a network error
+    if (errorStr.contains('socketexception') ||
+        errorStr.contains('connection refused') ||
+        errorStr.contains('failed host lookup') ||
+        errorStr.contains('network is unreachable') ||
+        errorStr.contains('no route to host')) {
+      // Suppress the error - ConnectionStateTracker will log state changes
+      return;
+    }
+    
+    // Not a network error - return false to let it be handled normally
+    return;
+  }
+  
+  // Suppress network error stack traces globally (synchronous errors)
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final error = details.exception;
+    final errorStr = error.toString().toLowerCase();
+    
+    // Only suppress network errors
+    if (errorStr.contains('socketexception') ||
+        errorStr.contains('connection refused') ||
+        errorStr.contains('failed host lookup') ||
+        errorStr.contains('network is unreachable') ||
+        errorStr.contains('no route to host')) {
+      // Fire and forget - don't await async call in sync handler
+      _handleNetworkError(error, details.stack);
+      return; // Suppress the error
+    }
+    
+    // For non-network errors, use default handler
+    FlutterError.presentError(details);
+  };
+  
+  // Suppress network error stack traces for async errors
+  PlatformDispatcher.instance.onError = (error, stack) {
+    final errorStr = error.toString().toLowerCase();
+    
+    // Only suppress network errors
+    if (errorStr.contains('socketexception') ||
+        errorStr.contains('connection refused') ||
+        errorStr.contains('failed host lookup') ||
+        errorStr.contains('network is unreachable') ||
+        errorStr.contains('no route to host')) {
+      // Fire and forget - don't await async call in sync handler
+      _handleNetworkError(error, stack);
+      // Return true to suppress the error (prevent stack trace)
+      return true;
+    }
+    
+    // For non-network errors, let Flutter handle it (return false)
+    return false;
+  };
   
   // Check if backend is configured (check this first, before any API calls)
   final isBackendConfigured = await BackendConfigService.isConfigured();

@@ -42,8 +42,11 @@ class SyncServiceV2 {
 
       print('📊 Sync status: Local=$localEventCount events (hash: ${localHash.substring(0, 8)}...), Server=$serverEventCount events (hash: ${serverHash.substring(0, 8)}...)');
 
-      // 3. If hashes match, we're in sync
-      if (localHash == serverHash && localEventCount == serverEventCount) {
+      // 3. Check for unsynced events first (even if hashes match, we might have offline events)
+      final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
+      
+      // 4. If hashes match and no unsynced events, we're fully in sync
+      if (localHash == serverHash && localEventCount == serverEventCount && unsyncedEvents.isEmpty) {
         print('✅ Already in sync');
         final lastSync = await EventStoreService.getLastSyncTimestamp();
         if (lastSync == null) {
@@ -54,11 +57,16 @@ class SyncServiceV2 {
         await _rebuildState();
         return;
       }
+      
+      // If we have unsynced events, continue with sync even if hashes match
+      if (unsyncedEvents.isNotEmpty) {
+        print('📤 Found ${unsyncedEvents.length} unsynced events, syncing...');
+      }
 
-      // 4. Get last sync timestamp for incremental sync
+      // 5. Get last sync timestamp for incremental sync
       final lastSync = await EventStoreService.getLastSyncTimestamp();
       
-      // 5. Pull new events from server (since last sync or all if first time)
+      // 6. Pull new events from server (since last sync or all if first time)
       List<Map<String, dynamic>> serverEvents;
       if (lastSync != null) {
         serverEvents = await ApiService.getSyncEvents(since: lastSync.toIso8601String());
@@ -69,7 +77,7 @@ class SyncServiceV2 {
 
       print('📥 Received ${serverEvents.length} events from server');
 
-      // 6. Insert missing events from server (by timestamp order)
+      // 7. Insert missing events from server (by timestamp order)
       int insertedCount = 0;
       for (final serverEvent in serverEvents) {
         final eventId = serverEvent['id'] as String;
@@ -100,13 +108,13 @@ class SyncServiceV2 {
 
       print('✅ Inserted $insertedCount new events from server');
 
-      // 7. Get unsynced local events
-      final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
-      print('📤 Sending ${unsyncedEvents.length} unsynced events to server');
+      // 8. Send unsynced local events to server (re-fetch to get latest)
+      final unsyncedEventsToSend = await EventStoreService.getUnsyncedEvents();
+      print('📤 Sending ${unsyncedEventsToSend.length} unsynced events to server');
 
-      if (unsyncedEvents.isNotEmpty) {
-        // 8. Convert local events to server format
-        final eventsToSend = unsyncedEvents.map((e) {
+      if (unsyncedEventsToSend.isNotEmpty) {
+        // 9. Convert local events to server format
+        final eventsToSend = unsyncedEventsToSend.map((e) {
           // Ensure timestamp is in RFC3339 format (with Z suffix for UTC)
           String timestamp = e.timestamp.toUtc().toIso8601String();
           if (!timestamp.endsWith('Z')) {
@@ -124,34 +132,36 @@ class SyncServiceV2 {
           };
         }).toList();
 
-        // 9. Send to server
+        // 10. Send to server
         final result = await ApiService.postSyncEvents(eventsToSend);
         final accepted = (result['accepted'] as List).cast<String>();
         final conflicts = (result['conflicts'] as List).cast<String>();
 
         print('✅ Server accepted ${accepted.length} events, ${conflicts.length} conflicts');
 
-        // 10. Mark accepted events as synced
+        // 11. Mark accepted events as synced
         for (final eventId in accepted) {
           await EventStoreService.markEventSynced(eventId);
         }
 
-        // 11. Handle conflicts (for now, just log them)
+        // 12. Handle conflicts (for now, just log them)
         if (conflicts.isNotEmpty) {
           print('⚠️ Conflicts detected: $conflicts');
           // TODO: Handle conflicts (merge strategy)
         }
+      } else {
+        print('✅ No unsynced events to send');
       }
 
-      // 12. Rebuild state from all events
+      // 13. Rebuild state from all events
       await _rebuildState();
 
-      // 13. Update last sync timestamp
+      // 14. Update last sync timestamp
       await EventStoreService.setLastSyncTimestamp(DateTime.now());
 
       print('✅ Sync completed');
       
-      // 14. Force UI refresh by triggering a state rebuild notification
+      // 15. Force UI refresh by triggering a state rebuild notification
       // This ensures the UI updates after sync
       final finalEvents = await EventStoreService.getAllEvents();
       final finalState = StateBuilder.buildState(finalEvents);

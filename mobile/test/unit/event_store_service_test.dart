@@ -1,13 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:hive/hive.dart';
 import 'package:debt_tracker_mobile/services/event_store_service.dart';
 import 'package:debt_tracker_mobile/models/event.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  
   group('EventStoreService Unit Tests', () {
     setUpAll(() async {
-      // Initialize Hive for testing
-      await Hive.initFlutter();
+      // Use Hive.init() instead of Hive.initFlutter() for unit tests
+      Hive.init('test/hive_test_data');
       // Register adapters (importing event.dart automatically imports event.g.dart)
       Hive.registerAdapter(EventAdapter());
     });
@@ -16,10 +18,8 @@ void main() {
       // Clear events before each test
       await EventStoreService.initialize();
       try {
-        final events = await EventStoreService.getAllEvents();
-        for (final event in events) {
-          await event.delete();
-        }
+        final box = await Hive.openBox<Event>('events');
+        await box.clear();
       } catch (e) {
         // Events box might not exist yet
       }
@@ -212,30 +212,37 @@ void main() {
     });
 
     test('getEventsAfter returns events after timestamp', () async {
-      final baseTime = DateTime(2024, 1, 1, 12, 0, 0);
+      final baseTime = DateTime.now();
       
+      // Create first event
       await EventStoreService.appendEvent(
         aggregateType: 'contact',
         aggregateId: 'contact-1',
         eventType: 'CREATED',
-        eventData: {'name': 'Contact 1', 'timestamp': baseTime.toIso8601String()},
+        eventData: {'name': 'Contact 1'},
       );
 
+      // Wait a bit to ensure different timestamps
+      await Future.delayed(const Duration(milliseconds: 10));
+      final cutoffTime = DateTime.now();
+      await Future.delayed(const Duration(milliseconds: 10));
+
+      // Create events after cutoff
       await EventStoreService.appendEvent(
         aggregateType: 'contact',
         aggregateId: 'contact-2',
         eventType: 'CREATED',
-        eventData: {'name': 'Contact 2', 'timestamp': baseTime.add(const Duration(hours: 1)).toIso8601String()},
+        eventData: {'name': 'Contact 2'},
       );
 
       await EventStoreService.appendEvent(
         aggregateType: 'contact',
         aggregateId: 'contact-3',
         eventType: 'CREATED',
-        eventData: {'name': 'Contact 3', 'timestamp': baseTime.add(const Duration(hours: 2)).toIso8601String()},
+        eventData: {'name': 'Contact 3'},
       );
 
-      final eventsAfter = await EventStoreService.getEventsAfter(baseTime.add(const Duration(minutes: 30)));
+      final eventsAfter = await EventStoreService.getEventsAfter(cutoffTime);
       expect(eventsAfter.length, 2);
       expect(eventsAfter.any((e) => e.aggregateId == 'contact-2'), true);
       expect(eventsAfter.any((e) => e.aggregateId == 'contact-3'), true);

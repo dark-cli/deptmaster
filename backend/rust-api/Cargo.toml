@@ -53,7 +53,7 @@ bcrypt = "0.15"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Time handling
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 
 # Error handling
 anyhow = "1"

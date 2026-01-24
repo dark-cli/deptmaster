@@ -136,14 +136,14 @@ pub async fn create_contact(
     )
     .bind(idempotency_key.to_string())
     .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
+        .await
+        .map_err(|e| {
         tracing::error!("Error checking idempotency: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check idempotency"})),
-        )
-    })?;
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check idempotency"})),
+            )
+        })?;
 
     if let Some((existing_contact_id,)) = existing_event {
         // Event already exists, return existing contact
@@ -354,14 +354,14 @@ pub async fn update_contact(
     )
     .bind(contact_uuid)
     .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
+        .await
+        .map_err(|e| {
         tracing::error!("Error getting contact version: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to get contact version"})),
-        )
-    })?;
+            )
+        })?;
 
     let current_version = current_version.unwrap_or(1);
     let new_version = current_version + 1;
@@ -590,7 +590,7 @@ pub async fn delete_contact(
     .bind(contact_uuid)
     .bind(new_version)
     .fetch_one(&*state.db_pool)
-    .await
+            .await
     .map_err(|e| {
         tracing::error!("Error checking delete result: {:?}", e);
         (

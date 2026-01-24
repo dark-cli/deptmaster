@@ -19,6 +19,7 @@ import '../providers/settings_provider.dart';
 import '../widgets/gradient_background.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../utils/theme_colors.dart';
+import '../utils/toast_service.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -59,13 +60,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
       // First back press - show message and record time
       _lastBackPressTime = now;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Press back again to exit'),
-          duration: Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      ToastService.showInfoFromContext(context, 'Press back again to exit', duration: const Duration(seconds: 2));
       return false; // Don't exit yet
     }
     
@@ -91,14 +86,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final authenticated = await AuthService.authenticateWithBiometrics();
     if (authenticated && mounted) {
       // User authenticated, app is already unlocked
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('✅ Authenticated'),
-          backgroundColor: ThemeColors.snackBarBackground(context),
-          duration: const Duration(seconds: 3),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      ToastService.showSuccessFromContext(context, '✅ Authenticated');
     }
   }
 
@@ -611,14 +599,7 @@ class _BackendConfigDialogState extends State<_BackendConfigDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving configuration: $e'),
-            backgroundColor: ThemeColors.snackBarErrorBackground(context),
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ToastService.showErrorFromContext(context, 'Error saving configuration: $e');
       }
     } finally {
       if (mounted) {

@@ -4,6 +4,7 @@ import '../models/contact.dart';
 import '../models/transaction.dart';
 import 'auth_service.dart';
 import 'backend_config_service.dart';
+import 'connection_manager.dart';
 
 class ApiService {
   // Get base URL from backend configuration
@@ -44,11 +45,17 @@ class ApiService {
         }
       }
     } catch (e) {
-      // Silently handle connection errors - app works offline
-      final errorStr = e.toString();
-      if (!errorStr.contains('Connection refused') && 
-          !errorStr.contains('Failed host lookup') &&
-          !errorStr.contains('Network is unreachable')) {
+      // Use connection manager to format errors
+      if (ConnectionManager.isNetworkError(e)) {
+        final apiBaseUrl = await baseUrl;
+        final serverUrl = apiBaseUrl.replaceFirst('http://', '').replaceFirst('/api/admin', '');
+        final message = await ConnectionManager.formatConnectionError(
+          e,
+          serviceName: 'HTTP',
+          serverUrl: serverUrl,
+        );
+        print('⚠️ $message');
+      } else {
         print('Error fetching contacts: $e');
       }
     }
@@ -447,32 +454,11 @@ class ApiService {
   }
 
   // Delete an event from the server (only if less than 5 seconds old)
+  /// @deprecated Use UNDO events instead of deleting events
+  /// This method is kept for backward compatibility but should not be used
   static Future<bool> deleteEvent(String eventId) async {
-    try {
-      final headers = await _getHeaders();
-      final baseUrl = await BackendConfigService.getBaseUrl();
-      final response = await http.delete(
-        Uri.parse('$baseUrl/api/admin/events/$eventId'),
-        headers: headers,
-      );
-
-      if (response.statusCode == 200) {
-        return true;
-      } else {
-        final errorBody = response.body;
-        try {
-          final errorJson = json.decode(errorBody);
-          if (errorJson is Map && errorJson.containsKey('error')) {
-            print('⚠️ Cannot delete event: ${errorJson['error']}');
-          }
-        } catch (_) {
-          print('⚠️ Cannot delete event: ${response.statusCode} - $errorBody');
-        }
-        return false;
-      }
-    } catch (e) {
-      print('Error deleting event: $e');
-      return false;
-    }
+    print('⚠️ deleteEvent is deprecated - use UNDO events instead');
+    // Endpoint no longer exists - return false
+    return false;
   }
 }

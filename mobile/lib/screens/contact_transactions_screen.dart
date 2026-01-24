@@ -11,6 +11,7 @@ import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../utils/toast_service.dart';
 import 'add_transaction_screen.dart';
 import 'edit_transaction_screen.dart';
 import 'edit_contact_screen.dart';
@@ -168,54 +169,22 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             if (!mounted) return;
                             
                             // Show undo toast for all deletes (single or bulk)
-                            final scaffoldMessenger = ScaffoldMessenger.of(context);
-                            scaffoldMessenger.showSnackBar(
-                              SnackBar(
-                                content: Text('✅ $deletedCount transaction(s) deleted'),
-                                backgroundColor: ThemeColors.snackBarBackground(context),
-                                action: SnackBarAction(
-                                  label: 'UNDO',
-                                  textColor: ThemeColors.snackBarActionColor(context),
-                                  onPressed: () async {
-                                    try {
-                                      if (deletedIds.length == 1) {
-                                        await LocalDatabaseServiceV2.undoTransactionAction(deletedIds.first);
-                                      } else {
-                                        await LocalDatabaseServiceV2.undoBulkTransactionActions(deletedIds);
-                                      }
-                                      _loadTransactions();
-                                      scaffoldMessenger.showSnackBar(
-                                        SnackBar(
-                                          content: Text('${deletedIds.length} transaction(s) deletion undone'),
-                                          backgroundColor: ThemeColors.snackBarBackground(context),
-                                          duration: const Duration(seconds: 3),
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      scaffoldMessenger.showSnackBar(
-                                        SnackBar(
-                                          content: Text('Error undoing: $e'),
-                                          backgroundColor: ThemeColors.snackBarErrorBackground(context),
-                                          duration: const Duration(seconds: 3),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                ),
-                                duration: const Duration(seconds: 5),
-                                behavior: SnackBarBehavior.floating, // Ensure it dismisses properly
-                              ),
+                            ToastService.showUndoWithErrorHandlingFromContext(
+                              context: context,
+                              message: '✅ $deletedCount transaction(s) deleted',
+                              onUndo: () async {
+                                if (deletedIds.length == 1) {
+                                  await LocalDatabaseServiceV2.undoTransactionAction(deletedIds.first);
+                                } else {
+                                  await LocalDatabaseServiceV2.undoBulkTransactionActions(deletedIds);
+                                }
+                                _loadTransactions();
+                              },
+                              successMessage: '${deletedIds.length} transaction(s) deletion undone',
                             );
                           } catch (e) {
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error deleting transactions: $e'),
-                                backgroundColor: ThemeColors.snackBarErrorBackground(context),
-                                duration: const Duration(seconds: 4),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
+                            ToastService.showErrorFromContext(context, 'Error deleting transactions: $e');
                             setState(() {
                               _loading = false;
                             });
@@ -423,51 +392,18 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                 if (!mounted) return;
                                 
                                 // Show undo toast
-                                final scaffoldMessenger = ScaffoldMessenger.of(context);
-                                scaffoldMessenger.showSnackBar(
-                                  SnackBar(
-                                    content: const Text('✅ Transaction deleted!'),
-                                    backgroundColor: ThemeColors.snackBarBackground(context),
-                                    action: SnackBarAction(
-                                      label: 'UNDO',
-                                      textColor: ThemeColors.snackBarTextColor(context),
-                                      onPressed: () async {
-                                        // Undo: remove the last event (DELETED)
-                                        try {
-                                          await LocalDatabaseServiceV2.undoTransactionAction(transaction.id);
-                                          _loadTransactions();
-                                          scaffoldMessenger.showSnackBar(
-                                            SnackBar(
-                                              content: const Text('Transaction deletion undone'),
-                                              backgroundColor: ThemeColors.snackBarBackground(context),
-                                              duration: const Duration(seconds: 3),
-                                            ),
-                                          );
-                                        } catch (e) {
-                                          scaffoldMessenger.showSnackBar(
-                                            SnackBar(
-                                              content: Text('Error undoing: $e'),
-                                              backgroundColor: ThemeColors.snackBarErrorBackground(context),
-                                              duration: const Duration(seconds: 3),
-                                            ),
-                                          );
-                                        }
-                                      },
-                                    ),
-                                    duration: const Duration(seconds: 5), // Show for 5 seconds (undo window)
-                                    behavior: SnackBarBehavior.floating, // Ensure it dismisses properly
-                                  ),
+                                ToastService.showUndoWithErrorHandlingFromContext(
+                                  context: context,
+                                  message: '✅ Transaction deleted!',
+                                  onUndo: () async {
+                                    await LocalDatabaseServiceV2.undoTransactionAction(transaction.id);
+                                    _loadTransactions();
+                                  },
+                                  successMessage: 'Transaction deletion undone',
                                 );
                               } catch (e) {
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Error deleting: $e'),
-                                    backgroundColor: ThemeColors.snackBarErrorBackground(context),
-                                    duration: const Duration(seconds: 4),
-                                    behavior: SnackBarBehavior.floating,
-                                  ),
-                                );
+                                ToastService.showErrorFromContext(context, 'Error deleting: $e');
                               }
                             }
                           },

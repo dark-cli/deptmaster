@@ -372,5 +372,107 @@ void main() {
       expect(state.contacts.length, 1);
       expect(state.contacts.first.name, 'Third Name'); // Final state
     });
+
+    test('buildState skips UNDO events and undone events', () {
+      final now = DateTime.now();
+      final contactId = 'contact-1';
+      
+      final createdEvent = Event(
+        id: 'event-1',
+        aggregateType: 'contact',
+        aggregateId: contactId,
+        eventType: 'CREATED',
+        eventData: {
+          'name': 'Original Name',
+          'timestamp': now.toIso8601String(),
+        },
+        timestamp: now,
+      );
+
+      final updatedEvent = Event(
+        id: 'event-2',
+        aggregateType: 'contact',
+        aggregateId: contactId,
+        eventType: 'UPDATED',
+        eventData: {
+          'name': 'Updated Name',
+          'timestamp': now.add(const Duration(seconds: 1)).toIso8601String(),
+        },
+        timestamp: now.add(const Duration(seconds: 1)),
+      );
+
+      final undoEvent = Event(
+        id: 'event-3',
+        aggregateType: 'contact',
+        aggregateId: contactId,
+        eventType: 'UNDO',
+        eventData: {
+          'undone_event_id': 'event-2',
+          'comment': 'Action undone',
+          'timestamp': now.add(const Duration(seconds: 2)).toIso8601String(),
+        },
+        timestamp: now.add(const Duration(seconds: 2)),
+      );
+
+      final state = StateBuilder.buildState([createdEvent, updatedEvent, undoEvent]);
+
+      // Update was undone, should have original name
+      expect(state.contacts.length, 1);
+      expect(state.contacts.first.name, 'Original Name');
+    });
+
+    test('buildState handles UNDO for transaction correctly', () {
+      final now = DateTime.now();
+      final contactId = 'contact-1';
+      final transactionId = 'transaction-1';
+      
+      final contactEvent = Event(
+        id: 'event-1',
+        aggregateType: 'contact',
+        aggregateId: contactId,
+        eventType: 'CREATED',
+        eventData: {
+          'name': 'Test Contact',
+          'timestamp': now.toIso8601String(),
+        },
+        timestamp: now,
+      );
+
+      final transactionEvent = Event(
+        id: 'event-2',
+        aggregateType: 'transaction',
+        aggregateId: transactionId,
+        eventType: 'CREATED',
+        eventData: {
+          'contact_id': contactId,
+          'type': 'money',
+          'direction': 'lent',
+          'amount': 100000,
+          'currency': 'IQD',
+          'transaction_date': now.toIso8601String().split('T')[0],
+          'timestamp': now.add(const Duration(seconds: 1)).toIso8601String(),
+        },
+        timestamp: now.add(const Duration(seconds: 1)),
+      );
+
+      final undoEvent = Event(
+        id: 'event-3',
+        aggregateType: 'transaction',
+        aggregateId: transactionId,
+        eventType: 'UNDO',
+        eventData: {
+          'undone_event_id': 'event-2',
+          'timestamp': now.add(const Duration(seconds: 2)).toIso8601String(),
+        },
+        timestamp: now.add(const Duration(seconds: 2)),
+      );
+
+      final state = StateBuilder.buildState([contactEvent, transactionEvent, undoEvent]);
+
+      // Transaction should not exist (undone)
+      expect(state.transactions, isEmpty);
+      // Balance should be 0 (transaction was undone)
+      expect(state.contacts.first.balance, 0);
+    });
   });
 }

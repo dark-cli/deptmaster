@@ -12,13 +12,13 @@ pub async fn setup_test_db() -> PgPool {
         .await
         .expect("Failed to connect to test database");
     
-    // Run migrations
-    sqlx::migrate!("./migrations")
+    // Run migrations (ignore errors if tables already exist)
+    let _ = sqlx::migrate!("./migrations")
         .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+        .await;
     
-    // Clear test data
+    // Clear test data (in correct order due to foreign keys)
+    sqlx::query("DELETE FROM projection_snapshots").execute(&pool).await.ok();
     sqlx::query("DELETE FROM transactions_projection").execute(&pool).await.ok();
     sqlx::query("DELETE FROM contacts_projection").execute(&pool).await.ok();
     sqlx::query("DELETE FROM events").execute(&pool).await.ok();
