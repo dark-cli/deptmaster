@@ -597,30 +597,40 @@ cmd_run_app() {
             
             # Hive stores data in ~/.local/share/com.example.debt_tracker_mobile/ (package name)
             local hive_dir="$HOME/.local/share/com.example.debt_tracker_mobile"
-            local cleaned=false
+            local files_removed=0
             
             if [ -d "$hive_dir" ]; then
+                # Count files before removal
+                local count_before=$(find "$hive_dir" -name "*.hive" -o -name "*.hive.lock" 2>/dev/null | wc -l)
+                
                 # Remove all Hive box files
                 rm -f "$hive_dir"/*.hive "$hive_dir"/*.hive.lock 2>/dev/null
-                cleaned=true
+                
+                if [ "$count_before" -gt 0 ]; then
+                    files_removed=$((files_removed + count_before))
+                fi
             fi
             
-            # Also check Documents directory (sometimes Hive stores there)
-            if [ -f "$HOME/Documents/contacts.hive" ] || [ -f "$HOME/Documents/transactions.hive" ] || [ -f "$HOME/Documents/events.hive" ]; then
+            # Also check Documents directory (sometimes Hive stores there during development)
+            local docs_hive_files=$(find "$HOME/Documents" -maxdepth 1 -name "*.hive" -o -name "*.hive.lock" 2>/dev/null | wc -l)
+            if [ "$docs_hive_files" -gt 0 ]; then
                 rm -f "$HOME/Documents"/*.hive "$HOME/Documents"/*.hive.lock 2>/dev/null
-                cleaned=true
+                files_removed=$((files_removed + docs_hive_files))
             fi
             
             # Clear SharedPreferences
-            local prefs_dir="$HOME/.local/share/com.example.debt_tracker_mobile"
-            if [ -d "$prefs_dir" ]; then
-                rm -f "$prefs_dir"/shared_preferences* 2>/dev/null
+            if [ -d "$hive_dir" ]; then
+                local prefs_count=$(find "$hive_dir" -name "shared_preferences*" 2>/dev/null | wc -l)
+                if [ "$prefs_count" -gt 0 ]; then
+                    rm -f "$hive_dir"/shared_preferences* 2>/dev/null
+                    files_removed=$((files_removed + prefs_count))
+                fi
             fi
             
-            if [ "$cleaned" = true ]; then
-                print_success "App data cleared (removed Hive boxes)"
+            if [ "$files_removed" -gt 0 ]; then
+                print_success "App data cleared (removed $files_removed file(s))"
             else
-                print_info "No app data found (Hive boxes don't exist yet)"
+                print_info "No app data found (Hive boxes don't exist yet or already clean)"
             fi
         fi
         
