@@ -111,7 +111,7 @@ wait_for_service() {
 cmd_reset() {
     local import_file="${1:-}"
     
-    print_info "Resetting system (database + EventStore)..."
+    print_info "Resetting system (database)..."
     
     check_docker
     
@@ -119,9 +119,6 @@ cmd_reset() {
     print_info "Stopping server..."
     pkill -f "debt-tracker-api" || true
     sleep 2
-    
-    # Reset EventStore
-    cmd_reset_eventstore
     
     # Reset database
     cmd_reset_database
@@ -144,10 +141,6 @@ cmd_full_flash() {
     # Stop server if running
     pkill -f "debt-tracker-api" > /dev/null 2>&1 || true
     sleep 2
-    
-    # Reset EventStore
-    print_info "Resetting EventStore..."
-    cmd_reset_eventstore > /dev/null 2>&1 || cmd_reset_eventstore
     
     # Reset database
     print_info "Resetting database..."
@@ -219,6 +212,7 @@ EOF
         docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/004_user_settings.sql > /dev/null 2>&1 || true
         docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/005_create_default_user.sql > /dev/null 2>&1 || true
         docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/006_add_username_to_contacts.sql > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/007_add_idempotency_and_versions.sql > /dev/null 2>&1 || true
     fi
     
     # Ensure only the "max" user exists (clean up any other users)
@@ -241,29 +235,6 @@ EOF
     print_success "Database reset complete"
 }
 
-cmd_reset_eventstore() {
-    print_info "Resetting EventStore..."
-    
-    check_docker
-    
-    if docker ps | grep -q "debt_tracker_eventstore"; then
-        print_info "Stopping EventStore..."
-        docker stop debt_tracker_eventstore > /dev/null 2>&1 || true
-        docker rm debt_tracker_eventstore > /dev/null 2>&1 || true
-    fi
-    
-    print_info "Removing EventStore data volume..."
-    docker volume rm eventstore_data > /dev/null 2>&1 || true
-    
-    print_info "Starting fresh EventStore..."
-    cd "$ROOT_DIR/backend"
-    docker-compose up -d eventstore > /dev/null 2>&1
-    cd "$ROOT_DIR"
-    
-    wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
-    print_success "EventStore reset complete"
-}
-
 cmd_import() {
     local backup_file="${1:-debitum-backup-2026-01-18T05_51_03.zip}"
     
@@ -278,15 +249,6 @@ cmd_import() {
     fi
     
     print_step "Importing data from: $backup_file"
-    
-    # Ensure EventStore is running
-    if ! docker ps | grep -q "debt_tracker_eventstore"; then
-        print_warning "EventStore not running. Starting..."
-        cd "$ROOT_DIR/backend"
-        docker-compose up -d eventstore > /dev/null 2>&1
-        wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
-        cd "$ROOT_DIR"
-    fi
     
     # Ensure server is running
     if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
@@ -342,12 +304,6 @@ cmd_start_services() {
         sleep 5
     fi
     
-    if [ "$1" = "eventstore" ] || [ -z "$1" ]; then
-        print_info "Starting EventStore..."
-        docker-compose up -d eventstore > /dev/null 2>&1
-        wait_for_service "http://localhost:2113/health/live" "EventStore" 30 2 > /dev/null 2>&1
-    fi
-    
     if [ "$1" = "redis" ] || [ -z "$1" ]; then
         print_info "Starting Redis..."
         docker-compose up -d redis > /dev/null 2>&1
@@ -356,7 +312,7 @@ cmd_start_services() {
     
     if [ -z "$1" ]; then
         print_info "Starting all services..."
-        docker-compose up -d postgres eventstore redis > /dev/null 2>&1
+        docker-compose up -d postgres redis > /dev/null 2>&1
     fi
     
     cd "$ROOT_DIR"
@@ -374,8 +330,6 @@ cmd_stop_services() {
     
     if [ "$1" = "postgres" ]; then
         docker-compose stop postgres
-    elif [ "$1" = "eventstore" ]; then
-        docker-compose stop eventstore
     elif [ "$1" = "redis" ]; then
         docker-compose stop redis
     else
@@ -486,16 +440,6 @@ cmd_status() {
             echo "    ❌ PostgreSQL (not running)"
         fi
         
-        if docker ps | grep -q "debt_tracker_eventstore"; then
-            if curl -f http://localhost:2113/health/live > /dev/null 2>&1; then
-                echo "    ✅ EventStore (healthy)"
-            else
-                echo "    ⚠️  EventStore (running but not healthy)"
-            fi
-        else
-            echo "    ❌ EventStore (not running)"
-        fi
-        
         if docker ps | grep -q "debt_tracker_redis"; then
             echo "    ✅ Redis"
         else
@@ -521,7 +465,6 @@ cmd_status() {
     echo ""
     echo "📊 Quick Links:"
     echo "   - Admin Panel: http://localhost:8000/admin"
-    echo "   - EventStore UI: http://localhost:2113 (admin/changeit)"
     echo "   - Server Logs: tail -f /tmp/debt-tracker-api.log"
 }
 
@@ -798,13 +741,12 @@ Options:
 Commands:
   full-flash [backup.zip]     Complete reset + rebuild + optional import (recommended)
                               Use --no-build to skip server build (faster if binary exists)
-  reset [backup.zip]          Reset database + EventStore, optionally import data
+  reset [backup.zip]          Reset database, optionally import data
   reset-db                    Reset PostgreSQL database only
-  reset-eventstore            Reset EventStore only
   import <backup.zip>         Import data from Debitum backup (creates events)
   rebuild-projections         Rebuild projections from events (via API)
   
-  start-services [name]       Start Docker services (postgres/eventstore/redis/all)
+  start-services [name]       Start Docker services (postgres/redis/all)
   stop-services [name]         Stop Docker services
   start-server                 Start API server
   stop-server                  Stop API server
@@ -858,9 +800,6 @@ case "${1:-help}" in
         ;;
     reset-db|reset-database)
         cmd_reset_database
-        ;;
-    reset-eventstore)
-        cmd_reset_eventstore
         ;;
     import)
         if [ -z "$2" ]; then
