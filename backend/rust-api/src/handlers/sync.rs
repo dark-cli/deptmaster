@@ -533,7 +533,7 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     // Get all events ordered by timestamp
     let events = sqlx::query(
         r#"
-        SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at
+        SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
         FROM events
         ORDER BY created_at ASC
         "#
@@ -541,293 +541,107 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     .fetch_all(&*state.db_pool)
     .await?;
 
-    // Get event count and last event info before processing (events will be moved in loop)
+    // Get event count and last event info before processing
     let event_count = events.len() as i64;
     let last_event_uuid = events.last().map(|row| row.get::<uuid::Uuid, _>("event_id"));
+    let last_event_db_id = events.last().and_then(|row| row.get::<Option<i64>, _>("id"));
 
-    // Clear existing projections (delete transactions first due to foreign key constraints)
-    sqlx::query("DELETE FROM transactions_projection WHERE true")
-        .execute(&*state.db_pool)
-        .await?;
-    
-    sqlx::query("DELETE FROM contacts_projection WHERE true")
-        .execute(&*state.db_pool)
-        .await?;
-
-    // First pass: collect UNDO events to know which events to skip
-    let mut undone_event_ids: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
-    for row in &events {
+    // Check for UNDO events - if present, always do full rebuild (same as client)
+    let has_undo_events = events.iter().any(|row| {
         let event_type: String = row.get("event_type");
-        if event_type == "UNDO" {
-            let event_data: serde_json::Value = row.get("event_data");
-            if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
-                if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
-                    undone_event_ids.insert(undone_id);
-                }
-            }
-        }
-    }
+        event_type == "UNDO"
+    });
 
-    // Process events to rebuild projections (skipping undone events)
-    for row in events {
-        let event_id: uuid::Uuid = row.get("event_id");
-        let aggregate_type: String = row.get("aggregate_type");
-        let aggregate_id: uuid::Uuid = row.get("aggregate_id");
-        let event_type: String = row.get("event_type");
-        let event_data: serde_json::Value = row.get("event_data");
-        let created_at: chrono::NaiveDateTime = row.get("created_at");
+    // Try to use snapshot optimization if no UNDO events
+    let used_snapshot = if !has_undo_events {
+        if let Some(last_id) = last_event_db_id {
+            if let Ok(Some(snapshot)) = projection_snapshot_service::get_snapshot_before_event(
+                &*state.db_pool,
+                last_id,
+            ).await {
+                // Get events after the snapshot
+                let snapshot_last_db_id = snapshot.last_event_id;
+                let events_after_snapshot: Vec<_> = events.iter()
+                    .filter(|row| {
+                        let event_db_id: Option<i64> = row.get("id");
+                        event_db_id.map_or(false, |id| id > snapshot_last_db_id)
+                    })
+                    .map(|row| row as &sqlx::postgres::PgRow)
+                    .collect();
 
-        // Skip UNDO events (they don't modify projections directly)
-        if event_type == "UNDO" {
-            continue;
-        }
-
-        // Skip events that have been undone
-        if undone_event_ids.contains(&event_id) {
-            continue;
-        }
-
-        if aggregate_type == "contact" {
-            match event_type.as_str() {
-                "CREATED" => {
-                    // Extract contact data from event
-                    let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    let username = event_data.get("username").and_then(|v| v.as_str());
-                    let phone = event_data.get("phone").and_then(|v| v.as_str());
-                    let email = event_data.get("email").and_then(|v| v.as_str());
-                    let notes = event_data.get("notes").and_then(|v| v.as_str());
-
-                    // Insert into contacts_projection
-                    sqlx::query(
-                        r#"
-                        INSERT INTO contacts_projection 
-                        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $8, 0)
-                        ON CONFLICT (id) DO UPDATE SET
-                            name = EXCLUDED.name,
-                            username = EXCLUDED.username,
-                            phone = EXCLUDED.phone,
-                            email = EXCLUDED.email,
-                            notes = EXCLUDED.notes,
-                            updated_at = EXCLUDED.updated_at
-                        "#
-                    )
-                    .bind(aggregate_id)
-                    .bind(user_id)
-                    .bind(name)
-                    .bind(username)
-                    .bind(phone)
-                    .bind(email)
-                    .bind(notes)
-                    .bind(created_at)
-                    .execute(&*state.db_pool)
-                    .await?;
-                }
-                "UPDATED" => {
-                    // Update existing contact - get current values first
-                    let current = sqlx::query(
-                        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1"
-                    )
-                    .bind(aggregate_id)
-                    .fetch_optional(&*state.db_pool)
-                    .await?;
-
-                    if let Some(row) = current {
-                        let current_name: String = row.get("name");
-                        let current_username: Option<String> = row.get("username");
-                        let current_phone: Option<String> = row.get("phone");
-                        let current_email: Option<String> = row.get("email");
-                        let current_notes: Option<String> = row.get("notes");
-
-                        let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or(&current_name);
-                        let username = event_data.get("username").and_then(|v| v.as_str()).or(current_username.as_deref());
-                        let phone = event_data.get("phone").and_then(|v| v.as_str()).or(current_phone.as_deref());
-                        let email = event_data.get("email").and_then(|v| v.as_str()).or(current_email.as_deref());
-                        let notes = event_data.get("notes").and_then(|v| v.as_str()).or(current_notes.as_deref());
-
-                        sqlx::query(
-                            r#"
-                            UPDATE contacts_projection SET
-                                name = $2,
-                                username = $3,
-                                phone = $4,
-                                email = $5,
-                                notes = $6,
-                                updated_at = $7
-                            WHERE id = $1
-                            "#
-                        )
-                        .bind(aggregate_id)
-                        .bind(name)
-                        .bind(username)
-                        .bind(phone)
-                        .bind(email)
-                        .bind(notes)
-                        .bind(created_at)
-                        .execute(&*state.db_pool)
-                        .await?;
-                    }
-                }
-                "DELETED" => {
-                    // Soft delete contact
-                    sqlx::query(
-                        "UPDATE contacts_projection SET is_deleted = true, updated_at = $2 WHERE id = $1"
-                    )
-                    .bind(aggregate_id)
-                    .bind(created_at)
-                    .execute(&*state.db_pool)
-                    .await?;
-                }
-                _ => {}
-            }
-        } else if aggregate_type == "transaction" {
-            match event_type.as_str() {
-                "CREATED" | "TRANSACTION_CREATED" => {
-                    // Extract transaction data from event
-                    let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
-                    let contact_id = uuid::Uuid::parse_str(contact_id_str).ok();
-                    
-                    if let Some(cid) = contact_id {
-                        let tx_type = event_data.get("type").and_then(|v| v.as_str()).unwrap_or("money");
-                        let direction = event_data.get("direction").and_then(|v| v.as_str()).unwrap_or("lent");
-                        let amount = event_data.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
-                        let currency = event_data.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
-                        let description = event_data.get("description").and_then(|v| v.as_str());
-                        let transaction_date_str = event_data.get("transaction_date").and_then(|v| v.as_str()).unwrap_or("");
-                        let due_date_str = event_data.get("due_date").and_then(|v| v.as_str());
-                        
-                        let transaction_date = if !transaction_date_str.is_empty() {
-                            chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d").ok()
-                        } else {
-                            Some(created_at.date())
-                        };
-                        
-                        let due_date = due_date_str.and_then(|d| {
-                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
-                        });
-
-                        if let Some(txn_date) = transaction_date {
-                            sqlx::query(
-                                r#"
-                                INSERT INTO transactions_projection 
-                                (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $11, 0)
-                                ON CONFLICT (id) DO UPDATE SET
-                                    contact_id = EXCLUDED.contact_id,
-                                    type = EXCLUDED.type,
-                                    direction = EXCLUDED.direction,
-                                    amount = EXCLUDED.amount,
-                                    currency = EXCLUDED.currency,
-                                    description = EXCLUDED.description,
-                                    transaction_date = EXCLUDED.transaction_date,
-                                    due_date = EXCLUDED.due_date,
-                                    updated_at = EXCLUDED.updated_at
-                                "#
-                            )
-                            .bind(aggregate_id)
-                            .bind(user_id)
-                            .bind(cid)
-                            .bind(tx_type)
-                            .bind(direction)
-                            .bind(amount)
-                            .bind(currency)
-                            .bind(description)
-                            .bind(txn_date)
-                            .bind(due_date)
-                            .bind(created_at)
-                            .execute(&*state.db_pool)
-                            .await?;
+                if !events_after_snapshot.is_empty() {
+                    // Restore projections from snapshot
+                    if restore_projections_from_snapshot(state, &snapshot, user_id).await.is_ok() {
+                        // Apply events after snapshot (need to collect undone events from all events, not just after snapshot)
+                        let mut undone_event_ids = std::collections::HashSet::new();
+                        for row in events.iter() {
+                            let event_type: String = row.get("event_type");
+                            if event_type == "UNDO" {
+                                let event_data: serde_json::Value = row.get("event_data");
+                                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                                        undone_event_ids.insert(undone_id);
+                                    }
+                                }
+                            }
                         }
+                        if apply_events_to_projections(state, &events_after_snapshot, user_id, &mut undone_event_ids).await.is_ok() {
+                            tracing::info!("Used snapshot for optimization: {} events after snapshot", events_after_snapshot.len());
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    // No new events, snapshot is current - just restore it
+                    restore_projections_from_snapshot(state, &snapshot, user_id).await.is_ok()
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // If snapshot optimization failed or UNDO events present, do full rebuild
+    if !used_snapshot {
+        // Clear existing projections (delete transactions first due to foreign key constraints)
+        sqlx::query("DELETE FROM transactions_projection WHERE true")
+            .execute(&*state.db_pool)
+            .await?;
+        
+        sqlx::query("DELETE FROM contacts_projection WHERE true")
+            .execute(&*state.db_pool)
+            .await?;
+
+        // First pass: collect UNDO events to know which events to skip
+        let mut undone_event_ids: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+        for row in &events {
+            let event_type: String = row.get("event_type");
+            if event_type == "UNDO" {
+                let event_data: serde_json::Value = row.get("event_data");
+                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                        undone_event_ids.insert(undone_id);
                     }
                 }
-                "UPDATED" => {
-                    // Update existing transaction - get current values first
-                    let current = sqlx::query(
-                        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
-                    )
-                    .bind(aggregate_id)
-                    .fetch_optional(&*state.db_pool)
-                    .await?;
-
-                    if let Some(row) = current {
-                        let current_contact_id: uuid::Uuid = row.get("contact_id");
-                        let current_type: String = row.get("type");
-                        let current_direction: String = row.get("direction");
-                        let current_amount: i64 = row.get("amount");
-                        let current_currency: String = row.get("currency");
-                        let current_description: Option<String> = row.get("description");
-                        let current_transaction_date: chrono::NaiveDate = row.get("transaction_date");
-                        let current_due_date: Option<chrono::NaiveDate> = row.get("due_date");
-
-                        let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str());
-                        let contact_id = contact_id_str
-                            .and_then(|s| uuid::Uuid::parse_str(s).ok())
-                            .unwrap_or(current_contact_id);
-                        
-                        let tx_type = event_data.get("type").and_then(|v| v.as_str()).unwrap_or(&current_type);
-                        let direction = event_data.get("direction").and_then(|v| v.as_str()).unwrap_or(&current_direction);
-                        let amount = event_data.get("amount").and_then(|v| v.as_i64()).unwrap_or(current_amount);
-                        let currency = event_data.get("currency").and_then(|v| v.as_str()).unwrap_or(&current_currency);
-                        let description = event_data.get("description").and_then(|v| v.as_str()).or(current_description.as_deref());
-                        
-                        let transaction_date_str = event_data.get("transaction_date").and_then(|v| v.as_str());
-                        let transaction_date = transaction_date_str
-                            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-                            .unwrap_or(current_transaction_date);
-                        
-                        let due_date_str = event_data.get("due_date").and_then(|v| v.as_str());
-                        let due_date = due_date_str
-                            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-                            .or(current_due_date);
-
-                        sqlx::query(
-                            r#"
-                            UPDATE transactions_projection SET
-                                contact_id = $2,
-                                type = $3,
-                                direction = $4,
-                                amount = $5,
-                                currency = $6,
-                                description = $7,
-                                transaction_date = $8,
-                                due_date = $9,
-                                updated_at = $10
-                            WHERE id = $1
-                            "#
-                        )
-                        .bind(aggregate_id)
-                        .bind(contact_id)
-                        .bind(tx_type)
-                        .bind(direction)
-                        .bind(amount)
-                        .bind(currency)
-                        .bind(description)
-                        .bind(transaction_date)
-                        .bind(due_date)
-                        .bind(created_at)
-                        .execute(&*state.db_pool)
-                        .await?;
-                    }
-                }
-                "DELETED" => {
-                    // Soft delete transaction
-                    sqlx::query(
-                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $2 WHERE id = $1"
-                    )
-                    .bind(aggregate_id)
-                    .bind(created_at)
-                    .execute(&*state.db_pool)
-                    .await?;
-                }
-                _ => {}
             }
         }
+
+        // Process events to rebuild projections (skipping undone events)
+        let events_refs: Vec<_> = events.iter().collect();
+        apply_events_to_projections(state, &events_refs, user_id, &mut undone_event_ids).await?;
     }
 
     // Note: Balance is calculated on-the-fly from transactions, not stored in contacts_projection
     // So we don't need to update it here
 
-    // Save snapshot after rebuild if needed
+    // Save snapshot after rebuild if needed (every 10 events or after UNDO)
     if let Some(last_uuid) = last_event_uuid {
         if let Ok(Some(last_event_db_id)) = sqlx::query_scalar::<_, Option<i64>>(
             "SELECT id FROM events WHERE event_id = $1"
@@ -836,7 +650,10 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
         .fetch_optional(&*state.db_pool)
         .await {
             if let Some(db_id) = last_event_db_id {
-                if crate::services::projection_snapshot_service::should_create_snapshot(event_count) {
+                let should_save = crate::services::projection_snapshot_service::should_create_snapshot(event_count) 
+                    || has_undo_events;
+                
+                if should_save {
                     if let Ok(snapshot_json) = create_snapshot_json(state).await {
                         let _ = crate::services::projection_snapshot_service::save_snapshot(
                             &*state.db_pool,
@@ -920,6 +737,399 @@ async fn create_snapshot_json(state: &AppState) -> Result<(serde_json::Value, se
         .collect();
 
     Ok((serde_json::json!(contacts_json), serde_json::json!(transactions_json)))
+}
+
+/// Restore projections from snapshot JSON
+async fn restore_projections_from_snapshot(
+    state: &AppState,
+    snapshot: &projection_snapshot_service::ProjectionSnapshot,
+    user_id: uuid::Uuid,
+) -> Result<(), sqlx::Error> {
+    // Clear existing projections
+    sqlx::query("DELETE FROM transactions_projection WHERE true")
+        .execute(&*state.db_pool)
+        .await?;
+    
+    sqlx::query("DELETE FROM contacts_projection WHERE true")
+        .execute(&*state.db_pool)
+        .await?;
+
+    // Restore contacts from snapshot
+    if let Some(contacts_array) = snapshot.contacts_snapshot.as_array() {
+        for contact_json in contacts_array {
+            let id_str = contact_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if let Ok(contact_id) = uuid::Uuid::parse_str(id_str) {
+                let name = contact_json.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let username = contact_json.get("username").and_then(|v| v.as_str());
+                let phone = contact_json.get("phone").and_then(|v| v.as_str());
+                let email = contact_json.get("email").and_then(|v| v.as_str());
+                let notes = contact_json.get("notes").and_then(|v| v.as_str());
+                let created_at_str = contact_json.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                let updated_at_str = contact_json.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+                
+                let created_at = chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                    .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
+                let updated_at = chrono::NaiveDateTime::parse_from_str(updated_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                    .unwrap_or(created_at);
+
+                sqlx::query(
+                    r#"
+                    INSERT INTO contacts_projection 
+                    (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, 0)
+                    "#
+                )
+                .bind(contact_id)
+                .bind(user_id)
+                .bind(name)
+                .bind(username)
+                .bind(phone)
+                .bind(email)
+                .bind(notes)
+                .bind(created_at)
+                .bind(updated_at)
+                .execute(&*state.db_pool)
+                .await?;
+            }
+        }
+    }
+
+    // Restore transactions from snapshot
+    if let Some(transactions_array) = snapshot.transactions_snapshot.as_array() {
+        for transaction_json in transactions_array {
+            let id_str = transaction_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if let Ok(transaction_id) = uuid::Uuid::parse_str(id_str) {
+                let contact_id_str = transaction_json.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(contact_id) = uuid::Uuid::parse_str(contact_id_str) {
+                    let tx_type = transaction_json.get("type").and_then(|v| v.as_str()).unwrap_or("money");
+                    let direction = transaction_json.get("direction").and_then(|v| v.as_str()).unwrap_or("lent");
+                    let amount = transaction_json.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let currency = transaction_json.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
+                    let description = transaction_json.get("description").and_then(|v| v.as_str());
+                    let transaction_date_str = transaction_json.get("transaction_date").and_then(|v| v.as_str()).unwrap_or("");
+                    let due_date_str = transaction_json.get("due_date").and_then(|v| v.as_str());
+                    let created_at_str = transaction_json.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                    let updated_at_str = transaction_json.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+                    
+                    let transaction_date = if !transaction_date_str.is_empty() {
+                        chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d").ok()
+                    } else {
+                        None
+                    };
+                    
+                    let due_date = due_date_str.and_then(|d| {
+                        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+                    });
+                    
+                    let created_at = chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                        .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
+                    let updated_at = chrono::NaiveDateTime::parse_from_str(updated_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                        .unwrap_or(created_at);
+
+                    if let Some(txn_date) = transaction_date {
+                        sqlx::query(
+                            r#"
+                            INSERT INTO transactions_projection 
+                            (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $12, 0)
+                            "#
+                        )
+                        .bind(transaction_id)
+                        .bind(user_id)
+                        .bind(contact_id)
+                        .bind(tx_type)
+                        .bind(direction)
+                        .bind(amount)
+                        .bind(currency)
+                        .bind(description)
+                        .bind(txn_date)
+                        .bind(due_date)
+                        .bind(created_at)
+                        .bind(updated_at)
+                        .execute(&*state.db_pool)
+                        .await?;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Apply events to projections (helper function for both full rebuild and snapshot-based rebuild)
+async fn apply_events_to_projections(
+    state: &AppState,
+    events: &[&sqlx::postgres::PgRow],
+    user_id: uuid::Uuid,
+    undone_event_ids: &mut std::collections::HashSet<uuid::Uuid>,
+) -> Result<(), sqlx::Error> {
+    // First pass: collect UNDO events if not already collected
+    if undone_event_ids.is_empty() {
+        for row in events.iter() {
+            let event_type: String = row.get("event_type");
+            if event_type == "UNDO" {
+                let event_data: serde_json::Value = row.get("event_data");
+                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                        undone_event_ids.insert(undone_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Second pass: apply events (skipping UNDO events and undone events)
+    for row in events {
+        let event_id: uuid::Uuid = row.get("event_id");
+        let aggregate_type: String = row.get("aggregate_type");
+        let aggregate_id: uuid::Uuid = row.get("aggregate_id");
+        let event_type: String = row.get("event_type");
+        let event_data: serde_json::Value = row.get("event_data");
+        let created_at: chrono::NaiveDateTime = row.get("created_at");
+
+        // Skip UNDO events (they don't modify projections directly)
+        if event_type == "UNDO" {
+            continue;
+        }
+
+        // Skip events that have been undone
+        if undone_event_ids.contains(&event_id) {
+            continue;
+        }
+
+        // Apply event (same logic as full rebuild)
+        if aggregate_type == "contact" {
+            match event_type.as_str() {
+                "CREATED" => {
+                    let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let username = event_data.get("username").and_then(|v| v.as_str());
+                    let phone = event_data.get("phone").and_then(|v| v.as_str());
+                    let email = event_data.get("email").and_then(|v| v.as_str());
+                    let notes = event_data.get("notes").and_then(|v| v.as_str());
+
+                    sqlx::query(
+                        r#"
+                        INSERT INTO contacts_projection 
+                        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $8, 0)
+                        ON CONFLICT (id) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            username = EXCLUDED.username,
+                            phone = EXCLUDED.phone,
+                            email = EXCLUDED.email,
+                            notes = EXCLUDED.notes,
+                            updated_at = EXCLUDED.updated_at
+                        "#
+                    )
+                    .bind(aggregate_id)
+                    .bind(user_id)
+                    .bind(name)
+                    .bind(username)
+                    .bind(phone)
+                    .bind(email)
+                    .bind(notes)
+                    .bind(created_at)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                "UPDATED" => {
+                    let current = sqlx::query(
+                        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1"
+                    )
+                    .bind(aggregate_id)
+                    .fetch_optional(&*state.db_pool)
+                    .await?;
+
+                    if let Some(current_row) = current {
+                        let current_name: String = current_row.get("name");
+                        let current_username: Option<String> = current_row.get("username");
+                        let current_phone: Option<String> = current_row.get("phone");
+                        let current_email: Option<String> = current_row.get("email");
+                        let current_notes: Option<String> = current_row.get("notes");
+
+                        let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or(&current_name);
+                        let username = event_data.get("username").and_then(|v| v.as_str()).or(current_username.as_deref());
+                        let phone = event_data.get("phone").and_then(|v| v.as_str()).or(current_phone.as_deref());
+                        let email = event_data.get("email").and_then(|v| v.as_str()).or(current_email.as_deref());
+                        let notes = event_data.get("notes").and_then(|v| v.as_str()).or(current_notes.as_deref());
+
+                        sqlx::query(
+                            r#"
+                            UPDATE contacts_projection SET
+                                name = $2,
+                                username = $3,
+                                phone = $4,
+                                email = $5,
+                                notes = $6,
+                                updated_at = $7
+                            WHERE id = $1
+                            "#
+                        )
+                        .bind(aggregate_id)
+                        .bind(name)
+                        .bind(username)
+                        .bind(phone)
+                        .bind(email)
+                        .bind(notes)
+                        .bind(created_at)
+                        .execute(&*state.db_pool)
+                        .await?;
+                    }
+                }
+                "DELETED" => {
+                    sqlx::query(
+                        "UPDATE contacts_projection SET is_deleted = true, updated_at = $2 WHERE id = $1"
+                    )
+                    .bind(aggregate_id)
+                    .bind(created_at)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                _ => {}
+            }
+        } else if aggregate_type == "transaction" {
+            match event_type.as_str() {
+                "CREATED" | "TRANSACTION_CREATED" => {
+                    let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
+                    let contact_id = uuid::Uuid::parse_str(contact_id_str).ok();
+                    
+                    if let Some(cid) = contact_id {
+                        let tx_type = event_data.get("type").and_then(|v| v.as_str()).unwrap_or("money");
+                        let direction = event_data.get("direction").and_then(|v| v.as_str()).unwrap_or("lent");
+                        let amount = event_data.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let currency = event_data.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
+                        let description = event_data.get("description").and_then(|v| v.as_str());
+                        let transaction_date_str = event_data.get("transaction_date").and_then(|v| v.as_str()).unwrap_or("");
+                        let due_date_str = event_data.get("due_date").and_then(|v| v.as_str());
+                        
+                        let transaction_date = if !transaction_date_str.is_empty() {
+                            chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d").ok()
+                        } else {
+                            Some(created_at.date())
+                        };
+                        
+                        let due_date = due_date_str.and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+                        });
+
+                        if let Some(txn_date) = transaction_date {
+                            sqlx::query(
+                                r#"
+                                INSERT INTO transactions_projection 
+                                (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $11, 0)
+                                ON CONFLICT (id) DO UPDATE SET
+                                    contact_id = EXCLUDED.contact_id,
+                                    type = EXCLUDED.type,
+                                    direction = EXCLUDED.direction,
+                                    amount = EXCLUDED.amount,
+                                    currency = EXCLUDED.currency,
+                                    description = EXCLUDED.description,
+                                    transaction_date = EXCLUDED.transaction_date,
+                                    due_date = EXCLUDED.due_date,
+                                    updated_at = EXCLUDED.updated_at
+                                "#
+                            )
+                            .bind(aggregate_id)
+                            .bind(user_id)
+                            .bind(cid)
+                            .bind(tx_type)
+                            .bind(direction)
+                            .bind(amount)
+                            .bind(currency)
+                            .bind(description)
+                            .bind(txn_date)
+                            .bind(due_date)
+                            .bind(created_at)
+                            .execute(&*state.db_pool)
+                            .await?;
+                        }
+                    }
+                }
+                "UPDATED" => {
+                    let current = sqlx::query(
+                        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
+                    )
+                    .bind(aggregate_id)
+                    .fetch_optional(&*state.db_pool)
+                    .await?;
+
+                    if let Some(current_row) = current {
+                        let current_contact_id: uuid::Uuid = current_row.get("contact_id");
+                        let current_type: String = current_row.get("type");
+                        let current_direction: String = current_row.get("direction");
+                        let current_amount: i64 = current_row.get("amount");
+                        let current_currency: String = current_row.get("currency");
+                        let current_description: Option<String> = current_row.get("description");
+                        let current_transaction_date: chrono::NaiveDate = current_row.get("transaction_date");
+                        let current_due_date: Option<chrono::NaiveDate> = current_row.get("due_date");
+
+                        let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str());
+                        let contact_id = contact_id_str
+                            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                            .unwrap_or(current_contact_id);
+                        
+                        let tx_type = event_data.get("type").and_then(|v| v.as_str()).unwrap_or(&current_type);
+                        let direction = event_data.get("direction").and_then(|v| v.as_str()).unwrap_or(&current_direction);
+                        let amount = event_data.get("amount").and_then(|v| v.as_i64()).unwrap_or(current_amount);
+                        let currency = event_data.get("currency").and_then(|v| v.as_str()).unwrap_or(&current_currency);
+                        let description = event_data.get("description").and_then(|v| v.as_str()).or(current_description.as_deref());
+                        
+                        let transaction_date_str = event_data.get("transaction_date").and_then(|v| v.as_str());
+                        let transaction_date = transaction_date_str
+                            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+                            .unwrap_or(current_transaction_date);
+                        
+                        let due_date_str = event_data.get("due_date").and_then(|v| v.as_str());
+                        let due_date = due_date_str
+                            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+                            .or(current_due_date);
+
+                        sqlx::query(
+                            r#"
+                            UPDATE transactions_projection SET
+                                contact_id = $2,
+                                type = $3,
+                                direction = $4,
+                                amount = $5,
+                                currency = $6,
+                                description = $7,
+                                transaction_date = $8,
+                                due_date = $9,
+                                updated_at = $10
+                            WHERE id = $1
+                            "#
+                        )
+                        .bind(aggregate_id)
+                        .bind(contact_id)
+                        .bind(tx_type)
+                        .bind(direction)
+                        .bind(amount)
+                        .bind(currency)
+                        .bind(description)
+                        .bind(transaction_date)
+                        .bind(due_date)
+                        .bind(created_at)
+                        .execute(&*state.db_pool)
+                        .await?;
+                    }
+                }
+                "DELETED" => {
+                    sqlx::query(
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $2 WHERE id = $1"
+                    )
+                    .bind(aggregate_id)
+                    .bind(created_at)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Apply a single event to projections (for incremental updates during sync)
