@@ -27,7 +27,6 @@ A modern debt management application with event-sourced architecture, offline-fi
 - Flutter SDK (for mobile/web apps)
 - Docker & Docker Compose
 - PostgreSQL 14+ (via Docker)
-- EventStore DB (via Docker)
 
 ### Setup
 
