@@ -19,7 +19,6 @@ mod websocket;
 use config::Config;
 use database::DatabasePool;
 use websocket::BroadcastChannel;
-use services::eventstore::EventStoreClient;
 use handlers::admin::rebuild_projections;
 
 // Define AppState in main.rs (not in shared app_state.rs to avoid library build issues)
@@ -28,7 +27,6 @@ pub struct AppState {
     pub db_pool: DatabasePool,
     pub config: Arc<Config>,
     pub broadcast_tx: BroadcastChannel,
-    pub eventstore: Arc<EventStoreClient>,
 }
 
 #[tokio::main]
@@ -54,14 +52,6 @@ async fn main() -> anyhow::Result<()> {
     let db_pool = database::new_pool(&config.database_url).await?;
     info!("Database connection pool created");
 
-    // Initialize EventStore client
-    let eventstore = Arc::new(EventStoreClient::new(
-        config.eventstore_url.clone(),
-        config.eventstore_username.clone(),
-        config.eventstore_password.clone(),
-    ));
-    info!("EventStore client initialized");
-
     // Seed dummy data if database is empty
     services::seed_data::seed_dummy_data(&db_pool).await?;
 
@@ -83,7 +73,6 @@ async fn main() -> anyhow::Result<()> {
         db_pool: db_pool.clone(),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
-        eventstore: eventstore.clone(),
     };
 
     // Build API routes

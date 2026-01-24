@@ -228,25 +228,7 @@ pub async fn create_transaction(
         "timestamp": Utc::now().to_rfc3339() // When the action was performed
     });
 
-    // Write event to EventStore
-    let stream_name = format!("transaction-{}", transaction_id);
-    let event_uuid = Uuid::new_v4();
-    
-    // Append event to EventStore (new stream, so expected version is -1)
-    // Note: EventStore write failures are logged but don't block transaction creation
-    let stream_version = state.eventstore
-        .write_event(
-            &stream_name,
-            "TransactionCreated",
-            event_uuid,
-            event_data.clone(),
-            -1, // New stream
-        )
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("EventStore write failed (non-blocking): {:?}. Transaction will still be created.", e);
-            0 // Default version if EventStore fails
-        });
+    // Transaction creation - no idempotency check needed (each transaction is unique)
 
     // Create projection FIRST
     sqlx::query(
@@ -280,8 +262,7 @@ pub async fn create_transaction(
     let total_debt_after = calculate_total_debt(&state).await;
     event_data["total_debt"] = serde_json::json!(total_debt_after);
     
-    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
-    // TODO: Remove this once fully migrated to EventStore
+    // Write to PostgreSQL events table with total_debt included (AFTER the action)
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
@@ -481,45 +462,31 @@ pub async fn update_transaction(
         }))
     });
 
-    // Write event to EventStore
-    let stream_name = format!("transaction-{}", transaction_uuid);
-    let event_uuid = Uuid::new_v4();
-    
-    // Get current stream version for optimistic concurrency
-    let current_version = state.eventstore
-        .get_stream_version(&stream_name)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error getting stream version: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to get stream version"})),
-            )
-        })?;
-
-    // Append event to EventStore
-    let expected_version = current_version.unwrap_or(-1);
-    let stream_version = state.eventstore
-        .write_event(
-            &stream_name,
-            "TransactionUpdated",
-            event_uuid,
-            event_data.clone(),
-            expected_version,
+    // Get current version for optimistic concurrency
+    let current_version = sqlx::query_scalar::<_, i32>(
+        "SELECT version FROM transactions_projection WHERE id = $1"
+    )
+    .bind(transaction_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error getting transaction version: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to get transaction version"})),
         )
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("EventStore write failed (non-blocking): {:?}. Transaction will still be updated.", e);
-            expected_version + 1 // Increment version if EventStore fails
-        });
+    })?;
 
-    // Update projection FIRST
+    let current_version = current_version.unwrap_or(1);
+    let new_version = current_version + 1;
+
+    // Update projection FIRST with version increment
     sqlx::query(
         r#"
         UPDATE transactions_projection 
         SET contact_id = $1, type = $2, direction = $3, amount = $4, currency = $5, 
-            description = $6, transaction_date = $7, due_date = $8, updated_at = NOW(), last_event_id = 0
-        WHERE id = $9
+            description = $6, transaction_date = $7, due_date = $8, updated_at = NOW(), version = $9
+        WHERE id = $10 AND version = $11
         "#
     )
     .bind(new_contact_id)
@@ -530,7 +497,9 @@ pub async fn update_transaction(
     .bind(new_description)
     .bind(new_date)
     .bind(new_due_date)
+    .bind(new_version)
     .bind(transaction_uuid)
+    .bind(current_version)
     .execute(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -541,21 +510,45 @@ pub async fn update_transaction(
         )
     })?;
 
+    // Check if update actually happened (optimistic locking)
+    let rows_affected = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM transactions_projection WHERE id = $1 AND version = $2"
+    )
+    .bind(transaction_uuid)
+    .bind(new_version)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking update result: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to verify update"})),
+        )
+    })?;
+
+    if rows_affected == 0 {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "Transaction was modified by another request. Please refresh and try again."})),
+        ));
+    }
+
     // Calculate total debt AFTER updating the transaction (this changes total debt - we want the value AFTER the action)
     let total_debt_after = calculate_total_debt(&state).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
-    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
+    // Write to PostgreSQL events table
     let update_event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_UPDATED', 1, $3, NOW())
+        VALUES ($1, 'transaction', $2, 'TRANSACTION_UPDATED', $3, $4, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
     .bind(transaction_uuid)
+    .bind(new_version)
     .bind(&event_data_with_debt)
     .fetch_one(&*state.db_pool)
     .await
@@ -665,9 +658,7 @@ pub async fn delete_transaction(
         )
     })?;
 
-    // Write delete event to EventStore with full audit trail
-    let stream_name = format!("transaction-{}", transaction_uuid);
-    let event_uuid = Uuid::new_v4();
+    // Prepare delete event data with full audit trail
     let event_data = serde_json::json!({
         "comment": payload.comment,
         "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -683,43 +674,35 @@ pub async fn delete_transaction(
         }))
     });
     
-    // Get current stream version for optimistic concurrency
-    let current_version = state.eventstore
-        .get_stream_version(&stream_name)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error getting stream version: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to get stream version"})),
-            )
-        })?;
-
-    // Append event to EventStore
-    let expected_version = current_version.unwrap_or(-1);
-    let stream_version = state.eventstore
-        .write_event(
-            &stream_name,
-            "TransactionDeleted",
-            event_uuid,
-            event_data.clone(),
-            expected_version,
+    // Get current version for optimistic concurrency
+    let current_version = sqlx::query_scalar::<_, i32>(
+        "SELECT version FROM transactions_projection WHERE id = $1"
+    )
+    .bind(transaction_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error getting transaction version: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to get transaction version"})),
         )
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("EventStore write failed (non-blocking): {:?}. Transaction will still be deleted.", e);
-            expected_version + 1 // Increment version if EventStore fails
-        });
+    })?;
+
+    let current_version = current_version.unwrap_or(1);
+    let new_version = current_version + 1;
 
     // Soft delete in projection FIRST (set is_deleted = true)
     sqlx::query(
         r#"
         UPDATE transactions_projection 
-        SET is_deleted = true, updated_at = NOW(), last_event_id = 0
-        WHERE id = $1
+        SET is_deleted = true, updated_at = NOW(), version = $1
+        WHERE id = $2 AND version = $3
         "#
     )
+    .bind(new_version)
     .bind(transaction_uuid)
+    .bind(current_version)
     .execute(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -730,21 +713,45 @@ pub async fn delete_transaction(
         )
     })?;
 
+    // Check if delete actually happened (optimistic locking)
+    let rows_affected = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM transactions_projection WHERE id = $1 AND version = $2"
+    )
+    .bind(transaction_uuid)
+    .bind(new_version)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking delete result: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to verify delete"})),
+        )
+    })?;
+
+    if rows_affected == 0 {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "Transaction was modified by another request. Please refresh and try again."})),
+        ));
+    }
+
     // Calculate total debt AFTER deleting the transaction (this changes total debt - we want the value AFTER the action)
     let total_debt_after = calculate_total_debt(&state).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
-    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
+    // Write to PostgreSQL events table
     let delete_event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_DELETED', 1, $3, NOW())
+        VALUES ($1, 'transaction', $2, 'TRANSACTION_DELETED', $3, $4, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
     .bind(transaction_uuid)
+    .bind(new_version)
     .bind(&event_data_with_debt)
     .fetch_one(&*state.db_pool)
     .await

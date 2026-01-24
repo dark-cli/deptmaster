@@ -59,8 +59,6 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 thiserror = "1"
 
-# Base64 encoding (for EventStore)
-base64 = "0.22"
 
 # Hashing for sync
 sha2 = "0.10"

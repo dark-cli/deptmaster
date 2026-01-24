@@ -4,9 +4,6 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub redis_url: String,
-    pub eventstore_url: String,
-    pub eventstore_username: String,
-    pub eventstore_password: String,
     pub port: u16,
     pub jwt_secret: String,
     pub jwt_expiration: u64,
@@ -19,12 +16,6 @@ impl Config {
                 .unwrap_or_else(|_| "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker".to_string()),
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
-            eventstore_url: env::var("EVENTSTORE_URL")
-                .unwrap_or_else(|_| "http://localhost:2113".to_string()),
-            eventstore_username: env::var("EVENTSTORE_USERNAME")
-                .unwrap_or_else(|_| "admin".to_string()),
-            eventstore_password: env::var("EVENTSTORE_PASSWORD")
-                .unwrap_or_else(|_| "changeit".to_string()),
             port: env::var("PORT")
                 .unwrap_or_else(|_| "8000".to_string())
                 .parse()

@@ -126,29 +126,33 @@ pub async fn create_contact(
         "timestamp": Utc::now().to_rfc3339() // When the action was performed
     });
 
-    // Write event to EventStore
-    let stream_name = format!("contact-{}", contact_id);
-    
-    // Check if event already exists (idempotency)
-    let event_exists = state.eventstore
-        .check_event_exists(&stream_name, &idempotency_key)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error checking event existence: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check idempotency"})),
-            )
-        })?;
+    // Check if event already exists (idempotency check using PostgreSQL)
+    let existing_event = sqlx::query_as::<_, (Uuid,)>(
+        r#"
+        SELECT aggregate_id FROM events 
+        WHERE idempotency_key = $1 AND aggregate_type = 'contact' AND event_type = 'CONTACT_CREATED'
+        LIMIT 1
+        "#
+    )
+    .bind(idempotency_key.to_string())
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking idempotency: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check idempotency"})),
+        )
+    })?;
 
-    if event_exists {
+    if let Some((existing_contact_id,)) = existing_event {
         // Event already exists, return existing contact
         tracing::info!("Idempotent request detected, returning existing contact");
         // Read existing contact from projection
         let contact = sqlx::query_as::<_, (Uuid, String, i64)>(
             "SELECT id, name, COALESCE((SELECT SUM(CASE WHEN direction = 'lent' THEN amount ELSE -amount END) FROM transactions_projection WHERE contact_id = contacts_projection.id AND is_deleted = false), 0) as balance FROM contacts_projection WHERE id = $1"
         )
-        .bind(contact_id)
+        .bind(existing_contact_id)
         .fetch_optional(&*state.db_pool)
         .await
         .map_err(|e| {
@@ -168,26 +172,6 @@ pub async fn create_contact(
                     balance,
                 }),
             ));
-        }
-    }
-
-    // Write to EventStore (expected version -1 for new stream)
-    match state.eventstore
-        .write_event(
-            &stream_name,
-            "ContactCreated",
-            idempotency_key,
-            event_data.clone(),
-            -1, // New stream
-        )
-        .await
-    {
-        Ok(version) => {
-            tracing::info!("EventStore event written successfully to stream {} at version {}", stream_name, version);
-        }
-        Err(e) => {
-            tracing::warn!("EventStore write failed (non-blocking): {:?}. Contact will still be created.", e);
-            // Continue with contact creation even if EventStore fails
         }
     }
 
@@ -220,18 +204,18 @@ pub async fn create_contact(
     let total_debt_after = calculate_total_debt(&state).await;
     event_data["total_debt"] = serde_json::json!(total_debt_after);
     
-    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
-    // TODO: Remove this once fully migrated to EventStore
+    // Write to PostgreSQL events table with total_debt included (AFTER the action)
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'contact', $2, 'CONTACT_CREATED', 1, $3, NOW())
+        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, idempotency_key, created_at)
+        VALUES ($1, 'contact', $2, 'CONTACT_CREATED', 1, $3, $4, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
     .bind(contact_id)
     .bind(&event_data)
+    .bind(idempotency_key.to_string())
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -364,47 +348,30 @@ pub async fn update_contact(
         }
     });
 
-    // Write event to EventStore
-    let stream_name = format!("contact-{}", contact_uuid);
-    let event_id = Uuid::new_v4();
-    
-    // Get current stream version for optimistic concurrency
-    let current_version = state.eventstore
-        .get_stream_version(&stream_name)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error getting stream version: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to get stream version"})),
-            )
-        })?;
-
-    // Append event to EventStore (use -1 if stream doesn't exist, otherwise use current version)
-    let expected_version = current_version.unwrap_or(-1);
-    let stream_version = state.eventstore
-        .write_event(
-            &stream_name,
-            "ContactUpdated",
-            event_id,
-            event_data.clone(),
-            expected_version, // Expected version for optimistic concurrency
+    // Get current version for optimistic concurrency
+    let current_version = sqlx::query_scalar::<_, i32>(
+        "SELECT version FROM contacts_projection WHERE id = $1"
+    )
+    .bind(contact_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error getting contact version: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to get contact version"})),
         )
-        .await
-        .map_err(|e| {
-            tracing::error!("Error writing event to EventStore: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to update contact event"})),
-            )
-        })?;
+    })?;
 
-    // Update projection FIRST
+    let current_version = current_version.unwrap_or(1);
+    let new_version = current_version + 1;
+
+    // Update projection FIRST with version increment
     sqlx::query(
         r#"
         UPDATE contacts_projection 
-        SET name = $1, username = $2, phone = $3, email = $4, notes = $5, updated_at = NOW(), last_event_id = $6
-        WHERE id = $7
+        SET name = $1, username = $2, phone = $3, email = $4, notes = $5, updated_at = NOW(), version = $6
+        WHERE id = $7 AND version = $8
         "#
     )
     .bind(new_name)
@@ -412,8 +379,9 @@ pub async fn update_contact(
     .bind(new_phone)
     .bind(new_email)
     .bind(new_notes)
-    .bind(stream_version) // Use stream version from EventStore
+    .bind(new_version)
     .bind(contact_uuid)
+    .bind(current_version)
     .execute(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -424,20 +392,61 @@ pub async fn update_contact(
         )
     })?;
 
+    // Check if update actually happened (optimistic locking)
+    let rows_affected = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM contacts_projection WHERE id = $1 AND version = $2"
+    )
+    .bind(contact_uuid)
+    .bind(new_version)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking update result: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to verify update"})),
+        )
+    })?;
+
+    if rows_affected == 0 {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "Contact was modified by another request. Please refresh and try again."})),
+        ));
+    }
+
     // Calculate total debt AFTER updating the contact (contact update doesn't change debt, but we record the state AFTER the action)
     let total_debt_after = calculate_total_debt(&state).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
-    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
-    sqlx::query(
+    // Write to PostgreSQL events table
+    let event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_UPDATED', 1, $2, NOW())
+        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_UPDATED', $2, $3, NOW())
+        RETURNING id
         "#
     )
     .bind(contact_uuid)
+    .bind(new_version)
     .bind(&event_data_with_debt)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating update event: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create update event"})),
+        )
+    })?;
+
+    // Update projection with event_id
+    sqlx::query(
+        "UPDATE contacts_projection SET last_event_id = $1 WHERE id = $2"
+    )
+    .bind(event_id)
+    .bind(contact_uuid)
     .execute(&*state.db_pool)
     .await
     .ok(); // Non-blocking update
@@ -522,9 +531,7 @@ pub async fn delete_contact(
         )
     })?;
     
-    // Write delete event to EventStore with full audit trail
-    let stream_name = format!("contact-{}", contact_uuid);
-    let event_id = Uuid::new_v4();
+    // Prepare delete event data with full audit trail
     let event_data = serde_json::json!({
         "comment": payload.comment,
         "timestamp": Utc::now().to_rfc3339(),
@@ -537,16 +544,35 @@ pub async fn delete_contact(
         }))
     });
 
+    // Get current version for optimistic concurrency
+    let current_version = sqlx::query_scalar::<_, i32>(
+        "SELECT version FROM contacts_projection WHERE id = $1"
+    )
+    .bind(contact_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error getting contact version: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to get contact version"})),
+        )
+    })?;
+
+    let current_version = current_version.unwrap_or(1);
+    let new_version = current_version + 1;
+
     // Soft delete in projection FIRST (set is_deleted = true)
-    // We do this first so the delete succeeds even if EventStore fails
     sqlx::query(
         r#"
         UPDATE contacts_projection 
-        SET is_deleted = true, updated_at = NOW()
-        WHERE id = $1
+        SET is_deleted = true, updated_at = NOW(), version = $1
+        WHERE id = $2 AND version = $3
         "#
     )
+    .bind(new_version)
     .bind(contact_uuid)
+    .bind(current_version)
     .execute(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -557,53 +583,61 @@ pub async fn delete_contact(
         )
     })?;
 
-    // Write delete event to EventStore (non-blocking - don't fail if EventStore is down)
-    let eventstore_clone = state.eventstore.clone();
-    let stream_name_clone = stream_name.clone();
-    let event_id_clone = event_id;
-    let event_data_clone = event_data.clone();
-    
-    tokio::spawn(async move {
-        // Get current stream version for optimistic concurrency
-        let current_version = eventstore_clone
-            .get_stream_version(&stream_name_clone)
-            .await;
-        
-        let expected_version = current_version.unwrap_or(Some(-1)).unwrap_or(-1);
-        match eventstore_clone
-            .write_event(
-                &stream_name_clone,
-                "ContactDeleted",
-                event_id_clone,
-                event_data_clone,
-                expected_version,
-            )
-            .await
-        {
-            Ok(version) => {
-                tracing::info!("EventStore delete event written successfully to stream {} at version {}", stream_name_clone, version);
-            }
-            Err(e) => {
-                tracing::warn!("EventStore write failed (non-blocking): {:?}. Contact deletion still succeeded.", e);
-                // Continue - contact deletion already succeeded in PostgreSQL
-            }
-        }
-    });
+    // Check if delete actually happened (optimistic locking)
+    let rows_affected = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM contacts_projection WHERE id = $1 AND version = $2"
+    )
+    .bind(contact_uuid)
+    .bind(new_version)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking delete result: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to verify delete"})),
+        )
+    })?;
+
+    if rows_affected == 0 {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "Contact was modified by another request. Please refresh and try again."})),
+        ));
+    }
 
     // Calculate total debt AFTER deleting the contact (contact deletion doesn't change debt if balance is 0, but we record the state AFTER the action)
     let total_debt_after = calculate_total_debt(&state).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
-    // Also write to PostgreSQL events table with total_debt included (AFTER the action)
-    sqlx::query(
+    // Write to PostgreSQL events table
+    let event_id = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_DELETED', 1, $2, NOW())
+        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_DELETED', $2, $3, NOW())
+        RETURNING id
         "#
     )
     .bind(contact_uuid)
+    .bind(new_version)
     .bind(&event_data_with_debt)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating delete event: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create delete event"})),
+        )
+    })?;
+
+    // Update projection with event_id
+    sqlx::query(
+        "UPDATE contacts_projection SET last_event_id = $1 WHERE id = $2"
+    )
+    .bind(event_id)
+    .bind(contact_uuid)
     .execute(&*state.db_pool)
     .await
     .ok(); // Non-blocking update

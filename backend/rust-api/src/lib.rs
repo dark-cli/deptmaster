@@ -15,15 +15,10 @@ use websocket::BroadcastChannel;
 pub use config::Config;
 pub use handlers::*;
 
-// Import EventStoreClient for library builds
-// The module should be available since it's declared in services/mod.rs
-use crate::services::eventstore::EventStoreClient;
-
 // AppState for library (must match main.rs)
 #[derive(Clone)]
 pub struct AppState {
     pub db_pool: DatabasePool,
     pub config: Arc<Config>,
     pub broadcast_tx: BroadcastChannel,
-    pub eventstore: Arc<EventStoreClient>,
 }
