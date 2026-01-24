@@ -595,21 +595,32 @@ cmd_run_app() {
         if [ "$CLEAN_APP_DATA" = true ]; then
             print_info "Clearing app data for Linux..."
             
-            # Hive stores data in ~/.local/share/debt_tracker_mobile/
-            local hive_dir="$HOME/.local/share/debt_tracker_mobile"
+            # Hive stores data in ~/.local/share/com.example.debt_tracker_mobile/ (package name)
+            local hive_dir="$HOME/.local/share/com.example.debt_tracker_mobile"
+            local cleaned=false
             
             if [ -d "$hive_dir" ]; then
                 # Remove all Hive box files
                 rm -f "$hive_dir"/*.hive "$hive_dir"/*.hive.lock 2>/dev/null
-                print_success "App data cleared (removed Hive boxes)"
-            else
-                print_info "No app data found (directory doesn't exist yet)"
+                cleaned=true
             fi
             
-            # Also clear SharedPreferences if it exists
-            local prefs_dir="$HOME/.local/share/debt_tracker_mobile"
+            # Also check Documents directory (sometimes Hive stores there)
+            if [ -f "$HOME/Documents/contacts.hive" ] || [ -f "$HOME/Documents/transactions.hive" ] || [ -f "$HOME/Documents/events.hive" ]; then
+                rm -f "$HOME/Documents"/*.hive "$HOME/Documents"/*.hive.lock 2>/dev/null
+                cleaned=true
+            fi
+            
+            # Clear SharedPreferences
+            local prefs_dir="$HOME/.local/share/com.example.debt_tracker_mobile"
             if [ -d "$prefs_dir" ]; then
                 rm -f "$prefs_dir"/shared_preferences* 2>/dev/null
+            fi
+            
+            if [ "$cleaned" = true ]; then
+                print_success "App data cleared (removed Hive boxes)"
+            else
+                print_info "No app data found (Hive boxes don't exist yet)"
             fi
         fi
         
