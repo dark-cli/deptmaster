@@ -591,9 +591,28 @@ cmd_run_app() {
         fi
         flutter run -d chrome
     elif [ "$platform" = "linux" ]; then
+        # Clean app data if --clean flag is set
         if [ "$CLEAN_APP_DATA" = true ]; then
-            print_warning "--clean flag is only supported for Android platform"
+            print_info "Clearing app data for Linux..."
+            
+            # Hive stores data in ~/.local/share/debt_tracker_mobile/
+            local hive_dir="$HOME/.local/share/debt_tracker_mobile"
+            
+            if [ -d "$hive_dir" ]; then
+                # Remove all Hive box files
+                rm -f "$hive_dir"/*.hive "$hive_dir"/*.hive.lock 2>/dev/null
+                print_success "App data cleared (removed Hive boxes)"
+            else
+                print_info "No app data found (directory doesn't exist yet)"
+            fi
+            
+            # Also clear SharedPreferences if it exists
+            local prefs_dir="$HOME/.local/share/debt_tracker_mobile"
+            if [ -d "$prefs_dir" ]; then
+                rm -f "$prefs_dir"/shared_preferences* 2>/dev/null
+            fi
         fi
+        
         flutter run -d linux
     else
         print_error "Unknown platform: $platform"
