@@ -805,11 +805,12 @@ cmd_help() {
     cat <<EOF
 Debt Tracker Management Script
 
-Usage: $0 [--verbose|-v] [--no-build] <command> [options]
+Usage: $0 [--verbose|-v] [--no-build] [--clean] <command> [options]
 
 Options:
   --verbose, -v              Show detailed output (default: minimal output)
   --no-build, --skip-build   Skip building server binary (faster, requires existing build)
+  --clean                     Clear app data before running (Android only, for run-app command)
 
 Commands:
   full-flash [backup.zip]     Complete reset + rebuild + optional import (recommended)
@@ -849,6 +850,7 @@ Examples:
   $0 restart-server                  # Restart server
   $0 status                          # Check what's running
   $0 run-app android                 # Run Android app
+  $0 run-app android --clean         # Run Android app with cleared data
   $0 run-web dev                     # Run web app in dev mode
   $0 test-app                        # Run all Flutter tests
   $0 test-server                     # Test server endpoints
