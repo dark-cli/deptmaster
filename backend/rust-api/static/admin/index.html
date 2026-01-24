@@ -656,6 +656,9 @@
                                     <option value="UPDATE_CONTACT">UPDATE_CONTACT</option>
                                     <option value="DELETE_CONTACT">DELETE_CONTACT</option>
                                 </optgroup>
+                                <optgroup label="Other Events">
+                                    <option value="UNDO">UNDO</option>
+                                </optgroup>
                             </select>
                         </div>
                         <div>
@@ -707,7 +710,7 @@
                         <tr>
                             <th>When</th>
                             <th>Event Type</th>
-                            <th>Aggregate</th>
+                            <th>Contact Name</th>
                             <th>Amount</th>
                             <th>Debt</th>
                             <th>User</th>
@@ -1446,17 +1449,72 @@
 
                 // Pre-load contact names for all events
                 const contactIds = new Set();
+                const undoneEventIds = new Set();
+                const deletedContactIds = new Set(); // Track deleted contact IDs to look up from other events
+                
+                // First pass: collect all contact IDs and cache names from event_data
                 events.forEach(event => {
+                    const eventData = event.event_data || {};
+                    
+                    // Cache contact names from aggregate_id for all contact events
                     if (event.aggregate_type === 'contact') {
-                        const name = event.event_data?.name;
-                        if (name) contactNameCache[event.aggregate_id] = name;
+                        const name = eventData.name;
+                        if (name && event.aggregate_id) {
+                            contactNameCache[event.aggregate_id] = name;
+                        }
+                        // For DELETE events, also cache deleted contact name using aggregate_id
+                        if (eventData.deleted_contact && typeof eventData.deleted_contact === 'object' && 
+                            eventData.deleted_contact !== null && eventData.deleted_contact.name && event.aggregate_id) {
+                            contactNameCache[event.aggregate_id] = eventData.deleted_contact.name;
+                        } else if ((event.event_type === 'CONTACT_DELETED' || event.event_type.includes('DELETE')) && event.aggregate_id) {
+                            // Track deleted contact IDs to look up from other events
+                            deletedContactIds.add(event.aggregate_id);
+                        }
                     } else if (event.aggregate_type === 'transaction') {
-                        const contactId = event.event_data?.contact_id;
+                        const contactId = eventData.contact_id;
                         if (contactId) contactIds.add(contactId);
+                        // For DELETE events, also get contact from deleted_transaction
+                        if (eventData.deleted_transaction && typeof eventData.deleted_transaction === 'object' && 
+                            eventData.deleted_transaction !== null && eventData.deleted_transaction.contact_id) {
+                            contactIds.add(eventData.deleted_transaction.contact_id);
+                        }
+                    }
+                    // Handle CONTACT_DELETED and TRANSACTION_DELETED event types
+                    if (event.event_type === 'CONTACT_DELETED' || event.event_type === 'TRANSACTION_DELETED') {
+                        if (eventData.deleted_contact && typeof eventData.deleted_contact === 'object' && 
+                            eventData.deleted_contact !== null && eventData.deleted_contact.name && event.aggregate_id) {
+                            contactNameCache[event.aggregate_id] = eventData.deleted_contact.name;
+                        } else if (event.event_type === 'CONTACT_DELETED' && event.aggregate_id) {
+                            deletedContactIds.add(event.aggregate_id);
+                        }
+                        if (eventData.deleted_transaction && typeof eventData.deleted_transaction === 'object' && 
+                            eventData.deleted_transaction !== null && eventData.deleted_transaction.contact_id) {
+                            contactIds.add(eventData.deleted_transaction.contact_id);
+                        }
+                    }
+                    // Collect UNDO event IDs to fetch undone events
+                    if (event.event_type === 'UNDO' && eventData.undone_event_id) {
+                        undoneEventIds.add(eventData.undone_event_id);
                     }
                 });
                 
-                // Fetch missing contact names
+                // Second pass: for deleted contacts without names, try to find them in other events in this batch
+                if (deletedContactIds.size > 0) {
+                    events.forEach(event => {
+                        // Look for CREATED or UPDATE events for the deleted contacts
+                        if ((event.event_type === 'CREATED' || event.event_type === 'CREATED_CONTACT' || 
+                             event.event_type.includes('CREATE') || event.event_type.includes('UPDATE')) &&
+                            event.aggregate_type === 'contact' && event.aggregate_id && 
+                            deletedContactIds.has(event.aggregate_id)) {
+                            const name = event.event_data?.name;
+                            if (name) {
+                                contactNameCache[event.aggregate_id] = name;
+                            }
+                        }
+                    });
+                }
+                
+                // Fetch missing contact names from contacts endpoint
                 if (contactIds.size > 0) {
                     try {
                         const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
@@ -1470,6 +1528,135 @@
                         }
                     } catch (e) {
                         console.error('Error pre-loading contacts:', e);
+                    }
+                }
+                
+                // For deleted contacts without names, fetch from CREATED events
+                // Also collect transaction aggregate_ids for DELETE transaction events
+                const deletedTransactionIds = new Set();
+                events.forEach(event => {
+                    if ((event.event_type === 'DELETED' || event.event_type.includes('DELETE')) && 
+                        event.aggregate_type === 'transaction' && event.aggregate_id) {
+                        deletedTransactionIds.add(event.aggregate_id);
+                    }
+                });
+                
+                if (deletedContactIds.size > 0 || deletedTransactionIds.size > 0) {
+                    try {
+                        // Fetch CREATED events for contacts
+                        if (deletedContactIds.size > 0) {
+                            const createdContactEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=contact`);
+                            if (createdContactEventsResponse.ok) {
+                                const createdContactEvents = await createdContactEventsResponse.json();
+                                createdContactEvents.forEach(evt => {
+                                    if (evt.aggregate_type === 'contact' && evt.aggregate_id && 
+                                        deletedContactIds.has(evt.aggregate_id) && 
+                                        evt.event_data?.name) {
+                                        contactNameCache[evt.aggregate_id] = evt.event_data.name;
+                                    }
+                                });
+                            }
+                        }
+                        
+                        // Fetch CREATED events for transactions to get their contact_ids
+                        if (deletedTransactionIds.size > 0) {
+                            const createdTransactionEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=transaction`);
+                            if (createdTransactionEventsResponse.ok) {
+                                const createdTransactionEvents = await createdTransactionEventsResponse.json();
+                                createdTransactionEvents.forEach(evt => {
+                                    if (evt.aggregate_type === 'transaction' && evt.aggregate_id && 
+                                        deletedTransactionIds.has(evt.aggregate_id) && 
+                                        evt.event_data?.contact_id) {
+                                        contactIds.add(evt.event_data.contact_id);
+                                    }
+                                });
+                                // Re-fetch contacts for these transaction contact IDs
+                                if (contactIds.size > 0) {
+                                    const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
+                                    if (contactsResponse.ok) {
+                                        const contacts = await contactsResponse.json();
+                                        contacts.forEach(contact => {
+                                            if (contactIds.has(contact.id)) {
+                                                contactNameCache[contact.id] = contact.name;
+                                            }
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error fetching names from CREATED events:', e);
+                    }
+                }
+                
+                // Fetch undone events to show what was undone
+                if (undoneEventIds.size > 0) {
+                    try {
+                        // Fetch all events to find the undone ones (they might be in a different page)
+                        const allEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&offset=0`);
+                        if (allEventsResponse.ok) {
+                            const allEvents = await allEventsResponse.json();
+                            const newContactIds = new Set();
+                            
+                            allEvents.forEach(evt => {
+                                if (undoneEventIds.has(evt.event_id)) {
+                                    undoneEventsCache[evt.event_id] = evt;
+                                    // The undone event is usually a DELETED event, so we need to get the name from CREATED events
+                                    if (evt.aggregate_type === 'contact' && evt.aggregate_id) {
+                                        const name = evt.event_data?.name;
+                                        if (name) {
+                                            contactNameCache[evt.aggregate_id] = name;
+                                        } else {
+                                            // If no name in event_data (DELETED event), we need to find CREATED event
+                                            deletedContactIds.add(evt.aggregate_id);
+                                        }
+                                    }
+                                    // For undone transactions, get contact_id from CREATED transaction event
+                                    if (evt.aggregate_type === 'transaction' && evt.aggregate_id) {
+                                        const contactId = evt.event_data?.contact_id;
+                                        if (contactId) {
+                                            newContactIds.add(contactId);
+                                        } else {
+                                            // If no contact_id (DELETED event), we need to find CREATED event
+                                            deletedTransactionIds.add(evt.aggregate_id);
+                                        }
+                                    }
+                                }
+                            });
+                            
+                            // Add new contact IDs to the main set
+                            newContactIds.forEach(id => contactIds.add(id));
+                            
+                            // Re-fetch contacts if we found new ones
+                            if (contactIds.size > 0) {
+                                const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
+                                if (contactsResponse.ok) {
+                                    const contacts = await contactsResponse.json();
+                                    contacts.forEach(contact => {
+                                        if (contactIds.has(contact.id)) {
+                                            contactNameCache[contact.id] = contact.name;
+                                        }
+                                    });
+                                }
+                            }
+                            
+                            // For undone contacts without names, fetch from CREATED events
+                            if (deletedContactIds.size > 0) {
+                                const createdEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=contact`);
+                                if (createdEventsResponse.ok) {
+                                    const createdEvents = await createdEventsResponse.json();
+                                    createdEvents.forEach(evt => {
+                                        if (evt.aggregate_type === 'contact' && evt.aggregate_id && 
+                                            deletedContactIds.has(evt.aggregate_id) && 
+                                            evt.event_data?.name) {
+                                            contactNameCache[evt.aggregate_id] = evt.event_data.name;
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error pre-loading undone events:', e);
                     }
                 }
 
@@ -1520,6 +1707,8 @@
         // Extract event rendering to separate function for reuse
         // Cache for contact names (to avoid repeated lookups)
         let contactNameCache = {};
+        // Cache for undone events (to show what was undone)
+        let undoneEventsCache = {};
         
         async function getContactName(contactId) {
             if (!contactId) return null;
@@ -1560,8 +1749,51 @@
             html += '<div class="event-modal-field"><div class="event-modal-field-label">Created At</div><div class="event-modal-field-value">' + formatDateTime(event.created_at) + '</div></div>';
             html += '<div class="event-modal-field"><div class="event-modal-field-label">User</div><div class="event-modal-field-value">' + escapeHtml(eventData.username || event.user_email || event.user_id) + '</div></div>';
             
+            // Handle UNDO events
+            if (event.event_type === 'UNDO' && eventData.undone_event_id) {
+                html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Event ID</div><div class="event-modal-field-value" style="font-family: monospace; font-size: 0.9rem;">' + escapeHtml(eventData.undone_event_id) + '</div></div>';
+                if (undoneEventsCache[eventData.undone_event_id]) {
+                    const undoneEvent = undoneEventsCache[eventData.undone_event_id];
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Event Type</div><div class="event-modal-field-value">' + escapeHtml(undoneEvent.event_type) + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Aggregate Type</div><div class="event-modal-field-value">' + escapeHtml(undoneEvent.aggregate_type) + '</div></div>';
+                    if (undoneEvent.aggregate_type === 'contact') {
+                        const undoneName = undoneEvent.event_data?.name || 'Unknown';
+                        html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Contact</div><div class="event-modal-field-value">' + escapeHtml(undoneName) + '</div></div>';
+                    } else if (undoneEvent.aggregate_type === 'transaction') {
+                        const undoneContactId = undoneEvent.event_data?.contact_id;
+                        const undoneContactName = undoneContactId ? (contactNameCache[undoneContactId] || 'Unknown Contact') : 'Unknown Contact';
+                        html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Transaction Contact</div><div class="event-modal-field-value">' + escapeHtml(undoneContactName) + '</div></div>';
+                        html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Transaction Amount</div><div class="event-modal-field-value">' + (undoneEvent.event_data?.amount ? (undoneEvent.event_data.amount.toLocaleString('en-US') + ' ' + (undoneEvent.event_data.currency || 'IQD')) : 'N/A') + '</div></div>';
+                        html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Transaction Direction</div><div class="event-modal-field-value">' + escapeHtml(undoneEvent.event_data?.direction || 'N/A') + '</div></div>';
+                    }
+                } else {
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Event</div><div class="event-modal-field-value" style="color: #938F99;">Not loaded (event may be outside current page)</div></div>';
+                }
+            }
+            // Handle DELETE events
+            else if (event.event_type.includes('DELETE') || event.event_type.includes('DELETED')) {
+                if (eventData.deleted_contact) {
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label" style="color: #BA1A1A; font-weight: 700;">Deleted Contact</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Name</div><div class="event-modal-field-value">' + escapeHtml(eventData.deleted_contact.name || 'N/A') + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Username</div><div class="event-modal-field-value">' + escapeHtml(eventData.deleted_contact.username || 'N/A') + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Phone</div><div class="event-modal-field-value">' + escapeHtml(eventData.deleted_contact.phone || 'N/A') + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Email</div><div class="event-modal-field-value">' + escapeHtml(eventData.deleted_contact.email || 'N/A') + '</div></div>';
+                }
+                if (eventData.deleted_transaction) {
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label" style="color: #BA1A1A; font-weight: 700;">Deleted Transaction</div></div>';
+                    const deletedTx = eventData.deleted_transaction;
+                    const deletedContactId = deletedTx.contact_id;
+                    const deletedContactName = deletedContactId ? (contactNameCache[deletedContactId] || 'Unknown Contact') : 'Unknown Contact';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Contact</div><div class="event-modal-field-value">' + escapeHtml(deletedContactName) + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Type</div><div class="event-modal-field-value">' + escapeHtml(deletedTx.type || 'N/A') + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Direction</div><div class="event-modal-field-value">' + escapeHtml(deletedTx.direction || 'N/A') + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Amount</div><div class="event-modal-field-value">' + (deletedTx.amount ? deletedTx.amount.toLocaleString('en-US') + ' ' + (deletedTx.currency || 'IQD') : 'N/A') + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Description</div><div class="event-modal-field-value">' + escapeHtml(deletedTx.description || 'N/A') + '</div></div>';
+                    html += '<div class="event-modal-field"><div class="event-modal-field-label">Transaction Date</div><div class="event-modal-field-value">' + escapeHtml(deletedTx.transaction_date || 'N/A') + '</div></div>';
+                }
+            }
             // Contact Info
-            if (event.aggregate_type === 'contact') {
+            else if (event.aggregate_type === 'contact') {
                 html += '<div class="event-modal-field"><div class="event-modal-field-label">Contact Name</div><div class="event-modal-field-value">' + escapeHtml(eventData.name || 'N/A') + '</div></div>';
                 html += '<div class="event-modal-field"><div class="event-modal-field-label">Username</div><div class="event-modal-field-value">' + escapeHtml(eventData.username || 'N/A') + '</div></div>';
                 html += '<div class="event-modal-field"><div class="event-modal-field-label">Phone</div><div class="event-modal-field-value">' + escapeHtml(eventData.phone || 'N/A') + '</div></div>';
@@ -1663,12 +1895,205 @@
                         }
                     }
                     
+                    // Handle DELETE events - extract deleted item info
+                    let deletedContactName = null;
+                    let deletedTransactionInfo = null;
+                    // deleted_contact is an object (not an array), and might be null
+                    // Check if it exists and has a name property
+                    if (eventData.deleted_contact) {
+                        if (typeof eventData.deleted_contact === 'object' && eventData.deleted_contact !== null) {
+                            deletedContactName = eventData.deleted_contact.name || null;
+                        } else if (typeof eventData.deleted_contact === 'string') {
+                            // In case it's serialized as a string
+                            try {
+                                const parsed = JSON.parse(eventData.deleted_contact);
+                                deletedContactName = parsed.name || null;
+                            } catch (e) {
+                                // Ignore parse errors
+                            }
+                        }
+                    }
+                    // deleted_transaction is also an object (not an array), and might be null
+                    if (eventData.deleted_transaction) {
+                        if (typeof eventData.deleted_transaction === 'object' && eventData.deleted_transaction !== null) {
+                            const deletedTx = eventData.deleted_transaction;
+                            const deletedContactId = deletedTx.contact_id; // This is a string UUID
+                            deletedTransactionInfo = {
+                                contactId: deletedContactId,
+                                amount: deletedTx.amount,
+                                direction: deletedTx.direction,
+                                description: deletedTx.description
+                            };
+                        } else if (typeof eventData.deleted_transaction === 'string') {
+                            // In case it's serialized as a string
+                            try {
+                                const parsed = JSON.parse(eventData.deleted_transaction);
+                                deletedTransactionInfo = {
+                                    contactId: parsed.contact_id,
+                                    amount: parsed.amount,
+                                    direction: parsed.direction,
+                                    description: parsed.description
+                                };
+                            } catch (e) {
+                                // Ignore parse errors
+                            }
+                        }
+                    }
+                    
+                    // Handle UNDO events - will be populated later
+                    let undoneEventInfo = null;
+                    if (event.event_type === 'UNDO' && eventData.undone_event_id) {
+                        // We'll fetch this in loadEvents
+                        undoneEventInfo = { undoneEventId: eventData.undone_event_id };
+                    }
+                    
                     // Determine contact name - show name instead of ID
                     let contactName = null;
-                    if (event.aggregate_type === 'contact') {
-                        contactName = name || 'Unknown';
-                    } else if (contactId) {
-                        contactName = contactNameCache[contactId] || 'Unknown Contact';
+                    
+                    // For UNDO events, show what was undone (check this first)
+                    if (event.event_type === 'UNDO' || event.event_type.toUpperCase() === 'UNDO') {
+                        // Try to get undone event info from cache
+                        const undoneEventId = eventData.undone_event_id;
+                        if (undoneEventId && undoneEventsCache[undoneEventId]) {
+                            const undoneEvent = undoneEventsCache[undoneEventId];
+                            // The undone event is usually a DELETED event, so we need to get the name from CREATED event
+                            if (undoneEvent.aggregate_type === 'contact') {
+                                // Get contact name from CREATED event using aggregate_id
+                                const undoneContactId = undoneEvent.aggregate_id;
+                                const undoneName = contactNameCache[undoneContactId];
+                                if (undoneName) {
+                                    contactName = `Undone: ${undoneName}`;
+                                } else {
+                                    // Try to find CREATED event in current batch
+                                    const createdEvent = events.find(e => 
+                                        e.aggregate_type === 'contact' && 
+                                        e.aggregate_id === undoneContactId &&
+                                        (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
+                                    );
+                                    if (createdEvent && createdEvent.event_data?.name) {
+                                        contactName = `Undone: ${createdEvent.event_data.name}`;
+                                        contactNameCache[undoneContactId] = createdEvent.event_data.name;
+                                    } else {
+                                        contactName = `Undone: ${undoneContactId.substring(0, 8)}...`;
+                                    }
+                                }
+                            } else if (undoneEvent.aggregate_type === 'transaction') {
+                                // For undone transaction, get contact from the transaction's CREATED event
+                                const undoneTransactionId = undoneEvent.aggregate_id;
+                                // Try to find the CREATED event for this transaction to get contact_id
+                                let undoneContactId = null;
+                                // Look in the events we already have
+                                const createdTxEvent = events.find(e => 
+                                    e.aggregate_type === 'transaction' && 
+                                    e.aggregate_id === undoneTransactionId &&
+                                    (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
+                                );
+                                if (createdTxEvent && createdTxEvent.event_data?.contact_id) {
+                                    undoneContactId = createdTxEvent.event_data.contact_id;
+                                }
+                                
+                                const undoneContactName = undoneContactId ? (contactNameCache[undoneContactId] || 'Unknown Contact') : 'Unknown Contact';
+                                const undoneAmount = undoneEvent.event_data?.amount;
+                                const undoneDirection = undoneEvent.event_data?.direction;
+                                if (undoneAmount !== null && undoneAmount !== undefined) {
+                                    const sign = undoneDirection === 'lent' ? '+' : '-';
+                                    contactName = `Undone: ${undoneContactName} (${sign}${Math.round(Number(undoneAmount)).toLocaleString('en-US')} IQD)`;
+                                } else {
+                                    contactName = `Undone: ${undoneContactName}`;
+                                }
+                            } else {
+                                contactName = 'Undone Event';
+                            }
+                        } else if (event.aggregate_id) {
+                            // Fallback: try to get from aggregate_id (which is the contact/transaction ID)
+                            const name = contactNameCache[event.aggregate_id];
+                            if (name) {
+                                contactName = `Undone: ${name}`;
+                            } else {
+                                // Try to find CREATED event in current batch
+                                const createdEvent = events.find(e => 
+                                    e.aggregate_id === event.aggregate_id &&
+                                    (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
+                                );
+                                if (createdEvent) {
+                                    if (createdEvent.aggregate_type === 'contact' && createdEvent.event_data?.name) {
+                                        contactName = `Undone: ${createdEvent.event_data.name}`;
+                                    } else if (createdEvent.aggregate_type === 'transaction' && createdEvent.event_data?.contact_id) {
+                                        const txContactId = createdEvent.event_data.contact_id;
+                                        const txContactName = contactNameCache[txContactId] || 'Unknown Contact';
+                                        contactName = `Undone: ${txContactName}`;
+                                    } else {
+                                        contactName = 'Undone Event';
+                                    }
+                                } else {
+                                    contactName = 'Undone Event';
+                                }
+                            }
+                        } else {
+                            contactName = 'Undone Event';
+                        }
+                    }
+                    // For DELETE events, use deleted item info
+                    else if (event.event_type.includes('DELETE') || event.event_type.includes('DELETED') || 
+                             event.event_type === 'CONTACT_DELETED' || event.event_type === 'TRANSACTION_DELETED') {
+                        if (event.aggregate_type === 'contact' || event.event_type === 'CONTACT_DELETED') {
+                            // For DELETE contact events, use deleted_contact name
+                            // Priority: deleted_contact.name > aggregate_id from cache > name from event_data
+                            if (deletedContactName) {
+                                contactName = deletedContactName;
+                                // Also cache it for future use
+                                if (event.aggregate_id) {
+                                    contactNameCache[event.aggregate_id] = deletedContactName;
+                                }
+                            } else if (event.aggregate_id) {
+                                // Try to get from cache first
+                                contactName = contactNameCache[event.aggregate_id] || null;
+                                // If not in cache, the contact loading step will try to fetch it
+                                if (!contactName) {
+                                    contactName = 'Unknown';
+                                }
+                            } else {
+                                contactName = name || 'Unknown';
+                            }
+                        } else if (event.aggregate_type === 'transaction' || event.event_type === 'TRANSACTION_DELETED' || event.event_type === 'DELETED') {
+                            // For DELETE transaction events, use deleted_transaction contact
+                            // Priority: deleted_transaction.contact_id > contact_id from event_data > CREATED event lookup
+                            if (deletedTransactionInfo && deletedTransactionInfo.contactId) {
+                                const deletedContactId = deletedTransactionInfo.contactId;
+                                contactName = contactNameCache[deletedContactId] || null;
+                                if (!contactName) {
+                                    // Will be fetched in the contact loading step
+                                    contactName = 'Unknown Contact';
+                                }
+                            } else if (contactId) {
+                                contactName = contactNameCache[contactId] || 'Unknown Contact';
+                            } else if (event.aggregate_id) {
+                                // Try to get contact_id from CREATED transaction event
+                                const createdTxEvent = events.find(e => 
+                                    e.aggregate_type === 'transaction' && 
+                                    e.aggregate_id === event.aggregate_id &&
+                                    (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
+                                );
+                                if (createdTxEvent && createdTxEvent.event_data?.contact_id) {
+                                    const txContactId = createdTxEvent.event_data.contact_id;
+                                    contactName = contactNameCache[txContactId] || 'Unknown Contact';
+                                } else {
+                                    contactName = 'Unknown Contact';
+                                }
+                            } else {
+                                contactName = 'Unknown Contact';
+                            }
+                        }
+                    }
+                    // For regular events
+                    else if (event.aggregate_type === 'contact') {
+                        contactName = name || contactNameCache[event.aggregate_id] || 'Unknown';
+                    } else if (event.aggregate_type === 'transaction') {
+                        if (contactId) {
+                            contactName = contactNameCache[contactId] || 'Unknown Contact';
+                        } else {
+                            contactName = contactNameCache[event.aggregate_id] || 'Unknown Contact';
+                        }
                     }
                     
                     // User display - show username only (no ID)
@@ -1691,49 +2116,214 @@
                     } else if (eventTypeUpper.includes('UPDATED') || eventTypeUpper.includes('UPDATE')) {
                         badgeClass += ' warning';
                     } else if (eventTypeUpper.includes('DELETED') || eventTypeUpper.includes('DELETE')) {
-                        badgeClass += ' error';
+                        // DELETE events use warning badge (same as UPDATE) to match other events
+                        badgeClass += ' warning';
+                    } else if (eventTypeUpper === 'UNDO') {
+                        badgeClass += ' warning';
                     }
                     
                     // Format event type for display - make it more specific
                     let displayEventType = event.event_type;
                     
-                    // If event type is generic (CREATED, UPDATED, DELETED), make it specific based on aggregate_type
-                    const genericTypes = ['CREATED', 'UPDATED', 'DELETED', 'CREATE', 'UPDATE', 'DELETE'];
-                    const isGeneric = genericTypes.some(gt => event.event_type.toUpperCase() === gt || 
-                                                              event.event_type.toUpperCase().includes(gt));
-                    
-                    if (isGeneric && event.aggregate_type) {
-                        // Convert to specific format: CREATED_TRANSACTION, UPDATE_TRANSACTION, etc.
-                        const action = event.event_type.toUpperCase();
-                        let specificAction = '';
-                        
-                        if (action.includes('CREATED') || action.includes('CREATE')) {
-                            specificAction = 'CREATED';
-                        } else if (action.includes('UPDATED') || action.includes('UPDATE')) {
-                            specificAction = 'UPDATE';
-                        } else if (action.includes('DELETED') || action.includes('DELETE')) {
-                            specificAction = 'DELETE';
+                    // Handle UNDO events specially - show what's being undone
+                    if (event.event_type === 'UNDO' || event.event_type.toUpperCase() === 'UNDO') {
+                        const undoneEventId = eventData.undone_event_id;
+                        if (undoneEventId && undoneEventsCache[undoneEventId]) {
+                            const undoneEvent = undoneEventsCache[undoneEventId];
+                            const undoneType = undoneEvent.event_type || 'Event';
+                            const undoneAggregate = undoneEvent.aggregate_type || '';
+                            
+                            // Format: "Undo [Aggregate] [Action]"
+                            // e.g., "Undo Contact Delete", "Undo Transaction Update"
+                            let undoneAction = '';
+                            if (undoneType.includes('DELETE') || undoneType.includes('DELETED')) {
+                                undoneAction = 'Delete';
+                            } else if (undoneType.includes('UPDATE') || undoneType.includes('UPDATED')) {
+                                undoneAction = 'Update';
+                            } else if (undoneType.includes('CREATE') || undoneType.includes('CREATED')) {
+                                undoneAction = 'Create';
+                            } else {
+                                undoneAction = undoneType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                            }
+                            
+                            const aggregateName = undoneAggregate.charAt(0).toUpperCase() + undoneAggregate.slice(1);
+                            displayEventType = `Undo ${aggregateName} ${undoneAction}`;
                         } else {
-                            specificAction = action;
+                            displayEventType = 'Undo';
+                        }
+                    }
+                    // If event type is generic (CREATED, UPDATED, DELETED), make it specific based on aggregate_type
+                    else {
+                        const genericTypes = ['CREATED', 'UPDATED', 'DELETED', 'CREATE', 'UPDATE', 'DELETE'];
+                        const isGeneric = genericTypes.some(gt => event.event_type.toUpperCase() === gt || 
+                                                                  event.event_type.toUpperCase().includes(gt));
+                        
+                        // Check if event type already has aggregate in it (e.g., CONTACT_DELETED, TRANSACTION_DELETED)
+                        const eventTypeUpper = event.event_type.toUpperCase();
+                        if (eventTypeUpper.includes('_CONTACT') || eventTypeUpper.includes('_TRANSACTION')) {
+                            // Event type already includes aggregate, just format it
+                            displayEventType = event.event_type;
+                        } else if (isGeneric && event.aggregate_type) {
+                            // Convert to specific format: CREATED_TRANSACTION, UPDATE_TRANSACTION, DELETE_TRANSACTION, etc.
+                            const action = event.event_type.toUpperCase();
+                            let specificAction = '';
+                            
+                            if (action.includes('CREATED') || action.includes('CREATE')) {
+                                specificAction = 'CREATED';
+                            } else if (action.includes('UPDATED') || action.includes('UPDATE')) {
+                                specificAction = 'UPDATE';
+                            } else if (action.includes('DELETED') || action.includes('DELETE')) {
+                                specificAction = 'DELETE';
+                            } else {
+                                specificAction = action;
+                            }
+                            
+                            const aggregateUpper = event.aggregate_type.toUpperCase();
+                            displayEventType = `${specificAction}_${aggregateUpper}`;
                         }
                         
-                        const aggregateUpper = event.aggregate_type.toUpperCase();
-                        displayEventType = `${specificAction}_${aggregateUpper}`;
+                        // Format for display (replace underscores with spaces, capitalize words)
+                        displayEventType = displayEventType
+                            .replace(/_/g, ' ')
+                            .split(' ')
+                            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                            .join(' ');
                     }
                     
-                    // Format for display (replace underscores with spaces, capitalize words)
-                    displayEventType = displayEventType
-                        .replace(/_/g, ' ')
-                        .split(' ')
-                        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                        .join(' ');
-                    
-                    // Format aggregate type
-                    const aggregateDisplay = event.aggregate_type.charAt(0).toUpperCase() + event.aggregate_type.slice(1);
+                    // contactName is already determined above - use it directly
                     
                     // Format amount display with +/- and colors
                     let amountDisplay = '-';
-                    if (event.aggregate_type === 'transaction' && amount !== null) {
+                    
+                    // For UNDO events, show undone transaction amount or contact balance impact (check this first)
+                    if (event.event_type === 'UNDO' || event.event_type.toUpperCase() === 'UNDO') {
+                        const undoneEventId = eventData.undone_event_id;
+                        if (undoneEventId && undoneEventsCache[undoneEventId]) {
+                            const undoneEvent = undoneEventsCache[undoneEventId];
+                            // If undoing a transaction, show the transaction amount
+                            if (undoneEvent.aggregate_type === 'transaction') {
+                                let undoneAmount = null;
+                                let undoneDirection = null;
+                                
+                                // First try to get from undone event's event_data (for UPDATE events)
+                                if (undoneEvent.event_data?.amount !== null && undoneEvent.event_data?.amount !== undefined) {
+                                    undoneAmount = undoneEvent.event_data.amount;
+                                    undoneDirection = undoneEvent.event_data.direction;
+                                }
+                                // If undone event is DELETE, try to get from deleted_transaction
+                                else if (undoneEvent.event_data?.deleted_transaction) {
+                                    undoneAmount = undoneEvent.event_data.deleted_transaction.amount;
+                                    undoneDirection = undoneEvent.event_data.deleted_transaction.direction;
+                                }
+                                
+                                // If still no amount, try to find CREATED transaction event in current batch
+                                if ((undoneAmount === null || undoneAmount === undefined) && undoneEvent.aggregate_id) {
+                                    const createdTxEvent = events.find(e => 
+                                        e.aggregate_type === 'transaction' && 
+                                        e.aggregate_id === undoneEvent.aggregate_id &&
+                                        (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
+                                    );
+                                    if (createdTxEvent && createdTxEvent.event_data?.amount) {
+                                        undoneAmount = createdTxEvent.event_data.amount;
+                                        undoneDirection = createdTxEvent.event_data.direction || 'owed';
+                                    }
+                                }
+                                
+                                // Display the amount if we found it
+                                if (undoneAmount !== null && undoneAmount !== undefined) {
+                                    const amountNum = Number(undoneAmount);
+                                    if (!isNaN(amountNum) && isFinite(amountNum)) {
+                                        const sign = (undoneDirection || 'owed') === 'lent' ? '+' : '-';
+                                        const amountColor = (undoneDirection || 'owed') === 'lent' ? 'color: #16A34A;' : 'color: #BA1A1A;';
+                                        amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign} ${Math.round(amountNum).toLocaleString('en-US')} IQD</span>`;
+                                    }
+                                }
+                            }
+                            // If undoing a contact delete, calculate the net balance impact from total_debt change
+                            else if (undoneEvent.aggregate_type === 'contact') {
+                                // Find the DELETE event for this contact to get the total_debt before deletion
+                                const deleteEvent = events.find(e => 
+                                    e.aggregate_type === 'contact' &&
+                                    e.aggregate_id === undoneEvent.aggregate_id &&
+                                    (e.event_type === 'DELETED' || e.event_type.includes('DELETE'))
+                                );
+                                
+                                if (deleteEvent && deleteEvent.event_data?.total_debt !== null && deleteEvent.event_data?.total_debt !== undefined &&
+                                    totalDebt !== null && totalDebt !== undefined) {
+                                    const deleteTotalDebt = Number(deleteEvent.event_data.total_debt);
+                                    const undoTotalDebt = Number(totalDebt);
+                                    
+                                    if (!isNaN(deleteTotalDebt) && !isNaN(undoTotalDebt)) {
+                                        // The difference is the net impact of restoring the contact
+                                        const netImpact = undoTotalDebt - deleteTotalDebt;
+                                        
+                                        if (netImpact !== 0) {
+                                            const sign = netImpact > 0 ? '+' : '-';
+                                            const amountColor = netImpact > 0 ? 'color: #16A34A;' : 'color: #BA1A1A;';
+                                            amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign} ${Math.abs(Math.round(netImpact)).toLocaleString('en-US')} IQD</span>`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // For DELETE contact events, calculate the net balance impact from total_debt change
+                    else if ((event.event_type === 'DELETED' || event.event_type.includes('DELETE')) && 
+                             event.aggregate_type === 'contact') {
+                        // Find the event before this DELETE to get total_debt before deletion
+                        const currentIndex = events.findIndex(e => e.event_id === event.event_id);
+                        if (currentIndex > 0) {
+                            const previousEvent = events[currentIndex - 1];
+                            const previousTotalDebt = previousEvent.event_data?.total_debt;
+                            
+                            if (previousTotalDebt !== null && previousTotalDebt !== undefined &&
+                                totalDebt !== null && totalDebt !== undefined) {
+                                const beforeTotalDebt = Number(previousTotalDebt);
+                                const afterTotalDebt = Number(totalDebt);
+                                
+                                if (!isNaN(beforeTotalDebt) && !isNaN(afterTotalDebt)) {
+                                    // The difference is the net impact of deleting the contact
+                                    const netImpact = afterTotalDebt - beforeTotalDebt;
+                                    
+                                    if (netImpact !== 0) {
+                                        const sign = netImpact > 0 ? '+' : '-';
+                                        const amountColor = netImpact > 0 ? 'color: #16A34A;' : 'color: #BA1A1A;';
+                                        amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign} ${Math.abs(Math.round(netImpact)).toLocaleString('en-US')} IQD</span>`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // For DELETE transaction events, show deleted transaction amount
+                    else if (deletedTransactionInfo && deletedTransactionInfo.amount !== null && deletedTransactionInfo.amount !== undefined) {
+                        const amountNum = Number(deletedTransactionInfo.amount);
+                        if (!isNaN(amountNum) && isFinite(amountNum)) {
+                            const sign = deletedTransactionInfo.direction === 'lent' ? '+' : '-';
+                            const amountColor = deletedTransactionInfo.direction === 'lent' ? 'color: #16A34A;' : 'color: #BA1A1A;';
+                            amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign} ${Math.round(amountNum).toLocaleString('en-US')} IQD</span>`;
+                        }
+                    }
+                    // For DELETE transaction events without deleted_transaction data, try to get from CREATED event
+                    else if ((event.event_type === 'DELETED' || event.event_type.includes('DELETE')) && 
+                             event.aggregate_type === 'transaction' && event.aggregate_id) {
+                        // Try to find CREATED transaction event to get amount
+                        const createdTxEvent = events.find(e => 
+                            e.aggregate_type === 'transaction' && 
+                            e.aggregate_id === event.aggregate_id &&
+                            (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
+                        );
+                        if (createdTxEvent && createdTxEvent.event_data?.amount) {
+                            const amountNum = Number(createdTxEvent.event_data.amount);
+                            if (!isNaN(amountNum) && isFinite(amountNum)) {
+                                const direction = createdTxEvent.event_data.direction || 'owed';
+                                const sign = direction === 'lent' ? '+' : '-';
+                                const amountColor = direction === 'lent' ? 'color: #16A34A;' : 'color: #BA1A1A;';
+                                amountDisplay = `<span style="${amountColor} font-weight: 600;">${sign} ${Math.round(amountNum).toLocaleString('en-US')} IQD</span>`;
+                            }
+                        }
+                    }
+                    // For regular transaction events
+                    else if (event.aggregate_type === 'transaction' && amount !== null) {
                         const amountNum = Number(amount);
                         if (!isNaN(amountNum) && isFinite(amountNum)) {
                             const currency = eventData.currency || 'IQD';
@@ -1758,7 +2348,7 @@
                                 <span class="${badgeClass}" style="font-size: 0.7rem;">${displayEventType}</span>
                             </td>
                             <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
-                                ${contactName || aggregateDisplay}
+                                ${contactName || 'Unknown'}
                             </td>
                             <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
                                 ${amountDisplay !== '-' ? amountDisplay : '-'}

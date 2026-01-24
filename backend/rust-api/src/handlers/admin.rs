@@ -23,6 +23,7 @@ pub struct EventQuery {
 #[derive(Serialize)]
 pub struct EventResponse {
     pub event_id: String,
+    pub aggregate_id: String, // Added aggregate_id to response
     pub aggregate_type: String,
     pub event_type: String,
     pub user_id: String,
@@ -35,6 +36,7 @@ impl<'r> FromRow<'r, PgRow> for EventResponse {
     fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
         Ok(Self {
             event_id: row.try_get::<uuid::Uuid, _>("event_id")?.to_string(),
+            aggregate_id: row.try_get::<uuid::Uuid, _>("aggregate_id")?.to_string(),
             aggregate_type: row.try_get("aggregate_type")?,
             event_type: row.try_get("event_type")?,
             user_id: row.try_get::<uuid::Uuid, _>("user_id")?.to_string(),
@@ -125,7 +127,7 @@ pub async fn get_events(
 
     // Build dynamic query with filters using QueryBuilder (join with users to get email)
     let mut query_builder: QueryBuilder<'_, sqlx::Postgres> = QueryBuilder::new(
-        "SELECT e.event_id, e.aggregate_type, e.event_type, e.user_id, u.email as user_email, e.created_at, e.event_data FROM events e LEFT JOIN users_projection u ON e.user_id = u.id WHERE 1=1"
+        "SELECT e.event_id, e.aggregate_id, e.aggregate_type, e.event_type, e.user_id, u.email as user_email, e.created_at, e.event_data FROM events e LEFT JOIN users_projection u ON e.user_id = u.id WHERE 1=1"
     );
     
     // Filter by event_type (case-insensitive, supports multiple formats)
