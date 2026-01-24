@@ -31,28 +31,6 @@ services:
     networks:
       - debt_tracker_network
 
-  eventstore:
-    image: eventstore/eventstore:latest
-    container_name: debt_tracker_eventstore
-    environment:
-      EVENTSTORE_CLUSTER_SIZE: 1
-      EVENTSTORE_RUN_PROJECTIONS: All
-      EVENTSTORE_START_STANDARD_PROJECTIONS: true
-      EVENTSTORE_INSECURE: true
-      EVENTSTORE_ENABLE_ATOM_PUB_OVER_HTTP: true
-    ports:
-      - "2113:2113"  # HTTP API
-      - "1113:1113"  # TCP protocol
-    volumes:
-      - eventstore_data:/var/lib/eventstore
-    networks:
-      - debt_tracker_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:2113/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   api:
     build:
       context: ./rust-api
@@ -61,9 +39,6 @@ services:
     environment:
       DATABASE_URL: postgresql://debt_tracker:${DB_PASSWORD:-dev_password}@postgres:5432/debt_tracker
       REDIS_URL: redis://redis:6379
-      EVENTSTORE_URL: http://eventstore:2113
-      EVENTSTORE_USERNAME: admin
-      EVENTSTORE_PASSWORD: changeit
       PORT: 8000
       RUST_LOG: info
     ports:
@@ -73,15 +48,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      eventstore:
-        condition: service_healthy
     networks:
       - debt_tracker_network
     restart: unless-stopped
 
 volumes:
   postgres_data:
-  eventstore_data:
 
 networks:
   debt_tracker_network:
