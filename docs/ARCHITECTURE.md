@@ -168,9 +168,9 @@ graph TD
 ### Client Architecture (Flutter)
 
 ```mermaid
-graph TD
+graph LR
     subgraph Client_Arch ["Client Architecture (Flutter)"]
-        direction TB
+        direction LR
 
         %% UI LAYER
         subgraph UI_Layer ["UI Layer"]
@@ -196,16 +196,17 @@ graph TD
 
         %% STORAGE
         subgraph Hive_Storage ["Local Storage (Hive)"]
-            direction LR
+            direction TB
             EventsBox["Events Box<br/>Immutable Log"]
             ProjectionsBox["Projections Box<br/>Contacts, Trans."]
+            EventsBox --- ProjectionsBox
         end
 
         %% BACKGROUND SERVICES
         subgraph Background_Services ["Background Services"]
             direction TB
-            Sync_Service["<b>SyncServiceV2</b><br/>Hash Comparison<br/>Push/Pull Events<br/>Projection Rebuild"]
             Realtime_Service["<b>RealtimeService</b><br/>WebSocket Listener<br/>Triggers SyncService"]
+            Sync_Service["<b>SyncServiceV2</b><br/>Hash Comparison<br/>Push/Pull Events<br/>Projection Rebuild"]
             Api_Service["<b>ApiService</b><br/>REST HTTP Client"]
             
             Realtime_Service --> Sync_Service
@@ -213,9 +214,9 @@ graph TD
         end
 
         %% Flow Connections
-        UI_Layer --> Local_Data
-        Local_Data --> Hive_Storage
-        Hive_Storage <--> Background_Services
+        UI_Layer -->|Read/Write| Local_Data
+        Local_Data -->|Store| Hive_Storage
+        Hive_Storage <-->|Sync| Background_Services
     end
 ```
 
