@@ -200,12 +200,24 @@ EOF
     print_info "Running migrations..."
     cd "$ROOT_DIR/backend/rust-api"
     
-    if command -v sqlx &> /dev/null; then
-        sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1 || {
-            print_error "Migration failed"
-            exit 1
-        }
-    else
+    # Try sqlx first, but fall back to manual migrations quickly
+    USE_SQLX=false
+    if command -v sqlx &> /dev/null 2>&1; then
+        USE_SQLX=true
+    fi
+    
+    if [ "$USE_SQLX" = true ]; then
+        if timeout 10 sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1; then
+            print_info "Migrations completed via sqlx"
+        else
+            print_warning "sqlx migration failed or timed out, using manual migrations..."
+            USE_SQLX=false
+        fi
+    fi
+    
+    # Manual migration fallback (always run if sqlx failed or doesn't exist)
+    if [ "$USE_SQLX" = false ]; then
+        print_info "Running migrations manually..."
         docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/001_initial_schema.sql > /dev/null 2>&1
         docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/002_remove_transaction_settled.sql > /dev/null 2>&1 || true
         docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < migrations/003_add_due_date.sql > /dev/null 2>&1 || true
