@@ -19,69 +19,67 @@ Debt Tracker is a debt management application with:
 
 ### User Creates a Contact
 
-```mermaid
-flowchart TD
-    A[User fills form and taps Save] --> B[Flutter App]
-    B --> B1[LocalDatabaseServiceV2.createContact]
-    B --> B2[Creates event: CONTACT_CREATED]
-    B --> B3[Stores event in local Hive]
-    B --> B4[Rebuilds state from all events]
-    B --> B5[Updates local projections]
-    B --> B6[UI updates immediately]
-    
-    B6 --> C[Background Sync]
-    C --> C1[Detects unsynced event]
-    C --> C2[POST /api/sync/events]
-    C --> C3[Marks event as synced]
-    
-    C3 --> D[Backend Server]
-    D --> D1[Receives event via sync endpoint]
-    D --> D2[Validates event]
-    D --> D3[Writes event to EventStore DB]
-    D --> D4[Updates PostgreSQL projection]
-    D --> D5[Broadcasts change via WebSocket]
-    D --> D6[Returns success]
-    
-    D5 --> E[WebSocket Broadcast]
-    E --> E1[All clients receive notification]
-    E --> E2[Clients trigger sync]
-    E --> E3[Clients pull new events]
-    E --> E4[Clients rebuild local state]
-    E --> E5[All UIs update automatically]
+```
+1. User fills form and taps "Save"
+   ↓
+2. Flutter App
+   ├─ Creates contact via local database service
+   ├─ Creates event: CONTACT_CREATED
+   ├─ Stores event in local Hive (EventStoreService)
+   ├─ Applies new event to last projection (incremental update)
+   ├─ Updates local projections (contacts box)
+   └─ UI updates immediately (instant feedback)
+   ↓
+3. Background Sync (SyncServiceV2)
+   ├─ Detects unsynced event
+   ├─ Sends event to server: POST /api/sync/events
+   └─ Marks event as synced when accepted
+   ↓
+4. Backend Server (Rust)
+   ├─ Receives event via sync endpoint
+   ├─ Validates event
+   ├─ Writes event to EventStore DB (immutable)
+   ├─ Updates PostgreSQL projection (contacts_projection)
+   ├─ Broadcasts change via WebSocket
+   └─ Returns success to client
+   ↓
+5. WebSocket Broadcast
+   ├─ All connected clients receive notification
+   ├─ Clients trigger sync automatically
+   ├─ Clients pull new events from server
+   ├─ Clients rebuild local state
+   └─ All UIs update automatically
 ```
 
 ### User Views Contacts
 
-```mermaid
-flowchart TD
-    A[User opens contacts screen] --> B[Flutter App]
-    B --> B1[Reads from local Hive box<br/>contacts projection]
-    B --> B2[No network call needed<br/>instant]
-    B --> B3[Displays contacts immediately]
-    
-    B3 --> C{Online?}
-    C -->|Yes| D[Background Sync]
-    C -->|No| E[Display local data]
-    
-    D --> D1[Compare local hash vs<br/>server hash]
-    D1 --> D2{Hash different?}
-    D2 -->|Yes| D3[Pull new events]
-    D2 -->|No| F[Already in sync]
-    D3 --> D4[Rebuild state from<br/>all events]
-    D4 --> D5[UI updates if<br/>changes detected]
+```
+1. User opens contacts screen
+   ↓
+2. Flutter App
+   ├─ Reads from local Hive box (contacts projection)
+   ├─ No network call needed (instant)
+   └─ Displays contacts immediately
+   ↓
+3. Background Sync (if online)
+   ├─ Compares local hash vs server hash
+   ├─ If different: pulls new events
+   ├─ Applies new events to last projection (incremental update)
+   └─ UI updates if changes detected
 ```
 
 ### Real-Time Updates
 
-```mermaid
-flowchart TD
-    A[User A creates transaction] --> B[Server processes change]
-    B --> C[Server broadcasts via WebSocket]
-    C --> D[User B's app receives<br/>WebSocket message]
-    D --> D1[Triggers immediate sync]
-    D --> D2[Pulls new events from server]
-    D --> D3[Rebuilds local state]
-    D --> D4[UI updates automatically<br/>no refresh needed]
+```
+1. User A creates a transaction
+   ↓
+2. Server processes and broadcasts via WebSocket
+   ↓
+3. User B's app receives WebSocket message
+   ├─ Triggers immediate sync
+   ├─ Pulls new events from server
+   ├─ Rebuilds local state
+   └─ UI updates automatically (no refresh needed)
 ```
 
 ---
@@ -91,82 +89,134 @@ flowchart TD
 ### High-Level Architecture
 
 ```mermaid
-graph TB
-    subgraph FlutterClient["Flutter Client"]
-        FlutterApp[Flutter App]
-        RESTAPI[REST API<br/>Bidirectional]
-        WebSocket[WebSocket<br/>Notifications]
-    end
-    
-    subgraph AdminPanel["Admin Panel"]
-        Browser[Web Browser]
-    end
-    
-    subgraph Backend["Backend Server (Rust)"]
-        subgraph Part1["Part 1: API Handling"]
-            RESTRoutes[REST API Routes<br/>/api/sync/*<br/>/api/contacts<br/>/api/transactions]
-            WSHandler[WebSocket Handler<br/>/ws]
-            Broadcast[Broadcast Channel<br/>Tokio 100 buffer]
+graph TD
+    subgraph HLA ["High-Level Architecture"]
+        direction TB
+
+        %% CLIENTS SECTION
+        subgraph Clients ["CLIENTS"]
+            direction LR
+            
+            subgraph FlutterClient ["Flutter Client"]
+                direction TB
+                FA["Flutter App<br/>(Web/Mobile/Desktop)"]
+                
+                subgraph F_Protocols [" "]
+                    direction TB
+                    F_REST["REST API (Bidirectional)<br/>- Client → Server: POST events, POST contacts<br/>- Client ← Server: GET events, GET hash"]
+                    F_WS["WebSocket (Notifications)<br/>- Server → Client: Notify changes"]
+                end
+                FA --> F_Protocols
+            end
+
+            subgraph AdminPanel ["Admin Panel (Web Browser)"]
+                direction TB
+                AW["Admin Web Interface<br/>(HTML/JavaScript)"]
+                
+                subgraph A_Protocols [" "]
+                    direction TB
+                    A_REST["REST API (Bidirectional)<br/>- Client → Server: GET /admin, GET /api/admin/events<br/>- Client ← Server: HTML page, JSON data"]
+                    A_WS["WebSocket (Notifications)<br/>- Server → Client: Notify changes"]
+                end
+                AW --> A_Protocols
+            end
         end
-        
-        subgraph Part2["Part 2: Admin Page Serving"]
-            AdminRoutes[Admin Routes<br/>/admin<br/>/api/admin/*]
+
+        %% BACKEND SECTION
+        subgraph Backend ["BACKEND SERVICES"]
+            direction LR
+            
+            subgraph API_Service ["Backend Service 1: API Service"]
+                direction TB
+                R1["REST API Routes<br/>- POST /api/sync/events<br/>- GET /api/sync/hash<br/>- POST /api/contacts<br/>- POST /api/auth/login"]
+                WS1["WebSocket Handler<br/>- Accepts /ws<br/>- Tokio broadcast channel"]
+                R1 --- WS1
+            end
+
+            subgraph Admin_Service ["Backend Service 2: Admin Service"]
+                direction TB
+                R2["Admin Routes<br/>- GET /admin (serves HTML)<br/>- GET /api/admin/events<br/>- POST /api/admin/projections/rebuild"]
+                WS2["WebSocket Handler<br/>- Accepts /ws<br/>- Tokio broadcast channel"]
+                R2 --- WS2
+            end
         end
-        
-        EventSourcing[Event Sourcing Layer]
+
+        %% STORAGE SECTION
+        subgraph Storage ["DATA STORAGE"]
+            direction TB
+            
+            ES[("EventStore DB (Primary Event Store)<br/>- External immutable event log<br/>- Write-only append log (non-blocking)<br/>- Idempotency & Audit trail")]
+
+            subgraph Postgres ["PostgreSQL Database"]
+                direction TB
+                EL["events table (Event Log Mirror)<br/>- Duplicate of EventStore for queries<br/>- Indexed for fast admin/debug access"]
+                PR["Projections (Read-Optimized)<br/>- contacts_projection, transactions_projection<br/>- Updated directly for fast GET reads"]
+                EL --> PR
+            end
+            
+            ES --> EL
+        end
+
+        %% Cross-Layer Connections
+        F_Protocols --> API_Service
+        A_Protocols --> Admin_Service
+        API_Service --> ES
+        Admin_Service --> ES
     end
-    
-    subgraph Storage["Data Storage"]
-        EventStoreDB[EventStore DB<br/>Immutable Events]
-        PostgreSQL[PostgreSQL<br/>events table<br/>projections]
-    end
-    
-    FlutterApp --> RESTAPI
-    FlutterApp --> WebSocket
-    RESTAPI -->|"POST/GET"| RESTRoutes
-    WebSocket -->|"WS /ws"| WSHandler
-    WSHandler --> Broadcast
-    
-    Browser -->|"GET /admin"| AdminRoutes
-    Browser -->|"GET /api/admin/*"| AdminRoutes
-    
-    RESTRoutes --> EventSourcing
-    WSHandler --> EventSourcing
-    AdminRoutes --> EventSourcing
-    
-    EventSourcing --> EventStoreDB
-    EventSourcing --> PostgreSQL
 ```
 
 ### Client Architecture (Flutter)
 
 ```mermaid
-graph TB
-    subgraph UI["UI Layer"]
-        Screens[Screens<br/>HomeScreen<br/>DashboardScreen<br/>ContactsScreen<br/>TransactionsScreen<br/>AddContactScreen<br/>AddTransactionScreen<br/>LoginScreen<br/>SettingsScreen<br/>EventsLogScreen<br/>BackendSetupScreen]
+graph TD
+    subgraph Client_Arch ["Client Architecture (Flutter)"]
+        direction TB
+
+        %% UI LAYER
+        subgraph UI_Layer ["UI Layer"]
+            direction TB
+            Screens["<b>Screens</b><br/>HomeScreen, Dashboard, Contacts, etc."]
+            Providers["<b>Providers (Riverpod)</b><br/>UI State Only (Settings, Toggles)<br/><i>Not used for data operations</i>"]
+            Screens --> Providers
+        end
+
+        %% LOCAL DATA LAYER
+        subgraph Local_Data ["Local Data Layer"]
+            direction TB
+            DB_Service["<b>LocalDatabaseServiceV2</b>"]
+            
+            subgraph Paths [" "]
+                direction LR
+                ReadPath["<b>READ PATH</b><br/>Direct Hive access<br/>(Fast/Offline)"]
+                WritePath["<b>WRITE PATH</b><br/>1. Create Event<br/>2. Rebuild Projections<br/>3. Save to Hive<br/>4. Trigger Sync"]
+            end
+            
+            DB_Service --- Paths
+        end
+
+        %% STORAGE
+        subgraph Hive_Storage ["Local Storage (Hive)"]
+            direction LR
+            EventsBox[("Events Box<br/>Immutable Log")]
+            ProjectionsBox[("Projections Box<br/>Contacts, Trans.")]
+        end
+
+        %% BACKGROUND SERVICES
+        subgraph Background_Services ["Background Services"]
+            direction TB
+            Sync_Service["<b>SyncServiceV2</b><br/>Hash Comparison<br/>Push/Pull Events<br/>Projection Rebuild"]
+            Realtime_Service["<b>RealtimeService</b><br/>WebSocket Listener<br/>Triggers SyncService"]
+            Api_Service["<b>ApiService</b><br/>REST HTTP Client"]
+            
+            Realtime_Service --> Sync_Service
+            Sync_Service --> Api_Service
+        end
+
+        %% Flow Connections
+        UI_Layer --> Local_Data
+        Local_Data --> Hive_Storage
+        Hive_Storage <--> Background_Services
     end
-    
-    subgraph Services["Service Layer"]
-        LocalDB[LocalDatabaseServiceV2<br/>getContacts<br/>createContact]
-        EventStore[EventStoreService<br/>appendEvent<br/>getAllEvents<br/>getEventHash]
-        StateBuilder[StateBuilder<br/>buildState<br/>Pure functions]
-        SyncService[SyncServiceV2<br/>sync<br/>hash-based comparison]
-        Realtime[RealtimeService<br/>WebSocket connection]
-    end
-    
-    subgraph Storage["Local Storage (Hive)"]
-        EventsBox[Events Box<br/>Immutable]
-        Projections[Projections<br/>contacts<br/>transactions]
-    end
-    
-    Screens --> LocalDB
-    LocalDB --> EventStore
-    EventStore --> StateBuilder
-    StateBuilder --> SyncService
-    SyncService --> Realtime
-    
-    EventStore --> EventsBox
-    StateBuilder --> Projections
 ```
 
 ---
@@ -185,14 +235,20 @@ All changes are stored as **immutable events**. Current state is derived by repl
 
 ### Event Flow
 
-```mermaid
-flowchart TD
-    A[User Action] --> B[Create Event]
-    B --> C[Store Event<br/>EventStore DB / Local Hive]
-    C --> D[Rebuild State<br/>from all events]
-    D --> E[Update Projections<br/>PostgreSQL / Local Hive]
-    E --> F[Broadcast Change<br/>WebSocket]
-    F --> G[All Clients Sync & Update]
+```
+User Action
+  ↓
+Create Event (CONTACT_CREATED, TRANSACTION_UPDATED, etc.)
+  ↓
+Store Event (EventStore DB / Local Hive)
+  ↓
+Apply Events to Last Projection (incremental update)
+  ↓
+Update Projections (PostgreSQL / Local Hive)
+  ↓
+Broadcast Change (WebSocket)
+  ↓
+All Clients Sync & Update
 ```
 
 ### Event Types
@@ -246,16 +302,16 @@ The Flutter app communicates with the backend through two distinct channels:
 - `GET /api/transactions` - Get transactions (used by web)
 
 **Flow:**
-
-```mermaid
-flowchart TD
-    A[Client needs to sync] --> B[GET /api/sync/hash<br/>compare hashes]
-    B --> C{Hash different?}
-    C -->|Yes| D[GET /api/sync/events<br/>pull new events]
-    C -->|Yes| E[POST /api/sync/events<br/>push local events]
-    C -->|No| F[Already in sync]
-    D --> G[Client rebuilds state<br/>from all events]
-    E --> G
+```
+Client needs to sync
+  ↓
+Client calls GET /api/sync/hash (compare hashes)
+  ↓
+If different:
+  ├─ Client calls GET /api/sync/events (pull new events)
+  └─ Client calls POST /api/sync/events (push local events)
+  ↓
+Client applies new events to last projection (incremental update)
 ```
 
 ### WebSocket (One-way Notification)
@@ -268,16 +324,22 @@ flowchart TD
 - Client then pulls actual events using `GET /api/sync/events`
 
 **Flow:**
-
-```mermaid
-flowchart TD
-    A[Server processes change] --> B[Write event to EventStore DB]
-    B --> C[Update PostgreSQL projection]
-    C --> D[Broadcast notification<br/>via WebSocket]
-    D --> E[All connected clients<br/>receive notification]
-    E --> F[Clients trigger<br/>SyncServiceV2.manualSync]
-    F --> G[Clients use REST API<br/>GET /api/sync/events]
-    G --> H[Clients rebuild state<br/>and update UI]
+```
+Server processes change
+  ↓
+Server writes event to EventStore DB
+  ↓
+Server updates PostgreSQL projection
+  ↓
+Server broadcasts notification via WebSocket
+  ↓
+All connected clients receive notification
+  ↓
+Clients trigger sync automatically
+  ↓
+Clients use REST API to pull events (GET /api/sync/events)
+  ↓
+Clients rebuild state and update UI
 ```
 
 **Why Two Channels?**
@@ -296,7 +358,7 @@ flowchart TD
 3. If different:
    - Pull new events from server (since last sync timestamp)
    - Push unsynced local events to server
-   - Rebuild state from all events
+   - Apply new events to last projection (incremental update)
 
 **Benefits:**
 - Efficient (only syncs differences)
@@ -335,8 +397,8 @@ flowchart TD
    └─ All connected clients receive notification
    ↓
 4. Clients receive notification:
-   ├─ RealtimeService._handleRealtimeUpdate() called
-   ├─ Triggers SyncServiceV2.manualSync()
+   ├─ RealtimeService handles the notification
+   ├─ Triggers sync automatically
    ├─ SyncServiceV2 uses REST API (GET /api/sync/events) to pull events
    ├─ StateBuilder rebuilds state from events
    └─ UI updates automatically
@@ -387,11 +449,13 @@ flowchart TD
 
 ## Backend Architecture
 
-The backend server consists of two distinct parts:
+The backend consists of **two separate services**:
 
-### Part 1: API Handling (REST API + WebSocket)
+### Backend Service 1: API Service (Request Handling)
 
 **Purpose:** Handle requests from Flutter clients (mobile/web/desktop)
+
+**Connects to:** Flutter clients via REST API and WebSocket
 
 **REST API Endpoints:**
 - **Sync:**
@@ -419,9 +483,11 @@ The backend server consists of two distinct parts:
 **WebSocket:**
 - `WS /ws` - WebSocket connection for real-time notifications
 
-### Part 2: Admin Page Serving
+### Backend Service 2: Admin Service (Web Admin Panel)
 
 **Purpose:** Serve the web-based admin panel for monitoring and debugging
+
+**Connects to:** Admin Panel (Web Browser) via REST API and WebSocket
 
 **Admin Routes:**
 - `GET /admin` - Serves HTML admin panel page (`static/admin/index.html`)
@@ -432,9 +498,16 @@ The backend server consists of two distinct parts:
 - `POST /api/admin/projections/rebuild` - Rebuild projections
 - `DELETE /api/admin/events/:event_id` - Delete event (undo)
 
+**WebSocket:**
+- `WS /ws` - WebSocket connection for real-time notifications (same endpoint as Flutter clients)
+
 **Access:** http://localhost:8000/admin
 
-**Note:** The admin panel uses `/api/admin/*` endpoints, while Flutter clients use `/api/*` endpoints (without `/admin` prefix).
+**Note:** 
+- Flutter clients connect to **Backend Service 1** (API Service) using `/api/*` endpoints and `/ws` WebSocket
+- Admin Panel connects to **Backend Service 2** (Admin Service) using `/admin` and `/api/admin/*` endpoints, and `/ws` WebSocket for real-time notifications
+- Both services share the same Event Sourcing Layer, Data Storage, and WebSocket broadcast channel
+- Both clients receive real-time notifications via WebSocket when data changes
 
 ---
 
@@ -455,15 +528,18 @@ The backend exposes REST API endpoints organized by functionality:
 - Handles connection lifecycle (connect, disconnect, errors)
 
 **Flow:**
-
-```mermaid
-flowchart TD
-    A[Client connects to /ws] --> B[WebSocket Handler<br/>accepts connection]
-    B --> C[Subscribe client to<br/>broadcast channel]
-    C --> D[Spawn tasks]
-    D --> E[Send messages<br/>channel → client]
-    D --> F[Receive messages<br/>client ping/pong]
-    E --> G[Client receives<br/>all broadcast messages]
+```
+Client connects to /ws
+  ↓
+WebSocket Handler accepts connection
+  ↓
+Subscribes client to broadcast channel
+  ↓
+Spawns tasks:
+  - Send messages from channel → client
+  - Receive messages from client (ping/pong)
+  ↓
+Client receives all broadcast messages
 ```
 
 ### Broadcast Channel
@@ -472,7 +548,7 @@ flowchart TD
 
 **Functionality:**
 - Created at server startup with 100 message buffer
-- When data changes, handlers call `broadcast_change()` to send messages
+- When data changes, handlers broadcast messages to all connected clients
 - All connected WebSocket clients receive the message automatically
 - Messages are JSON strings: `{"type": "contact_created", "data": {...}}`
 
@@ -499,27 +575,41 @@ broadcast_change(&broadcast_tx, "contact_created", &json_data);
 
 ### Request Handling Flow
 
-```mermaid
-flowchart TD
-    A[HTTP Request] --> B[Route Handler<br/>contacts.rs<br/>transactions.rs<br/>sync.rs<br/>admin.rs]
-    B --> C[Validate Request]
-    C --> D[Write Event to<br/>EventStore DB]
-    D --> E[Write Event to<br/>PostgreSQL events table]
-    E --> F[Update PostgreSQL<br/>Projection]
-    F --> G[Broadcast via<br/>Broadcast Channel]
-    G --> H[Return Response]
+```
+HTTP Request
+  ↓
+Route Handler (contacts.rs, transactions.rs, sync.rs, admin.rs)
+  ↓
+Validate Request
+  ↓
+Write Event to EventStore DB (non-blocking, for audit/idempotency)
+  ↓
+Update PostgreSQL Projection DIRECTLY (INSERT/UPDATE contacts_projection or transactions_projection)
+  ↓
+Write Event to PostgreSQL events table (for querying/debugging)
+  ↓
+Broadcast via Broadcast Channel
+  ↓
+Return Response
 ```
 
-### Event Store (EventStore DB)
+**Note:** Projections are updated directly (not rebuilt from events). This provides fast writes and reads.
+
+### EventStore DB (Primary Event Store)
 
 **Purpose:** External database for immutable event storage (write-only)
+
+**What it does:**
+- Stores events as append-only log
+- Provides idempotency checking (prevents duplicate operations)
+- Provides version tracking (optimistic locking for concurrent updates)
+- Complete audit trail
 
 **Features:**
 - Append-only (events never deleted or modified)
 - Idempotency key support (prevents duplicates)
 - Version tracking (optimistic locking)
-- Complete audit trail
-- Primary event store for the system
+- Non-blocking writes (if EventStore fails, operation continues)
 
 **Setup:**
 ```bash
@@ -532,24 +622,51 @@ flowchart TD
 
 ### PostgreSQL Database
 
-**Purpose:** Contains both event log and materialized projections
+**Purpose:** Contains event log and read-optimized projections
 
-**Event Log:**
-- `events` table - Stores all events (for debugging and querying)
+#### events table (Event Log)
+
+**What it does:**
+- Stores all events (duplicate of EventStore DB)
+- Used for querying events (admin panel, debugging)
 - Indexed for fast queries by user, aggregate, type, timestamp
 - Contains full event data in JSONB format
 
-**Projections (Materialized Views):**
-- `contacts_projection` - Current contact state (optimized for reads)
-- `transactions_projection` - Current transaction state
+**Why duplicate EventStore DB?**
+- EventStore DB is optimized for writes, not queries
+- PostgreSQL events table is optimized for querying (indexes, SQL)
+- Admin panel needs to query events with filters
+
+#### Projections (Read-Optimized Tables)
+
+**What they do:**
+- Store current state of contacts and transactions
+- Updated directly when operations occur (not rebuilt from events)
+- Used for all read operations (GET requests)
+
+**Tables:**
+- `contacts_projection` - Current contact state (name, phone, email, etc.)
+- `transactions_projection` - Current transaction state (amount, direction, date, etc.)
 - `users_projection` - User accounts
 - `user_settings` - User preferences
-- Automatically updated when events are written
 
-**Why Both EventStore DB and PostgreSQL?**
-- **EventStore DB**: Primary event store, optimized for append-only writes
-- **PostgreSQL events table**: Queryable event log for debugging/admin
-- **PostgreSQL projections**: Fast read-optimized views of current state
+**How they work:**
+- When you create a contact: INSERT directly into `contacts_projection`
+- When you update a contact: UPDATE `contacts_projection` directly
+- When you create a transaction: INSERT directly into `transactions_projection`
+- All reads query these tables (fast, optimized queries)
+
+**Why not rebuild from events?**
+- Rebuilding from events would be slow for reads
+- Direct updates provide instant consistency
+- Events are still stored for audit trail and debugging
+
+**Are projections actively used?**
+- **Yes!** All GET requests query projections:
+  - `GET /api/contacts` → queries `contacts_projection`
+  - `GET /api/transactions` → queries `transactions_projection`
+  - `GET /api/admin/contacts` → queries `contacts_projection`
+- Projections are the source of truth for current state
 
 ---
 
