@@ -475,6 +475,13 @@ class LocalDatabaseServiceV2 {
       }
       
       print('✅ Bulk undo complete: $successCount succeeded, $failCount failed');
+      
+      // Trigger sync notification after bulk undo
+      if (successCount > 0) {
+        SyncServiceV2.manualSync().catchError((e) {
+          // Silently handle sync errors - will retry later
+        });
+      }
     } catch (e) {
       print('Error undoing bulk contact actions: $e');
       rethrow;
