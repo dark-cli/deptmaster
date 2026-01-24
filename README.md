@@ -2,8 +2,6 @@
 
 A modern debt management application with event-sourced architecture, offline-first design, and cross-platform support.
 
-> **Note**: This is a clean repository with improved documentation and architecture.
-
 ## Features
 
 - 📱 **Cross-platform**: iOS, Android, Web, and Linux Desktop
