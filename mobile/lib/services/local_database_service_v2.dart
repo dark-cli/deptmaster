@@ -380,10 +380,9 @@ class LocalDatabaseServiceV2 {
       // Rebuild state
       await _rebuildState();
       
-      // Trigger sync notification (if event was synced, deletion will be synced; if not, sync will handle it)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      // Note: If event was synced, we delete it from server via ApiService.deleteEvent()
+      // The server will automatically broadcast WebSocket notification, so no need to call manualSync()
+      // manualSync() should only be called when hash comparison shows we're out of sync
       
       print('✅ Transaction action undone (removed last event): $transactionId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
     } catch (e) {
@@ -444,10 +443,9 @@ class LocalDatabaseServiceV2 {
       // Rebuild state
       await _rebuildState();
       
-      // Trigger sync notification (if event was synced, deletion will be synced; if not, sync will handle it)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      // Note: If event was synced, we delete it from server via ApiService.deleteEvent()
+      // The server will automatically broadcast WebSocket notification, so no need to call manualSync()
+      // manualSync() should only be called when hash comparison shows we're out of sync
       
       print('✅ Contact action undone (removed last event): $contactId, event type: ${lastEvent.eventType}, synced: ${lastEvent.synced}');
     } catch (e) {
@@ -476,12 +474,9 @@ class LocalDatabaseServiceV2 {
       
       print('✅ Bulk undo complete: $successCount succeeded, $failCount failed');
       
-      // Trigger sync notification after bulk undo
-      if (successCount > 0) {
-        SyncServiceV2.manualSync().catchError((e) {
-          // Silently handle sync errors - will retry later
-        });
-      }
+      // Note: Each undoContactAction() will delete events from server if synced
+      // The server will automatically broadcast WebSocket notifications, so no need to call manualSync()
+      // manualSync() should only be called when hash comparison shows we're out of sync
     } catch (e) {
       print('Error undoing bulk contact actions: $e');
       rethrow;
@@ -516,12 +511,9 @@ class LocalDatabaseServiceV2 {
       
       print('✅ Bulk undo complete: $successCount succeeded, $failCount failed');
       
-      // Trigger sync notification after bulk undo
-      if (successCount > 0) {
-        SyncServiceV2.manualSync().catchError((e) {
-          // Silently handle sync errors - will retry later
-        });
-      }
+      // Note: Each undoTransactionAction() will delete events from server if synced
+      // The server will automatically broadcast WebSocket notifications, so no need to call manualSync()
+      // manualSync() should only be called when hash comparison shows we're out of sync
     } catch (e) {
       print('Error undoing bulk transaction actions: $e');
       rethrow;

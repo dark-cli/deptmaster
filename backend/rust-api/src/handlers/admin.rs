@@ -353,6 +353,16 @@ pub async fn delete_event(
             }
         });
 
+        // Broadcast WebSocket notification that an event was deleted (undo action)
+        websocket::broadcast_change(
+            &state.broadcast_tx,
+            "event_deleted",
+            &serde_json::json!({
+                "event_id": event_id,
+                "message": "Event deleted (undo action)"
+            }).to_string(),
+        );
+
         Ok(Json(serde_json::json!({
             "success": true,
             "message": "Event deleted successfully"
