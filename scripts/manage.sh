@@ -93,7 +93,9 @@ wait_for_service() {
     local max_retries=${3:-30}
     local delay=${4:-1}
     
-    print_info "Waiting for $name to be ready..."
+    if [ "$VERBOSE" = true ]; then
+        print_info "Waiting for $name to be ready..."
+    fi
     for i in $(seq 1 $max_retries); do
         if curl -f "$url" > /dev/null 2>&1; then
             if [ "$VERBOSE" = true ]; then
@@ -101,9 +103,16 @@ wait_for_service() {
             fi
             return 0
         fi
+        if [ "$VERBOSE" = true ] && [ $((i % 5)) -eq 0 ]; then
+            print_info "Still waiting... ($i/$max_retries)"
+        fi
         sleep $delay
     done
-    print_error "$name failed to start"
+    print_error "$name failed to start after ${max_retries} attempts"
+    if [ -f "/tmp/debt-tracker-api.log" ]; then
+        print_error "Last 10 lines of server log:"
+        tail -10 /tmp/debt-tracker-api.log | sed 's/^/  /'
+    fi
     return 1
 }
 
