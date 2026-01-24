@@ -519,6 +519,63 @@ pub async fn get_projection_status(
     }))
 }
 
+/// Get total debt from the latest event (most efficient and solid)
+pub async fn get_total_debt(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get total_debt from the latest event that has it
+    let result: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT event_data->>'total_debt'
+        FROM events
+        WHERE event_data->>'total_debt' IS NOT NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        "#
+    )
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching total debt: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+
+    // If no event has total_debt, calculate from projections as fallback
+    let total_debt = if let Some(debt_str) = result {
+        // Parse the string value to i64
+        debt_str.parse::<i64>().unwrap_or_else(|_| {
+            // If parsing fails, try parsing as JSON number
+            serde_json::from_str::<i64>(&debt_str).unwrap_or(0)
+        })
+    } else {
+        // Fallback: calculate from projections
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COALESCE(SUM(
+                CASE 
+                    WHEN t.direction = 'lent' THEN t.amount
+                    WHEN t.direction = 'owed' THEN -t.amount
+                    ELSE 0
+                END
+            )::BIGINT, 0)
+            FROM contacts_projection c
+            LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
+            WHERE c.is_deleted = false
+            "#
+        )
+        .fetch_one(&*state.db_pool)
+        .await
+        .unwrap_or(0)
+    };
+
+    Ok(Json(serde_json::json!({
+        "total_debt": total_debt
+    })))
+}
+
 /// Rebuild projections from all events
 pub async fn rebuild_projections(
     State(state): State<AppState>,

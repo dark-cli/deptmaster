@@ -1314,7 +1314,7 @@
 
         async function loadStats() {
             try {
-                const [contacts, transactions] = await Promise.all([
+                const [contacts, transactions, totalDebtResponse] = await Promise.all([
                     fetch(`${API_URL}/admin/contacts`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
@@ -1322,15 +1322,15 @@
                     fetch(`${API_URL}/admin/transactions`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
+                    }),
+                    fetch(`${API_URL}/admin/total-debt`).then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        return r.json();
                     })
                 ]);
 
-                const totalDebt = transactions.reduce((sum, t) => {
-                    if (t.type === 'money') {
-                        return sum + (t.direction === 'owed' ? -t.amount : t.amount);
-                    }
-                    return sum;
-                }, 0);
+                // Use total_debt from latest event (more efficient and solid)
+                const totalDebt = totalDebtResponse.total_debt || 0;
 
                 const formatAmount = (amt) => {
                     return amt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');

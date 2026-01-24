@@ -10,8 +10,10 @@ pub use admin::{
     backfill_transaction_events,
     get_events,
     get_contacts,
+    get_transactions as get_admin_transactions,
     get_latest_event_id,
     get_projection_status,
+    get_total_debt,
     rebuild_projections,
 };
 pub use contacts::{

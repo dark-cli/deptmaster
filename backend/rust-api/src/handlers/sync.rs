@@ -682,18 +682,18 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                 if !events_after_snapshot.is_empty() {
                     // Collect undone event IDs from all events (even if no UNDO in current set, 
                     // snapshot might contain items undone by previous UNDO events)
-                    let mut undone_event_ids = std::collections::HashSet::new();
+                        let mut undone_event_ids = std::collections::HashSet::new();
                     for row in &events {
-                        let event_type: String = row.get("event_type");
-                        if event_type == "UNDO" {
-                            let event_data: serde_json::Value = row.get("event_data");
-                            if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
-                                if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
-                                    undone_event_ids.insert(undone_id);
+                            let event_type: String = row.get("event_type");
+                            if event_type == "UNDO" {
+                                let event_data: serde_json::Value = row.get("event_data");
+                                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                                        undone_event_ids.insert(undone_id);
+                                    }
                                 }
                             }
                         }
-                    }
                     
                     // Restore projections from snapshot (filter out undone events)
                     if restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok() {
@@ -724,12 +724,12 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                         }
                     }
                     restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok()
-                }
-            } else {
-                false
             }
         } else {
             false
+        }
+    } else {
+        false
         }
     };
 
@@ -747,14 +747,14 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
         // Collect undone event IDs if UNDO events exist
         let mut undone_event_ids: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
         if has_undo_events {
-            for row in &events {
-                let event_type: String = row.get("event_type");
-                if event_type == "UNDO" {
-                    let event_data: serde_json::Value = row.get("event_data");
-                    if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
-                        if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
-                            undone_event_ids.insert(undone_id);
-                        }
+        for row in &events {
+            let event_type: String = row.get("event_type");
+            if event_type == "UNDO" {
+                let event_data: serde_json::Value = row.get("event_data");
+                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
+                        undone_event_ids.insert(undone_id);
+                    }
                     }
                 }
             }
@@ -777,8 +777,8 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                     if undone_event_ids.contains(&event_id) {
                         tracing::info!("Skipping undone event: {}", event_id);
                         return false;
-                    }
-                    
+    }
+
                     true
                 })
                 .map(|row| row as &sqlx::postgres::PgRow)
