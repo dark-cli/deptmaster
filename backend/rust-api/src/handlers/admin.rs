@@ -6,6 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, postgres::PgRow, QueryBuilder};
 use crate::AppState;
+use crate::websocket;
 
 #[derive(Deserialize)]
 pub struct EventQuery {
