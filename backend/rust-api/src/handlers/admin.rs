@@ -355,12 +355,15 @@ pub async fn delete_event(
         });
 
         // Broadcast WebSocket notification that an event was deleted (undo action)
+        // Use "events_synced" to trigger sync on all clients (same as post_sync_events)
         websocket::broadcast_change(
             &state.broadcast_tx,
-            "event_deleted",
+            "events_synced",
             &serde_json::json!({
-                "event_id": event_id,
-                "message": "Event deleted (undo action)"
+                "accepted_count": 0,
+                "conflicts_count": 0,
+                "event_deleted": event_id,
+                "message": "Event deleted (undo action) - sync required"
             }).to_string(),
         );
 
