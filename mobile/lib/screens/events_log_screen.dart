@@ -8,6 +8,7 @@ import '../services/local_database_service_v2.dart';
 import '../services/state_builder.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../utils/event_formatter.dart';
 
 class EventsLogScreen extends ConsumerStatefulWidget {
   const EventsLogScreen({super.key});
@@ -33,6 +34,12 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   int _currentPage = 0;
   int _pageSize = 50; // Smaller default for mobile
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  
+  // Caches for event formatting
+  Map<String, String> _contactNameCache = {};
+  Map<String, String> _contactUsernameCache = {}; // Cache for contact usernames
+  Map<String, Event> _undoneEventsCache = {};
 
   @override
   void initState() {
@@ -43,6 +50,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -53,6 +61,15 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
 
     try {
       final events = await EventStoreService.getAllEvents();
+      // Sort by timestamp (newest first) for consistent ordering
+      events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      
+      // Pre-load undone events cache
+      await _preloadUndoneEvents(events);
+      
+      // Pre-load contact names cache
+      await _preloadContactNames(events);
+      
       setState(() {
         _allEvents = events;
         _loading = false;
@@ -65,24 +82,162 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       });
     }
   }
+  
+  Future<void> _preloadContactNames(List<Event> events) async {
+    _contactNameCache.clear();
+    _contactUsernameCache.clear();
+    
+    // Collect all contact IDs
+    final contactIds = <String>{};
+    for (final event in events) {
+      if (event.aggregateType == 'contact') {
+        contactIds.add(event.aggregateId);
+      } else if (event.aggregateType == 'transaction') {
+        final contactId = event.eventData['contact_id']?.toString();
+        if (contactId != null) {
+          contactIds.add(contactId);
+        }
+      }
+    }
+    
+    // Load contact names and usernames from database
+    for (final contactId in contactIds) {
+      try {
+        final contact = await LocalDatabaseServiceV2.getContact(contactId);
+        if (contact != null) {
+          _contactNameCache[contactId] = contact.name;
+          if (contact.username != null && contact.username!.isNotEmpty) {
+            _contactUsernameCache[contactId] = contact.username!;
+          }
+        }
+      } catch (e) {
+        // Contact might not exist, continue
+      }
+    }
+    
+    // Also cache names and usernames from CREATED events
+    for (final event in events) {
+      if (event.aggregateType == 'contact' && 
+          (event.eventType == 'CREATED' || event.eventType.contains('CREATE'))) {
+        final name = event.eventData['name']?.toString();
+        final username = event.eventData['username']?.toString();
+        if (name != null) {
+          _contactNameCache[event.aggregateId] = name;
+        }
+        if (username != null && username.isNotEmpty) {
+          _contactUsernameCache[event.aggregateId] = username;
+        }
+      }
+    }
+  }
+  
+  Future<void> _preloadUndoneEvents(List<Event> events) async {
+    _undoneEventsCache.clear();
+    
+    // Collect all undone event IDs
+    final undoneEventIds = <String>{};
+    for (final event in events) {
+      if (event.eventType.toUpperCase() == 'UNDO') {
+        final undoneEventId = event.eventData['undone_event_id'] as String?;
+        if (undoneEventId != null) {
+          undoneEventIds.add(undoneEventId);
+        }
+      }
+    }
+    
+    // Find undone events in the current batch
+    for (final event in events) {
+      if (undoneEventIds.contains(event.id)) {
+        _undoneEventsCache[event.id] = event;
+      }
+    }
+  }
 
   void _applyFilters() {
     List<Event> filtered = List.from(_allEvents);
 
-    // Search filter
+    // Search filter - search only in contact name and username (same as contact list page)
     if (_searchQuery.isNotEmpty) {
-      final query = _searchQuery.toLowerCase();
+      final query = _searchQuery.toLowerCase().trim();
       filtered = filtered.where((e) {
-        final comment = e.eventData['comment']?.toString().toLowerCase() ?? '';
-        final name = e.eventData['name']?.toString().toLowerCase() ?? '';
-        final description = e.eventData['description']?.toString().toLowerCase() ?? '';
-        final eventType = e.eventType.toLowerCase();
-        final aggregateType = e.aggregateType.toLowerCase();
-        return comment.contains(query) ||
-            name.contains(query) ||
-            description.contains(query) ||
-            eventType.contains(query) ||
-            aggregateType.contains(query);
+        final eventData = e.eventData;
+        
+        // Get contact name
+        String? contactName;
+        if (e.aggregateType == 'contact') {
+          contactName = eventData['name']?.toString().toLowerCase();
+          if (contactName == null) {
+            contactName = _contactNameCache[e.aggregateId]?.toLowerCase();
+          }
+          if (contactName == null) {
+            final deletedContact = eventData['deleted_contact'];
+            if (deletedContact != null && deletedContact is Map) {
+              contactName = deletedContact['name']?.toString().toLowerCase();
+            }
+          }
+        } else if (e.aggregateType == 'transaction') {
+          final contactId = eventData['contact_id']?.toString();
+          if (contactId != null) {
+            contactName = _contactNameCache[contactId]?.toLowerCase();
+          }
+          if (contactName == null) {
+            final deletedTransaction = eventData['deleted_transaction'];
+            if (deletedTransaction != null && deletedTransaction is Map) {
+              final deletedContactId = deletedTransaction['contact_id']?.toString();
+              if (deletedContactId != null) {
+                contactName = _contactNameCache[deletedContactId]?.toLowerCase();
+              }
+            }
+          }
+        }
+        
+        // Get username
+        String? username;
+        if (e.aggregateType == 'contact') {
+          username = _contactUsernameCache[e.aggregateId]?.toLowerCase();
+          if (username == null) {
+            username = eventData['username']?.toString().toLowerCase();
+          }
+          if (username == null) {
+            final deletedContact = eventData['deleted_contact'];
+            if (deletedContact != null && deletedContact is Map) {
+              username = deletedContact['username']?.toString().toLowerCase();
+            }
+          }
+        } else if (e.aggregateType == 'transaction') {
+          final contactId = eventData['contact_id']?.toString();
+          if (contactId != null) {
+            username = _contactUsernameCache[contactId]?.toLowerCase();
+            if (username == null) {
+              final contactEvent = _allEvents.firstWhere(
+                (evt) => evt.aggregateType == 'contact' &&
+                         evt.aggregateId == contactId &&
+                         (evt.eventType == 'CREATED' || evt.eventType.contains('CREATE')),
+                orElse: () => e,
+              );
+              if (contactEvent != e) {
+                username = contactEvent.eventData['username']?.toString().toLowerCase();
+              }
+            }
+          }
+          if (username == null) {
+            final deletedTransaction = eventData['deleted_transaction'];
+            if (deletedTransaction != null && deletedTransaction is Map) {
+              final deletedContactId = deletedTransaction['contact_id']?.toString();
+              if (deletedContactId != null) {
+                username = _contactUsernameCache[deletedContactId]?.toLowerCase();
+              }
+            }
+          }
+        }
+        
+        // Get comment
+        final comment = eventData['comment']?.toString().toLowerCase() ?? '';
+        
+        // Search in contact name, username, and comment
+        return (contactName != null && contactName.contains(query)) ||
+               (username != null && username.contains(query)) ||
+               comment.contains(query);
       }).toList();
     }
 
@@ -114,10 +269,36 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       _filteredEvents = filtered;
       _currentPage = 0; // Reset to first page when filters change
     });
+    
+    // Scroll to top when filters change
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+  
+  void _goToPage(int page) {
+    if (page >= 0 && page < _totalPages) {
+      setState(() {
+        _currentPage = page;
+      });
+      // Scroll to top when page changes
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    }
   }
 
   void _clearFilters() {
     setState(() {
+      _searchController.clear();
       _searchQuery = '';
       _eventTypeFilter = 'all';
       _aggregateTypeFilter = 'all';
@@ -125,7 +306,6 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       _dateTo = null;
       _currentPage = 0;
     });
-    _searchController.clear();
     _applyFilters();
   }
 
@@ -168,25 +348,36 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
         children: [
           // Search Bar (always visible)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: isDark
-                  ? AppColors.darkSurfaceVariant
-                  : AppColors.lightSurfaceVariant,
+              color: Theme.of(context).colorScheme.surface,
               border: Border(
                 bottom: BorderSide(
-                  color: isDark ? AppColors.darkGray : AppColors.lightGray,
+                  color: Theme.of(context).dividerColor,
+                  width: 1,
                 ),
               ),
             ),
             child: TextField(
               controller: _searchController,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
               decoration: InputDecoration(
-                hintText: 'Search events...',
-                prefixIcon: const Icon(Icons.search),
+                hintText: 'Search all event fields...',
+                hintStyle: TextStyle(
+                  color: ThemeColors.gray(context),
+                ),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: ThemeColors.gray(context),
+                ),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear),
+                        icon: Icon(
+                          Icons.clear,
+                          color: ThemeColors.gray(context),
+                        ),
                         onPressed: () {
                           _searchController.clear();
                           setState(() {
@@ -196,10 +387,30 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         },
                       )
                     : null,
+                filled: true,
+                fillColor: isDark
+                    ? AppColors.darkSurfaceVariant
+                    : AppColors.lightSurfaceVariant,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: Theme.of(context).dividerColor,
+                  ),
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: Theme.of(context).dividerColor,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                    width: 2,
+                  ),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
               onChanged: (value) {
                 setState(() {
@@ -213,14 +424,13 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
           // Collapsible Filter Section
           if (_showFilters)
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: isDark
-                    ? AppColors.darkSurfaceVariant
-                    : AppColors.lightSurfaceVariant,
+                color: Theme.of(context).colorScheme.surface,
                 border: Border(
                   bottom: BorderSide(
-                    color: isDark ? AppColors.darkGray : AppColors.lightGray,
+                    color: Theme.of(context).dividerColor,
+                    width: 1,
                   ),
                 ),
               ),
@@ -234,12 +444,32 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       value: _eventTypeFilter,
                       decoration: InputDecoration(
                         labelText: 'Event Type',
+                        filled: true,
+                        fillColor: isDark
+                            ? AppColors.darkSurfaceVariant
+                            : AppColors.lightSurfaceVariant,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Theme.of(context).dividerColor,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Theme.of(context).dividerColor,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            width: 2,
+                          ),
                         ),
                         contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
+                          horizontal: 16,
+                          vertical: 12,
                         ),
                       ),
                       items: const [
@@ -247,6 +477,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         DropdownMenuItem(value: 'CREATED', child: Text('Created')),
                         DropdownMenuItem(value: 'UPDATED', child: Text('Updated')),
                         DropdownMenuItem(value: 'DELETED', child: Text('Deleted')),
+                        DropdownMenuItem(value: 'UNDO', child: Text('Undo')),
                       ],
                       onChanged: (value) {
                         setState(() {
@@ -261,12 +492,32 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       value: _aggregateTypeFilter,
                       decoration: InputDecoration(
                         labelText: 'Type',
+                        filled: true,
+                        fillColor: isDark
+                            ? AppColors.darkSurfaceVariant
+                            : AppColors.lightSurfaceVariant,
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Theme.of(context).dividerColor,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Theme.of(context).dividerColor,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            width: 2,
+                          ),
                         ),
                         contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
+                          horizontal: 16,
+                          vertical: 12,
                         ),
                       ),
                       items: const [
@@ -301,14 +552,37 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       child: InputDecorator(
                         decoration: InputDecoration(
                           labelText: 'Date From',
+                          filled: true,
+                          fillColor: isDark
+                              ? AppColors.darkSurfaceVariant
+                              : AppColors.lightSurfaceVariant,
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: Theme.of(context).dividerColor,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: Theme.of(context).dividerColor,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                              width: 2,
+                            ),
                           ),
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
+                            horizontal: 16,
+                            vertical: 12,
                           ),
-                          suffixIcon: const Icon(Icons.calendar_today),
+                          suffixIcon: Icon(
+                            Icons.calendar_today,
+                            color: ThemeColors.gray(context),
+                          ),
                         ),
                         child: Text(
                           _dateFrom != null
@@ -342,14 +616,37 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       child: InputDecorator(
                         decoration: InputDecoration(
                           labelText: 'Date To',
+                          filled: true,
+                          fillColor: isDark
+                              ? AppColors.darkSurfaceVariant
+                              : AppColors.lightSurfaceVariant,
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: Theme.of(context).dividerColor,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: Theme.of(context).dividerColor,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                              width: 2,
+                            ),
                           ),
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
+                            horizontal: 16,
+                            vertical: 12,
                           ),
-                          suffixIcon: const Icon(Icons.calendar_today),
+                          suffixIcon: Icon(
+                            Icons.calendar_today,
+                            color: ThemeColors.gray(context),
+                          ),
                         ),
                         child: Text(
                           _dateTo != null
@@ -375,12 +672,32 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                             value: _eventTypeFilter,
                             decoration: InputDecoration(
                               labelText: 'Event Type',
+                              filled: true,
+                              fillColor: isDark
+                                  ? AppColors.darkSurfaceVariant
+                                  : AppColors.lightSurfaceVariant,
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Theme.of(context).dividerColor,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Theme.of(context).dividerColor,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                  width: 2,
+                                ),
                               ),
                               contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
+                                horizontal: 16,
+                                vertical: 12,
                               ),
                             ),
                             items: const [
@@ -388,6 +705,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                               DropdownMenuItem(value: 'CREATED', child: Text('Created')),
                               DropdownMenuItem(value: 'UPDATED', child: Text('Updated')),
                               DropdownMenuItem(value: 'DELETED', child: Text('Deleted')),
+                              DropdownMenuItem(value: 'UNDO', child: Text('Undo')),
                             ],
                             onChanged: (value) {
                               setState(() {
@@ -403,12 +721,32 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                             value: _aggregateTypeFilter,
                             decoration: InputDecoration(
                               labelText: 'Type',
+                              filled: true,
+                              fillColor: isDark
+                                  ? AppColors.darkSurfaceVariant
+                                  : AppColors.lightSurfaceVariant,
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Theme.of(context).dividerColor,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: Theme.of(context).dividerColor,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                  width: 2,
+                                ),
                               ),
                               contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
+                                horizontal: 16,
+                                vertical: 12,
                               ),
                             ),
                             items: const [
@@ -444,14 +782,37 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                             child: InputDecorator(
                               decoration: InputDecoration(
                                 labelText: 'Date From',
+                                filled: true,
+                                fillColor: isDark
+                                    ? AppColors.darkSurfaceVariant
+                                    : AppColors.lightSurfaceVariant,
                                 border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Theme.of(context).dividerColor,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Theme.of(context).dividerColor,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                    width: 2,
+                                  ),
                                 ),
                                 contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
+                                  horizontal: 16,
+                                  vertical: 12,
                                 ),
-                                suffixIcon: const Icon(Icons.calendar_today),
+                                suffixIcon: Icon(
+                                  Icons.calendar_today,
+                                  color: ThemeColors.gray(context),
+                                ),
                               ),
                               child: Text(
                                 _dateFrom != null
@@ -486,14 +847,37 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                             child: InputDecorator(
                               decoration: InputDecoration(
                                 labelText: 'Date To',
+                                filled: true,
+                                fillColor: isDark
+                                    ? AppColors.darkSurfaceVariant
+                                    : AppColors.lightSurfaceVariant,
                                 border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Theme.of(context).dividerColor,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Theme.of(context).dividerColor,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                    width: 2,
+                                  ),
                                 ),
                                 contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
+                                  horizontal: 16,
+                                  vertical: 12,
                                 ),
-                                suffixIcon: const Icon(Icons.calendar_today),
+                                suffixIcon: Icon(
+                                  Icons.calendar_today,
+                                  color: ThemeColors.gray(context),
+                                ),
                               ),
                               child: Text(
                                 _dateTo != null
@@ -520,6 +904,14 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         onPressed: _applyFilters,
                         icon: const Icon(Icons.filter_list),
                         label: const Text('Apply Filters'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                          foregroundColor: isDark ? AppColors.darkOnPrimary : AppColors.lightOnPrimary,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -529,6 +921,16 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         onPressed: _clearFilters,
                         icon: const Icon(Icons.clear),
                         label: const Text('Clear Filters'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                          side: BorderSide(
+                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
                     ),
                   ] else ...[
@@ -538,12 +940,30 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                           onPressed: _applyFilters,
                           icon: const Icon(Icons.filter_list),
                           label: const Text('Apply'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            foregroundColor: isDark ? AppColors.darkOnPrimary : AppColors.lightOnPrimary,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         OutlinedButton.icon(
                           onPressed: _clearFilters,
                           icon: const Icon(Icons.clear),
                           label: const Text('Clear'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            side: BorderSide(
+                              color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -632,27 +1052,25 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                     IconButton(
                       icon: const Icon(Icons.chevron_left),
                       onPressed: _currentPage > 0
-                          ? () {
-                              setState(() {
-                                _currentPage--;
-                              });
-                            }
+                          ? () => _goToPage(_currentPage - 1)
                           : null,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
+                      color: _currentPage > 0
+                          ? (isDark ? AppColors.darkPrimary : AppColors.lightPrimary)
+                          : ThemeColors.gray(context),
                     ),
                     const SizedBox(width: 8),
                     IconButton(
                       icon: const Icon(Icons.chevron_right),
                       onPressed: _currentPage < _totalPages - 1
-                          ? () {
-                              setState(() {
-                                _currentPage++;
-                              });
-                            }
+                          ? () => _goToPage(_currentPage + 1)
                           : null,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
+                      color: _currentPage < _totalPages - 1
+                          ? (isDark ? AppColors.darkPrimary : AppColors.lightPrimary)
+                          : ThemeColors.gray(context),
                     ),
                   ],
                 ),
@@ -683,13 +1101,19 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         ),
                       )
                     : ListView.builder(
+                        controller: _scrollController,
                         itemCount: _paginatedEvents.length,
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         itemBuilder: (context, index) {
                           final event = _paginatedEvents[index];
-                          return _EventCard(
+                          return _EventTableRow(
+                            key: ValueKey('${event.id}_${_contactNameCache.length}_${_undoneEventsCache.length}'),
                             event: event,
                             dateFormat: dateFormat,
+                            allEvents: _allEvents,
+                            contactNameCache: _contactNameCache,
+                            undoneEventsCache: _undoneEventsCache,
+                            isMobile: isMobile,
                           );
                         },
                       ),
@@ -700,446 +1124,815 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   }
 }
 
-class _EventCard extends StatefulWidget {
+class _EventTableRow extends StatefulWidget {
   final Event event;
   final DateFormat dateFormat;
+  final List<Event> allEvents;
+  final Map<String, String> contactNameCache;
+  final Map<String, Event> undoneEventsCache;
+  final bool isMobile;
 
-  const _EventCard({
+  const _EventTableRow({
+    super.key,
     required this.event,
     required this.dateFormat,
+    required this.allEvents,
+    required this.contactNameCache,
+    required this.undoneEventsCache,
+    required this.isMobile,
   });
 
   @override
-  State<_EventCard> createState() => _EventCardState();
+  State<_EventTableRow> createState() => _EventTableRowState();
 }
 
-class _EventCardState extends State<_EventCard> {
+class _EventTableRowState extends State<_EventTableRow> {
   String? _contactName;
+  String? _contactUsername;
+  AmountDisplay? _amount;
   int? _totalDebt;
-  bool _loadingTotalDebt = false;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadContactInfo();
-    _loadTotalDebt();
+    _loadData();
   }
 
-  Future<void> _loadContactInfo() async {
-    final eventData = widget.event.eventData;
-    final contactId = eventData['contact_id'] as String?;
-    
-    if (contactId != null) {
-      // For transactions, look up contact name
-      try {
-        final contact = await LocalDatabaseServiceV2.getContact(contactId);
-        if (contact != null && mounted) {
-          setState(() {
-            _contactName = contact.name;
-          });
-        }
-      } catch (e) {
-        print('Error loading contact: $e');
-      }
-    } else if (widget.event.aggregateType == 'contact') {
-      // For contact events, use name from event data
-      final name = eventData['name'] as String?;
-      if (name != null && mounted) {
-        setState(() {
-          _contactName = name;
-        });
-      }
+  @override
+  void didUpdateWidget(_EventTableRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Reload data if event changed or caches were updated
+    if (oldWidget.event.id != widget.event.id ||
+        oldWidget.contactNameCache.length != widget.contactNameCache.length ||
+        oldWidget.undoneEventsCache.length != widget.undoneEventsCache.length) {
+      _loadData();
     }
   }
 
-  Future<void> _loadTotalDebt() async {
-    // First check if total_debt is already in event data (from server)
+  Future<void> _loadData() async {
     final eventData = widget.event.eventData;
+    
+    // Load contact name using standardized formatter
+    final contactName = await EventFormatter.getContactName(
+      widget.event,
+      widget.contactNameCache,
+      widget.undoneEventsCache,
+      widget.allEvents,
+    );
+    
+    // Load contact username using standardized formatter
+    final contactUsername = await EventFormatter.getContactUsername(
+      widget.event,
+      widget.contactNameCache,
+      widget.undoneEventsCache,
+      widget.allEvents,
+    );
+    
+    // Load amount
+    final amount = await EventFormatter.getAmount(
+      widget.event,
+      widget.undoneEventsCache,
+      widget.allEvents,
+    );
+    
+    // Load total debt
     final totalDebtFromEvent = eventData['total_debt'];
-    
+    int? totalDebt;
     if (totalDebtFromEvent != null) {
-      // Use total_debt from event data (calculated on server after the action)
-      if (mounted) {
-        setState(() {
-          _totalDebt = (totalDebtFromEvent as num?)?.toInt();
-          _loadingTotalDebt = false;
-        });
-      }
-      return;
-    }
-    
-    // Fallback: Calculate total debt at the time of this event (for local events)
-    setState(() {
-      _loadingTotalDebt = true;
-    });
-    
-    try {
-      // Calculate total debt at the time of this event (includes this event)
-      final totalDebt = await StateBuilder.calculateTotalDebtAtTime(widget.event.timestamp);
-      if (mounted) {
-        setState(() {
-          _totalDebt = totalDebt;
-          _loadingTotalDebt = false;
-        });
-      }
-    } catch (e) {
-      print('Error calculating total debt: $e');
-      // Fallback: Calculate current total debt if time-based calculation fails
+      totalDebt = (totalDebtFromEvent as num?)?.toInt();
+    } else {
+      // Fallback: Calculate total debt at the time of this event
       try {
-        final contacts = await LocalDatabaseServiceV2.getContacts();
-        final transactions = await LocalDatabaseServiceV2.getTransactions();
-        int calculatedTotalDebt = 0;
-        for (final contact in contacts) {
-          calculatedTotalDebt += contact.balance;
-        }
-        if (mounted) {
-          setState(() {
-            _totalDebt = calculatedTotalDebt;
-            _loadingTotalDebt = false;
-          });
-        }
-      } catch (e2) {
-        print('Error calculating fallback total debt: $e2');
-        if (mounted) {
-          setState(() {
-            _totalDebt = 0; // Show 0 as last resort
-            _loadingTotalDebt = false;
-          });
-        }
+        totalDebt = await StateBuilder.calculateTotalDebtAtTime(widget.event.timestamp);
+      } catch (e) {
+        print('Error calculating total debt: $e');
+        totalDebt = 0;
       }
     }
-  }
-
-  Color _getEventColor(String eventType, bool isDark) {
-    switch (eventType) {
-      case 'CREATED':
-        return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
-      case 'UPDATED':
-        return isDark ? AppColors.darkWarning : AppColors.lightWarning;
-      case 'DELETED':
-        return isDark ? AppColors.darkError : AppColors.lightError;
-      default:
-        return isDark ? AppColors.darkGray : AppColors.lightGray;
+    
+    if (mounted) {
+      setState(() {
+        _contactName = contactName;
+        _contactUsername = contactUsername;
+        _amount = amount;
+        _totalDebt = totalDebt;
+        _loading = false;
+      });
     }
   }
 
-  String _formatEventType(String eventType) {
-    return eventType
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map((word) => word[0].toUpperCase() + word.substring(1).toLowerCase())
-        .join(' ');
+  Color _getEventBadgeColor(String eventType, bool isDark) {
+    final eventTypeUpper = eventType.toUpperCase();
+    if (eventTypeUpper.contains('CREATED') || eventTypeUpper.contains('CREATE')) {
+      return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
+    } else if (eventTypeUpper.contains('UPDATED') || eventTypeUpper.contains('UPDATE') || 
+               eventTypeUpper == 'UNDO') {
+      return isDark ? AppColors.darkWarning : AppColors.lightWarning;
+    } else if (eventTypeUpper.contains('DELETED') || eventTypeUpper.contains('DELETE')) {
+      return isDark ? AppColors.darkWarning : AppColors.lightWarning; // Same as UPDATE
+    }
+    return isDark ? AppColors.darkGray : AppColors.lightGray;
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final event = widget.event;
-    final eventData = event.eventData;
-    final comment = eventData['comment'] as String? ?? 'No comment';
-    final amount = eventData['amount'];
-    final direction = eventData['direction'] as String?;
-    final currency = eventData['currency'] as String? ?? 'IQD';
-    final username = eventData['username'] as String?;
     
-    // Determine contact name
-    String? contactName = _contactName;
-    if (contactName == null && event.aggregateType == 'contact') {
-      contactName = eventData['name'] as String?;
-    }
-    
-    // Build summary based on event type
-    String summary = '';
-    if (event.aggregateType == 'transaction') {
-      if (amount != null && direction != null) {
-        final amountFormatted = NumberFormat('#,###').format(amount);
-        final directionText = direction == 'lent' ? 'Lent' : 'Owed';
-        summary = '$directionText $amountFormatted $currency';
-      }
-    } else if (event.aggregateType == 'contact') {
-      final name = eventData['name'] as String? ?? 'Unknown';
-      final user = username ?? 'N/A';
-      summary = '$name (User: $user)';
-    }
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        leading: Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: _getEventColor(event.eventType, isDark).withOpacity(0.2),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Center(
-            child: Text(
-              event.eventType[0],
-              style: TextStyle(
-                color: _getEventColor(event.eventType, isDark),
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _formatEventType(event.eventType),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? AppColors.darkSurfaceVariant
-                        : AppColors.lightSurfaceVariant,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    event.aggregateType.toUpperCase(),
-                    style: const TextStyle(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Text(
-              widget.dateFormat.format(event.timestamp),
-              style: TextStyle(
-                fontSize: 10,
-                color: ThemeColors.gray(context),
-              ),
-            ),
-          ],
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Contact name
-              if (contactName != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.person,
-                        size: 12,
-                        color: ThemeColors.gray(context),
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          contactName,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: ThemeColors.gray(context),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              // Summary
-              if (summary.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    summary,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              // Total Debt stamp - always show
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? AppColors.darkPrimary.withOpacity(0.2)
-                      : AppColors.lightPrimary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color: isDark
-                        ? AppColors.darkPrimary
-                        : AppColors.lightPrimary,
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.account_balance_wallet,
-                      size: 10,
-                      color: isDark
-                          ? AppColors.darkPrimary
-                          : AppColors.lightPrimary,
-                    ),
-                    const SizedBox(width: 3),
-                    _loadingTotalDebt
-                        ? SizedBox(
-                            width: 10,
-                            height: 10,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 1.5,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                isDark
-                                    ? AppColors.darkPrimary
-                                    : AppColors.lightPrimary,
-                              ),
-                            ),
-                          )
-                        : Text(
-                            '${NumberFormat('#,###').format(_totalDebt ?? 0)} IQD',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w600,
-                              color: isDark
-                                  ? AppColors.darkPrimary
-                                  : AppColors.lightPrimary,
-                            ),
-                          ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 4),
-              // Sync status
-              Row(
-                children: [
-                  Icon(
-                    event.synced ? Icons.cloud_done : Icons.cloud_off,
-                    size: 14,
-                    color: event.synced
-                        ? AppColors.darkSuccess
-                        : AppColors.darkWarning,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    event.synced ? 'Synced' : 'Pending',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: ThemeColors.gray(context),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        children: [
-          Padding(
+    if (widget.isMobile) {
+      // Mobile: Card-like row with all columns stacked
+      return Card(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: InkWell(
+          onTap: () {
+            // Show event details modal
+            _showEventDetails(context);
+          },
+          child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Comment (highlighted)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? AppColors.darkPrimary.withOpacity(0.2)
-                        : AppColors.lightPrimary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isDark
-                          ? AppColors.darkPrimary
-                          : AppColors.lightPrimary,
-                      width: 2,
-                    ),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.comment,
-                        size: 18,
-                        color: isDark
-                            ? AppColors.darkPrimary
-                            : AppColors.lightPrimary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          comment,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w500,
-                            fontSize: 13,
-                          ),
+                // When and Event Type
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.dateFormat.format(widget.event.timestamp),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: ThemeColors.gray(context),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // Summary Info
-                if (contactName != null)
-                  _InfoRow(label: 'Contact', value: contactName),
-                if (summary.isNotEmpty)
-                  _InfoRow(label: 'Summary', value: summary),
-                if (amount != null && event.aggregateType == 'transaction')
-                  _InfoRow(
-                    label: 'Amount',
-                    value: '${NumberFormat('#,###').format(amount)} $currency',
-                  ),
-                if (direction != null && event.aggregateType == 'transaction')
-                  _InfoRow(
-                    label: 'Direction',
-                    value: direction == 'lent' ? 'Lent' : 'Owed',
-                  ),
-                if (username != null && event.aggregateType == 'contact')
-                  _InfoRow(label: 'Username', value: username),
-                const SizedBox(height: 12),
-                // Full Data
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  title: const Text('View Full Data', style: TextStyle(fontSize: 13)),
-                  children: [
+                    ),
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? AppColors.darkSurfaceVariant
-                            : AppColors.lightSurfaceVariant,
-                        borderRadius: BorderRadius.circular(8),
+                        color: _getEventBadgeColor(widget.event.eventType, isDark).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(4),
                       ),
-                      child: SelectableText(
-                        const JsonEncoder.withIndent('  ').convert(event.eventData),
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
+                      child: Text(
+                        EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
+                        style: TextStyle(
                           fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _getEventBadgeColor(widget.event.eventType, isDark),
                         ),
                       ),
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                // Contact Name with Username tag
+                if (_contactName != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Name:',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: ThemeColors.gray(context),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              if (_contactUsername != null)
+                                Container(
+                                  margin: const EdgeInsets.only(right: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? AppColors.darkPrimary.withOpacity(0.3) // Light purple with opacity for dark mode
+                                        : const Color(0xFFE8E0EC), // Light purple background for light mode
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: isDark
+                                        ? Border.all(
+                                            color: AppColors.darkPrimary.withOpacity(0.5),
+                                            width: 1,
+                                          )
+                                        : null,
+                                  ),
+                                  child: Text(
+                                    '@$_contactUsername',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w500,
+                                      color: isDark
+                                          ? AppColors.darkPrimary // Light purple text for dark mode
+                                          : AppColors.lightPrimary, // Dark purple text for light mode
+                                    ),
+                                  ),
+                                ),
+                              Expanded(
+                                child: Text(
+                                  _contactName!,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                // Amount
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Transaction Amount:',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: ThemeColors.gray(context),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _amount != null
+                            ? Text(
+                                '${_amount!.sign} ${NumberFormat('#,###').format(_amount!.amount)} IQD',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: _amount!.isPositive 
+                                      ? AppColors.darkSuccess 
+                                      : AppColors.darkError,
+                                ),
+                              )
+                            : (!_loading
+                                ? const Text(
+                                    '-',
+                                    style: TextStyle(fontSize: 13),
+                                  )
+                                : const SizedBox.shrink()),
+                      ),
+                    ],
+                  ),
+                ),
+                // Total Debt
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'New Total Balance:',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: ThemeColors.gray(context),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _totalDebt != null
+                            ? Text(
+                                '${NumberFormat('#,###').format(_totalDebt)} IQD',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                ),
+                              )
+                            : (!_loading
+                                ? const Text(
+                                    'N/A',
+                                    style: TextStyle(fontSize: 13),
+                                  )
+                                : const SizedBox.shrink()),
+                      ),
+                    ],
+                  ),
+                ),
+                // Comment
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Comment:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: ThemeColors.gray(context),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.event.eventData['comment'] as String? ?? '-',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: ThemeColors.gray(context),
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ],
+            ),
+          ),
+        ),
+      );
+    } else {
+      // Desktop: Table-like card row
+      return Card(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: InkWell(
+          onTap: () => _showEventDetails(context),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                // When
+                SizedBox(
+                  width: 150,
+                  child: Text(
+                    widget.dateFormat.format(widget.event.timestamp),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                // Event Type
+                SizedBox(
+                  width: 150,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _getEventBadgeColor(widget.event.eventType, isDark).withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _getEventBadgeColor(widget.event.eventType, isDark),
+                      ),
+                    ),
+                  ),
+                ),
+                // Contact Name with Username tag
+                Expanded(
+                  flex: 2,
+                  child: _loading 
+                      ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Row(
+                          children: [
+                            if (_contactUsername != null)
+                              Container(
+                                margin: const EdgeInsets.only(right: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? AppColors.darkPrimary.withOpacity(0.3) // Light purple with opacity for dark mode
+                                      : const Color(0xFFE8E0EC), // Light purple background for light mode
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: isDark
+                                      ? Border.all(
+                                          color: AppColors.darkPrimary.withOpacity(0.5),
+                                          width: 1,
+                                        )
+                                      : null,
+                                ),
+                                child: Text(
+                                  '@$_contactUsername',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                    color: isDark
+                                        ? AppColors.darkPrimary // Light purple text for dark mode
+                                        : AppColors.lightPrimary, // Dark purple text for light mode
+                                  ),
+                                ),
+                              ),
+                            Expanded(
+                              child: Text(
+                                _contactName ?? 'N/A',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                // Amount
+                SizedBox(
+                  width: 120,
+                  child: _loading
+                      ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                      : _amount != null
+                          ? Text(
+                              '${_amount!.sign} ${NumberFormat('#,###').format(_amount!.amount)} IQD',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _amount!.isPositive 
+                                    ? AppColors.darkSuccess 
+                                    : AppColors.darkError,
+                              ),
+                            )
+                          : const Text('-', style: TextStyle(fontSize: 12)),
+                ),
+                // Debt
+                SizedBox(
+                  width: 120,
+                  child: _loading
+                      ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                      : _totalDebt != null
+                          ? Text(
+                              '${NumberFormat('#,###').format(_totalDebt)} IQD',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                              ),
+                            )
+                          : const Text('N/A', style: TextStyle(fontSize: 12)),
+                ),
+                // Comment
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    widget.event.eventData['comment'] as String? ?? '-',
+                    style: const TextStyle(fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                // Details
+                SizedBox(
+                  width: 60,
+                  child: IconButton(
+                    icon: const Icon(Icons.visibility, size: 18),
+                    onPressed: () => _showEventDetails(context),
+                    tooltip: 'View Details',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  void _showEventDetails(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => _EventDetailsDialog(
+        event: widget.event,
+        dateFormat: widget.dateFormat,
+        contactName: _contactName,
+        contactUsername: _contactUsername,
+        amount: _amount,
+        totalDebt: _totalDebt,
+        undoneEventsCache: widget.undoneEventsCache,
+      ),
+    );
+  }
+}
+
+// Old _EventCard class removed - replaced with _EventTableRow
+
+class _EventDetailsDialog extends StatefulWidget {
+  final Event event;
+  final DateFormat dateFormat;
+  final String? contactName;
+  final String? contactUsername;
+  final AmountDisplay? amount;
+  final int? totalDebt;
+  final Map<String, Event>? undoneEventsCache;
+
+  const _EventDetailsDialog({
+    required this.event,
+    required this.dateFormat,
+    this.contactName,
+    this.contactUsername,
+    this.amount,
+    this.totalDebt,
+    this.undoneEventsCache,
+  });
+
+  @override
+  State<_EventDetailsDialog> createState() => _EventDetailsDialogState();
+}
+
+class _EventDetailsDialogState extends State<_EventDetailsDialog> {
+  bool _showJson = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final eventData = widget.event.eventData;
+    
+    return Dialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? AppColors.darkOnSurface : AppColors.lightOnSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.dateFormat.format(widget.event.timestamp),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: ThemeColors.gray(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                    tooltip: 'Close',
+                  ),
+                ],
+              ),
+            ),
+            // Content
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Contact Information
+                    if (widget.contactName != null)
+                      _DetailSection(
+                        title: 'Contact',
+                        child: Row(
+                          children: [
+                            if (widget.contactUsername != null)
+                              Container(
+                                margin: const EdgeInsets.only(right: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? AppColors.darkPrimary.withOpacity(0.3)
+                                      : const Color(0xFFE8E0EC),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: isDark
+                                      ? Border.all(
+                                          color: AppColors.darkPrimary.withOpacity(0.5),
+                                          width: 1,
+                                        )
+                                      : null,
+                                ),
+                                child: Text(
+                                  '@${widget.contactUsername}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                  ),
+                                ),
+                              ),
+                            Expanded(
+                              child: Text(
+                                widget.contactName!,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    
+                    // Transaction Amount
+                    if (widget.amount != null)
+                      _DetailSection(
+                        title: 'Transaction Amount',
+                        child: Text(
+                          '${widget.amount!.sign} ${NumberFormat('#,###').format(widget.amount!.amount)} IQD',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: widget.amount!.isPositive 
+                                ? AppColors.darkSuccess 
+                                : AppColors.darkError,
+                          ),
+                        ),
+                      ),
+                    
+                    // Total Balance
+                    if (widget.totalDebt != null)
+                      _DetailSection(
+                        title: 'New Total Balance',
+                        child: Text(
+                          '${NumberFormat('#,###').format(widget.totalDebt)} IQD',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                          ),
+                        ),
+                      ),
+                    
+                    // Event Details
+                    _DetailSection(
+                      title: 'Event Details',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _DetailRow(label: 'Event Type', value: widget.event.eventType),
+                          _DetailRow(label: 'Aggregate Type', value: widget.event.aggregateType),
+                          _DetailRow(label: 'Event ID', value: widget.event.id),
+                          if (widget.event.aggregateId.isNotEmpty)
+                            _DetailRow(label: 'Aggregate ID', value: widget.event.aggregateId),
+                        ],
+                      ),
+                    ),
+                    
+                    // Comment
+                    if (eventData['comment'] != null && (eventData['comment'] as String).isNotEmpty)
+                      _DetailSection(
+                        title: 'Comment',
+                        child: Text(
+                          eventData['comment'] as String,
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // JSON Toggle
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          _showJson = !_showJson;
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isDark ? AppColors.darkGray : AppColors.lightGray,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _showJson ? Icons.expand_less : Icons.expand_more,
+                              size: 20,
+                              color: ThemeColors.gray(context),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Full Event Data (JSON)',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: ThemeColors.gray(context),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    
+                    // JSON Content (collapsible)
+                    if (_showJson)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: SelectableText(
+                            const JsonEncoder.withIndent('  ').convert(widget.event.eventData),
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              color: isDark ? AppColors.darkOnSurface : AppColors.lightOnSurface,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DetailSection extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _DetailSection({
+    required this.title,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: ThemeColors.gray(context),
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DetailRow({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              '$label:',
+              style: TextStyle(
+                fontSize: 12,
+                color: ThemeColors.gray(context),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],

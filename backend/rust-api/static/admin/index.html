@@ -495,6 +495,24 @@
             color: #E6E1E5;
         }
 
+        /* Username tag styling */
+        .username-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            background-color: #E8E0EC;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 500;
+            color: #6750A4;
+            margin-right: 6px;
+        }
+
+        body.dark-mode .username-tag {
+            background-color: rgba(208, 188, 255, 0.3); /* Light purple with opacity for better visibility */
+            color: #D0BCFF; /* Light purple text - Material 3 dark primary light */
+            border: 1px solid rgba(208, 188, 255, 0.5); /* Subtle border for definition */
+        }
+
         .chart-container {
             background: #FFFBFE;
             border-radius: 8px;
@@ -1184,8 +1202,8 @@
                                                     txLine += event.event_type;
                                                 }
                                                 
-                                                if (contactNameCache[eventData.contact_id]) {
-                                                    txLine += ` • ${contactNameCache[eventData.contact_id]}`;
+                                                const contactData = contactCache[eventData.contact_id]; if (contactData) {
+                                                    txLine += ` • ${contactData?.name || "Unknown"}`;
                                                 }
                                                 
                                                 lines.push(txLine);
@@ -1460,12 +1478,12 @@
                     if (event.aggregate_type === 'contact') {
                         const name = eventData.name;
                         if (name && event.aggregate_id) {
-                            contactNameCache[event.aggregate_id] = name;
+                            contactCache[event.aggregate_id] = { name: name || null, username: null };
                         }
                         // For DELETE events, also cache deleted contact name using aggregate_id
                         if (eventData.deleted_contact && typeof eventData.deleted_contact === 'object' && 
                             eventData.deleted_contact !== null && eventData.deleted_contact.name && event.aggregate_id) {
-                            contactNameCache[event.aggregate_id] = eventData.deleted_contact.name;
+                            contactCache[event.aggregate_id] = { name: eventData.deleted_contact.name || null, username: eventData.deleted_contact.username || null };
                         } else if ((event.event_type === 'CONTACT_DELETED' || event.event_type.includes('DELETE')) && event.aggregate_id) {
                             // Track deleted contact IDs to look up from other events
                             deletedContactIds.add(event.aggregate_id);
@@ -1483,7 +1501,7 @@
                     if (event.event_type === 'CONTACT_DELETED' || event.event_type === 'TRANSACTION_DELETED') {
                         if (eventData.deleted_contact && typeof eventData.deleted_contact === 'object' && 
                             eventData.deleted_contact !== null && eventData.deleted_contact.name && event.aggregate_id) {
-                            contactNameCache[event.aggregate_id] = eventData.deleted_contact.name;
+                            contactCache[event.aggregate_id] = { name: eventData.deleted_contact.name || null, username: eventData.deleted_contact.username || null };
                         } else if (event.event_type === 'CONTACT_DELETED' && event.aggregate_id) {
                             deletedContactIds.add(event.aggregate_id);
                         }
@@ -1508,13 +1526,13 @@
                             deletedContactIds.has(event.aggregate_id)) {
                             const name = event.event_data?.name;
                             if (name) {
-                                contactNameCache[event.aggregate_id] = name;
+                                contactCache[event.aggregate_id] = { name: name || null, username: null };
                             }
                         }
                     });
                 }
                 
-                // Fetch missing contact names from contacts endpoint
+                // Fetch missing contact data from contacts endpoint
                 if (contactIds.size > 0) {
                     try {
                         const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
@@ -1522,7 +1540,10 @@
                             const contacts = await contactsResponse.json();
                             contacts.forEach(contact => {
                                 if (contactIds.has(contact.id)) {
-                                    contactNameCache[contact.id] = contact.name;
+                                    contactCache[contact.id] = {
+                                        name: contact.name || null,
+                                        username: contact.username || null
+                                    };
                                 }
                             });
                         }
@@ -1552,7 +1573,7 @@
                                     if (evt.aggregate_type === 'contact' && evt.aggregate_id && 
                                         deletedContactIds.has(evt.aggregate_id) && 
                                         evt.event_data?.name) {
-                                        contactNameCache[evt.aggregate_id] = evt.event_data.name;
+                                        contactCache[evt.aggregate_id] = { name: evt.event_data.name || null, username: evt.event_data.username || null };
                                     }
                                 });
                             }
@@ -1575,11 +1596,11 @@
                                     const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
                                     if (contactsResponse.ok) {
                                         const contacts = await contactsResponse.json();
-                                        contacts.forEach(contact => {
-                                            if (contactIds.has(contact.id)) {
-                                                contactNameCache[contact.id] = contact.name;
-                                            }
-                                        });
+                            contacts.forEach(contact => {
+                                if (contactIds.has(contact.id)) {
+                                    contactCache[contact.id] = { name: contact.name || null, username: contact.username || null };
+                                }
+                            });
                                     }
                                 }
                             }
@@ -1605,7 +1626,7 @@
                                     if (evt.aggregate_type === 'contact' && evt.aggregate_id) {
                                         const name = evt.event_data?.name;
                                         if (name) {
-                                            contactNameCache[evt.aggregate_id] = name;
+                                            contactCache[evt.aggregate_id] = name;
                                         } else {
                                             // If no name in event_data (DELETED event), we need to find CREATED event
                                             deletedContactIds.add(evt.aggregate_id);
@@ -1632,11 +1653,11 @@
                                 const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
                                 if (contactsResponse.ok) {
                                     const contacts = await contactsResponse.json();
-                                    contacts.forEach(contact => {
-                                        if (contactIds.has(contact.id)) {
-                                            contactNameCache[contact.id] = contact.name;
-                                        }
-                                    });
+                            contacts.forEach(contact => {
+                                if (contactIds.has(contact.id)) {
+                                    contactCache[contact.id] = { name: contact.name || null, username: contact.username || null };
+                                }
+                            });
                                 }
                             }
                             
@@ -1649,7 +1670,7 @@
                                         if (evt.aggregate_type === 'contact' && evt.aggregate_id && 
                                             deletedContactIds.has(evt.aggregate_id) && 
                                             evt.event_data?.name) {
-                                            contactNameCache[evt.aggregate_id] = evt.event_data.name;
+                                            contactCache[evt.aggregate_id] = { name: evt.event_data.name || null, username: evt.event_data.username || null };
                                         }
                                     });
                                 }
@@ -1705,14 +1726,14 @@
         }
         
         // Extract event rendering to separate function for reuse
-        // Cache for contact names (to avoid repeated lookups)
-        let contactNameCache = {};
+        // Cache for contact data (name and username) - keyed by contact ID
+        let contactCache = {}; // { contactId: { name: string, username: string|null } }
         // Cache for undone events (to show what was undone)
         let undoneEventsCache = {};
         
         async function getContactName(contactId) {
             if (!contactId) return null;
-            if (contactNameCache[contactId]) return contactNameCache[contactId];
+            if (contactCache[contactId]) return contactCache[contactId];
             
             try {
                 const response = await fetch(`${API_URL}/admin/contacts`);
@@ -1720,7 +1741,7 @@
                     const contacts = await response.json();
                     const contact = contacts.find(c => c.id === contactId);
                     if (contact) {
-                        contactNameCache[contactId] = contact.name;
+                        contactCache[contactId] = contact.name;
                         return contact.name;
                     }
                 }
@@ -1737,7 +1758,7 @@
             
             const eventData = event.event_data || {};
             const contactId = eventData.contact_id || null;
-            const contactName = contactId ? (contactNameCache[contactId] || 'Unknown') : null;
+            const contactName = contactId ? (contactCache[contactId] || 'Unknown') : null;
             
             let html = '';
             
@@ -1761,7 +1782,7 @@
                         html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Contact</div><div class="event-modal-field-value">' + escapeHtml(undoneName) + '</div></div>';
                     } else if (undoneEvent.aggregate_type === 'transaction') {
                         const undoneContactId = undoneEvent.event_data?.contact_id;
-                        const undoneContactName = undoneContactId ? (contactNameCache[undoneContactId] || 'Unknown Contact') : 'Unknown Contact';
+                        const undoneContactName = undoneContactId ? (contactCache[undoneContactId] || 'Unknown Contact') : 'Unknown Contact';
                         html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Transaction Contact</div><div class="event-modal-field-value">' + escapeHtml(undoneContactName) + '</div></div>';
                         html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Transaction Amount</div><div class="event-modal-field-value">' + (undoneEvent.event_data?.amount ? (undoneEvent.event_data.amount.toLocaleString('en-US') + ' ' + (undoneEvent.event_data.currency || 'IQD')) : 'N/A') + '</div></div>';
                         html += '<div class="event-modal-field"><div class="event-modal-field-label">Undone Transaction Direction</div><div class="event-modal-field-value">' + escapeHtml(undoneEvent.event_data?.direction || 'N/A') + '</div></div>';
@@ -1783,7 +1804,7 @@
                     html += '<div class="event-modal-field"><div class="event-modal-field-label" style="color: #BA1A1A; font-weight: 700;">Deleted Transaction</div></div>';
                     const deletedTx = eventData.deleted_transaction;
                     const deletedContactId = deletedTx.contact_id;
-                    const deletedContactName = deletedContactId ? (contactNameCache[deletedContactId] || 'Unknown Contact') : 'Unknown Contact';
+                    const deletedContactName = deletedContactId ? (contactCache[deletedContactId] || 'Unknown Contact') : 'Unknown Contact';
                     html += '<div class="event-modal-field"><div class="event-modal-field-label">Contact</div><div class="event-modal-field-value">' + escapeHtml(deletedContactName) + '</div></div>';
                     html += '<div class="event-modal-field"><div class="event-modal-field-label">Type</div><div class="event-modal-field-value">' + escapeHtml(deletedTx.type || 'N/A') + '</div></div>';
                     html += '<div class="event-modal-field"><div class="event-modal-field-label">Direction</div><div class="event-modal-field-value">' + escapeHtml(deletedTx.direction || 'N/A') + '</div></div>';
@@ -1949,6 +1970,18 @@
                     
                     // Determine contact name - show name instead of ID
                     let contactName = null;
+                    let contactUsername = null; // Username of the contact (not the event user)
+                    
+                    // Helper function to get contact data from cache
+                    const getContactData = (contactId) => {
+                        if (!contactId) return null;
+                        const cached = contactCache[contactId];
+                        // Handle both old format (string) and new format (object)
+                        if (typeof cached === 'string') {
+                            return { name: cached, username: null };
+                        }
+                        return cached || null;
+                    };
                     
                     // For UNDO events, show what was undone (check this first)
                     if (event.event_type === 'UNDO' || event.event_type.toUpperCase() === 'UNDO') {
@@ -1960,9 +1993,10 @@
                             if (undoneEvent.aggregate_type === 'contact') {
                                 // Get contact name from CREATED event using aggregate_id
                                 const undoneContactId = undoneEvent.aggregate_id;
-                                const undoneName = contactNameCache[undoneContactId];
-                                if (undoneName) {
-                                    contactName = `Undone: ${undoneName}`;
+                                const contactData = getContactData(undoneContactId);
+                                const undoneName = contactData?.name;
+                                if (contactData && undoneName) {
+                                    contactName = `Undone: ${undoneName}`; contactUsername = contactData?.username || null;
                                 } else {
                                     // Try to find CREATED event in current batch
                                     const createdEvent = events.find(e => 
@@ -1972,10 +2006,24 @@
                                     );
                                     if (createdEvent && createdEvent.event_data?.name) {
                                         contactName = `Undone: ${createdEvent.event_data.name}`;
-                                        contactNameCache[undoneContactId] = createdEvent.event_data.name;
+                                        contactCache[undoneContactId] = createdEvent.event_data.name;
+                                        if (createdEvent.event_data?.username) {
+                                            contactUsername = createdEvent.event_data.username;
+                                            // Update cache with both name and username
+                                            const existing = contactCache[undoneContactId] || {};
+                                            contactCache[undoneContactId] = {
+                                                name: existing.name || createdEvent.event_data.name || null,
+                                                username: createdEvent.event_data.username
+                                            };
+                                        }
                                     } else {
                                         contactName = `Undone: ${undoneContactId.substring(0, 8)}...`;
                                     }
+                                }
+                                // Get username from cache or undone event
+                                if (!contactUsername) {
+                                    const cached = contactCache[undoneEvent.aggregate_id];
+                                    contactUsername = cached?.username || undoneEvent.event_data?.username || null;
                                 }
                             } else if (undoneEvent.aggregate_type === 'transaction') {
                                 // For undone transaction, get contact from the transaction's CREATED event
@@ -1992,7 +2040,8 @@
                                     undoneContactId = createdTxEvent.event_data.contact_id;
                                 }
                                 
-                                const undoneContactName = undoneContactId ? (contactNameCache[undoneContactId] || 'Unknown Contact') : 'Unknown Contact';
+                                const contactData = undoneContactId ? getContactData(undoneContactId) : null;
+                                const undoneContactName = contactData?.name || 'Unknown Contact';
                                 const undoneAmount = undoneEvent.event_data?.amount;
                                 const undoneDirection = undoneEvent.event_data?.direction;
                                 if (undoneAmount !== null && undoneAmount !== undefined) {
@@ -2001,33 +2050,17 @@
                                 } else {
                                     contactName = `Undone: ${undoneContactName}`;
                                 }
+                                contactUsername = contactData?.username || null;
                             } else {
                                 contactName = 'Undone Event';
                             }
                         } else if (event.aggregate_id) {
-                            // Fallback: try to get from aggregate_id (which is the contact/transaction ID)
-                            const name = contactNameCache[event.aggregate_id];
-                            if (name) {
-                                contactName = `Undone: ${name}`;
+                            const contactData = getContactData(event.aggregate_id);
+                            if (contactData && contactData.name) {
+                                contactName = `Undone: ${contactData.name}`;
+                                contactUsername = contactData.username || null;
                             } else {
-                                // Try to find CREATED event in current batch
-                                const createdEvent = events.find(e => 
-                                    e.aggregate_id === event.aggregate_id &&
-                                    (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
-                                );
-                                if (createdEvent) {
-                                    if (createdEvent.aggregate_type === 'contact' && createdEvent.event_data?.name) {
-                                        contactName = `Undone: ${createdEvent.event_data.name}`;
-                                    } else if (createdEvent.aggregate_type === 'transaction' && createdEvent.event_data?.contact_id) {
-                                        const txContactId = createdEvent.event_data.contact_id;
-                                        const txContactName = contactNameCache[txContactId] || 'Unknown Contact';
-                                        contactName = `Undone: ${txContactName}`;
-                                    } else {
-                                        contactName = 'Undone Event';
-                                    }
-                                } else {
-                                    contactName = 'Undone Event';
-                                }
+                                contactName = 'Undone Event';
                             }
                         } else {
                             contactName = 'Undone Event';
@@ -2041,32 +2074,25 @@
                             // Priority: deleted_contact.name > aggregate_id from cache > name from event_data
                             if (deletedContactName) {
                                 contactName = deletedContactName;
-                                // Also cache it for future use
-                                if (event.aggregate_id) {
-                                    contactNameCache[event.aggregate_id] = deletedContactName;
+                                if (eventData.deleted_contact && typeof eventData.deleted_contact === 'object') {
+                                    contactUsername = eventData.deleted_contact.username || null;
                                 }
                             } else if (event.aggregate_id) {
-                                // Try to get from cache first
-                                contactName = contactNameCache[event.aggregate_id] || null;
-                                // If not in cache, the contact loading step will try to fetch it
-                                if (!contactName) {
-                                    contactName = 'Unknown';
-                                }
+                                const contactData = getContactData(event.aggregate_id);
+                                contactName = contactData?.name || 'Unknown';
+                                contactUsername = contactData?.username || null;
                             } else {
                                 contactName = name || 'Unknown';
+                                contactUsername = username || null;
                             }
                         } else if (event.aggregate_type === 'transaction' || event.event_type === 'TRANSACTION_DELETED' || event.event_type === 'DELETED') {
                             // For DELETE transaction events, use deleted_transaction contact
                             // Priority: deleted_transaction.contact_id > contact_id from event_data > CREATED event lookup
+                            let deletedContactId = null;
                             if (deletedTransactionInfo && deletedTransactionInfo.contactId) {
-                                const deletedContactId = deletedTransactionInfo.contactId;
-                                contactName = contactNameCache[deletedContactId] || null;
-                                if (!contactName) {
-                                    // Will be fetched in the contact loading step
-                                    contactName = 'Unknown Contact';
-                                }
+                                deletedContactId = deletedTransactionInfo.contactId;
                             } else if (contactId) {
-                                contactName = contactNameCache[contactId] || 'Unknown Contact';
+                                deletedContactId = contactId;
                             } else if (event.aggregate_id) {
                                 // Try to get contact_id from CREATED transaction event
                                 const createdTxEvent = events.find(e => 
@@ -2075,24 +2101,39 @@
                                     (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
                                 );
                                 if (createdTxEvent && createdTxEvent.event_data?.contact_id) {
-                                    const txContactId = createdTxEvent.event_data.contact_id;
-                                    contactName = contactNameCache[txContactId] || 'Unknown Contact';
-                                } else {
-                                    contactName = 'Unknown Contact';
+                                    deletedContactId = createdTxEvent.event_data.contact_id;
                                 }
-                            } else {
-                                contactName = 'Unknown Contact';
                             }
+                            const contactData = deletedContactId ? getContactData(deletedContactId) : null;
+                            contactName = contactData?.name || 'Unknown Contact';
+                            contactUsername = contactData?.username || null;
                         }
                     }
                     // For regular events
                     else if (event.aggregate_type === 'contact') {
-                        contactName = name || contactNameCache[event.aggregate_id] || 'Unknown';
+                        const contactData = event.aggregate_id ? getContactData(event.aggregate_id) : null;
+                        contactName = name || contactData?.name || 'Unknown';
+                        contactUsername = username || contactData?.username || null;
                     } else if (event.aggregate_type === 'transaction') {
                         if (contactId) {
-                            contactName = contactNameCache[contactId] || 'Unknown Contact';
-                        } else {
-                            contactName = contactNameCache[event.aggregate_id] || 'Unknown Contact';
+                            const contactData = getContactData(contactId);
+                            contactName = contactData?.name || 'Unknown Contact';
+                            contactUsername = contactData?.username || null;
+                        } else if (event.aggregate_id) {
+                            // Try to get contact_id from CREATED transaction event
+                            const createdTxEvent = events.find(e => 
+                                e.aggregate_type === 'transaction' && 
+                                e.aggregate_id === event.aggregate_id &&
+                                (e.event_type === 'CREATED' || e.event_type.includes('CREATE'))
+                            );
+                            if (createdTxEvent && createdTxEvent.event_data?.contact_id) {
+                                const txContactId = createdTxEvent.event_data.contact_id;
+                                const contactData = getContactData(txContactId);
+                                contactName = contactData?.name || 'Unknown Contact';
+                                contactUsername = contactData?.username || null;
+                            } else {
+                                contactName = 'Unknown Contact';
+                            }
                         }
                     }
                     
@@ -2348,7 +2389,7 @@
                                 <span class="${badgeClass}" style="font-size: 0.7rem;">${displayEventType}</span>
                             </td>
                             <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
-                                ${contactName || 'Unknown'}
+                                ${contactUsername ? `<span class="username-tag">@${escapeHtml(contactUsername)}</span>` : ''}${contactName || 'Unknown'}
                             </td>
                             <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">
                                 ${amountDisplay !== '-' ? amountDisplay : '-'}

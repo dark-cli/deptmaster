@@ -583,7 +583,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
           );
           },
         ),
-      ),
+        ),
       ),
     );
   }

@@ -435,6 +435,12 @@ cmd_start_server_no_build() {
 cmd_stop_server() {
     print_info "Stopping API server..."
     
+    # Stop Docker container if running
+    cd "$ROOT_DIR/backend"
+    docker-compose stop api 2>/dev/null || true
+    cd "$ROOT_DIR"
+    
+    # Also stop any direct process
     pkill -f "debt-tracker-api" || true
     sleep 2
     
@@ -447,6 +453,113 @@ cmd_restart_server() {
     cmd_stop_server
     sleep 2
     cmd_start_server
+}
+
+cmd_start_prod() {
+    print_step "Starting production server (all in Docker)..."
+    check_docker
+    
+    cd "$ROOT_DIR/backend"
+    
+    # Start all services including API in Docker
+    print_info "Starting all Docker services (postgres, redis, api)..."
+    docker-compose up -d
+    
+    # Wait for services to be healthy
+    print_info "Waiting for services to be ready..."
+    wait_for_service "http://localhost:8000/health" "API Server" 60 2
+    
+    cd "$ROOT_DIR"
+    print_success "Production server started (all in Docker)"
+    print_info "Server running at: http://localhost:8000"
+    print_info "View logs: $0 logs"
+    print_info "Stop with: docker-compose -f backend/docker-compose.yml stop api"
+}
+
+cmd_start_dev() {
+    print_step "Starting development server (direct)..."
+    
+    # Check if cargo is available
+    if ! command -v cargo &> /dev/null; then
+        print_error "Cargo not found. Please install Rust: https://rustup.rs/"
+        exit 1
+    fi
+    
+    # Start services (postgres, redis) if not running
+    cmd_start_services
+    
+    # Stop Docker API container if running (to free port 8000)
+    cd "$ROOT_DIR/backend"
+    if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_api$'; then
+        print_info "Stopping Docker API container to free port 8000..."
+        docker-compose stop api 2>/dev/null || true
+    fi
+    cd "$ROOT_DIR"
+    
+    # Check if port is available and try to stop what's using it
+    if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
+        print_warning "Port 8000 is already in use. Attempting to stop it..."
+        
+        # Try to stop Docker API container
+        cd "$ROOT_DIR/backend"
+        if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_api$'; then
+            print_info "Stopping Docker API container..."
+            docker-compose stop api 2>/dev/null || true
+            sleep 2
+        fi
+        cd "$ROOT_DIR"
+        
+        # Try to stop direct process
+        if pgrep -f "debt-tracker-api" > /dev/null; then
+            print_info "Stopping direct API process..."
+            pkill -f "debt-tracker-api" || true
+            sleep 2
+        fi
+        
+        # Check again
+        if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
+            print_error "Port 8000 is still in use. Please manually stop the service:"
+            print_info "  docker-compose -f backend/docker-compose.yml stop api"
+            print_info "  pkill -f debt-tracker-api"
+            print_info "  Or use: $0 stop-server"
+            exit 1
+        else
+            print_success "Port 8000 is now free"
+        fi
+    fi
+    
+    print_info "Starting Rust server directly..."
+    print_info "Database: postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker"
+    print_info "Redis: redis://localhost:6379"
+    print_info ""
+    print_info "Press Ctrl+C to stop"
+    print_info ""
+    
+    # Set environment variables
+    export DATABASE_URL="${DATABASE_URL:-postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker}"
+    export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
+    export PORT="${PORT:-8000}"
+    export RUST_LOG="${RUST_LOG:-debug}"
+    export JWT_SECRET="${JWT_SECRET:-your-secret-key-change-in-production}"
+    export JWT_EXPIRATION="${JWT_EXPIRATION:-3600}"
+    
+    cd "$ROOT_DIR/backend/rust-api"
+    
+    # Use cargo-watch if available, otherwise regular cargo run
+    if command -v cargo-watch &> /dev/null; then
+        print_info "Using cargo-watch for auto-reload..."
+        print_info "Watching: Rust source files (.rs) and static files (.html, .js)"
+        print_info "Note: Static file changes require recompilation (will auto-restart)"
+        # Watch both Rust files and static files
+        cargo watch \
+            --watch "$ROOT_DIR/backend/rust-api/src" \
+            --watch "$ROOT_DIR/backend/rust-api/static" \
+            -x 'run --bin debt-tracker-api'
+    else
+        print_warning "cargo-watch not installed. Install for auto-reload: cargo install cargo-watch"
+        print_info "Note: Static file changes require restarting the server"
+        cargo run --bin debt-tracker-api
+    fi
 }
 
 cmd_build() {
@@ -862,7 +975,9 @@ Commands:
   
   start-services [name]       Start Docker services (postgres/redis/all)
   stop-services [name]         Stop Docker services
-  start-server                 Start API server
+  start-server                 Start API server (Docker)
+  start-prod                   Start production server (all services in Docker)
+  start-dev                    Start development server (Rust directly, faster)
   stop-server                  Stop API server
   restart-server               Restart API server
   build                        Build the server (cargo build --release)
@@ -886,7 +1001,9 @@ Examples:
   $0 --no-build full-flash           # Fast reset (skip server build)
   $0 reset                           # Clean reset (no data)
   $0 import backup.zip               # Import data (keeps existing data)
-  $0 start-server                    # Start everything
+  $0 start-prod                      # Start production (all in Docker)
+  $0 start-dev                       # Start development (Rust directly, faster)
+  $0 start-server                    # Start API server (Docker)
   $0 restart-server                  # Restart server
   $0 status                          # Check what's running
   $0 run-app android                 # Run Android app
@@ -935,6 +1052,12 @@ case "${1:-help}" in
         ;;
     start-server|start)
         cmd_start_server
+        ;;
+    start-prod|prod)
+        cmd_start_prod
+        ;;
+    start-dev|dev)
+        cmd_start_dev
         ;;
     stop-server|stop)
         cmd_stop_server

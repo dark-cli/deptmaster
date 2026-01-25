@@ -109,7 +109,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
         // If didPop is true, normal navigation happened (not in selection mode)
       },
       child: GradientBackground(
-        child: Scaffold(
+      child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
         title: _selectionMode 
@@ -485,7 +485,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           );
         },
       ),
-        ),
+      ),
       ),
     );
   }
