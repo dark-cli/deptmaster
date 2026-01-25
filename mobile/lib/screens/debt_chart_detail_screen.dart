@@ -64,12 +64,18 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   String _eventTypeFilter = 'all';
   String _aggregateTypeFilter = 'all';
   bool _showFilters = false;
+  
+  // Tooltip navigation state for swipe gestures
+  int? _selectedTooltipIndex; // Currently selected point index for tooltip
+  final GlobalKey _chartKey = GlobalKey(); // Key to access chart widget
+  late TooltipBehavior _tooltipBehavior; // Tooltip behavior controller
 
   @override
   void initState() {
     super.initState();
     _selectedDateFrom = widget.initialDateFrom;
     _selectedDateTo = widget.initialDateTo;
+    _tooltipBehavior = TooltipBehavior(enable: false); // Initialize, will be configured in build
     _loadDefaultPeriod();
     _loadChartData();
   }
@@ -430,6 +436,58 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                           // Use accent color for all points
                           final primaryColor = Theme.of(context).colorScheme.primary;
                           
+                          // Update tooltip behavior with current configuration
+                          _tooltipBehavior = TooltipBehavior(
+                            enable: true,
+                            activationMode: ActivationMode.none, // We'll control it programmatically
+                            color: Theme.of(context).colorScheme.surface,
+                            textStyle: TextStyle(
+                              color: Theme.of(context).colorScheme.onSurface,
+                              fontSize: 9,
+                            ),
+                            borderWidth: 1,
+                            borderColor: primaryColor,
+                            duration: 0, // Keep visible until we hide it
+                            builder: (dynamic data, dynamic point, dynamic series, int pointIndex, int seriesIndex) {
+                              // If we have a selected tooltip index from swipe, use that instead
+                              final effectiveIndex = _selectedTooltipIndex ?? pointIndex;
+                              
+                              // Safety check: effectiveIndex must be valid
+                              if (effectiveIndex < 0 || effectiveIndex >= chartDataList.length) {
+                                return const SizedBox.shrink();
+                              }
+                              
+                              final chartData = chartDataList[effectiveIndex];
+                              if (!chartData.hasTransactions || chartData.events.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              
+                              // Build compact tooltip: show debt and transaction count
+                              final avgDebt = NumberFormat('#,###').format(chartData.debt.toInt());
+                              final txCount = chartData.events.length;
+                              
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surface,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: Theme.of(context).colorScheme.primary,
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Text(
+                                  '$avgDebt IQD\n$txCount ${txCount == 1 ? 'transaction' : 'transactions'}',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.onSurface,
+                                    fontSize: 9,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              );
+                            },
+                          );
+                          
                           // Determine date format based on period
                           String dateFormat;
                           DateTimeIntervalType intervalType;
@@ -451,10 +509,154 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               intervalType = DateTimeIntervalType.days;
                           }
                           
-                          return SfCartesianChart(
-                            backgroundColor: Colors.transparent,
-                            plotAreaBorderWidth: 0,
-                            primaryXAxis: DateTimeAxis(
+                          return GestureDetector(
+                            onHorizontalDragStart: (details) {
+                              // Initialize drag - show tooltip for the starting point
+                              if (chartDataList.isEmpty) return;
+                              
+                              final RenderBox? renderBox = _chartKey.currentContext?.findRenderObject() as RenderBox?;
+                              if (renderBox == null) return;
+                              
+                              final localPosition = renderBox.globalToLocal(details.globalPosition);
+                              final chartWidth = renderBox.size.width;
+                              final xPercent = (localPosition.dx / chartWidth).clamp(0.0, 1.0);
+                              
+                              int closestIndex = 0;
+                              double minDistance = double.infinity;
+                              
+                              for (int i = 0; i < chartDataList.length; i++) {
+                                final point = chartDataList[i];
+                                final pointXPercent = (point.date.millisecondsSinceEpoch - minX) / (maxX - minX);
+                                final distance = (pointXPercent - xPercent).abs();
+                                
+                                if (distance < minDistance) {
+                                  minDistance = distance;
+                                  closestIndex = i;
+                                }
+                              }
+                              
+                              if (mounted) {
+                                setState(() {
+                                  _selectedTooltipIndex = closestIndex;
+                                });
+                                _tooltipBehavior.showByIndex(closestIndex, 0);
+                              }
+                            },
+                            onHorizontalDragUpdate: (details) {
+                              // Calculate which point is closest to the drag position
+                              if (chartDataList.isEmpty) return;
+                              
+                              final RenderBox? renderBox = _chartKey.currentContext?.findRenderObject() as RenderBox?;
+                              if (renderBox == null) return;
+                              
+                              final localPosition = renderBox.globalToLocal(details.globalPosition);
+                              final chartWidth = renderBox.size.width;
+                              
+                              // Calculate the X position as a percentage of chart width
+                              final xPercent = (localPosition.dx / chartWidth).clamp(0.0, 1.0);
+                              
+                              // Find the closest point based on X position
+                              int closestIndex = 0;
+                              double minDistance = double.infinity;
+                              
+                              for (int i = 0; i < chartDataList.length; i++) {
+                                final point = chartDataList[i];
+                                // Calculate point's X position as percentage (0.0 to 1.0)
+                                // We need to map the date to the chart's X range
+                                final pointXPercent = (point.date.millisecondsSinceEpoch - minX) / (maxX - minX);
+                                final distance = (pointXPercent - xPercent).abs();
+                                
+                                if (distance < minDistance) {
+                                  minDistance = distance;
+                                  closestIndex = i;
+                                }
+                              }
+                              
+                              // Update tooltip to show the closest point
+                              if (_selectedTooltipIndex != closestIndex) {
+                                if (mounted) {
+                                  setState(() {
+                                    _selectedTooltipIndex = closestIndex;
+                                  });
+                                  _tooltipBehavior.showByIndex(closestIndex, 0);
+                                }
+                              }
+                            },
+                            onHorizontalDragEnd: (details) {
+                              // When gesture ends, select the current point
+                              if (_selectedTooltipIndex != null && 
+                                  _selectedTooltipIndex! >= 0 &&
+                                  _selectedTooltipIndex! < chartDataList.length) {
+                                final point = chartDataList[_selectedTooltipIndex!];
+                                if (point.hasTransactions) {
+                                  _onChartPointTapped(point.intervalStart, point.intervalEnd);
+                                }
+                              }
+                              // Hide tooltip and clear selection
+                              _tooltipBehavior.hide();
+                              if (mounted) {
+                                setState(() {
+                                  _selectedTooltipIndex = null;
+                                });
+                              }
+                            },
+                            onTapUp: (details) {
+                              // Handle direct tap to show tooltip and select point
+                              if (chartDataList.isEmpty) return;
+                              
+                              final RenderBox? renderBox = _chartKey.currentContext?.findRenderObject() as RenderBox?;
+                              if (renderBox == null) return;
+                              
+                              final localPosition = renderBox.globalToLocal(details.globalPosition);
+                              final chartWidth = renderBox.size.width;
+                              final xPercent = (localPosition.dx / chartWidth).clamp(0.0, 1.0);
+                              
+                              int tappedPointIndex = 0;
+                              double minDistance = double.infinity;
+                              
+                              for (int i = 0; i < chartDataList.length; i++) {
+                                final point = chartDataList[i];
+                                final pointXPercent = (point.date.millisecondsSinceEpoch - minX) / (maxX - minX);
+                                final distance = (pointXPercent - xPercent).abs();
+                                
+                                if (distance < minDistance) {
+                                  minDistance = distance;
+                                  tappedPointIndex = i;
+                                }
+                              }
+                              
+                              if (tappedPointIndex >= 0 && tappedPointIndex < chartDataList.length) {
+                                final point = chartDataList[tappedPointIndex];
+                                if (point.hasTransactions) {
+                                  if (mounted) {
+                                    setState(() {
+                                      _selectedTooltipIndex = tappedPointIndex;
+                                    });
+                                    _tooltipBehavior.showByIndex(tappedPointIndex, 0);
+                                    // Select the point after a short delay, but keep yellow marker visible briefly
+                                    Future.delayed(const Duration(milliseconds: 500), () {
+                                      if (mounted) {
+                                        _onChartPointTapped(point.intervalStart, point.intervalEnd);
+                                        _tooltipBehavior.hide();
+                                        // Keep yellow marker visible a bit longer for visual feedback
+                                        Future.delayed(const Duration(milliseconds: 300), () {
+                                          if (mounted) {
+                                            setState(() {
+                                              _selectedTooltipIndex = null;
+                                            });
+                                          }
+                                        });
+                                      }
+                                    });
+                                  }
+                                }
+                              }
+                            },
+                            child: SfCartesianChart(
+                              key: _chartKey,
+                              backgroundColor: Colors.transparent,
+                              plotAreaBorderWidth: 0,
+                              primaryXAxis: DateTimeAxis(
                               minimum: DateTime.fromMillisecondsSinceEpoch(minX.toInt()),
                               maximum: DateTime.fromMillisecondsSinceEpoch(maxX.toInt()),
                               intervalType: intervalType,
@@ -547,60 +749,63 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                       details.pointIndex! < chartDataList.length) {
                                     final point = chartDataList[details.pointIndex!];
                                     if (point.hasTransactions) {
-                                      _onChartPointTapped(point.intervalStart, point.intervalEnd);
+                                      // Show yellow marker for visual feedback
+                                      if (mounted) {
+                                        setState(() {
+                                          _selectedTooltipIndex = details.pointIndex;
+                                        });
+                                        _tooltipBehavior.showByIndex(details.pointIndex!, 0);
+                                        // Select the point after a short delay
+                                        Future.delayed(const Duration(milliseconds: 300), () {
+                                          if (mounted) {
+                                            _onChartPointTapped(point.intervalStart, point.intervalEnd);
+                                            _tooltipBehavior.hide();
+                                            // Keep yellow marker visible briefly
+                                            Future.delayed(const Duration(milliseconds: 300), () {
+                                              if (mounted) {
+                                                setState(() {
+                                                  _selectedTooltipIndex = null;
+                                                });
+                                              }
+                                            });
+                                          }
+                                        });
+                                      }
                                     }
                                   }
                                 },
                                 ),
+                              // Overlay series for selected point (yellow highlight)
+                              if (_selectedTooltipIndex != null && 
+                                  _selectedTooltipIndex! >= 0 &&
+                                  _selectedTooltipIndex! < chartDataList.length)
+                                SplineAreaSeries<ChartData, DateTime>(
+                                  dataSource: [chartDataList[_selectedTooltipIndex!]], // Only the selected point
+                                  xValueMapper: (ChartData data, _) => data.date,
+                                  yValueMapper: (ChartData data, _) => data.debt,
+                                  borderColor: Colors.transparent, // Transparent line
+                                  borderWidth: 0,
+                                  splineType: SplineType.natural,
+                                  animationDuration: 0,
+                                  enableTooltip: false,
+                                  color: Colors.transparent, // Transparent area
+                                  markerSettings: MarkerSettings(
+                                    isVisible: true,
+                                    height: 10, // Larger than normal markers
+                                    width: 10,
+                                    shape: DataMarkerType.circle,
+                                    color: Colors.yellow, // Yellow for selected point
+                                    borderColor: Colors.orange, // Orange border for visibility
+                                    borderWidth: 2,
+                                  ),
+                                  gradient: LinearGradient(
+                                    colors: [Colors.transparent, Colors.transparent], // No gradient
+                                  ),
+                                ),
                             ],
-                            tooltipBehavior: TooltipBehavior(
-                              enable: true,
-                              activationMode: ActivationMode.singleTap, // Show on tap, not hover
-                              color: Theme.of(context).colorScheme.surface,
-                              textStyle: TextStyle(
-                                color: Theme.of(context).colorScheme.onSurface,
-                                fontSize: 9,
-                              ),
-                              borderWidth: 1,
-                              borderColor: primaryColor,
-                              duration: 3000, // Show for 3 seconds
-                              builder: (dynamic data, dynamic point, dynamic series, int pointIndex, int seriesIndex) {
-                                // Safety check: pointIndex must be valid
-                                if (pointIndex < 0 || pointIndex >= chartDataList.length) {
-                                  return const SizedBox.shrink();
-                                }
-                                
-                                final chartData = data as ChartData;
-                                if (!chartData.hasTransactions || chartData.events.isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
-                                
-                                // Build compact tooltip: show debt and transaction count
-                                final avgDebt = NumberFormat('#,###').format(chartData.debt.toInt());
-                                final txCount = chartData.events.length;
-                                
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.surface,
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: Theme.of(context).colorScheme.primary,
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    '$avgDebt IQD\n$txCount ${txCount == 1 ? 'transaction' : 'transactions'}',
-                                    style: TextStyle(
-                                      color: Theme.of(context).colorScheme.onSurface,
-                                      fontSize: 9,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                );
-                              },
-                            ),
-                          );
+                            tooltipBehavior: _tooltipBehavior,
+                          ),
+                        );
                         },
                       ),
                     ),
