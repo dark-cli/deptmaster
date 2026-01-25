@@ -11,7 +11,14 @@ import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
 
 class EventsLogScreen extends ConsumerStatefulWidget {
-  const EventsLogScreen({super.key});
+  final DateTime? initialDateFrom;
+  final DateTime? initialDateTo;
+  
+  const EventsLogScreen({
+    super.key,
+    this.initialDateFrom,
+    this.initialDateTo,
+  });
 
   @override
   ConsumerState<EventsLogScreen> createState() => _EventsLogScreenState();
@@ -30,6 +37,15 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   DateTime? _dateFrom;
   DateTime? _dateTo;
   
+  @override
+  void initState() {
+    super.initState();
+    // Set initial date filters if provided
+    _dateFrom = widget.initialDateFrom;
+    _dateTo = widget.initialDateTo;
+    _loadEvents();
+  }
+  
   // Pagination
   int _currentPage = 0;
   int _pageSize = 50; // Smaller default for mobile
@@ -41,11 +57,6 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   Map<String, String> _contactUsernameCache = {}; // Cache for contact usernames
   Map<String, Event> _undoneEventsCache = {};
 
-  @override
-  void initState() {
-    super.initState();
-    _loadEvents();
-  }
 
   @override
   void dispose() {
@@ -74,6 +85,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
         _allEvents = events;
         _loading = false;
       });
+      // Apply filters (including initial date filters if provided)
       _applyFilters();
     } catch (e) {
       print('Error loading events: $e');
@@ -1106,7 +1118,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         itemBuilder: (context, index) {
                           final event = _paginatedEvents[index];
-                          return _EventTableRow(
+                          return EventTableRow(
                             key: ValueKey('${event.id}_${_contactNameCache.length}_${_undoneEventsCache.length}'),
                             event: event,
                             dateFormat: dateFormat,
@@ -1124,7 +1136,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   }
 }
 
-class _EventTableRow extends StatefulWidget {
+class EventTableRow extends StatefulWidget {
   final Event event;
   final DateFormat dateFormat;
   final List<Event> allEvents;
@@ -1132,7 +1144,7 @@ class _EventTableRow extends StatefulWidget {
   final Map<String, Event> undoneEventsCache;
   final bool isMobile;
 
-  const _EventTableRow({
+  const EventTableRow({
     super.key,
     required this.event,
     required this.dateFormat,
@@ -1143,10 +1155,10 @@ class _EventTableRow extends StatefulWidget {
   });
 
   @override
-  State<_EventTableRow> createState() => _EventTableRowState();
+  State<EventTableRow> createState() => _EventTableRowState();
 }
 
-class _EventTableRowState extends State<_EventTableRow> {
+class _EventTableRowState extends State<EventTableRow> {
   String? _contactName;
   String? _contactUsername;
   AmountDisplay? _amount;
@@ -1160,7 +1172,7 @@ class _EventTableRowState extends State<_EventTableRow> {
   }
 
   @override
-  void didUpdateWidget(_EventTableRow oldWidget) {
+  void didUpdateWidget(EventTableRow oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Reload data if event changed or caches were updated
     if (oldWidget.event.id != widget.event.id ||

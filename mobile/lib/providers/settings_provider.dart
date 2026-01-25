@@ -66,3 +66,65 @@ class DueDateEnabledNotifier extends StateNotifier<bool> {
     await _loadDueDateEnabled();
   }
 }
+
+// Provider for show dashboard chart
+final showDashboardChartProvider = StateNotifierProvider<ShowDashboardChartNotifier, bool>((ref) {
+  return ShowDashboardChartNotifier();
+});
+
+class ShowDashboardChartNotifier extends StateNotifier<bool> {
+  ShowDashboardChartNotifier() : super(true) {
+    _loadShowDashboardChart();
+  }
+
+  Future<void> _loadShowDashboardChart() async {
+    try {
+      final enabled = await SettingsService.getShowDashboardChart();
+      if (state != enabled) {
+        state = enabled;
+      }
+    } catch (e) {
+      print('Error loading show dashboard chart: $e');
+    }
+  }
+
+  Future<void> setShowDashboardChart(bool value) async {
+    await SettingsService.setShowDashboardChart(value);
+    state = value;
+  }
+
+  Future<void> refresh() async {
+    await _loadShowDashboardChart();
+  }
+}
+
+// Provider for invert Y-axis
+final invertYAxisProvider = StateNotifierProvider<InvertYAxisNotifier, bool>((ref) {
+  return InvertYAxisNotifier();
+});
+
+class InvertYAxisNotifier extends StateNotifier<bool> {
+  InvertYAxisNotifier() : super(false) {
+    _loadInvertYAxis();
+  }
+
+  Future<void> _loadInvertYAxis() async {
+    try {
+      final invert = await SettingsService.getInvertYAxis();
+      if (state != invert) {
+        state = invert;
+      }
+    } catch (e) {
+      print('Error loading invert Y-axis: $e');
+    }
+  }
+
+  Future<void> setInvertYAxis(bool value) async {
+    await SettingsService.setInvertYAxis(value);
+    state = value;
+  }
+
+  Future<void> refresh() async {
+    await _loadInvertYAxis();
+  }
+}

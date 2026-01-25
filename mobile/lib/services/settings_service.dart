@@ -11,6 +11,10 @@ class SettingsService {
   static const String _keyDueDateEnabled = 'due_date_enabled';
   static const String _keyDefaultDueDateDays = 'default_due_date_days';
   static const String _keyDefaultDueDateSwitch = 'default_due_date_switch'; // Default state of due date switch in transaction form
+  static const String _keyShowDashboardChart = 'show_dashboard_chart';
+  static const String _keyDashboardDefaultPeriod = 'dashboard_default_period'; // 'day', 'week', 'month', 'year'
+  static const String _keyGraphDefaultPeriod = 'graph_default_period'; // 'day', 'week', 'month', 'year'
+  static const String _keyInvertYAxis = 'invert_y_axis';
 
   // Dark mode
   static Future<bool> getDarkMode() async {
@@ -219,6 +223,50 @@ class SettingsService {
       print('⚠️ Failed to load settings from backend: $e');
       // Continue with local defaults if backend is unavailable
     }
+  }
+
+  // Show dashboard chart
+  static Future<bool> getShowDashboardChart() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyShowDashboardChart) ?? true; // Default ON
+  }
+
+  static Future<void> setShowDashboardChart(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowDashboardChart, enabled);
+  }
+
+  // Dashboard default period
+  static Future<String> getDashboardDefaultPeriod() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyDashboardDefaultPeriod) ?? 'month'; // Default to month
+  }
+
+  static Future<void> setDashboardDefaultPeriod(String period) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyDashboardDefaultPeriod, period);
+  }
+
+  // Graph default period
+  static Future<String> getGraphDefaultPeriod() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyGraphDefaultPeriod) ?? 'month'; // Default to month
+  }
+
+  static Future<void> setGraphDefaultPeriod(String period) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyGraphDefaultPeriod, period);
+  }
+
+  // Invert Y-axis
+  static Future<bool> getInvertYAxis() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyInvertYAxis) ?? false; // Default OFF
+  }
+
+  static Future<void> setInvertYAxis(bool invert) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyInvertYAxis, invert);
   }
 
   static Future<String> _getBaseUrl() async {

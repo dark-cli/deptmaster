@@ -487,6 +487,95 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           },
         ),
         
+        // Graph Settings
+        _buildSectionHeader('Graphs'),
+        Consumer(
+          builder: (context, ref, child) {
+            final showChart = ref.watch(showDashboardChartProvider);
+            return SwitchListTile(
+              title: const Text('Show Dashboard Chart'),
+              subtitle: const Text('Display debt over time chart on dashboard'),
+              value: showChart,
+              onChanged: (value) async {
+                await ref.read(showDashboardChartProvider.notifier).setShowDashboardChart(value);
+              },
+            );
+          },
+        ),
+        FutureBuilder<String>(
+          future: SettingsService.getDashboardDefaultPeriod(),
+          builder: (context, snapshot) {
+            final period = snapshot.data ?? 'month';
+            // If period is 'day', reset to 'month'
+            final safePeriod = period == 'day' ? 'month' : period;
+            if (period == 'day') {
+              // Reset to month if day was selected
+              SettingsService.setDashboardDefaultPeriod('month');
+            }
+            return ListTile(
+              title: const Text('Dashboard Default Period'),
+              subtitle: Text(_getPeriodLabel(safePeriod)),
+              trailing: DropdownButton<String>(
+                value: safePeriod,
+                items: const [
+                  DropdownMenuItem(value: 'week', child: Text('Week')),
+                  DropdownMenuItem(value: 'month', child: Text('Month')),
+                  DropdownMenuItem(value: 'year', child: Text('Year')),
+                ],
+                onChanged: (value) async {
+                  if (value != null) {
+                    await SettingsService.setDashboardDefaultPeriod(value);
+                    setState(() {});
+                  }
+                },
+              ),
+            );
+          },
+        ),
+        FutureBuilder<String>(
+          future: SettingsService.getGraphDefaultPeriod(),
+          builder: (context, snapshot) {
+            final period = snapshot.data ?? 'month';
+            // If period is 'day', reset to 'month'
+            final safePeriod = period == 'day' ? 'month' : period;
+            if (period == 'day') {
+              // Reset to month if day was selected
+              SettingsService.setGraphDefaultPeriod('month');
+            }
+            return ListTile(
+              title: const Text('Graph Page Default Period'),
+              subtitle: Text(_getPeriodLabel(safePeriod)),
+              trailing: DropdownButton<String>(
+                value: safePeriod,
+                items: const [
+                  DropdownMenuItem(value: 'week', child: Text('Week')),
+                  DropdownMenuItem(value: 'month', child: Text('Month')),
+                  DropdownMenuItem(value: 'year', child: Text('Year')),
+                ],
+                onChanged: (value) async {
+                  if (value != null) {
+                    await SettingsService.setGraphDefaultPeriod(value);
+                    setState(() {});
+                  }
+                },
+              ),
+            );
+          },
+        ),
+        Consumer(
+          builder: (context, ref, child) {
+            final invertY = ref.watch(invertYAxisProvider);
+            return SwitchListTile(
+              title: const Text('Invert Y-Axis'),
+              subtitle: const Text('Reverse Y-axis orientation (larger values at bottom)'),
+              value: invertY,
+              onChanged: (value) async {
+                await ref.read(invertYAxisProvider.notifier).setInvertYAxis(value);
+              },
+            );
+          },
+        ),
+        
         // Backend Configuration
         _buildSectionHeader('Backend Configuration'),
         ListTile(
@@ -506,6 +595,19 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         ),
       ],
     );
+  }
+
+  String _getPeriodLabel(String period) {
+    switch (period) {
+      case 'week':
+        return 'Last 7 days';
+      case 'month':
+        return 'Last 30 days';
+      case 'year':
+        return 'Last 365 days';
+      default:
+        return 'Last 30 days';
+    }
   }
 
   Widget _buildSectionHeader(String title) {

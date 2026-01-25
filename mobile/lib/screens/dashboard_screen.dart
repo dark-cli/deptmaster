@@ -14,8 +14,10 @@ import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../widgets/gradient_card.dart';
+import '../widgets/debt_chart_widget.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
+import 'debt_chart_detail_screen.dart';
 import '../utils/bottom_sheet_helper.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
@@ -181,6 +183,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             // Stats Cards
             _buildStatsCard(context, totalBalance),
             const SizedBox(height: 16),
+            
+            // Debt Over Time Chart (Simple) - only show if enabled
+            Consumer(
+              builder: (context, ref, child) {
+                final showChart = ref.watch(showDashboardChartProvider);
+                if (!showChart) {
+                  return const SizedBox.shrink();
+                }
+                return Column(
+                  children: [
+                    DebtChartWidget(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const DebtChartDetailScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                );
+              },
+            ),
             
             // Balance Chart
             if (_contacts != null && _contacts!.isNotEmpty) ...[
