@@ -194,7 +194,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     }
   }
 
-  List<ChartDataPoint> _buildChartData() {
+  List<ChartDataPoint> _buildChartData(String period, bool invertY) {
     if (_events == null || _events!.isEmpty) {
       print('⚠️ No events available for chart');
       return [];
@@ -205,9 +205,6 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     }
     
     print('📊 Building chart from ${_events!.length} events');
-    
-    // Get period from settings - watch it so it updates reactively
-    final period = ref.watch(dashboardDefaultPeriodProvider);
     final now = DateTime.now();
     DateTime periodStart;
     int intervalMs;
@@ -334,6 +331,10 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       return const SizedBox.shrink();
     }
     
+    // Watch settings providers in build method to ensure widget rebuilds when settings change
+    final period = ref.watch(dashboardDefaultPeriodProvider);
+    final invertY = ref.watch(invertYAxisProvider);
+    
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
     
@@ -344,7 +345,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       );
     }
     
-    final chartData = _buildChartData();
+    final chartData = _buildChartData(period, invertY);
     
     if (chartData.isEmpty) {
       print('⚠️ Chart data is empty, showing empty state');
@@ -385,9 +386,6 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     final yPaddingBottom = yRange > 0 
         ? (yRange * 0.4).clamp(5000, 200000) 
         : (rawMinY.abs() * 0.35).clamp(5000, 200000);
-    
-    // Check invert Y-axis setting - use watch so it updates reactively
-    final invertY = ref.watch(invertYAxisProvider);
     
     // Calculate bounds - when inverted, multiply by -1 to flip the axis
     final finalMinY = invertY ? -(rawMaxY + yPaddingTop) : rawMinY - yPaddingBottom;

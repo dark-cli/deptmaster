@@ -524,7 +524,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                 ],
                 onChanged: (value) async {
                   if (value != null) {
-                    await SettingsService.setDashboardDefaultPeriod(value);
+                    // Update the provider which will also save to service
+                    await ref.read(dashboardDefaultPeriodProvider.notifier).setDashboardDefaultPeriod(value);
                     setState(() {});
                   }
                 },
