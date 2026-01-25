@@ -378,13 +378,13 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     
     // Add padding to Y axis to ensure points don't touch the X-axis
     final yRange = rawMaxY - rawMinY;
-    // Calculate padding: 10% of range, but ensure at least some minimum padding
-    final yPaddingTop = yRange > 0 ? yRange * 0.1 : (rawMaxY.abs() * 0.05).clamp(1000, 100000);
+    // Calculate padding: 40% of range for both top and bottom (increased buffer)
+    final yPaddingTop = yRange > 0 ? yRange * 0.4 : (rawMaxY.abs() * 0.35).clamp(1000, 100000);
     // For bottom padding, ensure there's always room below the lowest point
-    // Use larger padding at bottom to prevent touching X-axis (20% of range or minimum)
+    // Use same padding at bottom as top for consistency (40% of range or minimum)
     final yPaddingBottom = yRange > 0 
-        ? (yRange * 0.2).clamp(5000, 200000) 
-        : (rawMinY.abs() * 0.15).clamp(5000, 200000);
+        ? (yRange * 0.4).clamp(5000, 200000) 
+        : (rawMinY.abs() * 0.35).clamp(5000, 200000);
     
     // Check invert Y-axis setting - use watch so it updates reactively
     final invertY = ref.watch(invertYAxisProvider);
@@ -554,8 +554,8 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                     ),
                     markerSettings: MarkerSettings(
                       isVisible: true, // Show markers with accent color
-                      height: 6,
-                      width: 6,
+                      height: 5,
+                      width: 5,
                       shape: DataMarkerType.circle,
                       color: primaryColor,
                       borderColor: primaryColor,

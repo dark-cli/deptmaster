@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
@@ -223,6 +224,17 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     _applyDateFilters();
   }
 
+  void _resetFilters() {
+    setState(() {
+      _selectedDateFrom = null;
+      _selectedDateTo = null;
+      _eventTypeFilter = 'all';
+      _aggregateTypeFilter = 'all';
+      _selectedTooltipIndex = null; // Clear selected point
+    });
+    _applyDateFilters();
+  }
+
   List<ChartDataPoint> _buildChartData() {
     if (_allEvents == null || _allEvents!.isEmpty) return [];
     
@@ -376,9 +388,9 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                           
                           final yRange = rawMaxY - rawMinY;
                           final yPaddingBottom = yRange > 0 
-                              ? (yRange * 0.2).clamp(5000, 200000) 
-                              : (rawMinY.abs() * 0.15).clamp(5000, 200000);
-                          final yPaddingTop = yRange > 0 ? yRange * 0.1 : (rawMaxY.abs() * 0.05).clamp(1000, 100000);
+                              ? (yRange * 0.4).clamp(5000, 200000) 
+                              : (rawMinY.abs() * 0.35).clamp(5000, 200000);
+                          final yPaddingTop = yRange > 0 ? yRange * 0.4 : (rawMaxY.abs() * 0.35).clamp(1000, 100000);
                           
                           final invertY = ref.watch(invertYAxisProvider);
                           final finalMinY = invertY ? -(rawMaxY + yPaddingTop) : rawMinY - yPaddingBottom;
@@ -509,8 +521,10 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               intervalType = DateTimeIntervalType.days;
                           }
                           
-                          return GestureDetector(
-                            onHorizontalDragStart: (details) {
+                          return Stack(
+                            children: [
+                              GestureDetector(
+                                onHorizontalDragStart: (details) {
                               // Initialize drag - show tooltip for the starting point
                               if (chartDataList.isEmpty) return;
                               
@@ -583,7 +597,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               }
                             },
                             onHorizontalDragEnd: (details) {
-                              // When gesture ends, select the current point
+                              // When gesture ends, select the current point but keep tooltip visible
                               if (_selectedTooltipIndex != null && 
                                   _selectedTooltipIndex! >= 0 &&
                                   _selectedTooltipIndex! < chartDataList.length) {
@@ -592,13 +606,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                   _onChartPointTapped(point.intervalStart, point.intervalEnd);
                                 }
                               }
-                              // Hide tooltip and clear selection
-                              _tooltipBehavior.hide();
-                              if (mounted) {
-                                setState(() {
-                                  _selectedTooltipIndex = null;
-                                });
-                              }
+                              // Keep tooltip visible - don't clear selection or hide
+                              // This prevents the graph from rebuilding
                             },
                             onTapUp: (details) {
                               // Handle direct tap to show tooltip and select point
@@ -723,8 +732,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 ),
                                 markerSettings: MarkerSettings(
                                   isVisible: true, // Show markers with accent color
-                                  height: 6,
-                                  width: 6,
+                                  height: 5,
+                                  width: 5,
                                   shape: DataMarkerType.circle,
                                   color: primaryColor,
                                   borderColor: primaryColor,
@@ -791,12 +800,12 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                   color: Colors.transparent, // Transparent area
                                   markerSettings: MarkerSettings(
                                     isVisible: true,
-                                    height: 10, // Larger than normal markers
-                                    width: 10,
+                                    height: 8, // Selected point marker
+                                    width: 8,
                                     shape: DataMarkerType.circle,
-                                    color: Colors.yellow, // Yellow for selected point
-                                    borderColor: Colors.orange, // Orange border for visibility
-                                    borderWidth: 2,
+                                    color: Colors.yellow, // Solid yellow for selected point
+                                    borderColor: Colors.yellow, // Same color as fill (no visible border)
+                                    borderWidth: 0, // No border
                                   ),
                                   gradient: LinearGradient(
                                     colors: [Colors.transparent, Colors.transparent], // No gradient
@@ -805,8 +814,23 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                             ],
                             tooltipBehavior: _tooltipBehavior,
                           ),
-                        );
-                        },
+                        ),
+                        // Custom tooltip widget that follows the selected point
+                        if (_selectedTooltipIndex != null && 
+                            _selectedTooltipIndex! >= 0 &&
+                            _selectedTooltipIndex! < chartDataList.length)
+                          _buildCustomTooltip(
+                            context,
+                            chartDataList[_selectedTooltipIndex!],
+                            minX,
+                            maxX,
+                            finalMinY,
+                            finalMaxY,
+                            chartDataList,
+                          ),
+                      ],
+                    );
+                    },
                       ),
                     ),
                     
@@ -986,14 +1010,26 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                   ),
                                 ),
                               ),
-                              IconButton(
-                                icon: Icon(_showFilters ? Icons.filter_list : Icons.filter_list_outlined),
-                                onPressed: () {
-                                  setState(() {
-                                    _showFilters = !_showFilters;
-                                  });
-                                },
-                                tooltip: 'Toggle Filters',
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.refresh),
+                                    onPressed: () {
+                                      _resetFilters();
+                                    },
+                                    tooltip: 'Reset Filters',
+                                  ),
+                                  IconButton(
+                                    icon: Icon(_showFilters ? Icons.filter_list : Icons.filter_list_outlined),
+                                    onPressed: () {
+                                      setState(() {
+                                        _showFilters = !_showFilters;
+                                      });
+                                    },
+                                    tooltip: 'Toggle Filters',
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -1083,7 +1119,159 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
       ),
     );
   }
+  
+  // Build custom tooltip widget that follows the selected point
+  Widget _buildCustomTooltip(
+    BuildContext context,
+    ChartData selectedPoint,
+    double minX,
+    double maxX,
+    double minY,
+    double maxY,
+    List<ChartData> chartDataList,
+  ) {
+    if (!selectedPoint.hasTransactions || selectedPoint.events.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    
+    // Calculate position of the selected point on the chart
+    final RenderBox? renderBox = _chartKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return const SizedBox.shrink();
+    
+    final chartWidth = renderBox.size.width;
+    final chartHeight = renderBox.size.height;
+    
+    // Calculate X position (0.0 to 1.0)
+    final xPercent = (selectedPoint.date.millisecondsSinceEpoch - minX) / (maxX - minX);
+    final pointX = xPercent * chartWidth;
+    
+    // Calculate Y position (0.0 to 1.0, but Y axis is inverted in Flutter)
+    final yRange = maxY - minY;
+    final yPercent = (selectedPoint.debt - minY) / yRange;
+    final pointY = chartHeight - (yPercent * chartHeight); // Invert Y for screen coordinates
+    
+    // Format debt amount and date
+    final debtAmount = NumberFormat('#,###').format(selectedPoint.debt.toInt());
+    final dateFormat = DateFormat('MM/dd/yyyy');
+    final dateStr = dateFormat.format(selectedPoint.date);
+    
+    // Determine tooltip position ensuring it never covers the selected point
+    const tooltipWidth = 120.0;
+    const tooltipHeight = 70.0;
+    const pointRadius = 5.0; // Radius of the yellow circle
+    const spacing = 20.0; // Minimum space between point and tooltip
+    
+    double tooltipX;
+    double tooltipY;
+    
+    // Check if point would be covered by tooltip in different positions
+    // Try to place tooltip to the right of point
+    final rightX = pointX + pointRadius + spacing;
+    if (rightX + tooltipWidth < chartWidth) {
+      // Check if this position would cover the point
+      if (!(rightX <= pointX + pointRadius && rightX + tooltipWidth >= pointX - pointRadius &&
+            pointY >= pointY - pointRadius && pointY <= pointY + pointRadius)) {
+        tooltipX = rightX;
+        tooltipY = pointY - (tooltipHeight / 2.0);
+      } else {
+        // Would cover, try left
+        final leftX = pointX - pointRadius - spacing - tooltipWidth;
+        if (leftX >= 0) {
+          tooltipX = leftX;
+          tooltipY = pointY - (tooltipHeight / 2.0);
+        } else {
+          // Try above
+          tooltipX = pointX - (tooltipWidth / 2.0);
+          tooltipY = pointY - tooltipHeight - spacing - pointRadius;
+        }
+      }
+    }
+    // Try to place tooltip to the left of point
+    else {
+      final leftX = pointX - pointRadius - spacing - tooltipWidth;
+      if (leftX >= 0) {
+        tooltipX = leftX;
+        tooltipY = pointY - (tooltipHeight / 2.0);
+      }
+      // No space on sides, place above the point
+      else if (pointY - tooltipHeight - spacing - pointRadius > 0) {
+        tooltipX = pointX - (tooltipWidth / 2.0);
+        tooltipY = pointY - tooltipHeight - spacing - pointRadius;
+      }
+      // No space above, place below the point
+      else {
+        tooltipX = pointX - (tooltipWidth / 2.0);
+        tooltipY = pointY + pointRadius + spacing;
+      }
+    }
+    
+    // Clamp tooltip position to stay within chart bounds
+    tooltipX = tooltipX.clamp(0.0, chartWidth - tooltipWidth);
+    tooltipY = tooltipY.clamp(0.0, chartHeight - tooltipHeight);
+    
+    // Final check: ensure tooltip doesn't cover the point after clamping
+    final pointInTooltipX = pointX >= tooltipX && pointX <= tooltipX + tooltipWidth;
+    final pointInTooltipY = pointY >= tooltipY && pointY <= tooltipY + tooltipHeight;
+    
+    if (pointInTooltipX && pointInTooltipY) {
+      // Point would be covered, adjust position
+      if (pointY > tooltipY + tooltipHeight / 2.0) {
+        // Point is in lower half, move tooltip up
+        tooltipY = pointY - tooltipHeight - spacing - pointRadius;
+      } else {
+        // Point is in upper half, move tooltip down
+        tooltipY = pointY + pointRadius + spacing;
+      }
+      // Re-clamp after adjustment
+      tooltipY = tooltipY.clamp(0.0, chartHeight - tooltipHeight);
+    }
+    
+    return Positioned(
+      left: tooltipX,
+      top: tooltipY,
+      child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            color: Theme.of(context).colorScheme.surface,
+            child: Container(
+              width: tooltipWidth,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    dateStr,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                      fontSize: 10,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$debtAmount IQD',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
 }
+
 
 class ChartDataPoint {
   final double x;
