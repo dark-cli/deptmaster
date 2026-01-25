@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:hive_flutter/hive_flutter.dart';
 import '../models/event.dart';
 import '../services/event_store_service.dart';
 import '../services/local_database_service_v2.dart';
+import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 
@@ -23,6 +26,25 @@ class ChartDataPoint {
     required this.intervalEnd,
     required this.hasTransactions,
     this.events = const [],
+  });
+}
+
+// Data model for Syncfusion charts
+class ChartData {
+  final DateTime date;
+  final double debt; // Debt value after inversion/clamping (for display)
+  final double originalDebt; // Original debt value before inversion (for coloring)
+  final bool hasTransactions;
+  final List<Event> events;
+  final String? dominantDirection; // 'lent' or 'owed' - dominant direction in this point's events
+
+  ChartData({
+    required this.date,
+    required this.debt,
+    required this.originalDebt,
+    required this.hasTransactions,
+    this.events = const [],
+    this.dominantDirection,
   });
 }
 
@@ -45,16 +67,80 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   void initState() {
     super.initState();
     _loadChartData();
+    
+    // Listen for real-time updates
+    RealtimeService.addListener(_onRealtimeUpdate);
+    
+    // Listen to Hive events box changes for offline updates
+    if (!kIsWeb) {
+      _setupEventBoxListener();
+    }
+  }
+  
+  void _setupEventBoxListener() {
+    try {
+      final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
+      eventsBox.listenable().addListener(_onEventsChanged);
+    } catch (e) {
+      // Box might not be open yet, will retry in _loadChartData
+    }
+  }
+  
+  void _onEventsChanged() {
+    // Reload chart when events box changes
+    if (mounted) {
+      _loadChartData();
+    }
+  }
+  
+  void _onRealtimeUpdate(Map<String, dynamic> data) {
+    final type = data['type'] as String?;
+    // Reload chart on any event-related updates
+    if (type != null && (type.contains('transaction') || type.contains('contact'))) {
+      if (mounted) {
+        _loadChartData();
+      }
+    }
+  }
+  
+  @override
+  void dispose() {
+    if (!kIsWeb) {
+      try {
+        final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
+        eventsBox.listenable().removeListener(_onEventsChanged);
+      } catch (e) {
+        // Box might not be open, ignore
+      }
+    }
+    RealtimeService.removeListener(_onRealtimeUpdate);
+    super.dispose();
   }
 
   Future<void> _loadChartData() async {
     try {
       final events = await EventStoreService.getAllEvents();
+      print('📊 Loaded ${events.length} total events from EventStoreService');
+      
       // Filter events that have total_debt in eventData
       final eventsWithDebt = events.where((e) {
         final totalDebt = e.eventData['total_debt'];
-        return totalDebt != null && totalDebt is num;
+        final hasDebt = totalDebt != null && totalDebt is num;
+        if (!hasDebt && events.indexOf(e) < 5) {
+          // Log first 5 events without total_debt for debugging
+          print('⚠️ Event ${e.id} (${e.eventType}) missing total_debt. eventData keys: ${e.eventData.keys.toList()}');
+        }
+        return hasDebt;
       }).toList();
+      
+      print('📊 Found ${eventsWithDebt.length} events with total_debt out of ${events.length} total events');
+      
+      if (eventsWithDebt.isEmpty && events.isNotEmpty) {
+        print('⚠️ WARNING: No events have total_debt! This may indicate a data issue.');
+        // Show sample of event types
+        final eventTypes = events.take(10).map((e) => e.eventType).toSet();
+        print('📊 Sample event types: ${eventTypes.join(", ")}');
+      }
       
       // Sort by timestamp (oldest first for chart)
       eventsWithDebt.sort((a, b) => a.timestamp.compareTo(b.timestamp));
@@ -67,7 +153,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
         _loading = false;
       });
     } catch (e) {
-      print('Error loading chart data: $e');
+      print('❌ Error loading chart data: $e');
       setState(() {
         _loading = false;
       });
@@ -276,18 +362,72 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     print('📊 Data range: X=[$rawMinX, $rawMaxX], Y=[$rawMinY, $rawMaxY]');
     print('📊 Inverted: $invertY, minY=$finalMinY, maxY=$finalMaxY');
     
-    // Build spots - only include points with transactions for display
-    // When Y-axis is inverted, simply multiply Y values by -1
-    final spots = chartData
-        .where((point) => point.hasTransactions)
+    // Build chart data for Syncfusion - include ALL points for smooth line connection
+    // Sort by date to ensure proper line connection
+    final sortedChartData = List<ChartDataPoint>.from(chartData)
+      ..sort((a, b) => a.x.compareTo(b.x));
+    
+    // When Y-axis is inverted, transform the Y values (multiply by -1)
+    // We transform the data, not the axis, so we don't use isInversed
+    final chartDataList = sortedChartData
         .map((point) {
           // When inverted, multiply by -1; otherwise use original value
           final yValue = invertY ? -point.y : point.y;
           // Ensure point is within bounds with a small margin to avoid touching edges
           final margin = (finalMaxY - finalMinY) * 0.02; // 2% margin
-          return FlSpot(point.x, yValue.clamp(finalMinY + margin, finalMaxY - margin));
+          final clampedY = yValue.clamp(finalMinY + margin, finalMaxY - margin);
+          // Determine dominant direction from events
+          String? dominantDirection;
+          if (point.events.isNotEmpty) {
+            int lentCount = 0;
+            int owedCount = 0;
+            for (final event in point.events) {
+              final direction = event.eventData['direction'] as String?;
+              if (direction == 'lent') {
+                lentCount++;
+              } else if (direction == 'owed') {
+                owedCount++;
+              }
+            }
+            if (lentCount > owedCount) {
+              dominantDirection = 'lent';
+            } else if (owedCount > lentCount) {
+              dominantDirection = 'owed';
+            } else if (point.events.isNotEmpty) {
+              // If equal, use the most recent event's direction
+              final lastEvent = point.events.last;
+              dominantDirection = lastEvent.eventData['direction'] as String?;
+            }
+          }
+          
+          return ChartData(
+            date: DateTime.fromMillisecondsSinceEpoch(point.x.toInt()),
+            debt: clampedY,
+            originalDebt: point.y, // Store original debt before inversion
+            hasTransactions: point.hasTransactions,
+            events: point.events,
+            dominantDirection: dominantDirection,
+          );
         })
         .toList();
+    
+    // Split data based on debt value: negative = owed (red), positive = lent (green)
+    final flipColors = ref.watch(flipColorsProvider);
+    final lentColor = AppColors.getGiveColor(flipColors, isDark); // Green for positive debt
+    final owedColor = AppColors.getReceivedColor(flipColors, isDark); // Red for negative debt
+    
+    // Split based on original debt value: negative = owed (red), positive = lent (green)
+    final lentData = chartDataList.where((d) {
+      if (!d.hasTransactions) return false;
+      // Use original debt value (before inversion) - positive = lent (green)
+      return d.originalDebt >= 0;
+    }).toList();
+    
+    final owedData = chartDataList.where((d) {
+      if (!d.hasTransactions) return false;
+      // Use original debt value (before inversion) - negative = owed (red)
+      return d.originalDebt < 0;
+    }).toList();
     
     return GestureDetector(
       onTap: widget.onTap,
@@ -312,199 +452,148 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
             ),
             const SizedBox(height: 8),
             Expanded(
-              child: SizedBox.expand(
-                child: LineChart(
-                LineChartData(
-                  clipData: FlClipData.all(), // Clip data to chart bounds
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    getDrawingHorizontalLine: (value) {
-                      return FlLine(
-                        color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
-                        strokeWidth: 1,
-                      );
-                    },
+              child: SfCartesianChart(
+                backgroundColor: Colors.transparent,
+                plotAreaBorderWidth: 0,
+                enableAxisAnimation: false,
+                primaryXAxis: DateTimeAxis(
+                  minimum: DateTime.fromMillisecondsSinceEpoch(minX.toInt()),
+                  maximum: DateTime.fromMillisecondsSinceEpoch(maxX.toInt()),
+                  intervalType: chartDataList.length > 4 ? DateTimeIntervalType.days : DateTimeIntervalType.auto,
+                  labelStyle: TextStyle(
+                    fontSize: 9,
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                   ),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 20,
-                        interval: chartData.length > 4 
-                            ? (maxX - minX) / 4 
-                            : 1,
-                        getTitlesWidget: (value, meta) {
-                          final date = DateTime.fromMillisecondsSinceEpoch(value.toInt());
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              DateFormat('MM/dd').format(date),
-                              style: TextStyle(
-                                fontSize: 9,
-                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 35,
-                        getTitlesWidget: (value, meta) {
-                          // Compact format: K for thousands, M for millions
-                          final num = value.toInt();
-                          String formatted;
-                          if (num.abs() >= 1000000) {
-                            formatted = '${(num / 1000000).toStringAsFixed(1)}M';
-                          } else if (num.abs() >= 1000) {
-                            formatted = '${(num / 1000).toStringAsFixed(1)}K';
-                          } else {
-                            formatted = num.toString();
-                          }
-                          return Text(
-                            formatted,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  borderData: FlBorderData(
-                    show: true,
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-                    ),
-                  ),
-                  minX: minX,
-                  maxX: maxX,
-                  minY: finalMinY,
-                  maxY: finalMaxY,
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: spots,
-                      isCurved: true,
-                      color: primaryColor,
-                      barWidth: 2,
-                      dotData: FlDotData(
-                        show: true,
-                        getDotPainter: (spot, percent, barData, index) {
-                          final point = chartData[index];
-                          return FlDotCirclePainter(
-                            radius: point.hasTransactions ? 2.5 : 0,
-                            color: primaryColor,
-                            strokeWidth: 1.5,
-                            strokeColor: Theme.of(context).colorScheme.surface,
-                          );
-                        },
-                      ),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: primaryColor.withOpacity(0.1),
-                      ),
-                    ),
-                  ],
-                  lineTouchData: LineTouchData(
-                    enabled: false, // Disable interaction on dashboard chart
-                    touchTooltipData: LineTouchTooltipData(
-                      tooltipRoundedRadius: 6,
-                      tooltipPadding: const EdgeInsets.all(8),
-                      tooltipBgColor: Theme.of(context).colorScheme.surface,
-                      tooltipBorder: BorderSide(
-                        color: primaryColor,
-                        width: 1,
-                      ),
-                      getTooltipItems: (List<LineBarSpot> touchedSpots) {
-                        // Must return one item per touched spot
-                        return touchedSpots.map((touchedSpot) {
-                          final point = chartData[touchedSpot.spotIndex];
-                          
-                          // Only show tooltip if this point has transactions
-                          if (!point.hasTransactions || point.events.isEmpty) {
-                            // Return empty item to hide tooltip
-                            return LineTooltipItem(
-                              '',
-                              const TextStyle(fontSize: 0),
-                            );
-                          }
-                          
-                          // Build compact tooltip content
-                          final buffer = StringBuffer();
-                          
-                          // Compact time interval (single line)
-                          final intervalFormat = DateFormat('MM/dd HH:mm');
-                          buffer.write('${intervalFormat.format(point.intervalStart)}-${intervalFormat.format(point.intervalEnd)}');
-                          
-                          // Compact average and count
-                          final avgDebt = NumberFormat('#,###').format(point.y.toInt());
-                          buffer.write('\n$avgDebt IQD • ${point.events.length}tx');
-                          
-                          // Show up to 3 transactions (reduced from 4)
-                          final maxShow = 3;
-                          final eventsToShow = point.events.take(maxShow).toList();
-                          
-                          for (final event in eventsToShow) {
-                            final eventData = event.eventData;
-                            final timeStr = DateFormat('HH:mm').format(event.timestamp);
-                            
-                            buffer.write('\n$timeStr ');
-                            
-                            if (eventData['amount'] != null) {
-                              final amount = (eventData['amount'] as num).toDouble();
-                              final direction = eventData['direction'] as String? ?? 'owed';
-                              final sign = direction == 'lent' ? '+' : '-';
-                              // Use compact format without currency
-                              buffer.write('$sign${NumberFormat('#,###').format(amount.toInt())}');
-                            } else {
-                              // Abbreviate event type
-                              final eventType = event.eventType;
-                              if (eventType.length > 8) {
-                                buffer.write(eventType.substring(0, 8));
-                              } else {
-                                buffer.write(eventType);
-                              }
-                            }
-                            
-                            // Try to get contact name (abbreviated if long)
-                            final contactId = eventData['contact_id'] as String?;
-                            if (contactId != null) {
-                              final contactName = _contactNameCache[contactId] ?? '?';
-                              if (contactName.length > 12) {
-                                buffer.write(' • ${contactName.substring(0, 12)}...');
-                              } else {
-                                buffer.write(' • $contactName');
-                              }
-                            }
-                          }
-                          
-                          if (point.events.length > maxShow) {
-                            buffer.write('\n+${point.events.length - maxShow}');
-                          }
-                          
-                          return LineTooltipItem(
-                            buffer.toString().trim(),
-                            TextStyle(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontSize: 9, // Reduced from 11
-                            ),
-                          );
-                        }).toList();
-                      },
-                    ),
+                  labelFormat: '{value}',
+                  dateFormat: DateFormat('MM/dd'),
+                  majorGridLines: const MajorGridLines(width: 0),
+                  axisLine: AxisLine(
+                    width: 1,
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
                   ),
                 ),
+                primaryYAxis: NumericAxis(
+                  minimum: finalMinY,
+                  maximum: finalMaxY,
+                  // Don't use isInversed since we're transforming the data values directly
+                  labelStyle: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                  ),
+                  labelFormat: '{value}',
+                  numberFormat: NumberFormat.compact(),
+                  axisLabelFormatter: (AxisLabelRenderDetails details) {
+                    // Compact format: K for thousands, M for millions
+                    final num = details.value.toInt();
+                    String formatted;
+                    if (num.abs() >= 1000000) {
+                      formatted = '${(num / 1000000).toStringAsFixed(1)}M';
+                    } else if (num.abs() >= 1000) {
+                      formatted = '${(num / 1000).toStringAsFixed(1)}K';
+                    } else {
+                      formatted = num.toString();
+                    }
+                    return ChartAxisLabel(
+                      formatted,
+                      details.textStyle?.copyWith(
+                        fontSize: 10,
+                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                      ),
+                    );
+                  },
+                  majorGridLines: MajorGridLines(
+                    width: 1,
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+                  ),
+                  axisLine: AxisLine(
+                    width: 1,
+                    color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                  ),
+                ),
+                series: <CartesianSeries<ChartData, DateTime>>[
+                  // Main line series (all points for continuous line)
+                  SplineAreaSeries<ChartData, DateTime>(
+                    dataSource: chartDataList,
+                    xValueMapper: (ChartData data, _) => data.date,
+                    yValueMapper: (ChartData data, _) => data.debt,
+                    borderColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
+                    borderWidth: 1.5,
+                    splineType: SplineType.natural,
+                    animationDuration: 0,
+                    enableTooltip: false, // Disable interaction on dashboard chart
+                    emptyPointSettings: EmptyPointSettings(
+                      mode: EmptyPointMode.gap,
+                    ),
+                    markerSettings: MarkerSettings(
+                      isVisible: false, // Hide markers on main series
+                    ),
+                    gradient: LinearGradient(
+                      colors: Theme.of(context).brightness == Brightness.dark
+                          ? [
+                              Theme.of(context).colorScheme.onSurface.withOpacity(0.25),
+                              Theme.of(context).colorScheme.onSurface.withOpacity(0.0),
+                            ]
+                          : [
+                              Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
+                              Theme.of(context).colorScheme.onSurface.withOpacity(0.0),
+                            ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                  ),
+                  // Overlay markers for lent transactions (green)
+                  if (lentData.isNotEmpty)
+                    SplineAreaSeries<ChartData, DateTime>(
+                      dataSource: lentData,
+                      xValueMapper: (ChartData data, _) => data.date,
+                      yValueMapper: (ChartData data, _) => data.debt,
+                      color: Colors.transparent,
+                      borderColor: Colors.transparent,
+                      borderWidth: 0,
+                      splineType: SplineType.natural,
+                      animationDuration: 0,
+                      enableTooltip: false,
+                      emptyPointSettings: EmptyPointSettings(
+                        mode: EmptyPointMode.gap,
+                      ),
+                      markerSettings: MarkerSettings(
+                        isVisible: true,
+                        height: 6,
+                        width: 6,
+                        shape: DataMarkerType.circle,
+                        color: lentColor,
+                        borderColor: lentColor,
+                        borderWidth: 0,
+                      ),
+                    ),
+                  // Overlay markers for owed transactions (red)
+                  if (owedData.isNotEmpty)
+                    SplineAreaSeries<ChartData, DateTime>(
+                      dataSource: owedData,
+                      xValueMapper: (ChartData data, _) => data.date,
+                      yValueMapper: (ChartData data, _) => data.debt,
+                      color: Colors.transparent,
+                      borderColor: Colors.transparent,
+                      borderWidth: 0,
+                      splineType: SplineType.natural,
+                      animationDuration: 0,
+                      enableTooltip: false,
+                      emptyPointSettings: EmptyPointSettings(
+                        mode: EmptyPointMode.gap,
+                      ),
+                      markerSettings: MarkerSettings(
+                        isVisible: true,
+                        height: 6,
+                        width: 6,
+                        shape: DataMarkerType.circle,
+                        color: owedColor,
+                        borderColor: owedColor,
+                        borderWidth: 0,
+                      ),
+                    ),
+                ],
+                tooltipBehavior: TooltipBehavior(
+                  enable: false, // Disable interaction on dashboard chart
                 ),
               ),
             ),

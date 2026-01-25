@@ -41,7 +41,7 @@ dependencies:
   flutter_svg: ^2.0.9
   
   # Charts
-  fl_chart: ^0.66.0
+  syncfusion_flutter_charts: ^27.1.48
 
 dev_dependencies:
   flutter_test:
