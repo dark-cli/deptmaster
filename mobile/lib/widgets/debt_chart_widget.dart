@@ -118,8 +118,13 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   }
 
   Future<void> _loadChartData() async {
+    if (!mounted) return;
+    
     try {
       final events = await EventStoreService.getAllEvents();
+      
+      if (!mounted) return;
+      
       print('📊 Loaded ${events.length} total events from EventStoreService');
       
       // Filter events that have total_debt in eventData
@@ -145,8 +150,12 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       // Sort by timestamp (oldest first for chart)
       eventsWithDebt.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       
+      if (!mounted) return;
+      
       // Pre-load contact names for tooltip
       await _preloadContactNames(eventsWithDebt);
+      
+      if (!mounted) return;
       
       setState(() {
         _events = eventsWithDebt;
@@ -154,13 +163,17 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       });
     } catch (e) {
       print('❌ Error loading chart data: $e');
-      setState(() {
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
   
   Future<void> _preloadContactNames(List<Event> events) async {
+    if (!mounted) return;
+    
     final contactIds = <String>{};
     for (final event in events) {
       final contactId = event.eventData['contact_id'] as String?;
@@ -187,12 +200,39 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       return [];
     }
     
+    if (!mounted) {
+      return [];
+    }
+    
     print('📊 Building chart from ${_events!.length} events');
     
-    // Get last month (30 days) of data for simple dashboard view
+    // Get period from settings - watch it so it updates reactively
+    final period = ref.watch(dashboardDefaultPeriodProvider);
     final now = DateTime.now();
-    final periodStart = now.subtract(const Duration(days: 30));
-    final intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals
+    DateTime periodStart;
+    int intervalMs;
+    
+    switch (period) {
+      case 'day':
+        periodStart = now.subtract(const Duration(days: 1));
+        intervalMs = 60 * 60 * 1000; // 1 hour intervals
+        break;
+      case 'week':
+        periodStart = now.subtract(const Duration(days: 7));
+        intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals
+        break;
+      case 'month':
+        periodStart = now.subtract(const Duration(days: 30));
+        intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals
+        break;
+      case 'year':
+        periodStart = now.subtract(const Duration(days: 365));
+        intervalMs = 7 * 24 * 60 * 60 * 1000; // 1 week intervals
+        break;
+      default:
+        periodStart = now.subtract(const Duration(days: 30));
+        intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals
+    }
     
     // Get all events (not just recent ones) for fallback
     final allEvents = _events!;
@@ -290,6 +330,10 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
 
   @override
   Widget build(BuildContext context) {
+    if (!mounted) {
+      return const SizedBox.shrink();
+    }
+    
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
     
@@ -411,23 +455,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
         })
         .toList();
     
-    // Split data based on debt value: negative = owed (red), positive = lent (green)
-    final flipColors = ref.watch(flipColorsProvider);
-    final lentColor = AppColors.getGiveColor(flipColors, isDark); // Green for positive debt
-    final owedColor = AppColors.getReceivedColor(flipColors, isDark); // Red for negative debt
-    
-    // Split based on original debt value: negative = owed (red), positive = lent (green)
-    final lentData = chartDataList.where((d) {
-      if (!d.hasTransactions) return false;
-      // Use original debt value (before inversion) - positive = lent (green)
-      return d.originalDebt >= 0;
-    }).toList();
-    
-    final owedData = chartDataList.where((d) {
-      if (!d.hasTransactions) return false;
-      // Use original debt value (before inversion) - negative = owed (red)
-      return d.originalDebt < 0;
-    }).toList();
+    // Use accent color for all points
     
     return GestureDetector(
       onTap: widget.onTap,
@@ -525,7 +553,13 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                       mode: EmptyPointMode.gap,
                     ),
                     markerSettings: MarkerSettings(
-                      isVisible: false, // Hide markers on main series
+                      isVisible: true, // Show markers with accent color
+                      height: 6,
+                      width: 6,
+                      shape: DataMarkerType.circle,
+                      color: primaryColor,
+                      borderColor: primaryColor,
+                      borderWidth: 0,
                     ),
                     gradient: LinearGradient(
                       colors: Theme.of(context).brightness == Brightness.dark
@@ -541,56 +575,6 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                       end: Alignment.bottomCenter,
                     ),
                   ),
-                  // Overlay markers for lent transactions (green)
-                  if (lentData.isNotEmpty)
-                    SplineAreaSeries<ChartData, DateTime>(
-                      dataSource: lentData,
-                      xValueMapper: (ChartData data, _) => data.date,
-                      yValueMapper: (ChartData data, _) => data.debt,
-                      color: Colors.transparent,
-                      borderColor: Colors.transparent,
-                      borderWidth: 0,
-                      splineType: SplineType.natural,
-                      animationDuration: 0,
-                      enableTooltip: false,
-                      emptyPointSettings: EmptyPointSettings(
-                        mode: EmptyPointMode.gap,
-                      ),
-                      markerSettings: MarkerSettings(
-                        isVisible: true,
-                        height: 6,
-                        width: 6,
-                        shape: DataMarkerType.circle,
-                        color: lentColor,
-                        borderColor: lentColor,
-                        borderWidth: 0,
-                      ),
-                    ),
-                  // Overlay markers for owed transactions (red)
-                  if (owedData.isNotEmpty)
-                    SplineAreaSeries<ChartData, DateTime>(
-                      dataSource: owedData,
-                      xValueMapper: (ChartData data, _) => data.date,
-                      yValueMapper: (ChartData data, _) => data.debt,
-                      color: Colors.transparent,
-                      borderColor: Colors.transparent,
-                      borderWidth: 0,
-                      splineType: SplineType.natural,
-                      animationDuration: 0,
-                      enableTooltip: false,
-                      emptyPointSettings: EmptyPointSettings(
-                        mode: EmptyPointMode.gap,
-                      ),
-                      markerSettings: MarkerSettings(
-                        isVisible: true,
-                        height: 6,
-                        width: 6,
-                        shape: DataMarkerType.circle,
-                        color: owedColor,
-                        borderColor: owedColor,
-                        borderWidth: 0,
-                      ),
-                    ),
                 ],
                 tooltipBehavior: TooltipBehavior(
                   enable: false, // Disable interaction on dashboard chart

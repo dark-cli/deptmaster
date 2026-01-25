@@ -427,24 +427,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               })
                               .toList();
                           
-                          // Split data based on debt value: negative = owed (red), positive = lent (green)
-                          final flipColors = ref.watch(flipColorsProvider);
-                          final isDark = Theme.of(context).brightness == Brightness.dark;
-                          final lentColor = AppColors.getGiveColor(flipColors, isDark); // Green for positive debt
-                          final owedColor = AppColors.getReceivedColor(flipColors, isDark); // Red for negative debt
-                          
-                          // Split based on original debt value: negative = owed (red), positive = lent (green)
-                          final lentData = chartDataList.where((d) {
-                            if (!d.hasTransactions) return false;
-                            // Use original debt value (before inversion) - positive = lent (green)
-                            return d.originalDebt >= 0;
-                          }).cast<ChartData>().toList();
-                          
-                          final owedData = chartDataList.where((d) {
-                            if (!d.hasTransactions) return false;
-                            // Use original debt value (before inversion) - negative = owed (red)
-                            return d.originalDebt < 0;
-                          }).cast<ChartData>().toList();
+                          // Use accent color for all points
+                          final primaryColor = Theme.of(context).colorScheme.primary;
                           
                           // Determine date format based on period
                           String dateFormat;
@@ -531,11 +515,18 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 borderWidth: 1.5,
                                 splineType: SplineType.natural,
                                 animationDuration: 0,
+                                enableTooltip: true, // Enable tooltip on series
                                 emptyPointSettings: EmptyPointSettings(
                                   mode: EmptyPointMode.gap,
                                 ),
                                 markerSettings: MarkerSettings(
-                                  isVisible: false, // Hide markers on main series
+                                  isVisible: true, // Show markers with accent color
+                                  height: 6,
+                                  width: 6,
+                                  shape: DataMarkerType.circle,
+                                  color: primaryColor,
+                                  borderColor: primaryColor,
+                                  borderWidth: 0,
                                 ),
                                 gradient: LinearGradient(
                                   colors: Theme.of(context).brightness == Brightness.dark
@@ -560,58 +551,11 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                     }
                                   }
                                 },
-                              ),
-                              // Overlay markers for lent transactions (green)
-                              if (lentData.isNotEmpty)
-                                SplineAreaSeries<ChartData, DateTime>(
-                                  dataSource: lentData,
-                                  xValueMapper: (ChartData data, _) => data.date,
-                                  yValueMapper: (ChartData data, _) => data.debt,
-                                  color: Colors.transparent,
-                                  borderColor: Colors.transparent,
-                                  borderWidth: 0,
-                                  splineType: SplineType.natural,
-                                  animationDuration: 0,
-                                  emptyPointSettings: EmptyPointSettings(
-                                    mode: EmptyPointMode.gap,
-                                  ),
-                                  markerSettings: MarkerSettings(
-                                    isVisible: true,
-                                    height: 6,
-                                    width: 6,
-                                    shape: DataMarkerType.circle,
-                                    color: lentColor,
-                                    borderColor: lentColor,
-                                    borderWidth: 0,
-                                  ),
-                                ),
-                              // Overlay markers for owed transactions (red)
-                              if (owedData.isNotEmpty)
-                                SplineAreaSeries<ChartData, DateTime>(
-                                  dataSource: owedData,
-                                  xValueMapper: (ChartData data, _) => data.date,
-                                  yValueMapper: (ChartData data, _) => data.debt,
-                                  color: Colors.transparent,
-                                  borderColor: Colors.transparent,
-                                  borderWidth: 0,
-                                  splineType: SplineType.natural,
-                                  animationDuration: 0,
-                                  emptyPointSettings: EmptyPointSettings(
-                                    mode: EmptyPointMode.gap,
-                                  ),
-                                  markerSettings: MarkerSettings(
-                                    isVisible: true,
-                                    height: 6,
-                                    width: 6,
-                                    shape: DataMarkerType.circle,
-                                    color: owedColor,
-                                    borderColor: owedColor,
-                                    borderWidth: 0,
-                                  ),
                                 ),
                             ],
                             tooltipBehavior: TooltipBehavior(
                               enable: true,
+                              activationMode: ActivationMode.singleTap, // Show on tap, not hover
                               color: Theme.of(context).colorScheme.surface,
                               textStyle: TextStyle(
                                 color: Theme.of(context).colorScheme.onSurface,
@@ -619,6 +563,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               ),
                               borderWidth: 1,
                               borderColor: primaryColor,
+                              duration: 3000, // Show for 3 seconds
                               builder: (dynamic data, dynamic point, dynamic series, int pointIndex, int seriesIndex) {
                                 // Safety check: pointIndex must be valid
                                 if (pointIndex < 0 || pointIndex >= chartDataList.length) {

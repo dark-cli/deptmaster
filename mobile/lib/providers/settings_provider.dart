@@ -128,3 +128,34 @@ class InvertYAxisNotifier extends StateNotifier<bool> {
     await _loadInvertYAxis();
   }
 }
+
+// Provider for dashboard default period
+final dashboardDefaultPeriodProvider = StateNotifierProvider<DashboardDefaultPeriodNotifier, String>((ref) {
+  return DashboardDefaultPeriodNotifier();
+});
+
+class DashboardDefaultPeriodNotifier extends StateNotifier<String> {
+  DashboardDefaultPeriodNotifier() : super('month') {
+    _loadDashboardDefaultPeriod();
+  }
+
+  Future<void> _loadDashboardDefaultPeriod() async {
+    try {
+      final period = await SettingsService.getDashboardDefaultPeriod();
+      if (state != period) {
+        state = period;
+      }
+    } catch (e) {
+      print('Error loading dashboard default period: $e');
+    }
+  }
+
+  Future<void> setDashboardDefaultPeriod(String period) async {
+    await SettingsService.setDashboardDefaultPeriod(period);
+    state = period;
+  }
+
+  Future<void> refresh() async {
+    await _loadDashboardDefaultPeriod();
+  }
+}
