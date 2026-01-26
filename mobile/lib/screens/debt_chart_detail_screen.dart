@@ -674,7 +674,10 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                               ),
                               dateFormat: DateFormat(dateFormat),
-                              majorGridLines: const MajorGridLines(width: 0),
+                              majorGridLines: MajorGridLines(
+                                width: 1,
+                                color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+                              ),
                               axisLine: AxisLine(
                                 width: 1,
                                 color: Theme.of(context).colorScheme.outline.withOpacity(0.2),

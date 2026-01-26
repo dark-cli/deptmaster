@@ -39,7 +39,7 @@ dependencies:
   
   # Icons
   flutter_svg: ^2.0.9
-  
+
   # Charts
   syncfusion_flutter_charts: ^27.1.48
 

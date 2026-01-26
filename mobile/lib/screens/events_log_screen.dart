@@ -36,7 +36,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   String _aggregateTypeFilter = 'all';
   DateTime? _dateFrom;
   DateTime? _dateTo;
-  
+
   @override
   void initState() {
     super.initState();
@@ -1217,34 +1217,34 @@ class _EventTableRowState extends State<EventTableRow> {
       // Fallback: Calculate total debt at the time of this event
       try {
         totalDebt = await StateBuilder.calculateTotalDebtAtTime(widget.event.timestamp);
-      } catch (e) {
-        print('Error calculating total debt: $e');
+    } catch (e) {
+      print('Error calculating total debt: $e');
         totalDebt = 0;
-      }
+        }
     }
     
-    if (mounted) {
-      setState(() {
+        if (mounted) {
+          setState(() {
         _contactName = contactName;
         _contactUsername = contactUsername;
         _amount = amount;
         _totalDebt = totalDebt;
         _loading = false;
-      });
+          });
     }
   }
 
   Color _getEventBadgeColor(String eventType, bool isDark) {
     final eventTypeUpper = eventType.toUpperCase();
     if (eventTypeUpper.contains('CREATED') || eventTypeUpper.contains('CREATE')) {
-      return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
+        return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
     } else if (eventTypeUpper.contains('UPDATED') || eventTypeUpper.contains('UPDATE') || 
                eventTypeUpper == 'UNDO') {
-      return isDark ? AppColors.darkWarning : AppColors.lightWarning;
+        return isDark ? AppColors.darkWarning : AppColors.lightWarning;
     } else if (eventTypeUpper.contains('DELETED') || eventTypeUpper.contains('DELETE')) {
       return isDark ? AppColors.darkWarning : AppColors.lightWarning; // Same as UPDATE
     }
-    return isDark ? AppColors.darkGray : AppColors.lightGray;
+        return isDark ? AppColors.darkGray : AppColors.lightGray;
   }
 
   @override
@@ -1253,7 +1253,7 @@ class _EventTableRowState extends State<EventTableRow> {
     
     if (widget.isMobile) {
       // Mobile: Card-like row with all columns stacked
-      return Card(
+    return Card(
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: InkWell(
           onTap: () {
@@ -1279,19 +1279,19 @@ class _EventTableRowState extends State<EventTableRow> {
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
+          decoration: BoxDecoration(
                         color: _getEventBadgeColor(widget.event.eventType, isDark).withOpacity(0.2),
                         borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
+          ),
+            child: Text(
                         EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
-                        style: TextStyle(
+              style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           color: _getEventBadgeColor(widget.event.eventType, isDark),
-                        ),
-                      ),
-                    ),
+              ),
+            ),
+          ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1300,26 +1300,26 @@ class _EventTableRowState extends State<EventTableRow> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
                         Text(
                           'Name:',
                           style: TextStyle(
                             fontSize: 11,
                             color: ThemeColors.gray(context),
                             fontWeight: FontWeight.w500,
-                          ),
-                        ),
+                  ),
+                ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Row(
                             children: [
                               if (_contactUsername != null)
-                                Container(
+                Container(
                                   margin: const EdgeInsets.only(right: 6),
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: isDark
+                  decoration: BoxDecoration(
+                    color: isDark
                                         ? AppColors.darkPrimary.withOpacity(0.3) // Light purple with opacity for dark mode
                                         : const Color(0xFFE8E0EC), // Light purple background for light mode
                                     borderRadius: BorderRadius.circular(4),
@@ -1329,8 +1329,8 @@ class _EventTableRowState extends State<EventTableRow> {
                                             width: 1,
                                           )
                                         : null,
-                                  ),
-                                  child: Text(
+                  ),
+                  child: Text(
                                     '@$_contactUsername',
                                     style: TextStyle(
                                       fontSize: 10,
@@ -1344,14 +1344,14 @@ class _EventTableRowState extends State<EventTableRow> {
                               Expanded(
                                 child: Text(
                                   _contactName!,
-                                  style: const TextStyle(
+                    style: const TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
                         ),
                       ],
                     ),
@@ -1362,13 +1362,13 @@ class _EventTableRowState extends State<EventTableRow> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+            Text(
                         'Transaction Amount:',
-                        style: TextStyle(
+              style: TextStyle(
                           fontSize: 11,
-                          color: ThemeColors.gray(context),
+                color: ThemeColors.gray(context),
                           fontWeight: FontWeight.w500,
-                        ),
+            ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -1403,7 +1403,7 @@ class _EventTableRowState extends State<EventTableRow> {
                         'New Total Balance:',
                         style: TextStyle(
                           fontSize: 11,
-                          color: ThemeColors.gray(context),
+                        color: ThemeColors.gray(context),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -1441,19 +1441,19 @@ class _EventTableRowState extends State<EventTableRow> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
+                      Expanded(
+                        child: Text(
                         widget.event.eventData['comment'] as String? ?? '-',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: ThemeColors.gray(context),
-                        ),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: ThemeColors.gray(context),
+                          ),
                         maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -1488,11 +1488,11 @@ class _EventTableRowState extends State<EventTableRow> {
                     ),
                     child: Text(
                       EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                         color: _getEventBadgeColor(widget.event.eventType, isDark),
-                      ),
+                    ),
                     ),
                   ),
                 ),
@@ -1504,27 +1504,27 @@ class _EventTableRowState extends State<EventTableRow> {
                       : Row(
                           children: [
                             if (_contactUsername != null)
-                              Container(
+              Container(
                                 margin: const EdgeInsets.only(right: 6),
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: isDark
+                decoration: BoxDecoration(
+                  color: isDark
                                       ? AppColors.darkPrimary.withOpacity(0.3) // Light purple with opacity for dark mode
                                       : const Color(0xFFE8E0EC), // Light purple background for light mode
-                                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(4),
                                   border: isDark
                                       ? Border.all(
                                           color: AppColors.darkPrimary.withOpacity(0.5),
-                                          width: 1,
+                    width: 1,
                                         )
                                       : null,
-                                ),
+                ),
                                 child: Text(
                                   '@$_contactUsername',
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w500,
-                                    color: isDark
+                      color: isDark
                                         ? AppColors.darkPrimary // Light purple text for dark mode
                                         : AppColors.lightPrimary, // Dark purple text for light mode
                                   ),
@@ -1565,9 +1565,9 @@ class _EventTableRowState extends State<EventTableRow> {
                       : _totalDebt != null
                           ? Text(
                               '${NumberFormat('#,###').format(_totalDebt)} IQD',
-                              style: TextStyle(
+                            style: TextStyle(
                                 fontSize: 12,
-                                fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w600,
                                 color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
                               ),
                             )
@@ -1590,11 +1590,11 @@ class _EventTableRowState extends State<EventTableRow> {
                     icon: const Icon(Icons.visibility, size: 18),
                     onPressed: () => _showEventDetails(context),
                     tooltip: 'View Details',
-                  ),
+                            ),
+                          ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
         ),
       );
     }
@@ -1657,7 +1657,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
         constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
+                children: [
             // Header
             Container(
               padding: const EdgeInsets.all(20),
@@ -1667,16 +1667,16 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
                 ),
-              ),
+                  ),
               child: Row(
                 children: [
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                  Text(
                           EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
-                          style: TextStyle(
+                    style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                             color: isDark ? AppColors.darkOnSurface : AppColors.lightOnSurface,
@@ -1687,27 +1687,27 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                           widget.dateFormat.format(widget.event.timestamp),
                           style: TextStyle(
                             fontSize: 12,
-                            color: ThemeColors.gray(context),
-                          ),
-                        ),
-                      ],
+                      color: ThemeColors.gray(context),
+                    ),
+                  ),
+                ],
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
                     onPressed: () => Navigator.of(context).pop(),
                     tooltip: 'Close',
-                  ),
-                ],
               ),
-            ),
+            ],
+          ),
+        ),
             // Content
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                     // Contact Information
                     if (widget.contactName != null)
                       _DetailSection(
@@ -1715,11 +1715,11 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                         child: Row(
                           children: [
                             if (widget.contactUsername != null)
-                              Container(
+                Container(
                                 margin: const EdgeInsets.only(right: 8),
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: isDark
+                  decoration: BoxDecoration(
+                    color: isDark
                                       ? AppColors.darkPrimary.withOpacity(0.3)
                                       : const Color(0xFFE8E0EC),
                                   borderRadius: BorderRadius.circular(4),
@@ -1729,28 +1729,28 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                                           width: 1,
                                         )
                                       : null,
-                                ),
+                  ),
                                 child: Text(
                                   '@${widget.contactUsername}',
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w500,
                                     color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
-                                  ),
+                      ),
                                 ),
                               ),
-                            Expanded(
-                              child: Text(
+                      Expanded(
+                        child: Text(
                                 widget.contactName!,
-                                style: const TextStyle(
+                          style: const TextStyle(
                                   fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
+                    ],
+                  ),
+                ),
                     
                     // Transaction Amount
                     if (widget.amount != null)
@@ -1764,7 +1764,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                             color: widget.amount!.isPositive 
                                 ? AppColors.darkSuccess 
                                 : AppColors.darkError,
-                          ),
+                  ),
                         ),
                       ),
                     
@@ -1787,7 +1787,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                       title: 'Event Details',
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+                  children: [
                           _DetailRow(label: 'Event Type', value: widget.event.eventType),
                           _DetailRow(label: 'Aggregate Type', value: widget.event.aggregateType),
                           _DetailRow(label: 'Event ID', value: widget.event.id),
@@ -1818,8 +1818,8 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                       },
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
                           color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
@@ -1856,18 +1856,18 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: SelectableText(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: SelectableText(
                             const JsonEncoder.withIndent('  ').convert(widget.event.eventData),
                             style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 11,
+                          fontFamily: 'monospace',
+                          fontSize: 11,
                               color: isDark ? AppColors.darkOnSurface : AppColors.lightOnSurface,
                             ),
-                          ),
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),

@@ -62,6 +62,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   List<Event>? _events;
   bool _loading = true;
   Map<String, String> _contactNameCache = {}; // Cache for contact names
+  bool _isDisposed = false; // Flag to prevent operations after disposal
 
   @override
   void initState() {
@@ -88,7 +89,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   
   void _onEventsChanged() {
     // Reload chart when events box changes
-    if (mounted) {
+    if (!_isDisposed && mounted) {
       _loadChartData();
     }
   }
@@ -97,7 +98,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     final type = data['type'] as String?;
     // Reload chart on any event-related updates
     if (type != null && (type.contains('transaction') || type.contains('contact'))) {
-      if (mounted) {
+      if (!_isDisposed && mounted) {
         _loadChartData();
       }
     }
@@ -105,6 +106,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   
   @override
   void dispose() {
+    _isDisposed = true; // Set flag before disposal
     if (!kIsWeb) {
       try {
         final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
@@ -118,12 +120,12 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   }
 
   Future<void> _loadChartData() async {
-    if (!mounted) return;
+    if (_isDisposed || !mounted) return;
     
     try {
       final events = await EventStoreService.getAllEvents();
       
-      if (!mounted) return;
+      if (_isDisposed || !mounted) return;
       
       print('📊 Loaded ${events.length} total events from EventStoreService');
       
@@ -150,20 +152,22 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       // Sort by timestamp (oldest first for chart)
       eventsWithDebt.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       
-      if (!mounted) return;
+      if (_isDisposed || !mounted) return;
       
       // Pre-load contact names for tooltip
       await _preloadContactNames(eventsWithDebt);
       
-      if (!mounted) return;
+      if (_isDisposed || !mounted) return;
       
       setState(() {
-        _events = eventsWithDebt;
-        _loading = false;
+        if (!_isDisposed) {
+          _events = eventsWithDebt;
+          _loading = false;
+        }
       });
     } catch (e) {
       print('❌ Error loading chart data: $e');
-      if (mounted) {
+      if (!_isDisposed && mounted) {
         setState(() {
           _loading = false;
         });
@@ -172,7 +176,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   }
   
   Future<void> _preloadContactNames(List<Event> events) async {
-    if (!mounted) return;
+    if (_isDisposed || !mounted) return;
     
     final contactIds = <String>{};
     for (final event in events) {
@@ -327,7 +331,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (!mounted) {
+    if (_isDisposed || !mounted) {
       return const SizedBox.shrink();
     }
     
@@ -351,7 +355,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       print('⚠️ Chart data is empty, showing empty state');
       return Container(
         height: 200,
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
@@ -397,12 +401,58 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     final rawMaxX = allXValues.reduce((a, b) => a > b ? a : b);
     final xRange = rawMaxX - rawMinX;
     final xPadding = xRange > 0 ? xRange * 0.02 : 86400000; // 1 day if no range
-    final minX = rawMinX - xPadding;
-    final maxX = rawMaxX + xPadding;
+    var minX = rawMinX - xPadding;
+    var maxX = rawMaxX + xPadding;
+    
+    // Calculate interval for even spacing based on period
+    double xInterval;
+    int minorTicksPerInterval;
+    DateTimeIntervalType xIntervalType;
+    DateFormat dateFormat;
+    
+    if (period == 'year') {
+      // Year View: Major marks each month, minor marks each week
+      xIntervalType = DateTimeIntervalType.months;
+      xInterval = 1.0;
+      minorTicksPerInterval = 3; // Approximately 4 weeks per month
+      dateFormat = DateFormat('MMM'); // e.g., "Dec", "Jan", "Feb"
+    } else if (period == 'month') {
+      // Month View: Major marks each week, minor marks each day
+      // Align minimum to ensure first mark appears near data start
+      // Calculate where the first mark should be (nearest 7-day boundary from data start)
+      final dataStartDate = DateTime.fromMillisecondsSinceEpoch(rawMinX.toInt());
+      final weekday = dataStartDate.weekday; // 1=Monday, 7=Sunday
+      final daysSinceSunday = weekday == 7 ? 0 : weekday; // Days since last Sunday
+      // Round down to nearest 7-day boundary, but only if it's close (within 2 days) to avoid large empty space
+      if (daysSinceSunday <= 2) {
+        final alignedStart = dataStartDate.subtract(Duration(days: daysSinceSunday));
+        // Only adjust if it doesn't create too much empty space (max 2 days)
+        final daysDifference = (minX - alignedStart.millisecondsSinceEpoch) / (1000 * 60 * 60 * 24);
+        if (daysDifference <= 2) {
+          minX = alignedStart.millisecondsSinceEpoch.toDouble();
+        }
+      }
+      
+      // Use fixed 7-day interval for consistent weekly marks
+      xIntervalType = DateTimeIntervalType.days;
+      xInterval = 7.0; // Fixed weekly interval
+      minorTicksPerInterval = 6; // Daily minor ticks (6 days between weekly marks)
+      dateFormat = DateFormat('MM/dd'); // e.g., "12/28", "01/04"
+    } else {
+      // Week View: Major marks each day, no minor marks
+      xIntervalType = DateTimeIntervalType.days;
+      xInterval = 1.0;
+      minorTicksPerInterval = 0;
+      dateFormat = DateFormat('MM/dd'); // e.g., "12/28", "12/29"
+    }
     
     print('📊 Chart bounds: X=[$minX, $maxX], Y=[$finalMinY, $finalMaxY]');
     print('📊 Data range: X=[$rawMinX, $rawMaxX], Y=[$rawMinY, $rawMaxY]');
     print('📊 Inverted: $invertY, minY=$finalMinY, maxY=$finalMaxY');
+    print('📊 X-axis interval: $xInterval, type: $xIntervalType, minorTicks: $minorTicksPerInterval');
+    if (minorTicksPerInterval > 0) {
+      print('📊 Minor ticks should be visible: $minorTicksPerInterval ticks per interval');
+    }
     
     // Build chart data for Syncfusion - include ALL points for smooth line connection
     // Sort by date to ensure proper line connection
@@ -459,7 +509,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       onTap: widget.onTap,
       child: Container(
         height: 250, // Increased height to give more space
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
@@ -470,34 +520,47 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Debt Over Time',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
             Expanded(
-              child: SfCartesianChart(
-                backgroundColor: Colors.transparent,
-                plotAreaBorderWidth: 0,
-                enableAxisAnimation: false,
-                primaryXAxis: DateTimeAxis(
-                  minimum: DateTime.fromMillisecondsSinceEpoch(minX.toInt()),
-                  maximum: DateTime.fromMillisecondsSinceEpoch(maxX.toInt()),
-                  intervalType: chartDataList.length > 4 ? DateTimeIntervalType.days : DateTimeIntervalType.auto,
-                  labelStyle: TextStyle(
-                    fontSize: 9,
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              child: _isDisposed 
+                  ? const SizedBox.shrink()
+                  : RepaintBoundary(
+                      child: SfCartesianChart(
+                        key: ValueKey('chart_${period}_$invertY'),
+                        backgroundColor: Colors.transparent,
+                        plotAreaBorderWidth: 0,
+                        plotAreaBorderColor: Colors.transparent,
+                        plotAreaBackgroundColor: Colors.transparent,
+                        margin: EdgeInsets.zero,
+                        enableAxisAnimation: false,
+                        primaryXAxis: DateTimeAxis(
+                    minimum: DateTime.fromMillisecondsSinceEpoch(minX.toInt()),
+                    maximum: DateTime.fromMillisecondsSinceEpoch(maxX.toInt()),
+                    intervalType: xIntervalType,
+                    interval: xInterval, // Dynamically calculated for even spacing
+                    // NOTE: Syncfusion Flutter Charts does NOT support minor ticks for DateTimeAxis
+                    // The minorTicksPerInterval property exists but has no effect on DateTimeAxis
+                    // This is a known limitation of the library - minor marks cannot be displayed
+                    labelStyle: TextStyle(
+                      fontSize: 9,
+                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                    ),
+                    labelFormat: '{value}',
+                    dateFormat: dateFormat,
+                    majorGridLines: MajorGridLines(
+                      width: 1,
+                      color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+                    ),
+                    majorTickLines: MajorTickLines(
+                      width: 1,
+                      color: Theme.of(context).colorScheme.outline.withOpacity(0.4),
+                    ),
+                    minorTickLines: const MinorTickLines(width: 0),
+                    minorGridLines: const MinorGridLines(width: 0),
+                    axisLine: AxisLine(
+                      width: 1,
+                      color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                    ),
                   ),
-                  labelFormat: '{value}',
-                  dateFormat: DateFormat('MM/dd'),
-                  majorGridLines: const MajorGridLines(width: 0),
-                  axisLine: AxisLine(
-                    width: 1,
-                    color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-                  ),
-                ),
                 primaryYAxis: NumericAxis(
                   minimum: finalMinY,
                   maximum: finalMaxY,
@@ -577,7 +640,8 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                 tooltipBehavior: TooltipBehavior(
                   enable: false, // Disable interaction on dashboard chart
                 ),
-              ),
+                      ),
+                    ),
             ),
             const SizedBox(height: 8),
             Center(
