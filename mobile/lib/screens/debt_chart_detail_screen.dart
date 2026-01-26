@@ -266,7 +266,31 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     
     if (eventsInPeriod.isEmpty) return [];
     
-    final minDate = periodStart.millisecondsSinceEpoch;
+    // Find the actual first event date in the period (or use periodStart if no events)
+    DateTime actualStartDate = periodStart;
+    if (eventsInPeriod.isNotEmpty) {
+      final firstEventDate = eventsInPeriod.map((e) => e.timestamp).reduce((a, b) => a.isBefore(b) ? a : b);
+      // Start from the first event date, but align to interval boundary
+      // For year view, align to month start; for month view, align to week start; etc.
+      if (_chartPeriod == 'year') {
+        // Align to month start
+        actualStartDate = DateTime(firstEventDate.year, firstEventDate.month, 1);
+      } else if (_chartPeriod == 'month') {
+        // Align to week start (Sunday)
+        final weekday = firstEventDate.weekday;
+        actualStartDate = firstEventDate.subtract(Duration(days: weekday == 7 ? 0 : weekday));
+      } else {
+        // For week/day, use the first event date as-is
+        actualStartDate = firstEventDate;
+      }
+      // Don't go before periodStart
+      if (actualStartDate.isBefore(periodStart)) {
+        actualStartDate = periodStart;
+      }
+      print('📊 Detail: First event date: $firstEventDate, aligned start: $actualStartDate');
+    }
+    
+    final minDate = actualStartDate.millisecondsSinceEpoch;
     final maxDate = now.millisecondsSinceEpoch;
     final numIntervals = ((maxDate - minDate) / intervalMs).ceil();
     
