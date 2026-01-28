@@ -14,12 +14,15 @@ mod background;
 mod database;
 mod utils;
 mod websocket;
+mod middleware;
 // app_state module removed - AppState defined directly in main.rs
 
 use config::Config;
 use database::DatabasePool;
 use websocket::BroadcastChannel;
 use handlers::admin::rebuild_projections;
+use middleware::auth::auth_middleware;
+use middleware::rate_limit::{RateLimiter, rate_limit_middleware};
 
 // Define AppState in main.rs (not in shared app_state.rs to avoid library build issues)
 #[derive(Clone)]
@@ -27,6 +30,7 @@ pub struct AppState {
     pub db_pool: DatabasePool,
     pub config: Arc<Config>,
     pub broadcast_tx: BroadcastChannel,
+    pub rate_limiter: RateLimiter,
 }
 
 #[tokio::main]
@@ -46,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let config = Arc::new(Config::from_env()?);
+    config.validate()?;
     info!("Configuration loaded");
 
     // Initialize database pool
@@ -68,26 +73,31 @@ async fn main() -> anyhow::Result<()> {
     let broadcast_tx = websocket::create_broadcast_channel();
     info!("WebSocket broadcast channel created");
 
+    // Create rate limiter
+    let rate_limiter = RateLimiter::new(
+        config.rate_limit_requests,
+        config.rate_limit_window,
+    );
+    info!("Rate limiter initialized: {} requests per {} seconds", config.rate_limit_requests, config.rate_limit_window);
+
     // Build application state
     let app_state = AppState {
         db_pool: db_pool.clone(),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: rate_limiter.clone(),
     };
 
-    // Build API routes
-    let app = Router::new()
-        .route("/", get(|| async { axum::response::Redirect::permanent("/admin") }))
+    // Public routes (no authentication required)
+    let public_routes = Router::new()
         .route("/health", get(health_check))
-        .route("/admin", get(handlers::admin_panel))
-        .route("/api/admin/events", get(handlers::get_events))
-        .route("/api/admin/events/latest", get(handlers::get_latest_event_id))
-        .route("/api/admin/events/backfill-transactions", post(handlers::backfill_transaction_events))
-        .route("/api/admin/contacts", get(handlers::get_contacts))
-        .route("/api/admin/transactions", get(handlers::get_admin_transactions))
-        .route("/api/admin/projections/status", get(handlers::get_projection_status))
-        .route("/api/admin/total-debt", get(handlers::get_total_debt))
-        .route("/api/admin/projections/rebuild", axum::routing::post(rebuild_projections))
+        .route("/api/auth/login", post(handlers::login)) // Regular user login
+        .route("/api/auth/admin/login", post(handlers::admin_login)) // Admin login
+        .route("/admin", get(handlers::admin_panel)); // Admin page HTML is public (login form)
+
+    // Protected API routes (require authentication)
+    let protected_api_routes = Router::new()
+        .route("/api/contacts", get(handlers::get_contacts))
         .route("/api/contacts", post(handlers::create_contact))
         .route("/api/contacts/:id", put(handlers::update_contact))
         .route("/api/contacts/:id", delete(handlers::delete_contact))
@@ -97,19 +107,123 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/transactions/:id", delete(handlers::delete_transaction))
         .route("/api/settings", get(handlers::get_settings))
         .route("/api/settings/:key", axum::routing::put(handlers::update_setting))
-        .route("/api/auth/login", post(handlers::login))
         .route("/api/sync/hash", get(handlers::get_sync_hash))
         .route("/api/sync/events", get(handlers::get_sync_events))
         .route("/api/sync/events", post(handlers::post_sync_events))
-        .route("/ws", get(websocket::websocket_handler))
-        .layer(tower_http::cors::CorsLayer::permissive())
+        .route("/api/auth/change-password", axum::routing::put(handlers::change_password))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ));
+
+    // Admin routes (require authentication)
+    let admin_routes = Router::new()
+        .route("/api/admin/events", get(handlers::get_events))
+        .route("/api/admin/events/latest", get(handlers::get_latest_event_id))
+        .route("/api/admin/events/backfill-transactions", post(handlers::backfill_transaction_events))
+        .route("/api/admin/contacts", get(handlers::get_admin_contacts))
+        .route("/api/admin/transactions", get(handlers::get_admin_transactions))
+        .route("/api/admin/projections/status", get(handlers::get_projection_status))
+        .route("/api/admin/total-debt", get(handlers::get_total_debt))
+        .route("/api/admin/projections/rebuild", axum::routing::post(rebuild_projections))
+        .route("/api/admin/users", get(handlers::get_users))
+        .route("/api/admin/users", post(handlers::create_user))
+        .route("/api/admin/users/:id", axum::routing::delete(handlers::delete_user))
+        .route("/api/admin/users/:id/password", axum::routing::put(handlers::admin_change_password))
+        .route("/api/admin/users/:id/login-logs", get(handlers::get_user_login_logs))
+        .route("/api/admin/users/:id/backup", get(handlers::backup_user_data))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ));
+
+    // WebSocket route (will add auth later)
+    let ws_routes = Router::new()
+        .route("/ws", get(websocket::websocket_handler));
+
+    // Build complete app
+    let app = Router::new()
+        .route("/", get(|| async { axum::response::Redirect::permanent("/admin") }))
+        .merge(public_routes)
+        .merge(protected_api_routes)
+        .merge(admin_routes)
+        .merge(ws_routes)
+        .layer(create_cors_layer(&config))
+        .layer(axum::middleware::from_fn_with_state(
+            rate_limiter.clone(),
+            rate_limit_middleware,
+        ))
+        .layer(axum::middleware::from_fn(middleware::security_headers::security_headers_middleware))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(app_state);
 
     // Start server
     let addr = format!("0.0.0.0:{}", config.port);
+    
+    if config.enable_tls {
+        // HTTPS mode - TLS configuration validation
+        // NOTE: For production, we STRONGLY RECOMMEND using a reverse proxy (nginx/Caddy/Traefik)
+        // Direct TLS in Axum 0.7 requires complex stream handling that is better handled by a reverse proxy.
+        // Reverse proxies also provide automatic certificate renewal, better performance, and additional security features.
+        
+        let cert_path = config.tls_cert_path.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("TLS enabled but TLS_CERT_PATH not set")
+        })?;
+        let key_path = config.tls_key_path.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("TLS enabled but TLS_KEY_PATH not set")
+        })?;
+
+        // Validate certificate and key files exist and are readable
+        let cert = std::fs::read(cert_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read certificate file {}: {}", cert_path, e))?;
+        let key = std::fs::read(key_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read key file {}: {}", key_path, e))?;
+
+        // Validate certificate and key can be parsed
+        let mut cert_reader = std::io::BufReader::new(cert.as_slice());
+        let cert_chains = rustls_pemfile::certs(&mut cert_reader)
+            .map_err(|e| anyhow::anyhow!("Failed to parse certificate: {}", e))?;
+        
+        if cert_chains.is_empty() {
+            return Err(anyhow::anyhow!("No certificates found in certificate file"));
+        }
+        
+        let cert_chain: Vec<rustls::Certificate> = cert_chains
+            .into_iter()
+            .map(|cert_bytes| rustls::Certificate(cert_bytes))
+            .collect();
+
+        let mut key_reader = std::io::BufReader::new(key.as_slice());
+        let key_chains = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+            .map_err(|e| anyhow::anyhow!("Failed to parse private key: {}", e))?;
+        
+        let key_der = key_chains.into_iter().next()
+            .ok_or_else(|| anyhow::anyhow!("No private key found in key file"))?;
+
+        // Validate TLS config can be built
+        let _tls_config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, rustls::PrivateKey(key_der))
+            .map_err(|e| anyhow::anyhow!("Failed to build TLS config: {}", e))?;
+
+        // TLS configuration is valid, but we'll run on HTTP and recommend reverse proxy
+        // This allows the server to start and be proxied by nginx/Caddy/etc.
+        info!("✅ TLS configuration validated successfully");
+        info!("⚠️  TLS is enabled but direct TLS serving is not implemented.");
+        info!("⚠️  For production HTTPS, use a reverse proxy (nginx/Caddy/Traefik) in front of this server.");
+        info!("⚠️  The server will run on HTTP and should be accessed through the reverse proxy.");
+        info!("📖 See docs/SECURITY.md for reverse proxy configuration examples.");
+    }
+    
+    // HTTP mode (default for development, or when TLS is handled by reverse proxy)
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    info!("Server listening on http://{}", addr);
+    if config.enable_tls {
+        info!("Server listening on http://{} (TLS handled by reverse proxy)", addr);
+    } else {
+        info!("Server listening on http://{}", addr);
+    }
+    info!("Access the server at: http://localhost:{}", config.port);
 
     // Graceful shutdown
     tokio::select! {
@@ -129,6 +243,36 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+fn create_cors_layer(config: &Config) -> tower_http::cors::CorsLayer {
+    use tower_http::cors::CorsLayer;
+    
+    if config.allowed_origins.contains(&"*".to_string()) {
+        // Development mode - allow all origins
+        CorsLayer::permissive()
+    } else {
+        // Production mode - restrict to specific origins
+        let origins: Vec<axum::http::HeaderValue> = config.allowed_origins
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        
+        CorsLayer::new()
+            .allow_origin(tower_http::cors::AllowOrigin::list(origins))
+            .allow_methods([
+                axum::http::Method::GET,
+                axum::http::Method::POST,
+                axum::http::Method::PUT,
+                axum::http::Method::DELETE,
+                axum::http::Method::OPTIONS,
+            ])
+            .allow_headers([
+                axum::http::header::AUTHORIZATION,
+                axum::http::header::CONTENT_TYPE,
+            ])
+            .allow_credentials(true)
+    }
 }
 
 async fn shutdown_signal() {

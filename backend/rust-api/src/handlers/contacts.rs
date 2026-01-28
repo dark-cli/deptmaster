@@ -69,6 +69,33 @@ pub struct UpdateContactResponse {
     pub message: String,
 }
 
+#[derive(Serialize)]
+pub struct ContactResponse {
+    pub id: String,
+    pub name: String,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub balance: i64,
+    pub is_deleted: bool,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for ContactResponse {
+    fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            id: row.try_get::<uuid::Uuid, _>("id")?.to_string(),
+            name: row.try_get("name")?,
+            username: row.try_get("username").ok(),
+            email: row.try_get("email").ok(),
+            phone: row.try_get("phone").ok(),
+            balance: row.try_get("balance")?,
+            is_deleted: row.try_get("is_deleted")?,
+            created_at: row.try_get("created_at")?,
+        })
+    }
+}
+
 pub async fn create_contact(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -658,4 +685,44 @@ pub async fn delete_contact(
         StatusCode::OK,
         Json(response),
     ))
+}
+
+pub async fn get_contacts(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ContactResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    let contacts = sqlx::query_as::<_, ContactResponse>(
+        r#"
+        SELECT 
+            c.id,
+            c.name,
+            c.username,
+            c.email,
+            c.phone,
+            COALESCE(SUM(
+                CASE 
+                    WHEN t.direction = 'lent' THEN t.amount
+                    WHEN t.direction = 'owed' THEN -t.amount
+                    ELSE 0
+                END
+            )::BIGINT, 0) as balance,
+            c.is_deleted,
+            c.created_at
+        FROM contacts_projection c
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
+        WHERE c.is_deleted = false
+        GROUP BY c.id, c.name, c.username, c.email, c.phone, c.is_deleted, c.created_at
+        ORDER BY c.name
+        "#
+    )
+    .fetch_all(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching contacts: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+
+    Ok(Json(contacts))
 }
