@@ -52,7 +52,11 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "debt_tracker_mobile");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  // Set fixed window size to phone dimensions (390x844 is iPhone 12/13/14 size)
+  // This can be overridden by window manager or command-line flags
+  gtk_window_set_default_size(window, 390, 844);
+  // Prevent window resizing
+  gtk_window_set_resizable(window, FALSE);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
