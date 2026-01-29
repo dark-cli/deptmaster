@@ -49,6 +49,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
   bool _selectionMode = false;
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
+  String? _lastMissingContactsHash; // Track missing contacts to avoid repeated warnings
 
   @override
   void initState() {
@@ -101,10 +102,14 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
     final type = data['type'] as String?;
+    // Reload when transactions OR contacts change (contacts affect transaction display)
     if (type == 'transaction_created' || 
         type == 'transaction_updated' || 
-        type == 'transaction_deleted') {
-      // Reload transactions when real-time update received
+        type == 'transaction_deleted' ||
+        type == 'contact_created' ||
+        type == 'contact_updated' ||
+        type == 'contact_deleted') {
+      // Reload transactions and contacts when real-time update received
       _loadData();
     }
   }
@@ -201,6 +206,11 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
       // Always use local database - never call API from UI
       transactions = await LocalDatabaseServiceV2.getTransactions();
       contacts = await LocalDatabaseServiceV2.getContacts();
+      
+      // In event-based systems, if transactions reference missing contacts, those contacts were deleted
+      // and the transactions should have been removed from the projection as well
+      // This check is no longer needed - missing contacts mean deleted contacts, which is expected
+      // The state builder ensures deleted contacts and their transactions are removed from projections
       
       // If sync requested, do full sync in background
       if (sync && !kIsWeb) {
@@ -489,10 +499,28 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
             );
           }
 
-          // Build contact map for display
-          final contactMap = _contacts != null 
-              ? Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)))
-              : <String, String>{};
+          // Build contact map for display - ALWAYS load from Hive directly for accuracy
+          // This ensures we get the most up-to-date contacts, matching how EditTransactionScreen loads them
+          Map<String, String> contactMap = <String, String>{};
+          if (!kIsWeb) {
+            try {
+              // Always load from Hive directly (same as EditTransactionScreen does)
+              final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+              final allContacts = contactsBox.values.toList();
+              if (allContacts.isNotEmpty) {
+                contactMap = Map.fromEntries(allContacts.map((c) => MapEntry(c.id, c.name)));
+              }
+            } catch (e) {
+              print('⚠️ Error loading contacts from Hive: $e');
+              // Fallback to _contacts if Hive fails
+              if (_contacts != null && _contacts!.isNotEmpty) {
+                contactMap = Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)));
+              }
+            }
+          } else if (_contacts != null && _contacts!.isNotEmpty) {
+            // Web fallback
+            contactMap = Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)));
+          }
 
           return RefreshIndicator(
             onRefresh: () => _loadData(sync: true),
@@ -503,11 +531,16 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                 final transaction = transactions[index];
                 final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
                 
+                // Handle missing contacts gracefully - missing contacts are already detected in _loadData()
+                // No need to log here to avoid spam during widget rebuilds
+                final contactId = transaction.contactId;
+                final contactNameFromMap = contactMap[contactId];
+                
                 Widget transactionItem = Container(
                   color: isSelected ? Colors.blue.withOpacity(0.1) : null,
                   child: TransactionListItem(
                     transaction: transaction,
-                    contactName: contactMap[transaction.contactId] ?? 'Unknown',
+                    contactName: contactNameFromMap, // Pass null if not found, let TransactionListItem handle it
                   ),
                 );
                 
@@ -575,16 +608,43 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     child: GestureDetector(
                       onTap: () async {
                         // Open edit transaction screen
-                        final contact = _contacts?.firstWhere(
-                          (c) => c.id == transaction.contactId,
-                          orElse: () => Contact(
-                            id: transaction.contactId,
-                            name: 'Unknown',
-                            createdAt: DateTime.now(),
-                            updatedAt: DateTime.now(),
-                            balance: 0,
-                          ),
+                        // Try to find contact from _contacts first, then fallback to Hive lookup (same as EditTransactionScreen does)
+                        Contact? contact;
+                        if (_contacts != null) {
+                          try {
+                            contact = _contacts!.firstWhere(
+                              (c) => c.id == transaction.contactId,
+                            );
+                          } catch (e) {
+                            // Not found in _contacts, try Hive directly (same method EditTransactionScreen uses)
+                            if (!kIsWeb) {
+                              try {
+                                final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+                                contact = contactsBox.get(transaction.contactId);
+                              } catch (_) {
+                                // Contact not found
+                              }
+                            }
+                          }
+                        } else if (!kIsWeb) {
+                          // _contacts is null, try Hive directly
+                          try {
+                            final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+                            contact = contactsBox.get(transaction.contactId);
+                          } catch (_) {
+                            // Contact not found
+                          }
+                        }
+                        
+                        // If still not found, create a placeholder (EditTransactionScreen will handle it)
+                        contact ??= Contact(
+                          id: transaction.contactId,
+                          name: 'Unknown',
+                          createdAt: DateTime.now(),
+                          updatedAt: DateTime.now(),
+                          balance: 0,
                         );
+                        
                         final result = await showScreenAsBottomSheet(
                           context: context,
                           screen: EditTransactionScreen(
@@ -645,11 +705,29 @@ class TransactionListItem extends StatelessWidget {
   });
 
   String _getContactName() {
-    if (contactName != null) return contactName!;
-    if (kIsWeb) return 'Unknown';
-    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-    final contact = contactsBox.get(transaction.contactId);
-    return contact?.name ?? 'Unknown';
+    // ALWAYS try to look up from Hive first (most up-to-date source)
+    // This ensures we get the latest contact data even if contactMap is stale
+    // Ignore the passed contactName and always check Hive for accuracy
+    if (!kIsWeb && transaction.contactId.isNotEmpty) {
+      try {
+        final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
+        final contact = contactsBox.get(transaction.contactId);
+        if (contact != null && contact.name.isNotEmpty) {
+          return contact.name;
+        }
+        // Contact not found - this means the contact was deleted or not synced yet
+        // Return "Unknown Contact" to indicate the contact is missing
+        return 'Unknown Contact';
+      } catch (e) {
+        // Fall through to use contactName if Hive lookup fails
+      }
+    }
+    // Fallback to passed contactName or 'Unknown Contact'
+    if (contactName != null && contactName!.isNotEmpty && contactName != 'Unknown') {
+      return contactName!;
+    }
+    if (kIsWeb) return 'Unknown Contact';
+    return 'Unknown Contact';
   }
 
   Contact? _getContact() {

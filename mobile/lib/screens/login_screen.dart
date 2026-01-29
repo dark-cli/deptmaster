@@ -46,20 +46,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
       if (mounted) {
         if (result['success'] == true) {
-          // After successful login, start sync and WebSocket connection
-          // This ensures sync starts immediately after login (like Firebase)
+          // After successful login, immediately trigger sync and connect WebSocket
+          // Sync happens immediately, not waiting for WebSocket
           try {
-            // Connect WebSocket for real-time updates
+            // Trigger immediate sync first (don't wait for WebSocket)
+            print('🔄 Triggering immediate sync after login...');
+            SyncServiceV2.manualSync().then((_) {
+              print('✅ Initial sync completed after login');
+            }).catchError((e, stackTrace) {
+              // Log all sync errors for debugging
+              final errorStr = e.toString().toLowerCase();
+              print('❌ Initial sync error after login: $e');
+              if (!errorStr.contains('connection refused') && 
+                  !errorStr.contains('failed host lookup') &&
+                  !errorStr.contains('network is unreachable')) {
+                print('   Stack trace: $stackTrace');
+              }
+            });
+            
+            // Connect WebSocket for real-time updates (in background)
             RealtimeService.connect().catchError((e) {
               // Silently handle connection errors
             });
-            
-            // Trigger initial sync to get server data
-            SyncServiceV2.manualSync().catchError((e) {
-              // Silently handle sync errors - will retry later
-            });
           } catch (e) {
             // Silently handle initialization errors
+            print('⚠️ Error initializing after login: $e');
           }
           
           // Navigate to home - use pushNamedAndRemoveUntil to ensure clean navigation stack

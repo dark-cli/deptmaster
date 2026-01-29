@@ -60,6 +60,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   DateTime? _selectedDateTo;
   Map<String, String> _contactNameCache = {}; // Cache for contact names
   Map<String, Event> _undoneEventsCache = {}; // Cache for undone events
+  bool _isDisposed = false; // Flag to prevent operations after disposal
   
   // Filters (same as events log but without search)
   String _eventTypeFilter = 'all';
@@ -90,13 +91,30 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _isDisposed = true;
+    // Hide tooltip before disposal to prevent chart updates
+    try {
+      _tooltipBehavior.hide();
+    } catch (e) {
+      // Ignore errors during disposal
+    }
+    super.dispose();
+  }
+
   Future<void> _loadChartData() async {
+    if (_isDisposed || !mounted) return;
+    
     setState(() {
       _loading = true;
     });
 
     try {
       final events = await EventStoreService.getAllEvents();
+      
+      if (_isDisposed || !mounted) return;
+      
       // Filter events that have total_debt in eventData
       final eventsWithDebt = events.where((e) {
         final totalDebt = e.eventData['total_debt'];
@@ -109,8 +127,12 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
       // Pre-load contact names for tooltip
       await _preloadContactNames(eventsWithDebt);
       
+      if (_isDisposed || !mounted) return;
+      
       // Pre-load undone events cache
       await _preloadUndoneEvents(eventsWithDebt);
+      
+      if (_isDisposed || !mounted) return;
       
       setState(() {
         _allEvents = eventsWithDebt;
@@ -121,14 +143,16 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
       _applyDateFilters();
     } catch (e) {
       print('Error loading chart data: $e');
-      setState(() {
-        _loading = false;
-      });
+      if (!_isDisposed && mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
   void _applyDateFilters() {
-    if (_allEvents == null) return;
+    if (_allEvents == null || _isDisposed || !mounted) return;
     
     List<Event> filtered = List.from(_allEvents!);
     
@@ -172,9 +196,11 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     // Sort by timestamp (newest first)
     filtered.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     
-    setState(() {
-      _filteredEvents = filtered;
-    });
+    if (!_isDisposed && mounted) {
+      setState(() {
+        _filteredEvents = filtered;
+      });
+    }
   }
   
   Future<void> _preloadUndoneEvents(List<Event> events) async {
@@ -349,6 +375,10 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isDisposed || !mounted) {
+      return const SizedBox.shrink();
+    }
+    
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
     final chartData = _buildChartData();
@@ -391,14 +421,21 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                           color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
                         ),
                       ),
-                      child: Builder(
-                        builder: (context) {
-                          // Calculate bounds
-                          final allX = chartData.map((d) => d.x).toList();
-                          final allY = chartData.map((d) => d.y).toList();
-                          if (allX.isEmpty || allY.isEmpty) {
-                            return const Center(child: Text('No data'));
-                          }
+                      child: (_isDisposed || !mounted)
+                          ? const SizedBox.shrink()
+                          : Builder(
+                              builder: (context) {
+                                // Check again inside builder
+                                if (_isDisposed || !mounted) {
+                                  return const SizedBox.shrink();
+                                }
+                                
+                                // Calculate bounds
+                                final allX = chartData.map((d) => d.x).toList();
+                                final allY = chartData.map((d) => d.y).toList();
+                                if (allX.isEmpty || allY.isEmpty) {
+                                  return const Center(child: Text('No data'));
+                                }
                           
                           final rawMinX = allX.reduce((a, b) => a < b ? a : b);
                           final rawMaxX = allX.reduce((a, b) => a > b ? a : b);
@@ -485,6 +522,11 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                             borderColor: primaryColor,
                             duration: 0, // Keep visible until we hide it
                             builder: (dynamic data, dynamic point, dynamic series, int pointIndex, int seriesIndex) {
+                              // Check if widget is still mounted before building tooltip
+                              if (_isDisposed || !mounted) {
+                                return const SizedBox.shrink();
+                              }
+                              
                               // If we have a selected tooltip index from swipe, use that instead
                               final effectiveIndex = _selectedTooltipIndex ?? pointIndex;
                               
@@ -573,11 +615,17 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 }
                               }
                               
-                              if (mounted) {
-                                setState(() {
-                                  _selectedTooltipIndex = closestIndex;
-                                });
-                                _tooltipBehavior.showByIndex(closestIndex, 0);
+                              if (mounted && !_isDisposed) {
+                                try {
+                                  setState(() {
+                                    _selectedTooltipIndex = closestIndex;
+                                  });
+                                  if (mounted && !_isDisposed) {
+                                    _tooltipBehavior.showByIndex(closestIndex, 0);
+                                  }
+                                } catch (e) {
+                                  // Chart might be disposed, ignore
+                                }
                               }
                             },
                             onHorizontalDragUpdate: (details) {
@@ -612,11 +660,17 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               
                               // Update tooltip to show the closest point
                               if (_selectedTooltipIndex != closestIndex) {
-                                if (mounted) {
-                                  setState(() {
-                                    _selectedTooltipIndex = closestIndex;
-                                  });
-                                  _tooltipBehavior.showByIndex(closestIndex, 0);
+                                if (mounted && !_isDisposed) {
+                                  try {
+                                    setState(() {
+                                      _selectedTooltipIndex = closestIndex;
+                                    });
+                                    if (mounted && !_isDisposed) {
+                                      _tooltipBehavior.showByIndex(closestIndex, 0);
+                                    }
+                                  } catch (e) {
+                                    // Chart might be disposed, ignore
+                                  }
                                 }
                               }
                             },
@@ -661,19 +715,31 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               if (tappedPointIndex >= 0 && tappedPointIndex < chartDataList.length) {
                                 final point = chartDataList[tappedPointIndex];
                                 if (point.hasTransactions) {
-                                  if (mounted) {
+                                  if (mounted && !_isDisposed) {
                                     setState(() {
                                       _selectedTooltipIndex = tappedPointIndex;
                                     });
-                                    _tooltipBehavior.showByIndex(tappedPointIndex, 0);
+                                    try {
+                                      if (mounted && !_isDisposed) {
+                                        _tooltipBehavior.showByIndex(tappedPointIndex, 0);
+                                      }
+                                    } catch (e) {
+                                      // Chart might be disposed, ignore
+                                    }
                                     // Select the point after a short delay, but keep yellow marker visible briefly
                                     Future.delayed(const Duration(milliseconds: 500), () {
-                                      if (mounted) {
+                                      if (mounted && !_isDisposed) {
                                         _onChartPointTapped(point.intervalStart, point.intervalEnd);
-                                        _tooltipBehavior.hide();
+                                        try {
+                                          if (mounted && !_isDisposed) {
+                                            _tooltipBehavior.hide();
+                                          }
+                                        } catch (e) {
+                                          // Chart might be disposed, ignore
+                                        }
                                         // Keep yellow marker visible a bit longer for visual feedback
                                         Future.delayed(const Duration(milliseconds: 300), () {
-                                          if (mounted) {
+                                          if (mounted && !_isDisposed) {
                                             setState(() {
                                               _selectedTooltipIndex = null;
                                             });
@@ -685,11 +751,13 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 }
                               }
                             },
-                            child: SfCartesianChart(
-                              key: _chartKey,
-                              backgroundColor: Colors.transparent,
-                              plotAreaBorderWidth: 0,
-                              primaryXAxis: DateTimeAxis(
+                            child: (_isDisposed || !mounted)
+                                ? const SizedBox.shrink()
+                                : SfCartesianChart(
+                                    key: _chartKey,
+                                    backgroundColor: Colors.transparent,
+                                    plotAreaBorderWidth: 0,
+                                    primaryXAxis: DateTimeAxis(
                               minimum: DateTime.fromMillisecondsSinceEpoch(minX.toInt()),
                               maximum: DateTime.fromMillisecondsSinceEpoch(maxX.toInt()),
                               intervalType: intervalType,
@@ -786,19 +854,31 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                     final point = chartDataList[details.pointIndex!];
                                     if (point.hasTransactions) {
                                       // Show yellow marker for visual feedback
-                                      if (mounted) {
+                                      if (mounted && !_isDisposed) {
                                         setState(() {
                                           _selectedTooltipIndex = details.pointIndex;
                                         });
-                                        _tooltipBehavior.showByIndex(details.pointIndex!, 0);
+                                        try {
+                                          if (mounted && !_isDisposed) {
+                                            _tooltipBehavior.showByIndex(details.pointIndex!, 0);
+                                          }
+                                        } catch (e) {
+                                          // Chart might be disposed, ignore
+                                        }
                                         // Select the point after a short delay
                                         Future.delayed(const Duration(milliseconds: 300), () {
-                                          if (mounted) {
+                                          if (mounted && !_isDisposed) {
                                             _onChartPointTapped(point.intervalStart, point.intervalEnd);
-                                            _tooltipBehavior.hide();
+                                            try {
+                                              if (mounted && !_isDisposed) {
+                                                _tooltipBehavior.hide();
+                                              }
+                                            } catch (e) {
+                                              // Chart might be disposed, ignore
+                                            }
                                             // Keep yellow marker visible briefly
                                             Future.delayed(const Duration(milliseconds: 300), () {
-                                              if (mounted) {
+                                              if (mounted && !_isDisposed) {
                                                 setState(() {
                                                   _selectedTooltipIndex = null;
                                                 });
@@ -857,9 +937,9 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                           ),
                       ],
                     );
-                    },
-                      ),
-                    ),
+                              },
+                            ),
+                          ),
                     
                     // Filters section (same as events log but without search)
                     if (_showFilters)

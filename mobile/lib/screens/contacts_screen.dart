@@ -335,37 +335,77 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           // Always delete from local database first
                           await LocalDatabaseServiceV2.bulkDeleteContacts(deletedIds);
                           
-                          if (mounted) {
-                            setState(() {
-                              _selectedContacts.clear();
-                              _selectionMode = false;
-                            });
-                            _loadContacts();
-                            if (!mounted) return;
-                            
-                            // Show undo toast for all deletes (single or bulk)
-                            ToastService.showUndoWithErrorHandlingFromContext(
-                              context: context,
+                          // Check mounted before any UI operations
+                          if (!mounted) return;
+                          
+                          setState(() {
+                            _selectedContacts.clear();
+                            _selectionMode = false;
+                            _loading = false;
+                          });
+                          
+                          // Reload contacts
+                          _loadContacts();
+                          
+                          // Show undo toast for all deletes (single or bulk) - always show, even in offline mode
+                          // Use a small delay to ensure context is stable
+                          await Future.delayed(const Duration(milliseconds: 100));
+                          
+                          // Check mounted again before showing toast
+                          if (!mounted) {
+                            // Use global toast service if context is deactivated
+                            ToastService.showUndoWithErrorHandling(
                               message: '✅ $deletedCount contact(s) deleted',
                               onUndo: () async {
+                                try {
+                                  if (deletedIds.length == 1) {
+                                    await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
+                                  } else {
+                                    await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
+                                  }
+                                } catch (e) {
+                                  // Error handled by ToastService
+                                }
+                              },
+                              successMessage: '${deletedIds.length} contact(s) deletion undone',
+                            );
+                            return;
+                          }
+                          
+                          ToastService.showUndoWithErrorHandlingFromContext(
+                            context: context,
+                            message: '✅ $deletedCount contact(s) deleted',
+                            onUndo: () async {
+                              if (!mounted) return;
+                              try {
                                 if (deletedIds.length == 1) {
                                   await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
                                 } else {
                                   await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
                                 }
-                                _loadContacts();
-                              },
-                              successMessage: '${deletedIds.length} contact(s) deletion undone',
-                            );
-                          }
-                          } catch (e) {
-                            if (!mounted) return;
-                            ToastService.showErrorFromContext(context, 'Error deleting contacts: $e');
+                                if (mounted) {
+                                  _loadContacts();
+                                }
+                              } catch (e) {
+                                // Error handled by ToastService
+                              }
+                            },
+                            successMessage: '${deletedIds.length} contact(s) deletion undone',
+                          );
+                        } catch (e) {
+                          // Check mounted before showing error
+                          if (!mounted) return;
+                          
+                          // Use global toast service if context is deactivated
+                          ToastService.showErrorFromContext(context, 'Error deleting contacts: $e');
+                          
+                          if (mounted) {
                             setState(() {
                               _loading = false;
                             });
                           }
                         }
+                      }
                     },
             ),
           ] else ...[

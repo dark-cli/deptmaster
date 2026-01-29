@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import '../models/event.dart';
 import '../services/event_store_service.dart';
 import '../services/local_database_service_v2.dart';
 import '../services/state_builder.dart';
+import '../services/realtime_service.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
@@ -29,6 +32,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   List<Event> _filteredEvents = [];
   bool _loading = true;
   bool _showFilters = false; // Collapsible filters for mobile
+  bool _isReloading = false; // Guard to prevent infinite loops
   
   // Filters
   String _searchQuery = '';
@@ -44,6 +48,37 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     _dateFrom = widget.initialDateFrom;
     _dateTo = widget.initialDateTo;
     _loadEvents();
+    
+    // Listen for real-time updates
+    RealtimeService.addListener(_onRealtimeUpdate);
+    
+    // Connect WebSocket if not connected
+    RealtimeService.connect();
+    
+    // Listen to local event store changes for sync state updates
+    _setupLocalListeners();
+  }
+
+  void _setupLocalListeners() {
+    if (kIsWeb) return;
+    
+    // Listen to local event store changes (for sync state updates)
+    // When events are marked as synced locally, this will trigger a reload
+    try {
+      final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
+      eventsBox.listenable().addListener(_onLocalEventsChanged);
+    } catch (e) {
+      // Box might not be initialized yet, will be set up when events are loaded
+      print('Note: Events box not yet initialized, will listen after first load');
+    }
+  }
+
+  void _onLocalEventsChanged() {
+    // Reload events when local event store changes (e.g., when events are marked as synced)
+    // This ensures sync state updates are reflected immediately
+    if (mounted && !_isReloading) {
+      _loadEvents();
+    }
   }
   
   // Pagination
@@ -58,50 +93,105 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   Map<String, Event> _undoneEventsCache = {};
 
 
+  void _onRealtimeUpdate(Map<String, dynamic> data) {
+    final type = data['type'] as String?;
+    // Reload events when any data changes (contacts, transactions, etc.)
+    // This ensures the event log stays up-to-date with all changes
+    if (type == 'contact_created' || 
+        type == 'contact_updated' || 
+        type == 'contact_deleted' ||
+        type == 'transaction_created' || 
+        type == 'transaction_updated' || 
+        type == 'transaction_deleted') {
+      // Reload events when real-time update received
+      _loadEvents();
+    }
+  }
+
   @override
   void dispose() {
+    RealtimeService.removeListener(_onRealtimeUpdate);
+    if (!kIsWeb) {
+      try {
+        final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
+        eventsBox.listenable().removeListener(_onLocalEventsChanged);
+      } catch (e) {
+        // Box might not be initialized, ignore
+      }
+    }
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _loadEvents() async {
+    if (!mounted || _isReloading) return;
+    
+    _isReloading = true;
     setState(() {
       _loading = true;
     });
 
     try {
+      // Ensure event store is initialized before loading
+      await EventStoreService.initialize();
+      
+      // Set up local listeners if not already set up (events box is now initialized)
+      if (!kIsWeb) {
+        try {
+          final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
+          // Add listener (it's safe to add multiple times, but we'll track it)
+          eventsBox.listenable().addListener(_onLocalEventsChanged);
+        } catch (e) {
+          // Ignore if box not available
+        }
+      }
+      
       final events = await EventStoreService.getAllEvents();
+      
+      if (!mounted) return;
+      
       // Sort by timestamp (newest first) for consistent ordering
       events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       
       // Pre-load undone events cache
       await _preloadUndoneEvents(events);
       
+      if (!mounted) return;
+      
       // Pre-load contact names cache
       await _preloadContactNames(events);
+      
+      if (!mounted) return;
       
       setState(() {
         _allEvents = events;
         _loading = false;
+        _isReloading = false;
       });
       // Apply filters (including initial date filters if provided)
       _applyFilters();
     } catch (e) {
       print('Error loading events: $e');
-      setState(() {
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _isReloading = false;
+        });
+      }
     }
   }
   
   Future<void> _preloadContactNames(List<Event> events) async {
+    if (!mounted) return;
+    
     _contactNameCache.clear();
     _contactUsernameCache.clear();
     
     // Collect all contact IDs
     final contactIds = <String>{};
     for (final event in events) {
+      if (!mounted) return;
       if (event.aggregateType == 'contact') {
         contactIds.add(event.aggregateId);
       } else if (event.aggregateType == 'transaction') {
@@ -114,9 +204,10 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     
     // Load contact names and usernames from database
     for (final contactId in contactIds) {
+      if (!mounted) return;
       try {
         final contact = await LocalDatabaseServiceV2.getContact(contactId);
-        if (contact != null) {
+        if (contact != null && mounted) {
           _contactNameCache[contactId] = contact.name;
           if (contact.username != null && contact.username!.isNotEmpty) {
             _contactUsernameCache[contactId] = contact.username!;
@@ -124,11 +215,15 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
         }
       } catch (e) {
         // Contact might not exist, continue
+        // Don't show error - this is expected for deleted contacts
       }
     }
     
+    if (!mounted) return;
+    
     // Also cache names and usernames from CREATED events
     for (final event in events) {
+      if (!mounted) return;
       if (event.aggregateType == 'contact' && 
           (event.eventType == 'CREATED' || event.eventType.contains('CREATE'))) {
         final name = event.eventData['name']?.toString();
@@ -144,11 +239,14 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   }
   
   Future<void> _preloadUndoneEvents(List<Event> events) async {
+    if (!mounted) return;
+    
     _undoneEventsCache.clear();
     
     // Collect all undone event IDs
     final undoneEventIds = <String>{};
     for (final event in events) {
+      if (!mounted) return;
       if (event.eventType.toUpperCase() == 'UNDO') {
         final undoneEventId = event.eventData['undone_event_id'] as String?;
         if (undoneEventId != null) {
@@ -157,8 +255,11 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       }
     }
     
+    if (!mounted) return;
+    
     // Find undone events in the current batch
     for (final event in events) {
+      if (!mounted) return;
       if (undoneEventIds.contains(event.id)) {
         _undoneEventsCache[event.id] = event;
       }
@@ -1262,10 +1363,12 @@ class _EventTableRowState extends State<EventTableRow> {
           },
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
               children: [
-                // When and Event Type
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                // When, Sync Status, and Event Type
                 Row(
                   children: [
                     Expanded(
@@ -1277,6 +1380,45 @@ class _EventTableRowState extends State<EventTableRow> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    // Sync Status Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: widget.event.synced
+                            ? (isDark 
+                                ? AppColors.darkSuccess.withOpacity(0.2)
+                                : AppColors.lightSuccess.withOpacity(0.2))
+                            : (isDark
+                                ? AppColors.darkWarning.withOpacity(0.2)
+                                : AppColors.lightWarning.withOpacity(0.2)),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            widget.event.synced ? Icons.cloud_done : Icons.cloud_upload,
+                            size: 12,
+                            color: widget.event.synced
+                                ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
+                                : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.event.synced ? 'Synced' : 'Pending',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: widget.event.synced
+                                  ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
+                                  : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
@@ -1454,6 +1596,8 @@ class _EventTableRowState extends State<EventTableRow> {
                       ),
                     ],
                   ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1467,8 +1611,10 @@ class _EventTableRowState extends State<EventTableRow> {
           onTap: () => _showEventDetails(context),
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
+            child: Stack(
               children: [
+                Row(
+                  children: [
                 // When
                 SizedBox(
                   width: 150,
@@ -1477,23 +1623,68 @@ class _EventTableRowState extends State<EventTableRow> {
                     style: const TextStyle(fontSize: 12),
                   ),
                 ),
-                // Event Type
+                // Sync Status and Event Type
                 SizedBox(
-                  width: 150,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _getEventBadgeColor(widget.event.eventType, isDark).withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                        color: _getEventBadgeColor(widget.event.eventType, isDark),
-                    ),
-                    ),
+                  width: 200,
+                  child: Row(
+                    children: [
+                      // Sync Status Badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: widget.event.synced
+                              ? (isDark 
+                                  ? AppColors.darkSuccess.withOpacity(0.2)
+                                  : AppColors.lightSuccess.withOpacity(0.2))
+                              : (isDark
+                                  ? AppColors.darkWarning.withOpacity(0.2)
+                                  : AppColors.lightWarning.withOpacity(0.2)),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              widget.event.synced ? Icons.cloud_done : Icons.cloud_upload,
+                              size: 12,
+                              color: widget.event.synced
+                                  ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
+                                  : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              widget.event.synced ? 'Synced' : 'Pending',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: widget.event.synced
+                                    ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
+                                    : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _getEventBadgeColor(widget.event.eventType, isDark).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            EventFormatter.formatEventType(widget.event, widget.undoneEventsCache),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _getEventBadgeColor(widget.event.eventType, isDark),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 // Contact Name with Username tag
@@ -1594,7 +1785,9 @@ class _EventTableRowState extends State<EventTableRow> {
                           ),
                   ],
                 ),
-              ),
+              ],
+            ),
+          ),
         ),
       );
     }

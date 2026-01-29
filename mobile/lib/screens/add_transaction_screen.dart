@@ -306,8 +306,18 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
         );
       }
     } catch (e) {
+      // Use showError instead of showErrorFromContext to avoid deactivated widget errors
+      // The context might be deactivated by the time the error occurs
       if (mounted) {
-        ToastService.showErrorFromContext(context, 'Error: $e');
+        try {
+          ToastService.showErrorFromContext(context, 'Error: $e');
+        } catch (_) {
+          // If context is deactivated, use global error handler
+          ToastService.showError('Error: $e');
+        }
+      } else {
+        // Widget is not mounted, use global error handler
+        ToastService.showError('Error: $e');
       }
     } finally {
       if (mounted) {
