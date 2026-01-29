@@ -73,7 +73,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   late TooltipBehavior _tooltipBehavior; // Tooltip behavior controller
   
   // Chart display settings
-  bool _useCurvedLines = true; // true = spline (curved), false = straight lines
+  bool _useCurvedLines = false; // true = spline (curved), false = straight lines (default: straight)
   bool _showTooltips = true; // Show/hide tooltips
 
   @override
