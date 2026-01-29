@@ -1165,7 +1165,57 @@
                 let transactionEventsCount = 0;
                 let eventsWithDebtCount = 0;
                 
-                for (const event of events) {
+                // Calculate total_debt progressively if not present in events
+                let runningTotalDebt = currentTotalDebt || 0;
+                const contactBalances = {}; // Track balance per contact
+                
+                // First pass: process all events in order to calculate running total_debt
+                const sortedEvents = [...events].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                
+                for (const event of sortedEvents) {
+                    if (event.aggregate_type === 'contact') {
+                        // Initialize contact balance
+                        if (event.event_type === 'CREATED') {
+                            contactBalances[event.aggregate_id] = 0;
+                        } else if (event.event_type === 'DELETED') {
+                            delete contactBalances[event.aggregate_id];
+                        }
+                    } else if (event.aggregate_type === 'transaction') {
+                        const eventDataObj = event.event_data || {};
+                        const contactId = eventDataObj.contact_id;
+                        const direction = eventDataObj.direction;
+                        const amount = Number(eventDataObj.amount) || 0;
+                        
+                        if (contactId) {
+                            if (!contactBalances[contactId]) {
+                                contactBalances[contactId] = 0;
+                            }
+                            
+                            if (event.event_type === 'CREATED' || event.event_type === 'UPDATED') {
+                                // For UPDATED, we need to recalculate from scratch for this contact
+                                // For simplicity, just add/subtract based on direction
+                                if (direction === 'lent') {
+                                    contactBalances[contactId] += amount;
+                                } else if (direction === 'owed') {
+                                    contactBalances[contactId] -= amount;
+                                }
+                            } else if (event.event_type === 'DELETED') {
+                                // Reverse the transaction
+                                if (direction === 'lent') {
+                                    contactBalances[contactId] -= amount;
+                                } else if (direction === 'owed') {
+                                    contactBalances[contactId] += amount;
+                                }
+                            }
+                            
+                            // Calculate total debt (sum of all contact balances)
+                            runningTotalDebt = Object.values(contactBalances).reduce((sum, balance) => sum + (balance || 0), 0);
+                        }
+                    }
+                }
+                
+                // Second pass: build chart data using total_debt from event_data or calculated value
+                for (const event of sortedEvents) {
                     // Filter: only transaction events
                     if (event.aggregate_type !== 'transaction') {
                         continue; // Skip contact events
@@ -1173,7 +1223,42 @@
                     
                     transactionEventsCount++;
                     const eventDataObj = event.event_data || {};
-                    const totalDebt = eventDataObj.total_debt;
+                    let totalDebt = eventDataObj.total_debt;
+                    
+                    // If total_debt is not in event_data, calculate it from contact balances at this point
+                    if (totalDebt === null || totalDebt === undefined) {
+                        // Recalculate up to this event
+                        const tempBalances = {};
+                        for (const e of sortedEvents) {
+                            if (new Date(e.created_at) > new Date(event.created_at)) break;
+                            
+                            if (e.aggregate_type === 'contact') {
+                                if (e.event_type === 'CREATED') {
+                                    tempBalances[e.aggregate_id] = 0;
+                                } else if (e.event_type === 'DELETED') {
+                                    delete tempBalances[e.aggregate_id];
+                                }
+                            } else if (e.aggregate_type === 'transaction') {
+                                const ed = e.event_data || {};
+                                const cid = ed.contact_id;
+                                const dir = ed.direction;
+                                const amt = Number(ed.amount) || 0;
+                                
+                                if (cid) {
+                                    if (!tempBalances[cid]) tempBalances[cid] = 0;
+                                    
+                                    if (e.event_type === 'CREATED' || e.event_type === 'UPDATED') {
+                                        if (dir === 'lent') tempBalances[cid] += amt;
+                                        else if (dir === 'owed') tempBalances[cid] -= amt;
+                                    } else if (e.event_type === 'DELETED') {
+                                        if (dir === 'lent') tempBalances[cid] -= amt;
+                                        else if (dir === 'owed') tempBalances[cid] += amt;
+                                    }
+                                }
+                            }
+                        }
+                        totalDebt = Object.values(tempBalances).reduce((sum, balance) => sum + (balance || 0), 0);
+                    }
                     
                     if (totalDebt !== null && totalDebt !== undefined) {
                         const debt = Number(totalDebt);
