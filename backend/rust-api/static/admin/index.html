@@ -1093,6 +1093,27 @@
             setChartPeriod('month'); // Set default to month
         }
         
+        // Helper functions to align dates to calendar boundaries
+        function alignToDayStart(date) {
+            return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        }
+        
+        function alignToWeekStart(date) {
+            const dayOfWeek = date.getDay(); // 0=Sunday, 6=Saturday
+            const daysToSubtract = dayOfWeek === 0 ? 0 : dayOfWeek;
+            const sunday = new Date(date);
+            sunday.setDate(date.getDate() - daysToSubtract);
+            return alignToDayStart(sunday);
+        }
+        
+        function alignToMonthStart(date) {
+            return new Date(date.getFullYear(), date.getMonth(), 1);
+        }
+        
+        function alignToYearStart(date) {
+            return new Date(date.getFullYear(), 0, 1);
+        }
+        
         async function loadDebtChart() {
             try {
                 // Calculate date range based on period (rolling periods: last 24h, 7d, 30d, 365d)
@@ -1101,20 +1122,24 @@
                 
                 switch (chartPeriod) {
                     case 'day':
-                        // Last 24 hours
-                        periodStart = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+                        // Last 24 hours, but align to day boundaries
+                        periodStart = alignToDayStart(new Date(now.getTime() - (24 * 60 * 60 * 1000)));
                         break;
                     case 'week':
-                        // Last 7 days
-                        periodStart = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+                        // Last 7 days, but align to week boundaries (Sunday to Sunday)
+                        periodStart = alignToWeekStart(new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000)));
                         break;
                     case 'month':
-                        // Last 30 days
-                        periodStart = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+                        // Last 30 days, but align to month boundaries
+                        const monthStart = alignToMonthStart(new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)));
+                        const currentMonthStart = alignToMonthStart(now);
+                        periodStart = monthStart < currentMonthStart ? monthStart : currentMonthStart;
                         break;
                     case 'year':
-                        // Last 365 days
-                        periodStart = new Date(now.getTime() - (365 * 24 * 60 * 60 * 1000));
+                        // Last 365 days, but align to year boundaries
+                        const yearStart = alignToYearStart(new Date(now.getTime() - (365 * 24 * 60 * 60 * 1000)));
+                        const currentYearStart = alignToYearStart(now);
+                        periodStart = yearStart < currentYearStart ? yearStart : currentYearStart;
                         break;
                 }
                 
@@ -1226,13 +1251,39 @@
                 const numIntervals = Math.ceil((maxDate - minDate) / intervalMs);
                 
                 for (let i = 0; i <= numIntervals; i++) {
-                    const intervalStart = minDate + (i * intervalMs);
-                    const intervalEnd = Math.min(intervalStart + intervalMs, maxDate);
-                    const intervalCenter = intervalStart + (intervalMs / 2);
+                    // Calculate interval boundaries aligned to calendar units
+                    let intervalStart, intervalEnd, intervalCenter;
                     
-                    // Find all events in this interval
+                    if ((chartPeriod === 'week' || chartPeriod === 'month') && intervalMs === 24 * 60 * 60 * 1000) {
+                        // For day intervals in week/month views, align to day boundaries (00:00:00 to 23:59:59.999)
+                        const baseDate = new Date(minDate);
+                        const dayStart = alignToDayStart(new Date(baseDate.getTime() + (i * 24 * 60 * 60 * 1000)));
+                        intervalStart = dayStart.getTime();
+                        const dayEnd = new Date(dayStart);
+                        dayEnd.setDate(dayEnd.getDate() + 1);
+                        dayEnd.setMilliseconds(dayEnd.getMilliseconds() - 1);
+                        intervalEnd = Math.min(dayEnd.getTime(), maxDate);
+                        intervalCenter = intervalStart + ((intervalEnd - intervalStart) / 2);
+                    } else if (chartPeriod === 'year' && intervalMs === 7 * 24 * 60 * 60 * 1000) {
+                        // For week intervals in year view, align to week boundaries (Sunday to Saturday)
+                        const baseDate = new Date(minDate);
+                        const weekStart = alignToWeekStart(new Date(baseDate.getTime() + (i * 7 * 24 * 60 * 60 * 1000)));
+                        intervalStart = weekStart.getTime();
+                        const weekEnd = new Date(weekStart);
+                        weekEnd.setDate(weekEnd.getDate() + 7);
+                        weekEnd.setMilliseconds(weekEnd.getMilliseconds() - 1);
+                        intervalEnd = Math.min(weekEnd.getTime(), maxDate);
+                        intervalCenter = intervalStart + ((intervalEnd - intervalStart) / 2);
+                    } else {
+                        // For hour intervals or other cases, use millisecond-based calculation
+                        intervalStart = minDate + (i * intervalMs);
+                        intervalEnd = Math.min(intervalStart + intervalMs, maxDate);
+                        intervalCenter = intervalStart + (intervalMs / 2);
+                    }
+                    
+                    // Find all events in this interval - use proper boundaries (inclusive end for day boundaries)
                     const eventsInInterval = rawEventData.filter(evt => 
-                        evt.timestamp >= intervalStart && evt.timestamp < intervalEnd
+                        evt.timestamp >= intervalStart && evt.timestamp <= intervalEnd
                     );
                     
                     let avgDebt = null;
@@ -1540,17 +1591,26 @@
                                 // Only filter if this point has transactions
                                 if (point && point.hasTransactions) {
                                     // Format dates for input fields (YYYY-MM-DD)
+                                    // Use aligned day boundaries for proper filtering
                                     const formatDate = (timestamp) => {
                                         const date = new Date(timestamp);
-                                        const year = date.getFullYear();
-                                        const month = String(date.getMonth() + 1).padStart(2, '0');
-                                        const day = String(date.getDate()).padStart(2, '0');
+                                        // Align to start of day for proper filtering
+                                        const dayStart = alignToDayStart(date);
+                                        const year = dayStart.getFullYear();
+                                        const month = String(dayStart.getMonth() + 1).padStart(2, '0');
+                                        const day = String(dayStart.getDate()).padStart(2, '0');
                                         return `${year}-${month}-${day}`;
                                     };
                                     
-                                    // Set filter dates using stored interval boundaries
-                                    document.getElementById('dateFromFilter').value = formatDate(point.intervalStart);
-                                    document.getElementById('dateToFilter').value = formatDate(point.intervalEnd);
+                                    // Set filter dates using stored interval boundaries (aligned to day start)
+                                    // For day intervals, use the day boundaries
+                                    const intervalStartDate = alignToDayStart(new Date(point.intervalStart));
+                                    const intervalEndDate = alignToDayStart(new Date(point.intervalEnd));
+                                    
+                                    document.getElementById('dateFromFilter').value = formatDate(intervalStartDate);
+                                    // For end date, use the same day (inclusive) or next day (exclusive)
+                                    // Since we want to include events on the end day, we use the end day itself
+                                    document.getElementById('dateToFilter').value = formatDate(intervalEndDate);
                                     
                                     // Switch to Events tab if not already there
                                     switchTab('events');

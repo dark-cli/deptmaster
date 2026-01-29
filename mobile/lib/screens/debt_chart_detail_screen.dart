@@ -248,8 +248,19 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
 
   void _onChartPointTapped(DateTime intervalStart, DateTime intervalEnd) {
     setState(() {
-      _selectedDateFrom = intervalStart;
-      _selectedDateTo = intervalEnd;
+      // Align to day boundaries for proper filtering
+      // Start of day (00:00:00) for dateFrom
+      _selectedDateFrom = _alignToDayStart(intervalStart);
+      // End of day (23:59:59) for dateTo - align to day start then add time
+      final endDayStart = _alignToDayStart(intervalEnd);
+      _selectedDateTo = DateTime(
+        endDayStart.year,
+        endDayStart.month,
+        endDayStart.day,
+        23,
+        59,
+        59,
+      );
     });
     _applyDateFilters();
   }
@@ -265,6 +276,26 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     _applyDateFilters();
   }
 
+  // Helper functions to align dates to calendar boundaries
+  DateTime _alignToDayStart(DateTime date) {
+    return DateTime(date.year, date.month, date.day);
+  }
+  
+  DateTime _alignToWeekStart(DateTime date) {
+    final dayOfWeek = date.weekday; // 1=Monday, 7=Sunday
+    final daysToSubtract = dayOfWeek == 7 ? 0 : dayOfWeek;
+    final sunday = date.subtract(Duration(days: daysToSubtract));
+    return DateTime(sunday.year, sunday.month, sunday.day);
+  }
+  
+  DateTime _alignToMonthStart(DateTime date) {
+    return DateTime(date.year, date.month, 1);
+  }
+  
+  DateTime _alignToYearStart(DateTime date) {
+    return DateTime(date.year, 1, 1);
+  }
+
   List<ChartDataPoint> _buildChartData() {
     if (_allEvents == null || _allEvents!.isEmpty) return [];
     
@@ -274,19 +305,28 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     
     switch (_chartPeriod) {
       case 'week':
-        periodStart = now.subtract(const Duration(days: 7));
+        // Last 7 days, but align to week boundaries (Sunday to Sunday)
+        periodStart = _alignToWeekStart(now.subtract(const Duration(days: 7)));
         intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals
         break;
       case 'month':
-        periodStart = now.subtract(const Duration(days: 30));
+        // Last 30 days, but align to month boundaries
+        final monthStart = _alignToMonthStart(now.subtract(const Duration(days: 30)));
+        periodStart = monthStart.isBefore(_alignToMonthStart(now)) 
+            ? monthStart 
+            : _alignToMonthStart(now);
         intervalMs = 24 * 60 * 60 * 1000; // 1 day intervals
         break;
       case 'year':
-        periodStart = now.subtract(const Duration(days: 365));
+        // Last 365 days, but align to year boundaries
+        final yearStart = _alignToYearStart(now.subtract(const Duration(days: 365)));
+        periodStart = yearStart.isBefore(_alignToYearStart(now)) 
+            ? yearStart 
+            : _alignToYearStart(now);
         intervalMs = 7 * 24 * 60 * 60 * 1000; // 1 week intervals
         break;
       default:
-        periodStart = now.subtract(const Duration(days: 30));
+        periodStart = _alignToMonthStart(now.subtract(const Duration(days: 30)));
         intervalMs = 24 * 60 * 60 * 1000;
     }
     
@@ -327,17 +367,37 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     final chartData = <ChartDataPoint>[];
     
     for (int i = 0; i <= numIntervals; i++) {
-      final intervalStart = minDate + (i * intervalMs);
-      final intervalEnd = (intervalStart + intervalMs).clamp(minDate, maxDate);
+      // Calculate interval boundaries aligned to calendar units
+      DateTime intervalStartDate;
+      DateTime intervalEndDate;
+      
+      if ((_chartPeriod == 'week' || _chartPeriod == 'month') && intervalMs == 24 * 60 * 60 * 1000) {
+        // For day intervals in week/month views, align to day boundaries (00:00:00 to 23:59:59.999)
+        final baseDate = DateTime.fromMillisecondsSinceEpoch(minDate.toInt());
+        intervalStartDate = _alignToDayStart(baseDate.add(Duration(days: i)));
+        intervalEndDate = intervalStartDate.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+      } else if (_chartPeriod == 'year' && intervalMs == 7 * 24 * 60 * 60 * 1000) {
+        // For week intervals in year view, align to week boundaries (Sunday to Saturday)
+        final baseDate = DateTime.fromMillisecondsSinceEpoch(minDate.toInt());
+        intervalStartDate = _alignToWeekStart(baseDate.add(Duration(days: i * 7)));
+        intervalEndDate = intervalStartDate.add(const Duration(days: 7)).subtract(const Duration(milliseconds: 1));
+      } else {
+        // For other cases, use millisecond-based calculation
+        final intervalStart = minDate + (i * intervalMs);
+        final intervalEnd = (intervalStart + intervalMs).clamp(minDate, maxDate);
+        intervalStartDate = DateTime.fromMillisecondsSinceEpoch(intervalStart.toInt());
+        intervalEndDate = DateTime.fromMillisecondsSinceEpoch(intervalEnd.toInt());
+      }
+      
+      final intervalStart = intervalStartDate.millisecondsSinceEpoch;
+      final intervalEnd = intervalEndDate.millisecondsSinceEpoch;
       final intervalCenter = (intervalStart + intervalEnd) / 2;
       
-      final intervalStartDate = DateTime.fromMillisecondsSinceEpoch(intervalStart.toInt());
-      final intervalEndDate = DateTime.fromMillisecondsSinceEpoch(intervalEnd.toInt());
-      
-      // Find events in this interval
+      // Find events in this interval - use proper boundaries (inclusive end for day boundaries)
       final eventsInInterval = eventsInPeriod.where((e) {
         final eventTime = e.timestamp.millisecondsSinceEpoch;
-        return eventTime >= intervalStart && eventTime < intervalEnd;
+        // Include events that fall within the interval (inclusive start and end for day boundaries)
+        return eventTime >= intervalStart && eventTime <= intervalEnd;
       }).toList();
       
       double avgDebt;
