@@ -9,6 +9,8 @@ pub mod users;
 
 pub use admin::{
     admin_panel,
+    config_js,
+    favicon,
     backfill_transaction_events,
     get_events,
     get_contacts as get_admin_contacts,

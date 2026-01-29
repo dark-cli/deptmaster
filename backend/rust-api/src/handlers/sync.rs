@@ -1174,6 +1174,7 @@ async fn apply_events_to_projections(
                     }
                 }
                 "DELETED" => {
+                    // Mark contact as deleted
                     sqlx::query(
                         "UPDATE contacts_projection SET is_deleted = true, updated_at = $2 WHERE id = $1"
                     )
@@ -1181,6 +1182,20 @@ async fn apply_events_to_projections(
                     .bind(created_at)
                     .execute(&*state.db_pool)
                     .await?;
+                    
+                    // Also delete all transactions that reference this deleted contact
+                    // This ensures data consistency: deleted contacts don't leave orphaned transactions
+                    let deleted_transactions = sqlx::query(
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE contact_id = $2 AND is_deleted = false"
+                    )
+                    .bind(created_at)
+                    .bind(aggregate_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+                    
+                    if deleted_transactions.rows_affected() > 0 {
+                        tracing::info!("Deleted {} transaction(s) for deleted contact {}", deleted_transactions.rows_affected(), aggregate_id);
+                    }
                 }
                 _ => {}
             }
@@ -1190,7 +1205,21 @@ async fn apply_events_to_projections(
                     let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
                     let contact_id = uuid::Uuid::parse_str(contact_id_str).ok();
                     
+                    // Only create transaction if contact exists and is not deleted
+                    // If contact was deleted, its transactions should also be ignored/deleted
                     if let Some(cid) = contact_id {
+                        // Check if contact exists and is not deleted
+                        let contact_exists = sqlx::query_scalar::<_, bool>(
+                            "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND is_deleted = false)"
+                        )
+                        .bind(cid)
+                        .fetch_one(&*state.db_pool)
+                        .await?;
+                        
+                        if !contact_exists {
+                            tracing::warn!("Skipping transaction creation for deleted contact {}", cid);
+                            continue;
+                        }
                         let tx_type = event_data.get("type").and_then(|v| v.as_str()).unwrap_or("money");
                         let direction = event_data.get("direction").and_then(|v| v.as_str()).unwrap_or("lent");
                         let amount = event_data.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1494,6 +1523,7 @@ async fn apply_single_event_to_projections(
                     .await?;
                 }
                 "DELETED" => {
+                    // Mark contact as deleted
                     sqlx::query(
                         "UPDATE contacts_projection SET is_deleted = true, updated_at = $1 WHERE id = $2"
                     )
@@ -1501,6 +1531,20 @@ async fn apply_single_event_to_projections(
                     .bind(aggregate_id)
                     .execute(&*state.db_pool)
                     .await?;
+                    
+                    // Also delete all transactions that reference this deleted contact
+                    // This ensures data consistency: deleted contacts don't leave orphaned transactions
+                    let deleted_transactions = sqlx::query(
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE contact_id = $2 AND is_deleted = false"
+                    )
+                    .bind(created_at)
+                    .bind(aggregate_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+                    
+                    if deleted_transactions.rows_affected() > 0 {
+                        tracing::info!("Deleted {} transaction(s) for deleted contact {}", deleted_transactions.rows_affected(), aggregate_id);
+                    }
                 }
                 _ => {}
             }
@@ -1508,6 +1552,26 @@ async fn apply_single_event_to_projections(
         "transaction" => {
             match event.event_type.as_str() {
                 "CREATED" => {
+                    // Get contact_id first to check if contact exists
+                    let contact_id = event_data.get("contact_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    
+                    // Only create transaction if contact exists and is not deleted
+                    // If contact was deleted, its transactions should also be ignored/deleted
+                    let contact_exists = sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND is_deleted = false)"
+                    )
+                    .bind(contact_id)
+                    .fetch_one(&*state.db_pool)
+                    .await?;
+                    
+                    if !contact_exists {
+                        tracing::warn!("Skipping transaction creation for deleted contact {}", contact_id);
+                        return Ok(());
+                    }
+                    
                     let amount = event_data.get("amount")
                         .and_then(|v| v.as_i64())
                         .ok_or_else(|| sqlx::Error::RowNotFound)?;
@@ -1517,11 +1581,6 @@ async fn apply_single_event_to_projections(
                     let txn_type = event_data.get("type")
                         .and_then(|v| v.as_str())
                         .unwrap_or("money");
-                    
-                    let contact_id = event_data.get("contact_id")
-                        .and_then(|v| v.as_str())
-                        .and_then(|s| uuid::Uuid::parse_str(s).ok())
-                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
                     
                     let transaction_date = event_data.get("transaction_date")
                         .and_then(|v| v.as_str())

@@ -6,7 +6,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, postgres::PgRow, QueryBuilder};
 use crate::AppState;
-use crate::websocket;
 
 #[derive(Deserialize)]
 pub struct EventQuery {
@@ -116,6 +115,83 @@ pub struct ProjectionStatus {
 
 pub async fn admin_panel() -> Html<&'static str> {
     Html(include_str!("../../static/admin/index.html"))
+}
+
+/// Serve favicon.ico
+pub async fn favicon() -> axum::response::Response {
+    use axum::response::{Response, IntoResponse};
+    use axum::http::{header, StatusCode};
+    use axum::body::Body;
+    
+    // Try to read favicon from multiple possible locations (relative to where server runs)
+    // Server typically runs from rust-api directory, so paths are relative to that
+    let favicon_paths = [
+        "../mobile/web/favicon.png",  // From rust-api directory
+        "mobile/web/favicon.png",     // From project root
+        "static/admin/favicon.ico",
+        "backend/rust-api/static/admin/favicon.ico",
+        "../static/admin/favicon.ico",
+    ];
+    
+    for path in &favicon_paths {
+        if let Ok(content) = std::fs::read(path) {
+            // Determine content type based on file extension
+            let content_type = if path.ends_with(".png") {
+                "image/png"
+            } else {
+                "image/x-icon"
+            };
+            
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(content))
+                .unwrap()
+                .into_response();
+        }
+    }
+    
+    // Return 404 if favicon not found
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::from(""))
+        .unwrap()
+        .into_response()
+}
+
+/// Serve config.js with correct MIME type (optional config file)
+/// Returns empty JavaScript if file doesn't exist (to avoid MIME type errors)
+pub async fn config_js() -> axum::response::Response {
+    use axum::response::{Response, IntoResponse};
+    use axum::http::{header, StatusCode};
+    use axum::body::Body;
+    
+    // Try to read config.js if it exists, otherwise return empty JS
+    // Path is relative to where the server runs (usually rust-api directory)
+    let config_paths = [
+        "../static/admin/config.js",  // From rust-api directory
+        "static/admin/config.js",     // From project root
+        "backend/rust-api/static/admin/config.js",
+    ];
+    
+    let mut found_content: Option<String> = None;
+    for path in &config_paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            found_content = Some(content);
+            break;
+        }
+    }
+    
+    let content = found_content.unwrap_or_else(|| {
+        "// Config file not found, using defaults\nwindow.ADMIN_CONFIG = {};".to_string()
+    });
+    
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/javascript; charset=utf-8")
+        .body(Body::from(content))
+        .unwrap()
+        .into_response()
 }
 
 pub async fn get_events(
