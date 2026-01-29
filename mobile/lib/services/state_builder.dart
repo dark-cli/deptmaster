@@ -51,7 +51,7 @@ class StateBuilder {
     final contacts = <String, Contact>{};
     final transactions = <String, Transaction>{};
 
-    // Second pass: apply events (skipping undone events and UNDO events themselves)
+    // Apply events in order - when contact is deleted, its transactions are also removed
     for (final event in sortedEvents) {
       // Skip UNDO events (they don't modify state directly)
       if (event.eventType == 'UNDO') {
@@ -63,7 +63,7 @@ class StateBuilder {
       }
 
       if (event.aggregateType == 'contact') {
-        _applyContactEvent(contacts, event);
+        _applyContactEvent(contacts, event, transactions);
       } else if (event.aggregateType == 'transaction') {
         _applyTransactionEvent(transactions, event, contacts);
       }
@@ -107,6 +107,7 @@ class StateBuilder {
     );
 
     // Apply new events (skipping undone events and UNDO events themselves)
+    // Process contacts and transactions together - when contact is deleted, transactions are removed
     for (final event in sortedNewEvents) {
       // Skip UNDO events (they don't modify state directly)
       if (event.eventType == 'UNDO') {
@@ -118,7 +119,7 @@ class StateBuilder {
       }
 
       if (event.aggregateType == 'contact') {
-        _applyContactEvent(contacts, event);
+        _applyContactEvent(contacts, event, transactions);
       } else if (event.aggregateType == 'transaction') {
         _applyTransactionEvent(transactions, event, contacts);
       }
@@ -135,7 +136,11 @@ class StateBuilder {
   }
 
   /// Apply a contact event to the contacts map
-  static void _applyContactEvent(Map<String, Contact> contacts, Event event) {
+  static void _applyContactEvent(
+    Map<String, Contact> contacts, 
+    Event event,
+    Map<String, Transaction> transactions,
+  ) {
     final contactId = event.aggregateId;
     final eventData = event.eventData;
 
@@ -167,8 +172,23 @@ class StateBuilder {
         balance: existing.balance, // Will be recalculated
       );
     } else if (event.eventType == 'DELETED' && contacts.containsKey(contactId)) {
-      // Remove deleted contact (hard delete for simplicity)
+      // Remove deleted contact
       contacts.remove(contactId);
+      
+      // Also remove all transactions that reference this deleted contact
+      // This ensures data consistency: deleted contacts don't leave orphaned transactions
+      final transactionsToRemove = transactions.values
+          .where((t) => t.contactId == contactId)
+          .map((t) => t.id)
+          .toList();
+      
+      for (final transactionId in transactionsToRemove) {
+        transactions.remove(transactionId);
+      }
+      
+      if (transactionsToRemove.isNotEmpty) {
+        print('✅ Deleted contact $contactId and removed ${transactionsToRemove.length} associated transactions');
+      }
     }
   }
 
@@ -183,8 +203,9 @@ class StateBuilder {
 
     if (event.eventType == 'CREATED') {
       final contactId = eventData['contact_id'] as String? ?? '';
-      // Only create if contact exists
-      if (contacts.containsKey(contactId)) {
+      // Only create transaction if contact exists
+      // If contact was deleted, its transactions should also be ignored/deleted
+      if (contactId.isNotEmpty && contacts.containsKey(contactId)) {
         transactions[transactionId] = Transaction(
           id: transactionId,
           contactId: contactId,
@@ -204,6 +225,7 @@ class StateBuilder {
           isSynced: event.synced,
         );
       }
+      // If contact doesn't exist, don't create transaction (contact was deleted)
     } else if (event.eventType == 'UPDATED' && transactions.containsKey(transactionId)) {
       final existing = transactions[transactionId]!;
       transactions[transactionId] = Transaction(

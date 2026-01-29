@@ -9,11 +9,13 @@ import 'state_builder.dart';
 import 'event_store_service.dart';
 import 'connection_manager.dart';
 import 'connection_state_tracker.dart';
+import 'auth_service.dart';
 
 class RealtimeService {
   static WebSocketChannel? _channel;
   static StreamSubscription? _subscription;
   static bool _isConnected = false;
+  static bool _isConnecting = false; // Guard to prevent multiple simultaneous connections
   static final List<Function(Map<String, dynamic>)> _listeners = [];
   static Function(String)? _onConnectionError;
 
@@ -30,21 +32,61 @@ class RealtimeService {
   }
 
   static Future<void> connect() async {
+    // If we are already connected, don't reconnect.
     if (_isConnected && _channel != null) {
+      print('🔌 WebSocket already connected, skipping connection attempt');
       return;
     }
+    
+    // Prevent multiple simultaneous connection attempts
+    if (_isConnecting) {
+      print('🔌 WebSocket connection already in progress, skipping duplicate attempt');
+      return;
+    }
+    
+    _isConnecting = true;
+
+    // Track if we were offline before connecting
+    final wasOffline = !_isConnected;
+
+    // Only attempt WebSocket connection if the user is logged in (has a token)
+    final token = await AuthService.getToken();
+    if (token == null || token.isEmpty) {
+      // No auth token -> don't spam the server with unauthorized WebSocket attempts
+      print('⚠️ Cannot connect WebSocket - no auth token available');
+      _isConnecting = false; // Clear connecting flag if no token
+      _isConnected = false;
+      _channel = null;
+      _subscription = null;
+      return;
+    }
+    
+    print('🔌 Attempting WebSocket connection with token (length: ${token.length})...');
 
     // Wrap entire connection in try-catch to catch all exceptions
     try {
       final wsUrl = await _wsUrl;
       
+      // Append token as query parameter (backend supports token via query param or Authorization header)
+      // Use Uri.parse and Uri.replace to properly encode the token
+      final uri = Uri.parse(wsUrl);
+      final authenticatedUrl = uri.replace(queryParameters: {
+        ...uri.queryParameters,
+        'token': token, // Uri.replace will automatically encode the token
+      });
+      
+      print('🔌 Connecting to WebSocket: ${authenticatedUrl.toString().replaceAll(RegExp(r'token=[^&]+'), 'token=***')}');
+      
       // Create channel - WebSocketChannel.connect() throws asynchronously
       // The PlatformDispatcher.onError in main.dart will catch and suppress it
       WebSocketChannel? channel;
       try {
-        channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+        // Include JWT token as query parameter so backend can authenticate /ws
+        channel = WebSocketChannel.connect(authenticatedUrl);
       } catch (e) {
-        // Synchronous error - log state change if needed
+        // Synchronous error - handle gracefully without crashing
+        print('WebSocket connection error (sync): $e');
+        _isConnecting = false; // Clear connecting flag on error
         if (_isConnected) {
           ConnectionStateTracker.logStateChange(false);
           _isConnected = false;
@@ -53,8 +95,9 @@ class RealtimeService {
         return;
       }
       
-      // Check if channel is null (shouldn't happen, but safety check)
+      // Wrap channel operations in additional error handling
       if (channel == null) {
+        _isConnecting = false; // Clear connecting flag if channel is null
         if (_isConnected) {
           ConnectionStateTracker.logStateChange(false);
           _isConnected = false;
@@ -62,7 +105,6 @@ class RealtimeService {
         _reconnect();
         return;
       }
-
       // Set up stream listener with error handling
       // Use a flag to track if we've set up the listener
       bool listenerSetup = false;
@@ -75,14 +117,27 @@ class RealtimeService {
               _isConnected = true;
               _channel = channel;
               
-              // Log state change (offline -> online)
+              print('✅ WebSocket connected successfully for real-time updates');
+              
+              // Log state change (offline -> online) - don't await in callback
               ConnectionStateTracker.logStateChange(true);
               
-              // Trigger sync when connection is established to sync offline events
+              // Always trigger sync when reconnecting to sync offline events
+              // This ensures events created offline are synced when back online
+              // Trigger sync immediately (no delay) for faster sync after reconnection
               if (!kIsWeb) {
-                // Check for unsynced events and sync them
+                print('🔄 Connection established - triggering sync immediately...');
+                // Trigger sync immediately - no delay needed
                 SyncServiceV2.manualSync().catchError((e) {
-                  // Silently handle sync errors
+                  // Check if it's an auth error
+                  final errorStr = e.toString();
+                  if (!errorStr.contains('Authentication') && 
+                      !errorStr.contains('expired') &&
+                      !errorStr.contains('Connection refused') &&
+                      !errorStr.contains('Failed host lookup') &&
+                      !errorStr.contains('Network is unreachable')) {
+                    print('⚠️ Sync error after reconnection: $e');
+                  }
                 });
               }
             }
@@ -102,6 +157,15 @@ class RealtimeService {
             _channel = null;
             _subscription = null;
             
+            // Check if it's an authentication error (401)
+            final errorStr = error.toString().toLowerCase();
+            if (errorStr.contains('401') || errorStr.contains('unauthorized')) {
+              print('⚠️ WebSocket authentication failed (401) - token may be expired');
+              // Don't reconnect if auth failed - user needs to login again
+              // The app will reconnect when user logs in again
+              return;
+            }
+            
             // Log state change (online -> offline) only if we were connected
             if (wasConnected) {
               ConnectionStateTracker.logStateChange(false);
@@ -112,6 +176,7 @@ class RealtimeService {
           onDone: () {
             final wasConnected = _isConnected;
             _isConnected = false;
+            _isConnecting = false; // Clear connecting flag when done
             _channel = null;
             _subscription = null;
             
@@ -133,6 +198,7 @@ class RealtimeService {
         await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         // Stream setup failed - log state change if needed
+        _isConnecting = false; // Clear connecting flag on error
         if (_isConnected) {
           ConnectionStateTracker.logStateChange(false);
         }
@@ -140,12 +206,17 @@ class RealtimeService {
         _channel = null;
         _subscription = null;
         if (listenerSetup) {
-          _subscription?.cancel();
+          try {
+            _subscription?.cancel();
+          } catch (_) {
+            // Ignore cancel errors
+          }
         }
         _reconnect();
       }
     } catch (e) {
-      // Catch any other exceptions - log state change if needed
+      // Catch any other exceptions - handle gracefully without crashing
+      _isConnecting = false; // Clear connecting flag on error
       if (_isConnected) {
         ConnectionStateTracker.logStateChange(false);
       }
@@ -163,15 +234,36 @@ class RealtimeService {
   
 
   static void _reconnect() {
-    // Auto-reconnect with 5 second delay to avoid spamming server
-    Future.delayed(const Duration(seconds: 5), () {
-      if (!_isConnected) {
-        // Silently attempt reconnect - don't spam console if server is down
-        connect().catchError((e) {
-          // Retry connection after delay
-          _reconnect();
-        });
+    // Check if user is still logged in before reconnecting
+    AuthService.getToken().then((token) {
+      if (token == null || token.isEmpty) {
+        // User logged out, don't reconnect
+        print('⚠️ Not reconnecting WebSocket - user logged out');
+        return;
       }
+      
+      // Auto-reconnect with 5 second delay to avoid spamming server
+      Future.delayed(const Duration(seconds: 5), () {
+        if (!_isConnected) {
+          // Silently attempt reconnect - don't spam console if server is down
+          connect().then((_) {
+            // After successful reconnection, sync will be triggered automatically
+            // by the connection handler
+          }).catchError((e) {
+            // Check if it's an auth error - don't retry if auth failed
+            final errorStr = e.toString().toLowerCase();
+            if (!errorStr.contains('401') && !errorStr.contains('unauthorized')) {
+              // Retry connection after delay (only if not auth error)
+              _reconnect();
+            } else {
+              print('⚠️ WebSocket reconnection failed due to auth error - stopping retries');
+            }
+          });
+        }
+      });
+    }).catchError((e) {
+      // If we can't get token, don't reconnect
+      print('⚠️ Cannot check auth token for WebSocket reconnection: $e');
     });
   }
 
@@ -201,11 +293,18 @@ class RealtimeService {
   }
 
   static Future<void> disconnect() async {
-    await _subscription?.cancel();
-    await _channel?.sink.close();
+    try {
+      await _subscription?.cancel();
+    } catch (_) {
+      // Ignore cancel errors
+    }
+    try {
+      await _channel?.sink.close();
+    } catch (_) {
+      // Ignore close errors
+    }
     _channel = null;
     _isConnected = false;
-    print('WebSocket disconnected');
   }
 
   static Future<void> syncWhenOnline() async {

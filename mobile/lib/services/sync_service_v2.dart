@@ -32,13 +32,17 @@ class SyncServiceV2 {
       print('🔄 Starting sync...');
 
       // 1. Get server hash
+      print('📡 Fetching server hash...');
       final serverHashData = await ApiService.getSyncHash();
       final serverHash = serverHashData['hash'] as String;
       final serverEventCount = serverHashData['event_count'] as int;
+      print('✅ Server hash received: $serverEventCount events (hash: ${serverHash.substring(0, 8)}...)');
 
       // 2. Get local hash
+      print('💾 Checking local events...');
       final localHash = await EventStoreService.getEventHash();
       final localEventCount = await EventStoreService.getEventCount();
+      print('✅ Local hash: $localEventCount events (hash: ${localHash.substring(0, 8)}...)');
 
       print('📊 Sync status: Local=$localEventCount events (hash: ${localHash.substring(0, 8)}...), Server=$serverEventCount events (hash: ${serverHash.substring(0, 8)}...)');
 
@@ -53,8 +57,8 @@ class SyncServiceV2 {
           // First sync - mark current time
           await EventStoreService.setLastSyncTimestamp(DateTime.now());
         }
-        // Still rebuild state to ensure it's up to date
-        await _rebuildState();
+        // Skip rebuilding state if already in sync - saves significant time
+        // State will be rebuilt automatically when new events arrive
         return;
       }
       
@@ -77,16 +81,20 @@ class SyncServiceV2 {
 
       print('📥 Received ${serverEvents.length} events from server');
 
-      // 7. Insert missing events from server (by timestamp order)
+      // 7. Load all local events once (performance optimization)
+      // Create a Set of event IDs for O(1) lookup instead of O(n) search in loop
+      final allLocalEvents = await EventStoreService.getAllEvents();
+      final localEventIds = allLocalEvents.map((e) => e.id).toSet();
+      
+      // 8. Insert missing events from server (by timestamp order)
       int insertedCount = 0;
+      final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+      
       for (final serverEvent in serverEvents) {
         final eventId = serverEvent['id'] as String;
         
-        // Check if event already exists locally
-        final allEvents = await EventStoreService.getAllEvents();
-        final exists = allEvents.any((e) => e.id == eventId);
-        
-        if (!exists) {
+        // Check if event already exists locally using Set lookup (O(1) instead of O(n))
+        if (!localEventIds.contains(eventId)) {
           // Convert server event to local Event
           final event = Event(
             id: eventId,
@@ -100,8 +108,8 @@ class SyncServiceV2 {
           );
 
           // Insert into local event store
-          final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
           await eventsBox.put(event.id, event);
+          localEventIds.add(eventId); // Update Set for subsequent checks
           insertedCount++;
         }
       }
@@ -133,15 +141,36 @@ class SyncServiceV2 {
         }).toList();
 
         // 10. Send to server
+        print('📤 Sending ${eventsToSend.length} events to server...');
         final result = await ApiService.postSyncEvents(eventsToSend);
         final accepted = (result['accepted'] as List).cast<String>();
         final conflicts = (result['conflicts'] as List).cast<String>();
 
         print('✅ Server accepted ${accepted.length} events, ${conflicts.length} conflicts');
+        
+        if (accepted.isEmpty && conflicts.isEmpty && eventsToSend.isNotEmpty) {
+          print('⚠️ Warning: No events were accepted or conflicted. This might indicate a server error.');
+        }
 
-        // 11. Mark accepted events as synced
-        for (final eventId in accepted) {
-          await EventStoreService.markEventSynced(eventId);
+        // 11. Mark accepted events as synced (batch operation for performance)
+        if (accepted.isNotEmpty) {
+          final eventsBoxForMarking = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+          for (final eventId in accepted) {
+            final event = eventsBoxForMarking.get(eventId);
+            if (event != null) {
+              final syncedEvent = Event(
+                id: event.id,
+                aggregateType: event.aggregateType,
+                aggregateId: event.aggregateId,
+                eventType: event.eventType,
+                eventData: event.eventData,
+                timestamp: event.timestamp,
+                version: event.version,
+                synced: true, // Mark as synced
+              );
+              await eventsBoxForMarking.put(eventId, syncedEvent);
+            }
+          }
         }
 
         // 12. Handle conflicts (for now, just log them)
@@ -161,13 +190,44 @@ class SyncServiceV2 {
 
       print('✅ Sync completed');
       
-      // 15. Force UI refresh by triggering a state rebuild notification
-      // This ensures the UI updates after sync
-      final finalEvents = await EventStoreService.getAllEvents();
-      final finalState = StateBuilder.buildState(finalEvents);
-      print('📊 Final state: ${finalState.contacts.length} contacts, ${finalState.transactions.length} transactions');
-    } catch (e) {
+      // 15. State was already rebuilt in step 13 (_rebuildState)
+      // The UI will automatically refresh via Hive box listeners when state changes
+    } catch (e, stackTrace) {
+      // Check if it's an authentication error
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('authentication') || errorStr.contains('expired') || errorStr.contains('401')) {
+        print('⚠️ Sync failed due to authentication error - user has been logged out');
+        print('   Error: $e');
+        // Don't retry - user needs to login again
+        return;
+      }
+      
+      // Check if it's a network error
+      if (errorStr.contains('connection refused') || 
+          errorStr.contains('failed host lookup') ||
+          errorStr.contains('network is unreachable') ||
+          errorStr.contains('socketexception') ||
+          errorStr.contains('timeout')) {
+        print('⚠️ Sync failed due to network error (offline or server unreachable)');
+        print('   Error: $e');
+        // Don't throw - network errors are expected when offline
+        return;
+      }
+      
+      // For other errors, log them with full details
       print('❌ Sync error: $e');
+      print('   Stack trace: $stackTrace');
+      
+      // Check if there are unsynced events that failed to sync
+      try {
+        final unsyncedCount = (await EventStoreService.getUnsyncedEvents()).length;
+        if (unsyncedCount > 0) {
+          print('   ⚠️ Warning: $unsyncedCount events remain unsynced');
+        }
+      } catch (_) {
+        // Ignore errors checking unsynced events
+      }
+      
       // Don't throw - sync failures shouldn't break the app
     } finally {
       _isSyncing = false;
@@ -212,7 +272,35 @@ class SyncServiceV2 {
 
   /// Manual sync trigger
   static Future<void> manualSync() async {
+    if (_isSyncing) {
+      print('⚠️ Sync already in progress, skipping...');
+      return;
+    }
     await sync();
+  }
+  
+  /// Get sync status for debugging
+  static Future<Map<String, dynamic>> getSyncStatus() async {
+    if (kIsWeb) {
+      return {'error': 'Sync not available on web'};
+    }
+    
+    try {
+      final localEventCount = await EventStoreService.getEventCount();
+      final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
+      final unsyncedCount = unsyncedEvents.length;
+      final lastSync = await EventStoreService.getLastSyncTimestamp();
+      
+      return {
+        'is_syncing': _isSyncing,
+        'local_event_count': localEventCount,
+        'unsynced_event_count': unsyncedCount,
+        'last_sync': lastSync?.toIso8601String(),
+        'has_unsynced_events': unsyncedCount > 0,
+      };
+    } catch (e) {
+      return {'error': e.toString()};
+    }
   }
 
   /// Stop periodic sync
