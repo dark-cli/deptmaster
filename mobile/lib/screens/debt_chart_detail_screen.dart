@@ -507,6 +507,14 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               })
                               .toList();
                           
+                          // Create list of indices for visible points only (for navigation)
+                          final visiblePointIndices = <int>[];
+                          for (int i = 0; i < chartDataList.length; i++) {
+                            if (chartDataList[i].hasTransactions) {
+                              visiblePointIndices.add(i);
+                            }
+                          }
+                          
                           // Use accent color for all points
                           final primaryColor = Theme.of(context).colorScheme.primary;
                           
@@ -593,7 +601,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               GestureDetector(
                                 onHorizontalDragStart: (details) {
                               // Initialize drag - show tooltip for the starting point
-                              if (chartDataList.isEmpty) return;
+                              // Only consider visible points (with transactions)
+                              if (visiblePointIndices.isEmpty) return;
                               
                               final RenderBox? renderBox = _chartKey.currentContext?.findRenderObject() as RenderBox?;
                               if (renderBox == null) return;
@@ -602,27 +611,28 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               final chartWidth = renderBox.size.width;
                               final xPercent = (localPosition.dx / chartWidth).clamp(0.0, 1.0);
                               
-                              int closestIndex = 0;
+                              int closestVisibleIndex = 0;
                               double minDistance = double.infinity;
                               
-                              for (int i = 0; i < chartDataList.length; i++) {
+                              // Only search through visible points
+                              for (final i in visiblePointIndices) {
                                 final point = chartDataList[i];
                                 final pointXPercent = (point.date.millisecondsSinceEpoch - minX) / (maxX - minX);
                                 final distance = (pointXPercent - xPercent).abs();
                                 
                                 if (distance < minDistance) {
                                   minDistance = distance;
-                                  closestIndex = i;
+                                  closestVisibleIndex = i;
                                 }
                               }
                               
                               if (mounted && !_isDisposed) {
                                 try {
                                   setState(() {
-                                    _selectedTooltipIndex = closestIndex;
+                                    _selectedTooltipIndex = closestVisibleIndex;
                                   });
                                   if (mounted && !_isDisposed) {
-                                    _tooltipBehavior.showByIndex(closestIndex, 0);
+                                    _tooltipBehavior.showByIndex(closestVisibleIndex, 0);
                                   }
                                 } catch (e) {
                                   // Chart might be disposed, ignore
@@ -631,7 +641,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                             },
                             onHorizontalDragUpdate: (details) {
                               // Calculate which point is closest to the drag position
-                              if (chartDataList.isEmpty) return;
+                              // Only consider visible points (with transactions)
+                              if (visiblePointIndices.isEmpty) return;
                               
                               final RenderBox? renderBox = _chartKey.currentContext?.findRenderObject() as RenderBox?;
                               if (renderBox == null) return;
@@ -642,32 +653,32 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               // Calculate the X position as a percentage of chart width
                               final xPercent = (localPosition.dx / chartWidth).clamp(0.0, 1.0);
                               
-                              // Find the closest point based on X position
-                              int closestIndex = 0;
+                              // Find the closest visible point based on X position
+                              int closestVisibleIndex = 0;
                               double minDistance = double.infinity;
                               
-                              for (int i = 0; i < chartDataList.length; i++) {
+                              // Only search through visible points
+                              for (final i in visiblePointIndices) {
                                 final point = chartDataList[i];
                                 // Calculate point's X position as percentage (0.0 to 1.0)
-                                // We need to map the date to the chart's X range
                                 final pointXPercent = (point.date.millisecondsSinceEpoch - minX) / (maxX - minX);
                                 final distance = (pointXPercent - xPercent).abs();
                                 
                                 if (distance < minDistance) {
                                   minDistance = distance;
-                                  closestIndex = i;
+                                  closestVisibleIndex = i;
                                 }
                               }
                               
-                              // Update tooltip to show the closest point
-                              if (_selectedTooltipIndex != closestIndex) {
+                              // Update tooltip to show the closest visible point
+                              if (_selectedTooltipIndex != closestVisibleIndex) {
                                 if (mounted && !_isDisposed) {
                                   try {
                                     setState(() {
-                                      _selectedTooltipIndex = closestIndex;
+                                      _selectedTooltipIndex = closestVisibleIndex;
                                     });
                                     if (mounted && !_isDisposed) {
-                                      _tooltipBehavior.showByIndex(closestIndex, 0);
+                                      _tooltipBehavior.showByIndex(closestVisibleIndex, 0);
                                     }
                                   } catch (e) {
                                     // Chart might be disposed, ignore
@@ -690,7 +701,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                             },
                             onTapUp: (details) {
                               // Handle direct tap to show tooltip and select point
-                              if (chartDataList.isEmpty) return;
+                              // Only consider visible points (with transactions)
+                              if (visiblePointIndices.isEmpty) return;
                               
                               final RenderBox? renderBox = _chartKey.currentContext?.findRenderObject() as RenderBox?;
                               if (renderBox == null) return;
@@ -699,56 +711,55 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                               final chartWidth = renderBox.size.width;
                               final xPercent = (localPosition.dx / chartWidth).clamp(0.0, 1.0);
                               
-                              int tappedPointIndex = 0;
+                              int tappedVisibleIndex = 0;
                               double minDistance = double.infinity;
                               
-                              for (int i = 0; i < chartDataList.length; i++) {
+                              // Only search through visible points
+                              for (final i in visiblePointIndices) {
                                 final point = chartDataList[i];
                                 final pointXPercent = (point.date.millisecondsSinceEpoch - minX) / (maxX - minX);
                                 final distance = (pointXPercent - xPercent).abs();
                                 
                                 if (distance < minDistance) {
                                   minDistance = distance;
-                                  tappedPointIndex = i;
+                                  tappedVisibleIndex = i;
                                 }
                               }
                               
-                              if (tappedPointIndex >= 0 && tappedPointIndex < chartDataList.length) {
-                                final point = chartDataList[tappedPointIndex];
-                                if (point.hasTransactions) {
-                                  if (mounted && !_isDisposed) {
-                                    setState(() {
-                                      _selectedTooltipIndex = tappedPointIndex;
-                                    });
-                                    try {
-                                      if (mounted && !_isDisposed) {
-                                        _tooltipBehavior.showByIndex(tappedPointIndex, 0);
-                                      }
-                                    } catch (e) {
-                                      // Chart might be disposed, ignore
+                              if (tappedVisibleIndex >= 0 && tappedVisibleIndex < chartDataList.length) {
+                                final point = chartDataList[tappedVisibleIndex];
+                                if (mounted && !_isDisposed) {
+                                  setState(() {
+                                    _selectedTooltipIndex = tappedVisibleIndex;
+                                  });
+                                  try {
+                                    if (mounted && !_isDisposed) {
+                                      _tooltipBehavior.showByIndex(tappedVisibleIndex, 0);
                                     }
-                                    // Select the point after a short delay, but keep yellow marker visible briefly
-                                    Future.delayed(const Duration(milliseconds: 500), () {
-                                      if (mounted && !_isDisposed) {
-                                        _onChartPointTapped(point.intervalStart, point.intervalEnd);
-                                        try {
-                                          if (mounted && !_isDisposed) {
-                                            _tooltipBehavior.hide();
-                                          }
-                                        } catch (e) {
-                                          // Chart might be disposed, ignore
-                                        }
-                                        // Keep yellow marker visible a bit longer for visual feedback
-                                        Future.delayed(const Duration(milliseconds: 300), () {
-                                          if (mounted && !_isDisposed) {
-                                            setState(() {
-                                              _selectedTooltipIndex = null;
-                                            });
-                                          }
-                                        });
-                                      }
-                                    });
+                                  } catch (e) {
+                                    // Chart might be disposed, ignore
                                   }
+                                  // Select the point after a short delay, but keep yellow marker visible briefly
+                                  Future.delayed(const Duration(milliseconds: 500), () {
+                                    if (mounted && !_isDisposed) {
+                                      _onChartPointTapped(point.intervalStart, point.intervalEnd);
+                                      try {
+                                        if (mounted && !_isDisposed) {
+                                          _tooltipBehavior.hide();
+                                        }
+                                      } catch (e) {
+                                        // Chart might be disposed, ignore
+                                      }
+                                      // Keep yellow marker visible a bit longer for visual feedback
+                                      Future.delayed(const Duration(milliseconds: 300), () {
+                                        if (mounted && !_isDisposed) {
+                                          setState(() {
+                                            _selectedTooltipIndex = null;
+                                          });
+                                        }
+                                      });
+                                    }
+                                  });
                                 }
                               }
                             },
@@ -844,44 +855,50 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                   end: Alignment.bottomCenter,
                                 ),
                                 onPointTap: (ChartPointDetails details) {
+                                  // This is called from the marker series, so all points here have transactions
                                   if (details.pointIndex != null && 
-                                      details.pointIndex! >= 0 &&
-                                      details.pointIndex! < chartDataList.length) {
-                                    final point = chartDataList[details.pointIndex!];
-                                    if (point.hasTransactions) {
-                                      // Show yellow marker for visual feedback
-                                      if (mounted && !_isDisposed) {
-                                        setState(() {
-                                          _selectedTooltipIndex = details.pointIndex;
-                                        });
-                                        try {
-                                          if (mounted && !_isDisposed) {
-                                            _tooltipBehavior.showByIndex(details.pointIndex!, 0);
-                                          }
-                                        } catch (e) {
-                                          // Chart might be disposed, ignore
-                                        }
-                                        // Select the point after a short delay
-                                        Future.delayed(const Duration(milliseconds: 300), () {
-                                          if (mounted && !_isDisposed) {
-                                            _onChartPointTapped(point.intervalStart, point.intervalEnd);
-                                            try {
-                                              if (mounted && !_isDisposed) {
-                                                _tooltipBehavior.hide();
-                                              }
-                                            } catch (e) {
-                                              // Chart might be disposed, ignore
+                                      details.pointIndex! >= 0) {
+                                    // Map marker series index to full chartDataList index
+                                    final markerSeriesData = chartDataList.where((d) => d.hasTransactions).toList();
+                                    if (details.pointIndex! < markerSeriesData.length) {
+                                      final tappedPoint = markerSeriesData[details.pointIndex!];
+                                      final fullIndex = chartDataList.indexOf(tappedPoint);
+                                      
+                                      if (fullIndex >= 0 && fullIndex < chartDataList.length) {
+                                        // Show yellow marker for visual feedback
+                                        if (mounted && !_isDisposed) {
+                                          setState(() {
+                                            _selectedTooltipIndex = fullIndex;
+                                          });
+                                          try {
+                                            if (mounted && !_isDisposed) {
+                                              _tooltipBehavior.showByIndex(fullIndex, 0);
                                             }
-                                            // Keep yellow marker visible briefly
-                                            Future.delayed(const Duration(milliseconds: 300), () {
-                                              if (mounted && !_isDisposed) {
-                                                setState(() {
-                                                  _selectedTooltipIndex = null;
-                                                });
-                                              }
-                                            });
+                                          } catch (e) {
+                                            // Chart might be disposed, ignore
                                           }
-                                        });
+                                          // Select the point after a short delay
+                                          Future.delayed(const Duration(milliseconds: 300), () {
+                                            if (mounted && !_isDisposed) {
+                                              _onChartPointTapped(tappedPoint.intervalStart, tappedPoint.intervalEnd);
+                                              try {
+                                                if (mounted && !_isDisposed) {
+                                                  _tooltipBehavior.hide();
+                                                }
+                                              } catch (e) {
+                                                // Chart might be disposed, ignore
+                                              }
+                                              // Keep yellow marker visible briefly
+                                              Future.delayed(const Duration(milliseconds: 300), () {
+                                                if (mounted && !_isDisposed) {
+                                                  setState(() {
+                                                    _selectedTooltipIndex = null;
+                                                  });
+                                                }
+                                              });
+                                            }
+                                          });
+                                        }
                                       }
                                     }
                                   }
