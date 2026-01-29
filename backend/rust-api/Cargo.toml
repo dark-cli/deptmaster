@@ -7,6 +7,18 @@ edition = "2021"
 name = "debt_tracker_api"
 path = "src/lib.rs"
 
+[[bin]]
+name = "debt-tracker-api"
+path = "src/main.rs"
+
+[[bin]]
+name = "reset_password"
+path = "src/bin/reset_password.rs"
+
+[[bin]]
+name = "set_admin_password"
+path = "src/bin/set_admin_password.rs"
+
 [dependencies]
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
@@ -69,6 +81,11 @@ redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 # WebSocket
 tokio-tungstenite = "0.21"
 axum-extra = { version = "0.9", features = ["typed-header"] }
+
+# TLS support
+tokio-rustls = "0.24"
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+rustls-pemfile = "1.0"
 
 [dev-dependencies]
 tokio-test = "0.4"
