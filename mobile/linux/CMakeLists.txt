@@ -34,6 +34,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     "Debug" "Profile" "Release")
 endif()
 
+# Global compiler flags to suppress deprecated warnings from plugins (like flutter_secure_storage_linux)
+# This must be set before plugins are loaded so it applies to all targets
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations -Wno-error=deprecated-literal-operator")
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
@@ -41,7 +45,8 @@ endif()
 # of modifying this function.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_14)
-  target_compile_options(${TARGET} PRIVATE -Wall -Werror)
+  # Use -Werror but allow deprecated warnings for plugins (like flutter_secure_storage)
+  target_compile_options(${TARGET} PRIVATE -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=deprecated-literal-operator)
   target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
 endfunction()

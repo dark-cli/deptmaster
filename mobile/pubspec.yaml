@@ -37,6 +37,9 @@ dependencies:
   # Biometric
   local_auth: ^2.1.7
   
+  # Secure storage (optional, for enhanced security)
+  flutter_secure_storage: ^9.0.0
+  
   # Icons
   flutter_svg: ^2.0.9
 
