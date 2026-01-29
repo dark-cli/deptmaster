@@ -1154,12 +1154,16 @@
                 }
                 const events = await response.json();
                 
+                console.log(`📊 Loaded ${events.length} events for chart (period: ${chartPeriod})`);
+                
                 // Sort events by timestamp
                 events.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                 
                 // Build raw event data: time and total_debt
                 // Only include transaction events (CREATED, UPDATED, DELETED) - exclude contact events
                 const rawEventData = [];
+                let transactionEventsCount = 0;
+                let eventsWithDebtCount = 0;
                 
                 for (const event of events) {
                     // Filter: only transaction events
@@ -1167,12 +1171,14 @@
                         continue; // Skip contact events
                     }
                     
+                    transactionEventsCount++;
                     const eventDataObj = event.event_data || {};
                     const totalDebt = eventDataObj.total_debt;
                     
                     if (totalDebt !== null && totalDebt !== undefined) {
                         const debt = Number(totalDebt);
                         if (!isNaN(debt) && isFinite(debt)) {
+                            eventsWithDebtCount++;
                             rawEventData.push({
                                 timestamp: new Date(event.created_at).getTime(),
                                 debt: debt,
@@ -1182,12 +1188,17 @@
                     }
                 }
                 
+                console.log(`📊 Transaction events: ${transactionEventsCount}, Events with total_debt: ${eventsWithDebtCount}, Chart data points: ${rawEventData.length}`);
+                
                 // If no data points, use current total debt
                 if (rawEventData.length === 0 && currentTotalDebt !== null) {
+                    console.log(`📊 No event data, using current total debt: ${currentTotalDebt}`);
                     rawEventData.push({
                         timestamp: new Date().getTime(),
                         debt: currentTotalDebt
                     });
+                } else if (rawEventData.length === 0) {
+                    console.warn('⚠️ No chart data available - no events with total_debt and no currentTotalDebt');
                 }
                 
                 // Determine time scale configuration based on period
