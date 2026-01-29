@@ -826,21 +826,9 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 emptyPointSettings: EmptyPointSettings(
                                   mode: EmptyPointMode.gap,
                                 ),
-                                markerSettings: MarkerSettings(
-                                  // Only show markers for points with actual transactions
-                                  // Points without transactions will have transparent markers but still contribute to line
-                                  isVisible: true,
-                                  height: 5,
-                                  width: 5,
-                                  shape: DataMarkerType.circle,
-                                  color: primaryColor,
-                                  borderColor: primaryColor,
-                                  borderWidth: 0,
-                                  // Use pointColorMapper to make markers transparent for points without transactions
-                                  pointColorMapper: (ChartData data, int index) {
-                                    // Return transparent color for points without transactions (hides the marker)
-                                    return data.hasTransactions ? primaryColor : Colors.transparent;
-                                  },
+                                markerSettings: const MarkerSettings(
+                                  // Hide all markers on main series - we'll show markers separately
+                                  isVisible: false,
                                 ),
                                 gradient: LinearGradient(
                                   colors: Theme.of(context).brightness == Brightness.dark
