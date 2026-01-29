@@ -218,22 +218,6 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     }
   }
 
-  // Helper function to convert string to SplineType
-  SplineType _getSplineType(String lineType) {
-    switch (lineType) {
-      case 'natural':
-        return SplineType.natural;
-      case 'monotonic':
-        return SplineType.monotonic;
-      case 'cardinal':
-        return SplineType.cardinal;
-      case 'clamped':
-        return SplineType.clamped;
-      default:
-        return SplineType.natural;
-    }
-  }
-
   // Helper functions to align dates to calendar boundaries
   DateTime _alignToDayStart(DateTime date) {
     return DateTime(date.year, date.month, date.day);
@@ -728,7 +712,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                     yValueMapper: (ChartData data, _) => data.debt,
                     borderColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
                     borderWidth: 1.5,
-                    splineType: _getSplineType(ref.watch(chartLineTypeProvider)), // Use setting
+                    splineType: SplineType.monotonic, // Default to straighter lines
                     animationDuration: 0,
                     enableTooltip: false, // Disable interaction on dashboard chart
                     emptyPointSettings: EmptyPointSettings(
@@ -761,7 +745,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                     yValueMapper: (ChartData data, _) => data.debt,
                     borderColor: Colors.transparent, // Transparent line (only markers visible)
                     borderWidth: 0,
-                    splineType: _getSplineType(ref.watch(chartLineTypeProvider)), // Use setting
+                    splineType: SplineType.monotonic, // Default to straighter lines
                     animationDuration: 0,
                     enableTooltip: false,
                     markerSettings: MarkerSettings(
