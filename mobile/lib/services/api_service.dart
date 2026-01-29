@@ -21,16 +21,27 @@ class ApiService {
     }
     return headers;
   }
+
+  // Helper method to handle HTTP responses and check for 401 errors
+  static Future<http.Response> _handleResponse(http.Response response) async {
+    // If we get a 401, logout immediately
+    if (response.statusCode == 401) {
+      print('⚠️ Received 401 Unauthorized - logging out');
+      await AuthService.logout();
+      throw Exception('Authentication expired. Please login again.');
+    }
+    return response;
+  }
   
   // Contacts
   static Future<List<Contact>> getContacts() async {
     try {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
-      final response = await http.get(
+      final response = await _handleResponse(await http.get(
         Uri.parse('$apiBaseUrl/contacts'),
         headers: headers,
-      );
+      ));
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
         return data.map((json) => Contact.fromJson(json)).toList();
@@ -67,7 +78,7 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
-      final response = await http.post(
+      final response = await _handleResponse(await http.post(
         Uri.parse('$apiUrl/contacts'),
         headers: headers,
         body: json.encode({
@@ -77,7 +88,7 @@ class ApiService {
           'notes': contact.notes,
           'comment': comment ?? 'Contact created via mobile app',
         }),
-      );
+      ));
       if (response.statusCode == 201 || response.statusCode == 200) {
         final data = json.decode(response.body);
         // Return a contact with the data from response
@@ -112,7 +123,7 @@ class ApiService {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
-      final response = await http.put(
+      final response = await _handleResponse(await http.put(
         Uri.parse('$apiUrl/contacts/$contactId'),
         headers: headers,
         body: json.encode({
@@ -122,7 +133,7 @@ class ApiService {
           'notes': contact.notes,
           'comment': comment ?? 'Contact updated via mobile app',
         }),
-      );
+      ));
       if (response.statusCode == 200) {
         return;
       } else {
@@ -146,13 +157,13 @@ class ApiService {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
-      final response = await http.delete(
+      final response = await _handleResponse(await http.delete(
         Uri.parse('$apiUrl/contacts/$contactId'),
         headers: headers,
         body: json.encode({
           'comment': comment ?? 'Contact deleted via mobile app',
         }),
-      );
+      ));
       if (response.statusCode == 200) {
         return;
       } else {
@@ -203,10 +214,10 @@ class ApiService {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
-      final response = await http.get(
+      final response = await _handleResponse(await http.get(
         Uri.parse('$apiUrl/transactions'),
         headers: headers,
-      );
+      ));
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
         final transactions = <Transaction>[];
@@ -250,7 +261,7 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
-      final response = await http.post(
+      final response = await _handleResponse(await http.post(
         Uri.parse('$apiUrl/transactions'),
         headers: headers,
         body: json.encode({
@@ -264,7 +275,7 @@ class ApiService {
           'due_date': transaction.dueDate?.toIso8601String().split('T')[0],
           'comment': comment ?? 'Transaction created via mobile app',
         }),
-      );
+      ));
       if (response.statusCode == 201 || response.statusCode == 200) {
         final data = json.decode(response.body);
         // Return a transaction with the data from request
@@ -325,11 +336,11 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
-      final response = await http.put(
+      final response = await _handleResponse(await http.put(
         Uri.parse('$apiUrl/transactions/$transactionId'),
         headers: headers,
         body: json.encode(body),
-      );
+      ));
 
       if (response.statusCode != 200) {
         final errorBody = response.body;
@@ -351,13 +362,13 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
-      final response = await http.delete(
+      final response = await _handleResponse(await http.delete(
         Uri.parse('$apiUrl/transactions/$transactionId'),
         headers: headers,
         body: json.encode({
           'comment': comment ?? 'Transaction deleted via mobile app',
         }),
-      );
+      ));
 
       if (response.statusCode != 200) {
         final errorBody = response.body;
@@ -379,10 +390,10 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final baseUrl = await BackendConfigService.getBaseUrl();
-      final response = await http.get(
+      final response = await _handleResponse(await http.get(
         Uri.parse('$baseUrl/api/sync/hash'),
         headers: headers,
-      );
+      ));
 
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map<String, dynamic>;
@@ -404,10 +415,10 @@ class ApiService {
           ? uri.replace(queryParameters: {'since': since})
           : uri;
 
-      final response = await http.get(
+      final response = await _handleResponse(await http.get(
         uriWithParams,
         headers: headers,
-      );
+      ));
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
@@ -425,11 +436,11 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final baseUrl = await BackendConfigService.getBaseUrl();
-      final response = await http.post(
+      final response = await _handleResponse(await http.post(
         Uri.parse('$baseUrl/api/sync/events'),
         headers: headers,
         body: json.encode(events),
-      );
+      ));
 
       if (response.statusCode == 200) {
         return json.decode(response.body) as Map<String, dynamic>;

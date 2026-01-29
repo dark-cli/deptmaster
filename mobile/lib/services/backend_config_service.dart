@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class BackendConfigService {
   static const String _keyBackendIp = 'backend_ip';
   static const String _keyBackendPort = 'backend_port';
+  static const String _keyBackendUseHttps = 'backend_use_https';
   static const String _keyBackendConfigured = 'backend_configured';
 
   // Default values (temporary defaults for development)
@@ -36,11 +37,25 @@ class BackendConfigService {
     await prefs.setBool(_keyBackendConfigured, true);
   }
 
+  // Check if HTTPS should be used
+  static Future<bool> useHttps() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyBackendUseHttps) ?? false;
+  }
+
+  // Set HTTPS usage
+  static Future<void> setUseHttps(bool useHttps) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBackendUseHttps, useHttps);
+  }
+
   // Get full base URL (without /api/admin)
   static Future<String> getBaseUrl() async {
     final ip = await getBackendIp();
     final port = await getBackendPort();
-    return 'http://$ip:$port';
+    final https = await useHttps();
+    final protocol = https ? 'https' : 'http';
+    return '$protocol://$ip:$port';
   }
 
   // Get API base URL
@@ -53,6 +68,8 @@ class BackendConfigService {
   static Future<String> getWebSocketUrl() async {
     final ip = await getBackendIp();
     final port = await getBackendPort();
-    return 'ws://$ip:$port/ws';
+    final https = await useHttps();
+    final protocol = https ? 'wss' : 'ws';
+    return '$protocol://$ip:$port/ws';
   }
 }
