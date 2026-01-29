@@ -408,11 +408,13 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
             onPressed: () {
               setState(() {
                 _showTooltips = !_showTooltips;
-                if (_showTooltips) {
-                  _tooltipBehavior.enable = true;
-                } else {
-                  _tooltipBehavior.enable = false;
-                  _tooltipBehavior.hide();
+                // Hide tooltip if disabling
+                if (!_showTooltips) {
+                  try {
+                    _tooltipBehavior.hide();
+                  } catch (e) {
+                    // Tooltip might not be initialized yet, ignore
+                  }
                 }
               });
             },
