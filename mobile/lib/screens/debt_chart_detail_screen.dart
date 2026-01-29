@@ -457,12 +457,19 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                           final finalMinY = invertY ? -(rawMaxY + yPaddingTop) : rawMinY - yPaddingBottom;
                           final finalMaxY = invertY ? -(rawMinY - yPaddingBottom) : rawMaxY + yPaddingTop;
                           
-                          // Convert to Syncfusion format - include ALL points for line connection
+                          // Convert to Syncfusion format - only include points with transactions
+                          // This prevents showing duplicate points for time intervals with no events
                           // Sort by date to ensure proper line connection
                           final sortedChartData = List<ChartDataPoint>.from(chartData)
                             ..sort((a, b) => a.x.compareTo(b.x));
                           
-                          final chartDataList = sortedChartData
+                          // Filter out points without transactions to avoid showing duplicate points
+                          // for time intervals with no events
+                          final pointsWithTransactions = sortedChartData
+                              .where((point) => point.hasTransactions)
+                              .toList();
+                          
+                          final chartDataList = pointsWithTransactions
                               .map((point) {
                                 // When inverted, multiply by -1; otherwise use original value
                                 final yValue = invertY ? -point.y : point.y;

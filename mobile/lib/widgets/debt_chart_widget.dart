@@ -508,14 +508,21 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       print('📊 Minor ticks should be visible: $minorTicksPerInterval ticks per interval');
     }
     
-    // Build chart data for Syncfusion - include ALL points for smooth line connection
+    // Build chart data for Syncfusion - only include points with transactions
+    // This prevents showing duplicate points for time intervals with no events
     // Sort by date to ensure proper line connection
     final sortedChartData = List<ChartDataPoint>.from(chartData)
       ..sort((a, b) => a.x.compareTo(b.x));
     
+    // Filter out points without transactions to avoid showing duplicate points
+    // for time intervals with no events
+    final pointsWithTransactions = sortedChartData
+        .where((point) => point.hasTransactions)
+        .toList();
+    
     // When Y-axis is inverted, transform the Y values (multiply by -1)
     // We transform the data, not the axis, so we don't use isInversed
-    final chartDataList = sortedChartData
+    final chartDataList = pointsWithTransactions
         .map((point) {
           // When inverted, multiply by -1; otherwise use original value
           final yValue = invertY ? -point.y : point.y;
