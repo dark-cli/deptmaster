@@ -80,14 +80,29 @@ flutter pub run build_runner build --delete-conflicting-outputs
 
 ```bash
 # Android
-./manage.sh run-app android
+./scripts/manage.sh run-flutter-app android
 
 # Web
-./manage.sh run-web dev
+./scripts/manage.sh run-flutter-web dev
 
 # Linux Desktop
-./manage.sh run-app linux
+./scripts/manage.sh run-flutter-app linux
 ```
+
+#### Reducing Verbose Android Logs
+
+When running on Android, you may see many verbose Android system logs (VRI, InsetsController, BLASTBufferQueue, etc.). These are normal but can clutter the console.
+
+**To filter logs:**
+1. Run Flutter normally: `./scripts/manage.sh run-flutter-app android`
+2. In a **separate terminal**, show filtered logs:
+   ```bash
+   ./scripts/manage.sh show-android-logs
+   ```
+
+This shows only Flutter/Dart logs without interfering with Flutter's interactive commands (r for reload, R for restart, etc.).
+
+**See `mobile/REDUCE_LOGS.md` for more options.**
 
 ### Project Structure
 
