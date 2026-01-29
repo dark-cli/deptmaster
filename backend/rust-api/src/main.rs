@@ -93,7 +93,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health_check))
         .route("/api/auth/login", post(handlers::login)) // Regular user login
         .route("/api/auth/admin/login", post(handlers::admin_login)) // Admin login
-        .route("/admin", get(handlers::admin_panel)); // Admin page HTML is public (login form)
+        .route("/admin", get(handlers::admin_panel)) // Admin page HTML is public (login form)
+        .route("/config.js", get(handlers::config_js)) // Admin config.js (optional, returns empty if not exists)
+        .route("/favicon.ico", get(handlers::favicon)); // Favicon
 
     // Protected API routes (require authentication)
     let protected_api_routes = Router::new()

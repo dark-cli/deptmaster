@@ -8,6 +8,7 @@ pub mod models;
 pub mod services;
 pub mod background;
 pub mod utils;
+pub mod middleware;
 use database::DatabasePool;
 use std::sync::Arc;
 use websocket::BroadcastChannel;

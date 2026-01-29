@@ -95,6 +95,7 @@ pub async fn get_snapshot_before_event(
 }
 
 /// Get the latest snapshot
+#[allow(dead_code)] // Reserved for future snapshot functionality
 pub async fn get_latest_snapshot(
     pool: &PgPool,
 ) -> Result<Option<ProjectionSnapshot>, sqlx::Error> {
@@ -152,6 +153,7 @@ pub fn should_create_snapshot(event_count: i64) -> bool {
 }
 
 /// Get event ID from events table by event_id UUID
+#[allow(dead_code)] // Reserved for future event lookup functionality
 pub async fn get_event_db_id(
     pool: &PgPool,
     event_id: Uuid,
