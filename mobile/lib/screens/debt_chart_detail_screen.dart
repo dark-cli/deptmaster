@@ -457,19 +457,13 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                           final finalMinY = invertY ? -(rawMaxY + yPaddingTop) : rawMinY - yPaddingBottom;
                           final finalMaxY = invertY ? -(rawMinY - yPaddingBottom) : rawMaxY + yPaddingTop;
                           
-                          // Convert to Syncfusion format - only include points with transactions
-                          // This prevents showing duplicate points for time intervals with no events
+                          // Convert to Syncfusion format - include ALL points for correct line progression
+                          // Points without transactions will have hidden markers but still contribute to the line
                           // Sort by date to ensure proper line connection
                           final sortedChartData = List<ChartDataPoint>.from(chartData)
                             ..sort((a, b) => a.x.compareTo(b.x));
                           
-                          // Filter out points without transactions to avoid showing duplicate points
-                          // for time intervals with no events
-                          final pointsWithTransactions = sortedChartData
-                              .where((point) => point.hasTransactions)
-                              .toList();
-                          
-                          final chartDataList = pointsWithTransactions
+                          final chartDataList = sortedChartData
                               .map((point) {
                                 // When inverted, multiply by -1; otherwise use original value
                                 final yValue = invertY ? -point.y : point.y;
@@ -833,13 +827,20 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                   mode: EmptyPointMode.gap,
                                 ),
                                 markerSettings: MarkerSettings(
-                                  isVisible: true, // Show markers with accent color
+                                  // Only show markers for points with actual transactions
+                                  // Points without transactions will have transparent markers but still contribute to line
+                                  isVisible: true,
                                   height: 5,
                                   width: 5,
                                   shape: DataMarkerType.circle,
                                   color: primaryColor,
                                   borderColor: primaryColor,
                                   borderWidth: 0,
+                                  // Use pointColorMapper to make markers transparent for points without transactions
+                                  pointColorMapper: (ChartData data, int index) {
+                                    // Return transparent color for points without transactions (hides the marker)
+                                    return data.hasTransactions ? primaryColor : Colors.transparent;
+                                  },
                                 ),
                                 gradient: LinearGradient(
                                   colors: Theme.of(context).brightness == Brightness.dark
@@ -898,6 +899,33 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                   }
                                 },
                                 ),
+                              // Separate series for markers - only points with transactions
+                              // This allows the line to connect through all points while only showing markers for actual events
+                              SplineAreaSeries<ChartData, DateTime>(
+                                dataSource: chartDataList.where((d) => d.hasTransactions).toList(),
+                                xValueMapper: (ChartData data, _) => data.date,
+                                yValueMapper: (ChartData data, _) => data.debt,
+                                borderColor: Colors.transparent, // Transparent line (only markers visible)
+                                borderWidth: 0,
+                                splineType: SplineType.natural,
+                                animationDuration: 0,
+                                enableTooltip: false,
+                                markerSettings: MarkerSettings(
+                                  // Show markers only for points with transactions
+                                  isVisible: true,
+                                  height: 5,
+                                  width: 5,
+                                  shape: DataMarkerType.circle,
+                                  color: primaryColor,
+                                  borderColor: primaryColor,
+                                  borderWidth: 0,
+                                ),
+                                gradient: const LinearGradient(
+                                  // Transparent gradient so only markers show
+                                  colors: [Colors.transparent, Colors.transparent],
+                                ),
+                                onPointTap: null,
+                              ),
                               // Overlay series for selected point (yellow highlight)
                               if (_selectedTooltipIndex != null && 
                                   _selectedTooltipIndex! >= 0 &&

@@ -508,21 +508,15 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       print('📊 Minor ticks should be visible: $minorTicksPerInterval ticks per interval');
     }
     
-    // Build chart data for Syncfusion - only include points with transactions
-    // This prevents showing duplicate points for time intervals with no events
+    // Build chart data for Syncfusion - include ALL points for correct line progression
+    // Points without transactions will have hidden markers but still contribute to the line
     // Sort by date to ensure proper line connection
     final sortedChartData = List<ChartDataPoint>.from(chartData)
       ..sort((a, b) => a.x.compareTo(b.x));
     
-    // Filter out points without transactions to avoid showing duplicate points
-    // for time intervals with no events
-    final pointsWithTransactions = sortedChartData
-        .where((point) => point.hasTransactions)
-        .toList();
-    
     // When Y-axis is inverted, transform the Y values (multiply by -1)
     // We transform the data, not the axis, so we don't use isInversed
-    final chartDataList = pointsWithTransactions
+    final chartDataList = sortedChartData
         .map((point) {
           // When inverted, multiply by -1; otherwise use original value
           final yValue = invertY ? -point.y : point.y;
@@ -661,7 +655,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                   ),
                 ),
                 series: <CartesianSeries<ChartData, DateTime>>[
-                  // Main line series (all points for continuous line)
+                  // Main line series (all points for continuous line, no markers)
                   SplineAreaSeries<ChartData, DateTime>(
                     dataSource: chartDataList,
                     xValueMapper: (ChartData data, _) => data.date,
@@ -674,14 +668,9 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                     emptyPointSettings: EmptyPointSettings(
                       mode: EmptyPointMode.gap,
                     ),
-                    markerSettings: MarkerSettings(
-                      isVisible: true, // Show markers with accent color
-                      height: 5,
-                      width: 5,
-                      shape: DataMarkerType.circle,
-                      color: primaryColor,
-                      borderColor: primaryColor,
-                      borderWidth: 0,
+                    markerSettings: const MarkerSettings(
+                      // Hide all markers on main series - we'll show markers separately
+                      isVisible: false,
                     ),
                     gradient: LinearGradient(
                       colors: Theme.of(context).brightness == Brightness.dark
@@ -697,6 +686,33 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                       end: Alignment.bottomCenter,
                     ),
                     onPointTap: null, // Explicitly disable point tap
+                  ),
+                  // Separate series for markers - only points with transactions
+                  // This allows the line to connect through all points while only showing markers for actual events
+                  SplineAreaSeries<ChartData, DateTime>(
+                    dataSource: chartDataList.where((d) => d.hasTransactions).toList(),
+                    xValueMapper: (ChartData data, _) => data.date,
+                    yValueMapper: (ChartData data, _) => data.debt,
+                    borderColor: Colors.transparent, // Transparent line (only markers visible)
+                    borderWidth: 0,
+                    splineType: SplineType.natural,
+                    animationDuration: 0,
+                    enableTooltip: false,
+                    markerSettings: MarkerSettings(
+                      // Show markers only for points with transactions
+                      isVisible: true,
+                      height: 5,
+                      width: 5,
+                      shape: DataMarkerType.circle,
+                      color: primaryColor,
+                      borderColor: primaryColor,
+                      borderWidth: 0,
+                    ),
+                    gradient: const LinearGradient(
+                      // Transparent gradient so only markers show
+                      colors: [Colors.transparent, Colors.transparent],
+                    ),
+                    onPointTap: null,
                   ),
                 ],
                 tooltipBehavior: TooltipBehavior(
