@@ -55,9 +55,11 @@ void main() async {
     // Only suppress network errors
     if (errorStr.contains('socketexception') ||
         errorStr.contains('connection refused') ||
+        errorStr.contains('connection reset') ||
         errorStr.contains('failed host lookup') ||
         errorStr.contains('network is unreachable') ||
-        errorStr.contains('no route to host')) {
+        errorStr.contains('no route to host') ||
+        errorStr.contains('httpexception')) {
       // Fire and forget - don't await async call in sync handler
       _handleNetworkError(error, details.stack);
       return; // Suppress the error
@@ -74,9 +76,11 @@ void main() async {
     // Only suppress network errors
     if (errorStr.contains('socketexception') ||
         errorStr.contains('connection refused') ||
+        errorStr.contains('connection reset') ||
         errorStr.contains('failed host lookup') ||
         errorStr.contains('network is unreachable') ||
-        errorStr.contains('no route to host')) {
+        errorStr.contains('no route to host') ||
+        errorStr.contains('httpexception')) {
       // Fire and forget - don't await async call in sync handler
       _handleNetworkError(error, stack);
       // Return true to suppress the error (prevent stack trace)
@@ -179,9 +183,34 @@ void main() async {
     if (!isBackendConfigured) {
       initialRoute = '/setup';
     } else {
+      // Check if user is logged in and validate token
       final isLoggedIn = await AuthService.isLoggedIn();
-      initialRoute = isLoggedIn ? '/' : '/login';
+      if (isLoggedIn) {
+        // Validate token on startup
+        final isValid = await AuthService.validateAuth();
+        if (!isValid) {
+          // Token was invalid, user has been logged out
+          print('⚠️ Token validation failed on startup - redirecting to login');
+          initialRoute = '/login';
+        } else {
+          initialRoute = '/';
+        }
+      } else {
+        initialRoute = '/login';
+      }
     }
+    
+    // Set up logout callback to navigate to login screen
+    AuthService.onLogout = () {
+      // Use navigatorKey to navigate from anywhere
+      final context = navigatorKey.currentContext;
+      if (context != null) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (Route<dynamic> route) => false,
+        );
+      }
+    };
     
     runApp(ProviderScope(
       child: DebtTrackerApp(initialRoute: initialRoute),

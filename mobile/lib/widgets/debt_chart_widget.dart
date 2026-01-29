@@ -63,6 +63,8 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   bool _loading = true;
   Map<String, String> _contactNameCache = {}; // Cache for contact names
   bool _isDisposed = false; // Flag to prevent operations after disposal
+  bool _isLoading = false; // Guard to prevent concurrent loads
+  int _lastEventCount = 0; // Track event count to avoid unnecessary reloads
 
   @override
   void initState() {
@@ -88,9 +90,21 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   }
   
   void _onEventsChanged() {
-    // Reload chart when events box changes
-    if (!_isDisposed && mounted) {
-      _loadChartData();
+    // Reload chart when events box changes, but only if not already loading
+    // and if the event count actually changed (to prevent infinite loops)
+    if (!_isDisposed && mounted && !_isLoading) {
+      // Check if event count changed before reloading
+      EventStoreService.getEventCount().then((count) {
+        if (!_isDisposed && mounted && count != _lastEventCount) {
+          _lastEventCount = count;
+          _loadChartData();
+        }
+      }).catchError((e) {
+        // If we can't get count, reload anyway (better safe than sorry)
+        if (!_isDisposed && mounted && !_isLoading) {
+          _loadChartData();
+        }
+      });
     }
   }
   
@@ -120,12 +134,16 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   }
 
   Future<void> _loadChartData() async {
-    if (_isDisposed || !mounted) return;
+    if (_isDisposed || !mounted || _isLoading) return;
     
+    _isLoading = true;
     try {
       final events = await EventStoreService.getAllEvents();
       
       if (_isDisposed || !mounted) return;
+      
+      // Update last event count to prevent unnecessary reloads
+      _lastEventCount = events.length;
       
       print('📊 Loaded ${events.length} total events from EventStoreService');
       
@@ -172,6 +190,8 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
           _loading = false;
         });
       }
+    } finally {
+      _isLoading = false;
     }
   }
   
@@ -373,6 +393,11 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       );
     }
     
+    // Don't build chart if disposed
+    if (_isDisposed || !mounted) {
+      return const SizedBox.shrink();
+    }
+    
     final chartData = _buildChartData(period, invertY);
     
     if (chartData.isEmpty) {
@@ -399,6 +424,11 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     }
     
     print('📊 Rendering chart with ${chartData.length} points');
+    
+    // Build chart key separately to avoid string interpolation issues
+    final chartKeySuffix = invertY ? 'inverted' : 'normal';
+    final chartKeyState = _isDisposed ? 'disposed' : 'active';
+    final chartKey = 'chart_${period}_${chartKeySuffix}_${chartKeyState}';
     
     // Calculate min/max for proper boundaries with padding
     final allYValues = chartData.map((d) => d.y).toList();
@@ -545,11 +575,11 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: _isDisposed 
+              child: (_isDisposed || !mounted)
                   ? const SizedBox.shrink()
                   : RepaintBoundary(
                       child: SfCartesianChart(
-                        key: ValueKey('chart_${period}_$invertY'),
+                        key: ValueKey(chartKey),
                         backgroundColor: Colors.transparent,
                         plotAreaBorderWidth: 0,
                         plotAreaBorderColor: Colors.transparent,
@@ -659,6 +689,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                     ),
+                    onPointTap: null, // Explicitly disable point tap
                   ),
                 ],
                 tooltipBehavior: TooltipBehavior(
