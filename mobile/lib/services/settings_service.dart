@@ -15,6 +15,7 @@ class SettingsService {
   static const String _keyDashboardDefaultPeriod = 'dashboard_default_period'; // 'day', 'week', 'month', 'year'
   static const String _keyGraphDefaultPeriod = 'graph_default_period'; // 'day', 'week', 'month', 'year'
   static const String _keyInvertYAxis = 'invert_y_axis';
+  static const String _keyChartLineType = 'chart_line_type'; // 'natural', 'monotonic', 'cardinal', 'clamped'
 
   // Dark mode
   static Future<bool> getDarkMode() async {
@@ -267,6 +268,17 @@ class SettingsService {
   static Future<void> setInvertYAxis(bool invert) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyInvertYAxis, invert);
+  }
+
+  // Chart line type (spline type)
+  static Future<String> getChartLineType() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyChartLineType) ?? 'natural'; // Default to natural (smooth)
+  }
+
+  static Future<void> setChartLineType(String lineType) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyChartLineType, lineType);
   }
 
   static Future<String> _getBaseUrl() async {

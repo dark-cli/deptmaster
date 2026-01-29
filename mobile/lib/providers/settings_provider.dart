@@ -159,3 +159,34 @@ class DashboardDefaultPeriodNotifier extends StateNotifier<String> {
     await _loadDashboardDefaultPeriod();
   }
 }
+
+// Provider for chart line type
+final chartLineTypeProvider = StateNotifierProvider<ChartLineTypeNotifier, String>((ref) {
+  return ChartLineTypeNotifier();
+});
+
+class ChartLineTypeNotifier extends StateNotifier<String> {
+  ChartLineTypeNotifier() : super('natural') {
+    _loadChartLineType();
+  }
+
+  Future<void> _loadChartLineType() async {
+    try {
+      final lineType = await SettingsService.getChartLineType();
+      if (state != lineType) {
+        state = lineType;
+      }
+    } catch (e) {
+      print('Error loading chart line type: $e');
+    }
+  }
+
+  Future<void> setChartLineType(String lineType) async {
+    await SettingsService.setChartLineType(lineType);
+    state = lineType;
+  }
+
+  Future<void> refresh() async {
+    await _loadChartLineType();
+  }
+}
