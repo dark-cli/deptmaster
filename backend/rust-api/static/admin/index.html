@@ -1,9 +1,10 @@
-<n!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Debt Tracker - Admin Panel</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
@@ -642,10 +643,11 @@
         </div>
 
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('events')">PostgreSQL Events</button>
+            <button class="tab active" onclick="switchTab('events')">Events Log</button>
             <button class="tab" onclick="switchTab('contacts')">Contacts</button>
             <button class="tab" onclick="switchTab('transactions')">Transactions</button>
             <button class="tab" onclick="switchTab('projections')">Projections</button>
+            <button class="tab" onclick="switchTab('users')">User Management</button>
         </div>
 
         <div id="events" class="tab-content active">
@@ -726,7 +728,7 @@
                 <table id="eventsTable" style="display: none;">
                     <thead>
                         <tr>
-                            <th>When</th>
+                            <th>Date</th>
                             <th>Event Type</th>
                             <th>Contact Name</th>
                             <th>Amount</th>
@@ -764,17 +766,75 @@
 
         <div id="transactions" class="tab-content">
             <div class="table-container">
+                <!-- Search and Filter Controls -->
+                <div class="filter-section" style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">🔍 Search</label>
+                            <input type="text" id="transactionSearch" placeholder="Search in contact names, descriptions..." 
+                                   class="form-input"
+                                   style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;"
+                                   onkeyup="debounceTransactionSearch()">
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Type</label>
+                            <select id="transactionTypeFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
+                                <option value="">All Types</option>
+                                <option value="money">Money</option>
+                                <option value="item">Item</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Direction</label>
+                            <select id="transactionDirectionFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
+                                <option value="">All Directions</option>
+                                <option value="lent">Lent</option>
+                                <option value="owed">Owed</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Date From</label>
+                            <input type="date" id="transactionDateFromFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
+                        </div>
+                        <div>
+                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Date To</label>
+                            <input type="date" id="transactionDateToFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button class="refresh-btn" onclick="applyTransactionFilters()" style="margin: 0;">🔍 Apply Filters</button>
+                        <button onclick="clearTransactionFilters()" class="btn-secondary" style="padding: 0.75rem 1.5rem; background: #625B71; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">Clear Filters</button>
+                        <button class="refresh-btn" onclick="loadTransactions()" style="margin: 0; background: #4caf50;">🔄 Refresh</button>
+                        <span id="transactionsCount" class="events-count" style="margin-left: auto; color: #79747E;"></span>
+                    </div>
+                </div>
+                
+                <!-- Pagination -->
+                <div class="pagination-section" style="padding: 1rem; background: #E7E0EC; border-bottom: 1px solid #E7E0EC; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <label class="form-label" style="margin-right: 0.5rem; color: #1C1B1F;">Page Size:</label>
+                        <select id="transactionPageSize" class="form-input" onchange="applyTransactionFilters()" style="padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                        </select>
+                    </div>
+                    <div>
+                        <button onclick="previousTransactionPage()" id="transactionPrevBtn" class="btn-pagination" style="padding: 0.5rem 1rem; margin-right: 0.5rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">← Previous</button>
+                        <span id="transactionPageInfo" class="page-info" style="margin: 0 1rem; color: #1C1B1F;">Page 1</span>
+                        <button onclick="nextTransactionPage()" id="transactionNextBtn" class="btn-pagination" style="padding: 0.5rem 1rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">Next →</button>
+                    </div>
+                </div>
+                
                 <div class="loading" id="transactionsLoading">Loading transactions...</div>
                 <table id="transactionsTable" style="display: none;">
                     <thead>
                         <tr>
-                            <th>ID</th>
+                            <th>Date</th>
                             <th>Contact</th>
-                            <th>Type</th>
                             <th>Amount</th>
                             <th>Direction</th>
-                            <th>Date</th>
-                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody id="transactionsBody"></tbody>
@@ -791,6 +851,25 @@
                 </div>
             </div>
         </div>
+
+        <div id="users" class="tab-content">
+            <div class="table-container">
+                <div style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC; margin-bottom: 1rem;">
+                    <button onclick="showCreateUserModal()" class="refresh-btn" style="margin: 0; background: #4caf50;">+ Create User</button>
+                </div>
+                <div class="loading" id="usersLoading">Loading users...</div>
+                <table id="usersTable" style="display: none; width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Created At</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersBody"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <!-- Event Detail Modal -->
@@ -812,6 +891,27 @@
                 <button class="event-modal-close" onclick="closeEventModal()">&times;</button>
             </div>
             <div id="eventModalBody"></div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="event-modal" style="display: flex;">
+        <div class="event-modal-content" onclick="event.stopPropagation()" style="max-width: 400px;">
+            <div class="event-modal-header">
+                <h2>Admin Login</h2>
+            </div>
+            <div style="padding: 1rem;">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Email:</label>
+                    <input type="email" id="loginEmail" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" placeholder="admin@debitum.local">
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Password:</label>
+                    <input type="password" id="loginPassword" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" placeholder="Enter password">
+                </div>
+                <button onclick="performLogin()" class="refresh-btn" style="width: 100%; margin: 0;">Login</button>
+                <div id="loginError" style="color: #f44336; margin-top: 0.5rem; display: none;"></div>
+            </div>
         </div>
     </div>
 
@@ -821,6 +921,148 @@
         // Use config from config.js if available, otherwise use defaults
         const API_URL = window.ADMIN_CONFIG?.API_URL || window.location.origin + '/api';
         const WS_URL = window.ADMIN_CONFIG?.WS_URL || ((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws');
+        
+        // Authentication
+        // Logout function to clear all auth data
+        function logout() {
+            console.log('🔒 Logging out user...');
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user_id');
+            localStorage.removeItem('username');
+            document.getElementById('loginModal').style.display = 'flex';
+            // Clear any displayed data
+            document.getElementById('eventsBody').innerHTML = '';
+            document.getElementById('contactsBody').innerHTML = '';
+            document.getElementById('transactionsBody').innerHTML = '';
+            document.getElementById('eventsCount').textContent = '';
+            document.getElementById('contactsCount').textContent = '';
+            document.getElementById('transactionsCount').textContent = '';
+            // Stop any ongoing updates
+            if (wsConnection) {
+                wsConnection.close();
+                wsConnection = null;
+            }
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }
+
+        function checkAuth() {
+            const token = localStorage.getItem('auth_token');
+            if (!token) {
+                logout();
+                return false;
+            }
+            document.getElementById('loginModal').style.display = 'none';
+            return true;
+        }
+
+        // Validate token by making a test API call
+        async function validateAuth() {
+            const token = localStorage.getItem('auth_token');
+            if (!token) {
+                logout();
+                return false;
+            }
+
+            try {
+                // Try to fetch a lightweight endpoint to validate token
+                const response = await authenticatedFetch(`${API_URL}/admin/events/latest`);
+                if (response.status === 401) {
+                    console.log('⚠️ Token validation failed - logging out');
+                    logout();
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                // If it's an auth error, logout
+                if (error.message.includes('Authentication')) {
+                    console.log('⚠️ Authentication error - logging out');
+                    logout();
+                    return false;
+                }
+                // Other errors might be network issues, but we'll still try to proceed
+                console.warn('⚠️ Token validation check failed:', error);
+                return true; // Assume token is valid if it's not an auth error
+            }
+        }
+
+        async function performLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const errorDiv = document.getElementById('loginError');
+
+            if (!email || !password) {
+                errorDiv.textContent = 'Please enter email and password';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/auth/admin/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username: email, password })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Login failed');
+                }
+
+                const data = await response.json();
+                localStorage.setItem('auth_token', data.token);
+                localStorage.setItem('user_id', data.admin_id || data.user_id); // Support both field names
+                localStorage.setItem('username', data.username);
+                
+                document.getElementById('loginModal').style.display = 'none';
+                // Start WebSocket connection after successful login
+                startSmartUpdates();
+                loadData();
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        // Add Enter key support for login
+        document.addEventListener('DOMContentLoaded', () => {
+            const loginPassword = document.getElementById('loginPassword');
+            if (loginPassword) {
+                loginPassword.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        performLogin();
+                    }
+                });
+            }
+        });
+
+        // Helper function to make authenticated API requests
+        async function authenticatedFetch(url, options = {}) {
+            const token = localStorage.getItem('auth_token');
+            if (!token) {
+                // No token, logout and show login modal
+                logout();
+                throw new Error('Authentication required');
+            }
+            const headers = {
+                ...options.headers,
+                'Authorization': `Bearer ${token}`
+            };
+            const response = await fetch(url, { ...options, headers });
+            
+            // If we get a 401, logout (clear token and show login modal)
+            if (response.status === 401) {
+                console.log('⚠️ Received 401 Unauthorized - logging out');
+                logout();
+                throw new Error('Authentication expired. Please login again.');
+            }
+            
+            return response;
+        }
         
         // Smart update state
         let lastEventId = null;
@@ -881,7 +1123,7 @@
                 params.append('date_from', periodStart.toISOString());
                 params.append('limit', '10000'); // Get all events in range
                 
-                const response = await fetch(`${API_URL}/admin/events?${params.toString()}`);
+                const response = await authenticatedFetch(`${API_URL}/admin/events?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
                 }
@@ -1117,8 +1359,17 @@
                                 usePointStyle: false,
                                 callbacks: {
                                     title: function(context) {
+                                        // Safely access context array - check if it exists and has elements
+                                        if (!context || !Array.isArray(context) || context.length === 0) {
+                                            return null; // Hide tooltip if no context data
+                                        }
+                                        
                                         const point = context[0];
-                                        const hasTransactions = point.raw?.hasTransactions || false;
+                                        if (!point || !point.raw) {
+                                            return null; // Hide tooltip if point data is invalid
+                                        }
+                                        
+                                        const hasTransactions = point.raw.hasTransactions || false;
                                         
                                         // Only show tooltip if there are transactions in this interval
                                         if (!hasTransactions) {
@@ -1165,9 +1416,14 @@
                                         return title;
                                     },
                                     label: function(context) {
+                                        // Safely access context - check if it exists and has raw data
+                                        if (!context || !context.raw) {
+                                            return null; // Hide tooltip if context data is invalid
+                                        }
+                                        
                                         const point = context;
-                                        const events = point.raw?.events || [];
-                                        const hasTransactions = point.raw?.hasTransactions || false;
+                                        const events = point.raw.events || [];
+                                        const hasTransactions = point.raw.hasTransactions || false;
                                         
                                         // Only show tooltip if there are transactions in this interval
                                         if (!hasTransactions || events.length === 0) {
@@ -1321,30 +1577,53 @@
         }
 
         async function loadData() {
-            // Load stats first to populate currentTotalDebt
-            await loadStats();
-            // Then load events (which will use currentTotalDebt as fallback)
-            await Promise.all([
-                loadEvents(),
-                loadContacts(),
-                loadTransactions(),
-                loadProjections(),
-                loadDebtChart()
-            ]);
+            // Validate authentication first (makes a test API call)
+            const isValid = await validateAuth();
+            if (!isValid) {
+                console.log('⚠️ Authentication invalid - user logged out, showing login modal');
+                return;
+            }
+            
+            // Double-check token exists
+            if (!checkAuth()) {
+                console.log('⚠️ No authentication token - showing login modal');
+                return;
+            }
+            
+            try {
+                console.log('🔄 Loading admin data...');
+                // Load stats first to populate currentTotalDebt
+                await loadStats();
+                // Then load events (which will use currentTotalDebt as fallback)
+                await Promise.all([
+                    loadEvents(),
+                    loadContacts(),
+                    loadTransactions(),
+                    loadProjections(),
+                    loadDebtChart()
+                ]);
+                console.log('✅ Admin data loaded successfully');
+            } catch (error) {
+                console.error('❌ Error loading admin data:', error);
+                // Don't show alert for authentication errors - logout() already handled it
+                if (!error.message.includes('Authentication') && !error.message.includes('expired')) {
+                    alert('Error loading data: ' + error.message + '\n\nPlease check the browser console for details.');
+                }
+            }
         }
 
         async function loadStats() {
             try {
                 const [contacts, transactions, totalDebtResponse] = await Promise.all([
-                    fetch(`${API_URL}/admin/contacts`).then(r => {
+                    authenticatedFetch(`${API_URL}/admin/contacts`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
                     }),
-                    fetch(`${API_URL}/admin/transactions`).then(r => {
+                    authenticatedFetch(`${API_URL}/admin/transactions`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
                     }),
-                    fetch(`${API_URL}/admin/total-debt`).then(r => {
+                    authenticatedFetch(`${API_URL}/admin/total-debt`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
                     })
@@ -1410,6 +1689,47 @@
             loadEvents();
         }
 
+        // Transactions log state
+        let transactionCurrentPage = 0;
+        let transactionPageSize = 100;
+        let transactionSearchTimeout = null;
+        let allTransactions = []; // Store all transactions for client-side filtering
+
+        function debounceTransactionSearch() {
+            clearTimeout(transactionSearchTimeout);
+            transactionSearchTimeout = setTimeout(() => {
+                transactionCurrentPage = 0; // Reset to first page on new search
+                applyTransactionFilters();
+            }, 500);
+        }
+
+        function clearTransactionFilters() {
+            document.getElementById('transactionSearch').value = '';
+            document.getElementById('transactionTypeFilter').value = '';
+            document.getElementById('transactionDirectionFilter').value = '';
+            document.getElementById('transactionDateFromFilter').value = '';
+            document.getElementById('transactionDateToFilter').value = '';
+            transactionCurrentPage = 0;
+            applyTransactionFilters();
+        }
+
+        function previousTransactionPage() {
+            if (transactionCurrentPage > 0) {
+                transactionCurrentPage--;
+                applyTransactionFilters();
+            }
+        }
+
+        function nextTransactionPage() {
+            transactionCurrentPage++;
+            applyTransactionFilters();
+        }
+
+        function applyTransactionFilters() {
+            transactionPageSize = parseInt(document.getElementById('transactionPageSize').value) || 100;
+            loadTransactions();
+        }
+
         async function loadEvents(silent = false) {
             if (isUpdating && !silent) return; // Prevent concurrent updates unless silent
             isUpdating = true;
@@ -1458,7 +1778,7 @@
                     table.style.display = 'none';
                 }
                 
-                const response = await fetch(`${API_URL}/admin/events?${params.toString()}`);
+                const response = await authenticatedFetch(`${API_URL}/admin/events?${params.toString()}`);
                 if (!response.ok) {
                     const text = await response.text();
                     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -1535,7 +1855,7 @@
                 // Fetch missing contact data from contacts endpoint
                 if (contactIds.size > 0) {
                     try {
-                        const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
+                        const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
                         if (contactsResponse.ok) {
                             const contacts = await contactsResponse.json();
                             contacts.forEach(contact => {
@@ -1566,7 +1886,7 @@
                     try {
                         // Fetch CREATED events for contacts
                         if (deletedContactIds.size > 0) {
-                            const createdContactEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=contact`);
+                            const createdContactEventsResponse = await authenticatedFetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=contact`);
                             if (createdContactEventsResponse.ok) {
                                 const createdContactEvents = await createdContactEventsResponse.json();
                                 createdContactEvents.forEach(evt => {
@@ -1581,7 +1901,7 @@
                         
                         // Fetch CREATED events for transactions to get their contact_ids
                         if (deletedTransactionIds.size > 0) {
-                            const createdTransactionEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=transaction`);
+                            const createdTransactionEventsResponse = await authenticatedFetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=transaction`);
                             if (createdTransactionEventsResponse.ok) {
                                 const createdTransactionEvents = await createdTransactionEventsResponse.json();
                                 createdTransactionEvents.forEach(evt => {
@@ -1593,7 +1913,7 @@
                                 });
                                 // Re-fetch contacts for these transaction contact IDs
                                 if (contactIds.size > 0) {
-                                    const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
+                                    const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
                                     if (contactsResponse.ok) {
                                         const contacts = await contactsResponse.json();
                             contacts.forEach(contact => {
@@ -1614,7 +1934,7 @@
                 if (undoneEventIds.size > 0) {
                     try {
                         // Fetch all events to find the undone ones (they might be in a different page)
-                        const allEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&offset=0`);
+                        const allEventsResponse = await authenticatedFetch(`${API_URL}/admin/events?limit=10000&offset=0`);
                         if (allEventsResponse.ok) {
                             const allEvents = await allEventsResponse.json();
                             const newContactIds = new Set();
@@ -1650,7 +1970,7 @@
                             
                             // Re-fetch contacts if we found new ones
                             if (contactIds.size > 0) {
-                                const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
+                                const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
                                 if (contactsResponse.ok) {
                                     const contacts = await contactsResponse.json();
                             contacts.forEach(contact => {
@@ -1663,7 +1983,7 @@
                             
                             // For undone contacts without names, fetch from CREATED events
                             if (deletedContactIds.size > 0) {
-                                const createdEventsResponse = await fetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=contact`);
+                                const createdEventsResponse = await authenticatedFetch(`${API_URL}/admin/events?limit=10000&event_type=CREATED&aggregate_type=contact`);
                                 if (createdEventsResponse.ok) {
                                     const createdEvents = await createdEventsResponse.json();
                                     createdEvents.forEach(evt => {
@@ -1736,7 +2056,7 @@
             if (contactCache[contactId]) return contactCache[contactId];
             
             try {
-                const response = await fetch(`${API_URL}/admin/contacts`);
+                const response = await authenticatedFetch(`${API_URL}/admin/contacts`);
                 if (response.ok) {
                     const contacts = await response.json();
                     const contact = contacts.find(c => c.id === contactId);
@@ -2413,17 +2733,47 @@
         
         // Smart update system - only updates when there are changes
         function startSmartUpdates() {
+            // Check auth first
+            if (!checkAuth()) {
+                console.log('⚠️ Cannot start smart updates - not authenticated');
+                return;
+            }
+            
             // First, get the latest event ID
-            fetch(`${API_URL}/admin/events/latest`)
+            authenticatedFetch(`${API_URL}/admin/events/latest`)
                 .then(r => r.json())
                 .then(data => {
                     lastEventId = data.latest_event_id;
                 })
-                .catch(err => console.error('Error getting latest event ID:', err));
+                .catch(err => {
+                    // If it's an auth error, logout has already been called
+                    if (err.message && err.message.includes('Authentication')) {
+                        console.log('⚠️ Authentication failed during smart updates - user logged out');
+                        return;
+                    }
+                    console.error('Error getting latest event ID:', err);
+                });
             
             // Try WebSocket first (real-time)
             try {
-                wsConnection = new WebSocket(WS_URL);
+                // Get auth token and include it in WebSocket URL
+                const token = localStorage.getItem('auth_token');
+                if (!token) {
+                    console.log('⚠️ No auth token available for WebSocket connection - skipping');
+                    return;
+                }
+                
+                // Close existing connection if any
+                if (wsConnection && wsConnection.readyState !== WebSocket.CLOSED) {
+                    console.log('🔌 Closing existing WebSocket connection...');
+                    wsConnection.close();
+                    wsConnection = null;
+                }
+                
+                // Include token as query parameter for WebSocket authentication
+                const wsUrlWithAuth = `${WS_URL}?token=${encodeURIComponent(token)}`;
+                console.log('🔌 Connecting WebSocket to:', wsUrlWithAuth.replace(/token=[^&]+/, 'token=***'));
+                wsConnection = new WebSocket(wsUrlWithAuth);
                 
                 wsConnection.onopen = () => {
                     console.log('✅ WebSocket connected for real-time updates');
@@ -2432,28 +2782,67 @@
                 wsConnection.onmessage = (event) => {
                     try {
                         const message = JSON.parse(event.data);
+                        console.log('📨 WebSocket message received:', message.type || 'unknown');
                         // When we receive ANY WebSocket event, immediately check for updates
                         // This ensures hot updates without delay
                         checkForUpdates();
                     } catch (e) {
-                        console.error('Error parsing WebSocket message:', e);
+                        console.error('Error parsing WebSocket message:', e, 'Raw data:', event.data);
                     }
                 };
                 
                 wsConnection.onerror = (error) => {
-                    console.log('WebSocket error, will reconnect:', error);
-                    // Auto-reconnect after short delay (like Firebase)
-                    setTimeout(() => {
-                        startSmartUpdates();
-                    }, 1000);
+                    console.log('WebSocket error:', error);
+                    const token = localStorage.getItem('auth_token');
+                    if (!token) {
+                        console.log('⚠️ No auth token - not reconnecting');
+                        return;
+                    }
+                    // Check if it's an auth error (401)
+                    if (wsConnection.readyState === WebSocket.CLOSED) {
+                        console.log('⚠️ WebSocket closed due to auth error - checking token validity...');
+                        // Validate token and reconnect if valid
+                        validateAuth().then(isValid => {
+                            if (isValid) {
+                                console.log('✅ Token is valid, reconnecting WebSocket...');
+                                setTimeout(() => startSmartUpdates(), 2000);
+                            } else {
+                                console.log('⚠️ Token invalid - not reconnecting');
+                            }
+                        });
+                    } else {
+                        // Other error - try to reconnect
+                        setTimeout(() => {
+                            if (checkAuth()) {
+                                startSmartUpdates();
+                            }
+                        }, 2000);
+                    }
                 };
                 
-                wsConnection.onclose = () => {
-                    console.log('WebSocket closed, will reconnect');
-                    // Auto-reconnect after short delay (like Firebase)
+                wsConnection.onclose = (event) => {
+                    console.log('WebSocket closed', event.code, event.reason);
+                    // Don't reconnect if it was closed due to auth error (401)
+                    if (event.code === 1008 || event.code === 1002) {
+                        console.log('⚠️ WebSocket closed due to protocol/auth error - checking token...');
+                        validateAuth().then(isValid => {
+                            if (isValid) {
+                                console.log('✅ Token is valid, reconnecting WebSocket...');
+                                setTimeout(() => startSmartUpdates(), 2000);
+                            } else {
+                                console.log('⚠️ Token invalid - not reconnecting');
+                            }
+                        });
+                        return;
+                    }
+                    // Normal close - reconnect if authenticated
                     setTimeout(() => {
-                        startSmartUpdates();
-                    }, 1000);
+                        if (checkAuth()) {
+                            startSmartUpdates();
+                        } else {
+                            console.log('⚠️ Not reconnecting WebSocket - user logged out');
+                        }
+                    }, 2000);
                 };
             } catch (e) {
                 console.log('WebSocket not available, using polling:', e);
@@ -2471,8 +2860,14 @@
         
         // Check for updates (used by WebSocket and polling)
         async function checkForUpdates() {
+            // Check auth first
+            if (!checkAuth()) {
+                console.log('⚠️ Cannot check for updates - not authenticated');
+                return;
+            }
+            
             try {
-                const response = await fetch(`${API_URL}/admin/events/latest`);
+                const response = await authenticatedFetch(`${API_URL}/admin/events/latest`);
                 const data = await response.json();
                 
                 if (data.latest_event_id !== null && data.latest_event_id !== lastEventId) {
@@ -2489,6 +2884,11 @@
                     ]);
                 }
             } catch (err) {
+                // If it's an auth error, logout has already been called
+                if (err.message && err.message.includes('Authentication')) {
+                    console.log('⚠️ Authentication failed during update check - user logged out');
+                    return;
+                }
                 console.error('Error checking for updates:', err);
             }
         }
@@ -2499,7 +2899,7 @@
             const body = document.getElementById('contactsBody');
 
             try {
-                const response = await fetch(`${API_URL}/admin/contacts`);
+                const response = await authenticatedFetch(`${API_URL}/admin/contacts`);
                 if (!response.ok) {
                     const text = await response.text();
                     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -2537,38 +2937,128 @@
             const loading = document.getElementById('transactionsLoading');
             const table = document.getElementById('transactionsTable');
             const body = document.getElementById('transactionsBody');
+            const countSpan = document.getElementById('transactionsCount');
+            const pageInfo = document.getElementById('transactionPageInfo');
+            const prevBtn = document.getElementById('transactionPrevBtn');
+            const nextBtn = document.getElementById('transactionNextBtn');
 
             try {
-                const response = await fetch(`${API_URL}/admin/transactions`);
-                if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${text}`);
+                // Load all transactions if not already loaded
+                if (allTransactions.length === 0) {
+                    const response = await authenticatedFetch(`${API_URL}/admin/transactions`);
+                    if (!response.ok) {
+                        const text = await response.text();
+                        throw new Error(`HTTP ${response.status}: ${text}`);
+                    }
+                    allTransactions = await response.json();
                 }
-                const transactions = await response.json();
-                const contactsResponse = await fetch(`${API_URL}/admin/contacts`);
+
+                // Load contacts for name and username mapping
+                const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
                 let contacts = [];
                 if (contactsResponse.ok) {
                     contacts = await contactsResponse.json();
                 }
-                const contactMap = new Map(contacts.map(c => [c.id, c.name]));
+                const contactMap = new Map(contacts.map(c => [c.id, { name: c.name, username: c.username || null }]));
+
+                // Apply filters
+                let filteredTransactions = [...allTransactions];
+                
+                const search = document.getElementById('transactionSearch').value.trim().toLowerCase();
+                if (search) {
+                    filteredTransactions = filteredTransactions.filter(t => {
+                        const contactData = contactMap.get(t.contact_id) || { name: 'Unknown', username: null };
+                        const contactName = (contactData.name || 'Unknown').toLowerCase();
+                        const contactUsername = (contactData.username || '').toLowerCase();
+                        const description = (t.description || '').toLowerCase();
+                        return contactName.includes(search) || contactUsername.includes(search) || description.includes(search);
+                    });
+                }
+                
+                const typeFilter = document.getElementById('transactionTypeFilter').value;
+                if (typeFilter) {
+                    filteredTransactions = filteredTransactions.filter(t => t.type === typeFilter);
+                }
+                
+                const directionFilter = document.getElementById('transactionDirectionFilter').value;
+                if (directionFilter) {
+                    filteredTransactions = filteredTransactions.filter(t => t.direction === directionFilter);
+                }
+                
+                const dateFrom = document.getElementById('transactionDateFromFilter').value;
+                if (dateFrom) {
+                    const fromDate = new Date(dateFrom + 'T00:00:00');
+                    filteredTransactions = filteredTransactions.filter(t => {
+                        const tDate = new Date(t.transaction_date);
+                        return tDate >= fromDate;
+                    });
+                }
+                
+                const dateTo = document.getElementById('transactionDateToFilter').value;
+                if (dateTo) {
+                    const toDate = new Date(dateTo + 'T23:59:59');
+                    filteredTransactions = filteredTransactions.filter(t => {
+                        const tDate = new Date(t.transaction_date);
+                        return tDate <= toDate;
+                    });
+                }
+
+                // Apply pagination
+                const startIndex = transactionCurrentPage * transactionPageSize;
+                const endIndex = startIndex + transactionPageSize;
+                const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
 
                 loading.style.display = 'none';
                 table.style.display = 'table';
-                body.innerHTML = transactions.map(t => {
+                
+                // Update count
+                countSpan.textContent = `Showing ${paginatedTransactions.length} of ${filteredTransactions.length} transaction(s)`;
+                
+                // Update pagination
+                pageInfo.textContent = `Page ${transactionCurrentPage + 1}`;
+                prevBtn.disabled = transactionCurrentPage === 0;
+                prevBtn.style.opacity = transactionCurrentPage === 0 ? '0.5' : '1';
+                prevBtn.style.cursor = transactionCurrentPage === 0 ? 'not-allowed' : 'pointer';
+                nextBtn.disabled = endIndex >= filteredTransactions.length;
+                nextBtn.style.opacity = endIndex >= filteredTransactions.length ? '0.5' : '1';
+                nextBtn.style.cursor = endIndex >= filteredTransactions.length ? 'not-allowed' : 'pointer';
+                
+                body.innerHTML = paginatedTransactions.map(t => {
                     // Amount is stored as whole units (IQD), format with commas
                     const formatAmount = (amt) => {
                         return amt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
                     };
                     const amount = t.type === 'money' ? `${formatAmount(t.amount)} IQD` : `${t.amount} item(s)`;
+                    
+                    // Get contact data
+                    const contactData = contactMap.get(t.contact_id) || { name: 'Unknown', username: null };
+                    const contactName = contactData.name || 'Unknown';
+                    const contactUsername = contactData.username;
+                    
+                    // Format contact with username tag (same format as events list)
+                    const contactDisplay = contactUsername 
+                        ? `<span class="username-tag">@${escapeHtml(contactUsername)}</span>${escapeHtml(contactName)}`
+                        : escapeHtml(contactName);
+                    
+                    // Format direction with badge (same format as Event Type in events list)
+                    let directionBadgeClass = 'badge';
+                    if (t.direction === 'lent') {
+                        directionBadgeClass += ' success';
+                    } else {
+                        directionBadgeClass += ' error';
+                    }
+                    const directionDisplay = t.direction === 'lent' ? 'Lent' : 'Owed';
+                    
                     return `
                         <tr>
-                            <td>${t.id.substring(0, 8)}...</td>
-                            <td>${contactMap.get(t.contact_id) || 'Unknown'}</td>
-                            <td>${t.type}</td>
-                            <td>${amount}</td>
-                            <td><span class="badge ${t.direction === 'owed' ? 'error' : 'success'}">${t.direction}</span></td>
-                            <td>${new Date(t.transaction_date).toLocaleDateString()}</td>
-                            <td><span class="badge success">Active</span></td>
+                            <td style="white-space: nowrap; font-size: 0.75rem; padding: 0.4rem 0.5rem;">
+                                ${formatDateTime(t.transaction_date)}
+                            </td>
+                            <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">${contactDisplay}</td>
+                            <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">${amount}</td>
+                            <td style="padding: 0.4rem 0.5rem;">
+                                <span class="${directionBadgeClass}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.7rem; font-weight: 500;">${directionDisplay}</span>
+                            </td>
                         </tr>
                     `;
                 }).join('');
@@ -2584,7 +3074,7 @@
             const info = document.getElementById('projectionsInfo');
 
             try {
-                const response = await fetch(`${API_URL}/admin/projections/status`);
+                const response = await authenticatedFetch(`${API_URL}/admin/projections/status`);
                 if (!response.ok) {
                     const text = await response.text();
                     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -2630,6 +3120,187 @@
                 }
             });
             document.getElementById(tabName).classList.add('active');
+            
+            // Load data when switching to specific tabs
+            if (tabName === 'users') {
+                loadUsers();
+            } else if (tabName === 'transactions') {
+                // Reset transactions cache when switching to tab to ensure fresh data
+                allTransactions = [];
+                loadTransactions();
+            }
+        }
+
+        // User Management Functions
+        async function loadUsers() {
+            const loading = document.getElementById('usersLoading');
+            const table = document.getElementById('usersTable');
+            const body = document.getElementById('usersBody');
+
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/users`);
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Authentication required. Please login.');
+                    }
+                    const text = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                }
+                const users = await response.json();
+
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                body.innerHTML = users.map(user => `
+                    <tr>
+                        <td>${user.email}</td>
+                        <td>${formatDateTime(user.created_at)}</td>
+                        <td>
+                            <button onclick="showChangePasswordModal('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer;">Change Password</button>
+                            <button onclick="showLoginLogsModal('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">Login Logs</button>
+                            <button onclick="backupUserData('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer;">Backup</button>
+                            <button onclick="deleteUser('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                loading.innerHTML = `<div class="error">Error loading users: ${error.message}</div>`;
+                console.error('Error:', error);
+            }
+        }
+
+        function showCreateUserModal() {
+            const email = prompt('Enter email for new user:');
+            if (!email) return;
+            
+            const password = prompt('Enter password (min 8 characters):');
+            if (!password || password.length < 8) {
+                alert('Password must be at least 8 characters');
+                return;
+            }
+
+            createUser(email, password);
+        }
+
+        async function createUser(email, password) {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/users`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to create user');
+                }
+
+                alert('User created successfully!');
+                loadUsers();
+            } catch (error) {
+                alert(`Error creating user: ${error.message}`);
+            }
+        }
+
+        async function deleteUser(userId, email) {
+            if (!confirm(`Are you sure you want to delete user ${email}? This action cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/users/${userId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to delete user');
+                }
+
+                alert('User deleted successfully!');
+                loadUsers();
+            } catch (error) {
+                alert(`Error deleting user: ${error.message}`);
+            }
+        }
+
+        function showChangePasswordModal(userId, email) {
+            const newPassword = prompt(`Enter new password for ${email} (min 8 characters):`);
+            if (!newPassword || newPassword.length < 8) {
+                alert('Password must be at least 8 characters');
+                return;
+            }
+
+            changeUserPassword(userId, newPassword);
+        }
+
+        async function changeUserPassword(userId, newPassword) {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/users/${userId}/password`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ new_password: newPassword })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to change password');
+                }
+
+                alert('Password changed successfully!');
+            } catch (error) {
+                alert(`Error changing password: ${error.message}`);
+            }
+        }
+
+        async function showLoginLogsModal(userId, email) {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/users/${userId}/login-logs`);
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to load login logs');
+                }
+
+                const logs = await response.json();
+                const logsText = logs.map(log => 
+                    `${formatDateTime(log.login_at)} - ${log.success ? '✅ Success' : '❌ Failed'}${log.failure_reason ? ' (' + log.failure_reason + ')' : ''}${log.ip_address ? ' - IP: ' + log.ip_address : ''}`
+                ).join('\n');
+
+                alert(`Login Logs for ${email}:\n\n${logsText || 'No login logs found'}`);
+            } catch (error) {
+                alert(`Error loading login logs: ${error.message}`);
+            }
+        }
+
+        async function backupUserData(userId, email) {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/users/${userId}/backup`);
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to backup user data');
+                }
+
+                const backup = await response.json();
+                const backupStr = JSON.stringify(backup, null, 2);
+                const blob = new Blob([backupStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `user_backup_${email}_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                alert(`Backup downloaded for ${email}!`);
+            } catch (error) {
+                alert(`Error backing up user data: ${error.message}`);
+            }
         }
 
         // Dark mode toggle - default to dark mode
@@ -2660,11 +3331,26 @@
         // Initialize chart period button state
         initializeChartPeriod();
         
-        // Load data on page load
-        loadData();
-        
-        // Start smart updates (WebSocket-only, no timers - like Firebase)
-        startSmartUpdates();
+        // Validate authentication and load data on page load
+        (async () => {
+            // First check if token exists
+            if (!checkAuth()) {
+                console.log('⚠️ No authentication token found');
+                return;
+            }
+            
+            // Validate token by making a test API call
+            const isValid = await validateAuth();
+            if (isValid) {
+                // Token is valid, load data and start updates
+                loadData();
+                // Start smart updates (WebSocket-only, no timers - like Firebase)
+                startSmartUpdates();
+            } else {
+                // Token was invalid, user has been logged out
+                console.log('⚠️ Authentication token invalid - user logged out');
+            }
+        })();
         
         // No auto-refresh timer - WebSocket handles all real-time updates
         // Stats/contacts/transactions will update when WebSocket sends events
