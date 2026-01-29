@@ -114,6 +114,7 @@ class RealtimeService {
           (message) {
             // First message confirms connection is successful
             if (!_isConnected) {
+              _isConnecting = false; // Clear connecting flag on successful connection
               _isConnected = true;
               _channel = channel;
               
@@ -161,6 +162,7 @@ class RealtimeService {
             final errorStr = error.toString().toLowerCase();
             if (errorStr.contains('401') || errorStr.contains('unauthorized')) {
               print('⚠️ WebSocket authentication failed (401) - token may be expired');
+              _isConnecting = false; // Clear connecting flag
               // Don't reconnect if auth failed - user needs to login again
               // The app will reconnect when user logs in again
               return;

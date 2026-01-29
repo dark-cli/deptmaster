@@ -768,6 +768,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                 tooltipBehavior: TooltipBehavior(
                   enable: false, // Disable interaction on dashboard chart
                 ),
+                        ),
                       ),
                     ),
             ),
