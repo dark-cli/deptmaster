@@ -72,9 +72,9 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   final GlobalKey _chartKey = GlobalKey(); // Key to access chart widget
   late TooltipBehavior _tooltipBehavior; // Tooltip behavior controller
   
-  // Chart display settings
-  bool _useCurvedLines = false; // true = spline (curved), false = straight lines (default: straight)
-  bool _showTooltips = true; // Show/hide tooltips
+  // Chart display settings - fixed to straight lines
+  static const bool _useCurvedLines = false; // Always use straight lines (monotonic spline)
+  static const bool _showTooltips = true; // Always show tooltips
 
   @override
   void initState() {
@@ -390,36 +390,6 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Debt Over Time'),
-        actions: [
-          // Toggle for curved vs straight lines
-          IconButton(
-            icon: Icon(_useCurvedLines ? Icons.show_chart : Icons.timeline),
-            tooltip: _useCurvedLines ? 'Switch to straight lines' : 'Switch to curved lines',
-            onPressed: () {
-              setState(() {
-                _useCurvedLines = !_useCurvedLines;
-              });
-            },
-          ),
-          // Toggle for tooltip visibility
-          IconButton(
-            icon: Icon(_showTooltips ? Icons.info_outline : Icons.info_outline),
-            tooltip: _showTooltips ? 'Hide tooltips' : 'Show tooltips',
-            onPressed: () {
-              setState(() {
-                _showTooltips = !_showTooltips;
-                // Hide tooltip if disabling
-                if (!_showTooltips) {
-                  try {
-                    _tooltipBehavior.hide();
-                  } catch (e) {
-                    // Tooltip might not be initialized yet, ignore
-                  }
-                }
-              });
-            },
-          ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
