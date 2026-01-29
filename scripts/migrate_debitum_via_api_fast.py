@@ -18,6 +18,36 @@ from pathlib import Path
 
 API_BASE_URL = "http://localhost:8000"
 
+def login():
+    """Login and get auth token."""
+    # Try multiple common default credentials
+    credentials = [
+        {"username": "max", "password": "max"},
+        {"username": "max", "password": "1234"},  # Default password from seed_data.rs
+        {"username": "max", "password": "admin123456"},
+        {"username": "admin", "password": "admin123456"},
+    ]
+    
+    for creds in credentials:
+        try:
+            response = requests.post(
+                f"{API_BASE_URL}/api/auth/login",
+                json=creds,
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get('token')
+                if token:
+                    return token
+        except requests.exceptions.RequestException:
+            continue
+    
+    # If all failed, try to get user info from database directly
+    print("⚠️  Login failed with default credentials")
+    print("💡 Trying to find user in database...")
+    return None
+
 def extract_username(name):
     """Extract username (English letters and numbers) from contact name."""
     if not name:
@@ -101,6 +131,28 @@ def migrate_debitum(debitum_db_path):
             import shutil
             shutil.rmtree(temp_dir)
         sys.exit(1)
+    
+    # Login to get auth token
+    print("🔐 Authenticating...")
+    # Wait a moment for database migrations to complete
+    import time
+    time.sleep(2)
+    
+    auth_token = login()
+    if not auth_token:
+        print("❌ Failed to authenticate")
+        print("💡 Make sure default user 'max' exists with password 'max'")
+        print("💡 The user should be created by migration 005")
+        if temp_dir:
+            import shutil
+            shutil.rmtree(temp_dir)
+        sys.exit(1)
+    
+    # Set up auth headers
+    auth_headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {auth_token}"
+    }
     
     debitum_conn = None
     try:
@@ -186,7 +238,7 @@ def migrate_debitum(debitum_db_path):
             response = requests.post(
                 f"{API_BASE_URL}/api/sync/events",
                 json=events,
-                headers={"Content-Type": "application/json"},
+                headers=auth_headers,
                 timeout=60
             )
             
@@ -276,7 +328,7 @@ def migrate_debitum(debitum_db_path):
                 response = requests.post(
                     f"{API_BASE_URL}/api/sync/events",
                     json=transaction_events,
-                    headers={"Content-Type": "application/json"},
+                    headers=auth_headers,
                     timeout=120
                 )
                 

@@ -63,6 +63,9 @@ cmd_run() {
         flutter run -d chrome
     elif [ "$platform" = "android" ]; then
         print_info "Starting Android app..."
+        print_info "💡 Tip: To reduce Android system logs, run in a separate terminal:"
+        print_info "   adb logcat -s flutter:D DartVM:D"
+        
         if [ -n "$device_id" ]; then
             flutter run -d "$device_id"
         else
@@ -149,6 +152,7 @@ Commands:
   run [platform] [device] [--clear]    Run Flutter app
                                         Platforms: android, web, linux
                                         Use --clear to clear app data
+                                        Tip: To filter Android logs, see mobile/REDUCE_LOGS.md
   
   build [platform]                      Build Flutter app
                                         Platforms: android, web, linux
