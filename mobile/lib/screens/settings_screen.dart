@@ -294,29 +294,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               );
             },
           ),
-          Consumer(
-            builder: (context, ref, child) {
-              final lineType = ref.watch(chartLineTypeProvider);
-              return ListTile(
-                title: const Text('Chart Line Type'),
-                subtitle: Text(_getLineTypeLabel(lineType)),
-                trailing: DropdownButton<String>(
-                  value: lineType,
-                  items: const [
-                    DropdownMenuItem(value: 'natural', child: Text('Natural (Smooth)')),
-                    DropdownMenuItem(value: 'monotonic', child: Text('Monotonic (Straight)')),
-                    DropdownMenuItem(value: 'cardinal', child: Text('Cardinal')),
-                    DropdownMenuItem(value: 'clamped', child: Text('Clamped')),
-                  ],
-                  onChanged: (value) async {
-                    if (value != null) {
-                      await ref.read(chartLineTypeProvider.notifier).setChartLineType(value);
-                    }
-                  },
-                ),
-              );
-            },
-          ),
         ],
       ),
     );
@@ -332,21 +309,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         return 'Last 365 days';
       default:
         return 'Last 30 days';
-    }
-  }
-
-  String _getLineTypeLabel(String lineType) {
-    switch (lineType) {
-      case 'natural':
-        return 'Natural (Smooth curves)';
-      case 'monotonic':
-        return 'Monotonic (Straight lines)';
-      case 'cardinal':
-        return 'Cardinal (Cardinal spline)';
-      case 'clamped':
-        return 'Clamped (Clamped spline)';
-      default:
-        return 'Natural (Smooth curves)';
     }
   }
 
