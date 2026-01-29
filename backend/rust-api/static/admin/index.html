@@ -955,6 +955,11 @@
         }
 
         // Validate token by making a test API call
+        // Cache auth validation to prevent rate limiting
+        let lastAuthValidation = null;
+        let authValidationCache = null;
+        const AUTH_CACHE_DURATION = 60000; // Cache for 60 seconds
+        
         async function validateAuth() {
             const token = localStorage.getItem('auth_token');
             if (!token) {
@@ -962,25 +967,56 @@
                 return false;
             }
 
+            // Check cache first to avoid rate limiting
+            const now = Date.now();
+            if (authValidationCache !== null && lastAuthValidation !== null && 
+                (now - lastAuthValidation) < AUTH_CACHE_DURATION) {
+                return authValidationCache;
+            }
+
             try {
                 // Try to fetch a lightweight endpoint to validate token
                 const response = await authenticatedFetch(`${API_URL}/admin/events/latest`);
+                
+                // Handle rate limiting with exponential backoff
+                if (response.status === 429) {
+                    console.warn('⚠️ Rate limited during auth validation - using cached result');
+                    // Use cached result if available, otherwise assume valid
+                    return authValidationCache !== null ? authValidationCache : true;
+                }
+                
                 if (response.status === 401) {
                     console.log('⚠️ Token validation failed - logging out');
+                    authValidationCache = false;
+                    lastAuthValidation = now;
                     logout();
                     return false;
                 }
+                
+                // Cache successful validation
+                authValidationCache = true;
+                lastAuthValidation = now;
                 return true;
             } catch (error) {
                 // If it's an auth error, logout
                 if (error.message.includes('Authentication')) {
                     console.log('⚠️ Authentication error - logging out');
+                    authValidationCache = false;
+                    lastAuthValidation = now;
                     logout();
                     return false;
                 }
+                
+                // If it's a rate limit error, use cache
+                if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
+                    console.warn('⚠️ Rate limited during auth validation - using cached result');
+                    return authValidationCache !== null ? authValidationCache : true;
+                }
+                
                 // Other errors might be network issues, but we'll still try to proceed
                 console.warn('⚠️ Token validation check failed:', error);
-                return true; // Assume token is valid if it's not an auth error
+                // Don't cache network errors - assume token is valid
+                return true;
             }
         }
 
@@ -2847,11 +2883,21 @@
                 return;
             }
             
-            // First, get the latest event ID
+            // Get the latest event ID (with rate limit handling)
             authenticatedFetch(`${API_URL}/admin/events/latest`)
-                .then(r => r.json())
+                .then(r => {
+                    // Handle rate limiting gracefully
+                    if (r.status === 429) {
+                        console.warn('⚠️ Rate limited when getting latest event ID - will use WebSocket for updates');
+                        // Don't set lastEventId, WebSocket will handle updates
+                        return;
+                    }
+                    return r.json();
+                })
                 .then(data => {
-                    lastEventId = data.latest_event_id;
+                    if (data) {
+                        lastEventId = data.latest_event_id;
+                    }
                 })
                 .catch(err => {
                     // If it's an auth error, logout has already been called
@@ -2859,6 +2905,13 @@
                         console.log('⚠️ Authentication failed during smart updates - user logged out');
                         return;
                     }
+                    
+                    // If it's a rate limit error, just log and continue (WebSocket will handle updates)
+                    if (err.message && (err.message.includes('429') || err.message.includes('Too Many Requests'))) {
+                        console.warn('⚠️ Rate limited when getting latest event ID - will use WebSocket for updates');
+                        return;
+                    }
+                    
                     console.error('Error getting latest event ID:', err);
                 });
             
@@ -2976,6 +3029,13 @@
             
             try {
                 const response = await authenticatedFetch(`${API_URL}/admin/events/latest`);
+                
+                // Handle rate limiting - skip update check if rate limited
+                if (response.status === 429) {
+                    console.warn('⚠️ Rate limited during update check - skipping (WebSocket will handle updates)');
+                    return;
+                }
+                
                 const data = await response.json();
                 
                 if (data.latest_event_id !== null && data.latest_event_id !== lastEventId) {
@@ -2995,6 +3055,12 @@
                 // If it's an auth error, logout has already been called
                 if (err.message && err.message.includes('Authentication')) {
                     console.log('⚠️ Authentication failed during update check - user logged out');
+                    return;
+                }
+                
+                // If it's a rate limit error, just skip (WebSocket will handle updates)
+                if (err.message && (err.message.includes('429') || err.message.includes('Too Many Requests'))) {
+                    console.warn('⚠️ Rate limited during update check - skipping (WebSocket will handle updates)');
                     return;
                 }
                 console.error('Error checking for updates:', err);
