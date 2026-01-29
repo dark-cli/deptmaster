@@ -1,0 +1,100 @@
+use axum::{
+    extract::{Request, State},
+    http::{header::AUTHORIZATION, StatusCode},
+    middleware::Next,
+    response::Response,
+};
+use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use crate::AppState;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub user_id: String,
+    pub email: String,
+    pub exp: usize,
+}
+
+#[derive(Clone)]
+pub struct AuthUser {
+    pub user_id: Uuid,
+    #[allow(dead_code)] // Reserved for future use (e.g., logging, user info display)
+    pub email: String,
+}
+
+pub async fn auth_middleware(
+    State(state): State<AppState>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    // Allow health check and login endpoints without auth
+    let path = req.uri().path();
+    if path == "/health" || path == "/api/auth/login" || path == "/api/auth/admin/login" {
+        return Ok(next.run(req).await);
+    }
+
+    // Extract token from Authorization header
+    let auth_header = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if !auth_header.starts_with("Bearer ") {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let token = &auth_header[7..]; // Skip "Bearer "
+
+    // Decode and validate JWT
+    let decoding_key = DecodingKey::from_secret(state.config.jwt_secret.as_ref());
+    let validation = Validation::new(Algorithm::HS256);
+
+    let token_data = decode::<Claims>(token, &decoding_key, &validation)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let claims = token_data.claims;
+
+    // Parse user_id
+    let user_id = Uuid::parse_str(&claims.user_id)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // Verify user exists in either users_projection or admin_users
+    let user_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1) OR EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)"
+    )
+    .bind(user_id)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if !user_exists {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // Attach user info to request
+    let auth_user = AuthUser {
+        user_id,
+        email: claims.email,
+    };
+    req.extensions_mut().insert(auth_user);
+
+    Ok(next.run(req).await)
+}
+
+// Extractor to get authenticated user from request
+// Reserved for future use when additional auth checks are needed
+#[allow(dead_code)]
+pub async fn require_auth(
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let _auth_user = req
+        .extensions()
+        .get::<AuthUser>()
+        .cloned()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    Ok(next.run(req).await)
+}
