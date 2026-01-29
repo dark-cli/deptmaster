@@ -72,8 +72,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   final GlobalKey _chartKey = GlobalKey(); // Key to access chart widget
   late TooltipBehavior _tooltipBehavior; // Tooltip behavior controller
   
-  // Chart display settings - fixed to straight lines
-  static const bool _useCurvedLines = false; // Always use straight lines (monotonic spline)
+  // Chart display settings - fixed to smooth lines
+  static const bool _useCurvedLines = true; // Always use smooth curved lines (natural spline)
   static const bool _showTooltips = true; // Always show tooltips
 
   @override

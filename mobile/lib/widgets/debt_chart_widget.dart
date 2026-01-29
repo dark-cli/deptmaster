@@ -712,7 +712,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                     yValueMapper: (ChartData data, _) => data.debt,
                     borderColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
                     borderWidth: 1.5,
-                    splineType: SplineType.monotonic, // Default to straighter lines
+                    splineType: SplineType.natural, // Smooth curved lines
                     animationDuration: 0,
                     enableTooltip: false, // Disable interaction on dashboard chart
                     emptyPointSettings: EmptyPointSettings(
@@ -745,7 +745,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                     yValueMapper: (ChartData data, _) => data.debt,
                     borderColor: Colors.transparent, // Transparent line (only markers visible)
                     borderWidth: 0,
-                    splineType: SplineType.monotonic, // Default to straighter lines
+                    splineType: SplineType.natural, // Smooth curved lines
                     animationDuration: 0,
                     enableTooltip: false,
                     markerSettings: MarkerSettings(
