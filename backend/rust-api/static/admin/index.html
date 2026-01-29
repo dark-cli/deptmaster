@@ -2966,18 +2966,18 @@
                         validateAuth().then(isValid => {
                             if (isValid) {
                                 console.log('✅ Token is valid, reconnecting WebSocket...');
-                                setTimeout(() => startSmartUpdates(), 2000);
+                                setTimeout(() => startSmartUpdates(), 5000); // Longer delay to avoid rate limits
                             } else {
                                 console.log('⚠️ Token invalid - not reconnecting');
                             }
                         });
                     } else {
-                        // Other error - try to reconnect
+                        // Other error - try to reconnect (longer delay to avoid rate limits)
                         setTimeout(() => {
                             if (checkAuth()) {
                                 startSmartUpdates();
                             }
-                        }, 2000);
+                        }, 5000); // Increased from 2000 to 5000ms
                     }
                 };
                 
@@ -2989,21 +2989,21 @@
                         validateAuth().then(isValid => {
                             if (isValid) {
                                 console.log('✅ Token is valid, reconnecting WebSocket...');
-                                setTimeout(() => startSmartUpdates(), 2000);
+                                setTimeout(() => startSmartUpdates(), 5000); // Longer delay to avoid rate limits
                             } else {
                                 console.log('⚠️ Token invalid - not reconnecting');
                             }
                         });
                         return;
                     }
-                    // Normal close - reconnect if authenticated
+                    // Normal close - reconnect if authenticated (longer delay to avoid rate limits)
                     setTimeout(() => {
                         if (checkAuth()) {
                             startSmartUpdates();
                         } else {
                             console.log('⚠️ Not reconnecting WebSocket - user logged out');
                         }
-                    }, 2000);
+                    }, 5000); // Increased from 2000 to 5000ms
                 };
             } catch (e) {
                 console.log('WebSocket not available, using polling:', e);
