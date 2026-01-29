@@ -71,6 +71,10 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   int? _selectedTooltipIndex; // Currently selected point index for tooltip
   final GlobalKey _chartKey = GlobalKey(); // Key to access chart widget
   late TooltipBehavior _tooltipBehavior; // Tooltip behavior controller
+  
+  // Chart display settings
+  bool _useCurvedLines = true; // true = spline (curved), false = straight lines
+  bool _showTooltips = true; // Show/hide tooltips
 
   @override
   void initState() {
@@ -386,6 +390,34 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Debt Over Time'),
+        actions: [
+          // Toggle for curved vs straight lines
+          IconButton(
+            icon: Icon(_useCurvedLines ? Icons.show_chart : Icons.timeline),
+            tooltip: _useCurvedLines ? 'Switch to straight lines' : 'Switch to curved lines',
+            onPressed: () {
+              setState(() {
+                _useCurvedLines = !_useCurvedLines;
+              });
+            },
+          ),
+          // Toggle for tooltip visibility
+          IconButton(
+            icon: Icon(_showTooltips ? Icons.info_outline : Icons.info_outline),
+            tooltip: _showTooltips ? 'Hide tooltips' : 'Show tooltips',
+            onPressed: () {
+              setState(() {
+                _showTooltips = !_showTooltips;
+                if (_showTooltips) {
+                  _tooltipBehavior.enable = true;
+                } else {
+                  _tooltipBehavior.enable = false;
+                  _tooltipBehavior.hide();
+                }
+              });
+            },
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -520,7 +552,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                           
                           // Update tooltip behavior with current configuration
                           _tooltipBehavior = TooltipBehavior(
-                            enable: true,
+                            enable: _showTooltips,
                             activationMode: ActivationMode.none, // We'll control it programmatically
                             color: Theme.of(context).colorScheme.surface,
                             textStyle: TextStyle(
@@ -831,9 +863,9 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 yValueMapper: (ChartData data, _) => data.debt,
                                 borderColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
                                 borderWidth: 1.5,
-                                splineType: SplineType.natural,
+                                splineType: _useCurvedLines ? SplineType.natural : SplineType.monotonic,
                                 animationDuration: 0,
-                                enableTooltip: true, // Enable tooltip on series
+                                enableTooltip: _showTooltips, // Control tooltip visibility
                                 emptyPointSettings: EmptyPointSettings(
                                   mode: EmptyPointMode.gap,
                                 ),
@@ -912,7 +944,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 yValueMapper: (ChartData data, _) => data.debt,
                                 borderColor: Colors.transparent, // Transparent line (only markers visible)
                                 borderWidth: 0,
-                                splineType: SplineType.natural,
+                                splineType: _useCurvedLines ? SplineType.natural : SplineType.monotonic,
                                 animationDuration: 0,
                                 enableTooltip: false,
                                 markerSettings: MarkerSettings(
@@ -941,7 +973,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                   yValueMapper: (ChartData data, _) => data.debt,
                                   borderColor: Colors.transparent, // Transparent line
                                   borderWidth: 0,
-                                  splineType: SplineType.natural,
+                                  splineType: _useCurvedLines ? SplineType.natural : SplineType.monotonic,
                                   animationDuration: 0,
                                   enableTooltip: false,
                                   color: Colors.transparent, // Transparent area
