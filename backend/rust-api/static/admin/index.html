@@ -1361,7 +1361,7 @@
                             backgroundColor: 'rgba(103, 80, 164, 0.1)',
                             borderWidth: 2,
                             fill: false, // No fill - just line connecting actual events
-                            tension: 0, // Straight lines (was 0.4 for curved)
+                            tension: 0.4, // Smooth curved lines
                             pointRadius: function(context) {
                                 // Hide points where no transactions occurred
                                 return context.raw?.hasTransactions ? 4 : 0;
