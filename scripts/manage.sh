@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$ROOT_DIR"
+# Note: We don't cd here to avoid affecting the parent shell's working directory
 
 # Colors for output
 RED='\033[0;31m'
@@ -281,14 +281,12 @@ cmd_reset_database_complete() {
         print_warning "Server not ready, skipping admin password reset"
         print_warning "You may need to run: $0 set-admin-password admin $default_admin_password"
     else
-        cd "$ROOT_DIR/backend/rust-api"
-        if cargo run --bin set_admin_password -- "admin" "$default_admin_password" > /dev/null 2>&1; then
+        (cd "$ROOT_DIR/backend/rust-api" && cargo run --bin set_admin_password -- "admin" "$default_admin_password" > /dev/null 2>&1) && {
             print_success "Admin password reset to: $default_admin_password"
-        else
+        } || {
             print_warning "Failed to reset admin password (may need to run manually)"
             print_warning "Run: $0 set-admin-password admin $default_admin_password"
-        fi
-        cd "$ROOT_DIR"
+        }
     fi
     
     print_success "Complete database reset finished!"
@@ -318,10 +316,8 @@ cmd_reset_database_only() {
     # Ensure PostgreSQL is running
     if ! docker ps | grep -q "debt_tracker_postgres"; then
         print_warning "PostgreSQL not running. Starting..."
-        cd "$ROOT_DIR/backend"
-        docker-compose up -d postgres > /dev/null 2>&1
+        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
         sleep 5
-        cd "$ROOT_DIR"
     fi
     
     print_info "Terminating all connections..."
@@ -343,7 +339,6 @@ CREATE DATABASE $DB_NAME;
 EOF
     
     print_info "Running migrations..."
-    cd "$ROOT_DIR/backend/rust-api"
     
     # Try sqlx first, but fall back to manual migrations quickly
     USE_SQLX=false
@@ -352,7 +347,7 @@ EOF
     fi
     
     if [ "$USE_SQLX" = true ]; then
-        if timeout 10 sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1; then
+        if (cd "$ROOT_DIR/backend/rust-api" && timeout 10 sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1); then
             print_info "Migrations completed via sqlx"
         else
             print_warning "sqlx migration failed or timed out, using manual migrations..."
@@ -404,8 +399,6 @@ BEGIN
     END IF;
 END \$\$;
 EOF
-    
-    cd "$ROOT_DIR"
     print_success "Database reset complete"
     
     # If import file provided, import data
@@ -421,13 +414,32 @@ cmd_import_backup() {
     
     local backup_file="${1:-debitum-backup-2026-01-18T05_51_03.zip}"
     
+    # Expand ~ to home directory
+    if [[ "$backup_file" == ~* ]]; then
+        backup_file="${backup_file/#\~/$HOME}"
+    fi
+    
     # Resolve backup file path (handle relative paths)
     if [[ "$backup_file" != /* ]]; then
-        # Relative path - try current dir first, then root dir
+        # Relative path - try multiple locations
+        local resolved_file=""
+        
+        # 1. Try current directory
         if [ -f "$backup_file" ]; then
-            backup_file="$(cd "$(dirname "$backup_file")" && pwd)/$(basename "$backup_file")"
+            resolved_file="$(cd "$(dirname "$backup_file")" && pwd)/$(basename "$backup_file")"
+        # 2. Try root directory
         elif [ -f "$ROOT_DIR/$backup_file" ]; then
-            backup_file="$ROOT_DIR/$backup_file"
+            resolved_file="$ROOT_DIR/$backup_file"
+        # 3. Try scripts directory
+        elif [ -f "$SCRIPT_DIR/$backup_file" ]; then
+            resolved_file="$SCRIPT_DIR/$backup_file"
+        # 4. Try root/scripts directory
+        elif [ -f "$ROOT_DIR/scripts/$backup_file" ]; then
+            resolved_file="$ROOT_DIR/scripts/$backup_file"
+        fi
+        
+        if [ -n "$resolved_file" ]; then
+            backup_file="$resolved_file"
         fi
     fi
     
@@ -436,15 +448,17 @@ cmd_import_backup() {
         echo ""
         echo "Usage: $0 import-backup <path-to-backup.zip>"
         echo ""
-        echo "Looking for backup files in current directory..."
-        ls -la *.zip 2>/dev/null || echo "No .zip files found"
+        echo "Searched in:"
+        echo "  - Current directory: $(pwd)"
+        echo "  - Root directory: $ROOT_DIR"
+        echo "  - Scripts directory: $SCRIPT_DIR"
+        echo ""
+        echo "Looking for backup files in common locations..."
+        (cd "$ROOT_DIR" && find . -maxdepth 2 -name "*.zip" -type f 2>/dev/null | head -10) || echo "No .zip files found"
         exit 1
     fi
     
     print_step "Importing data from: $backup_file"
-    
-    # Ensure we're in the root directory
-    cd "$ROOT_DIR"
     
     # Ensure server is running
     if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
@@ -504,26 +518,22 @@ cmd_start_docker_services() {
     
     check_docker
     
-    cd "$ROOT_DIR/backend"
-    
     if [ "$1" = "postgres" ] || [ -z "$1" ]; then
         print_info "Starting PostgreSQL..."
-        docker-compose up -d postgres > /dev/null 2>&1
+        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
         sleep 5
     fi
     
     if [ "$1" = "redis" ] || [ -z "$1" ]; then
         print_info "Starting Redis..."
-        docker-compose up -d redis > /dev/null 2>&1
+        (cd "$ROOT_DIR/backend" && docker-compose up -d redis > /dev/null 2>&1)
         sleep 3
     fi
     
     if [ -z "$1" ]; then
         print_info "Starting all services..."
-        docker-compose up -d postgres redis > /dev/null 2>&1
+        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres redis > /dev/null 2>&1)
     fi
-    
-    cd "$ROOT_DIR"
     if [ "$VERBOSE" = true ]; then
         print_success "Services started"
     fi
@@ -536,17 +546,13 @@ cmd_stop_docker_services() {
     
     check_docker
     
-    cd "$ROOT_DIR/backend"
-    
     if [ "$1" = "postgres" ]; then
-        docker-compose stop postgres
+        (cd "$ROOT_DIR/backend" && docker-compose stop postgres)
     elif [ "$1" = "redis" ]; then
-        docker-compose stop redis
+        (cd "$ROOT_DIR/backend" && docker-compose stop redis)
     else
-        docker-compose stop
+        (cd "$ROOT_DIR/backend" && docker-compose stop)
     fi
-    
-    cd "$ROOT_DIR"
     print_success "Services stopped"
 }
 
@@ -565,20 +571,18 @@ cmd_start_server_docker() {
     # Build if needed
     if [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
         print_step "Building server (this may take a minute)..."
-        cd "$ROOT_DIR/backend/rust-api"
         if [ "$VERBOSE" = true ]; then
-            cargo build --release || {
+            (cd "$ROOT_DIR/backend/rust-api" && cargo build --release) || {
                 print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
                 exit 1
             }
         else
-            if ! cargo build --release 2>&1 | tee /tmp/cargo-build.log | grep -E "error|Finished|Compiling" | head -20; then
+            if ! (cd "$ROOT_DIR/backend/rust-api" && cargo build --release 2>&1 | tee /tmp/cargo-build.log | grep -E "error|Finished|Compiling" | head -20); then
                 print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
                 print_error "Build log: /tmp/cargo-build.log"
                 exit 1
             fi
         fi
-        cd "$ROOT_DIR"
     fi
     
     # Start server
@@ -623,9 +627,7 @@ cmd_stop_server() {
     print_info "Stopping API server..."
     
     # Stop Docker container if running
-    cd "$ROOT_DIR/backend"
-    docker-compose stop api 2>/dev/null || true
-    cd "$ROOT_DIR"
+    (cd "$ROOT_DIR/backend" && docker-compose stop api 2>/dev/null) || true
     
     # Also stop any direct process
     pkill -f "debt-tracker-api" || true
@@ -654,17 +656,13 @@ cmd_start_all_docker_production() {
     print_step "Starting production server (all services in Docker containers)..."
     check_docker
     
-    cd "$ROOT_DIR/backend"
-    
     # Start all services including API in Docker
     print_info "Starting all Docker services (postgres, redis, api)..."
-    docker-compose up -d
+    (cd "$ROOT_DIR/backend" && docker-compose up -d)
     
     # Wait for services to be healthy
     print_info "Waiting for services to be ready..."
     wait_for_service "http://localhost:8000/health" "API Server" 60 2
-    
-    cd "$ROOT_DIR"
     print_success "Production server started (all in Docker)"
     print_info "Server running at: http://localhost:8000"
     print_info "View logs: $0 logs"
@@ -686,25 +684,21 @@ cmd_start_server_direct() {
     cmd_start_docker_services
     
     # Stop Docker API container if running (to free port 8000)
-    cd "$ROOT_DIR/backend"
     if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_api$'; then
         print_info "Stopping Docker API container to free port 8000..."
-        docker-compose stop api 2>/dev/null || true
+        (cd "$ROOT_DIR/backend" && docker-compose stop api 2>/dev/null) || true
     fi
-    cd "$ROOT_DIR"
     
     # Check if port is available and try to stop what's using it
     if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
         print_warning "Port 8000 is already in use. Attempting to stop it..."
         
         # Try to stop Docker API container
-        cd "$ROOT_DIR/backend"
         if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_api$'; then
             print_info "Stopping Docker API container..."
-            docker-compose stop api 2>/dev/null || true
+            (cd "$ROOT_DIR/backend" && docker-compose stop api 2>/dev/null) || true
             sleep 2
         fi
-        cd "$ROOT_DIR"
         
         # Try to stop direct process
         if pgrep -f "debt-tracker-api" > /dev/null; then
@@ -740,22 +734,20 @@ cmd_start_server_direct() {
     export JWT_SECRET="${JWT_SECRET:-your-secret-key-change-in-production}"
     export JWT_EXPIRATION="${JWT_EXPIRATION:-3600}"
     
-    cd "$ROOT_DIR/backend/rust-api"
-    
     # Use cargo-watch if available, otherwise regular cargo run
     if command -v cargo-watch &> /dev/null; then
         print_info "Using cargo-watch for auto-reload..."
         print_info "Watching: Rust source files (.rs) and static files (.html, .js)"
         print_info "Note: Static file changes require recompilation (will auto-restart)"
         # Watch both Rust files and static files
-        cargo watch \
+        (cd "$ROOT_DIR/backend/rust-api" && cargo watch \
             --watch "$ROOT_DIR/backend/rust-api/src" \
             --watch "$ROOT_DIR/backend/rust-api/static" \
-            -x 'run --bin debt-tracker-api'
+            -x 'run --bin debt-tracker-api')
     else
         print_warning "cargo-watch not installed. Install for auto-reload: cargo install cargo-watch"
         print_info "Note: Static file changes require restarting the server"
-        cargo run --bin debt-tracker-api
+        (cd "$ROOT_DIR/backend/rust-api" && cargo run --bin debt-tracker-api)
     fi
 }
 
@@ -764,9 +756,7 @@ cmd_build_server() {
     
     print_info "Building server..."
     
-    cd "$ROOT_DIR/backend/rust-api"
-    cargo build --release
-    cd "$ROOT_DIR"
+    (cd "$ROOT_DIR/backend/rust-api" && cargo build --release)
     
     print_success "Build complete"
 }
@@ -885,8 +875,6 @@ cmd_run_flutter_app() {
     
     print_step "Running Flutter app ($platform, mode: $mode)..."
     
-    cd mobile
-    
     # Build flutter run command with mode flag
     local flutter_cmd="flutter run"
     if [ -n "$mode_flag" ]; then
@@ -932,13 +920,13 @@ cmd_run_flutter_app() {
         
         # Run on Android device (explicitly specify android to avoid fallback to Linux)
         if [ -n "$device_id" ]; then
-            $flutter_cmd -d "$device_id"
+            (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$device_id")
         else
             # List available devices and use the first Android device
             local android_device=$(adb devices | grep "device$" | head -1 | awk '{print $1}')
             if [ -n "$android_device" ]; then
                 print_info "Running on Android device: $android_device"
-                $flutter_cmd -d "$android_device"
+                (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$android_device")
             else
                 print_error "No Android device found"
                 exit 1
@@ -949,9 +937,9 @@ cmd_run_flutter_app() {
             print_warning "--clear-app-data flag is only supported for Android and Linux platforms"
         fi
         if [ -n "$device_id" ]; then
-            $flutter_cmd -d "$device_id"
+            (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$device_id")
         else
-            $flutter_cmd -d chrome
+            (cd "$ROOT_DIR/mobile" && $flutter_cmd -d chrome)
         fi
     elif [ "$platform" = "linux" ]; then
         # Clean app data if --clear-app-data flag is set
@@ -999,7 +987,7 @@ cmd_run_flutter_app() {
         
         # Launch Flutter app and configure window for Hyprland
         if [ -n "$device_id" ]; then
-            $flutter_cmd -d "$device_id"
+            (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$device_id")
         else
             # Check if running on Hyprland
             if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || command -v hyprctl &> /dev/null; then
@@ -1101,13 +1089,13 @@ cmd_run_flutter_app() {
                 local config_pid=$!
                 
                 # Launch Flutter (foreground)
-                $flutter_cmd -d linux
+                (cd "$ROOT_DIR/mobile" && $flutter_cmd -d linux)
                 
                 # Clean up background process if still running
                 kill $config_pid 2>/dev/null || true
             else
                 # Not on Hyprland, just run normally
-                $flutter_cmd -d linux
+                (cd "$ROOT_DIR/mobile" && $flutter_cmd -d linux)
             fi
         fi
     else
@@ -1117,8 +1105,6 @@ cmd_run_flutter_app() {
         echo "Modes: dev (default), debug, release, profile"
         exit 1
     fi
-    
-    cd "$ROOT_DIR"
 }
 
 cmd_run_flutter_web() {
@@ -1128,15 +1114,11 @@ cmd_run_flutter_web() {
     
     print_step "Running Flutter web app (mode: $mode)..."
     
-    cd mobile
-    
     if [ "$mode" = "dev" ]; then
-        flutter run -d chrome --dart-define=FLUTTER_WEB_USE_SKIA=true
+        (cd "$ROOT_DIR/mobile" && flutter run -d chrome --dart-define=FLUTTER_WEB_USE_SKIA=true)
     else
-        flutter run -d chrome --release
+        (cd "$ROOT_DIR/mobile" && flutter run -d chrome --release)
     fi
-    
-    cd "$ROOT_DIR"
 }
 
 cmd_show_android_logs() {
@@ -1172,15 +1154,12 @@ cmd_test_flutter_app() {
     
     print_step "Running Flutter tests..."
     
-    cd mobile
-    
     if [ -n "$1" ]; then
-        flutter test "$1"
+        (cd "$ROOT_DIR/mobile" && flutter test "$1")
     else
-        flutter test
+        (cd "$ROOT_DIR/mobile" && flutter test)
     fi
     
-    cd "$ROOT_DIR"
     print_success "Tests complete"
 }
 
@@ -1240,16 +1219,14 @@ cmd_test_flutter_integration() {
     cmd_reset_database_complete > /dev/null 2>&1 || cmd_reset_database_complete
     
     print_info "Running integration test: $test_file"
-    cd mobile
     
     if command -v flutter &> /dev/null; then
-        flutter test "$test_file" "${@:2}"
+        (cd "$ROOT_DIR/mobile" && flutter test "$test_file" "${@:2}")
     else
         print_error "Flutter not found. Please install Flutter SDK."
         exit 1
     fi
     
-    cd "$ROOT_DIR"
     print_success "Integration tests complete"
 }
 
@@ -1384,17 +1361,14 @@ cmd_set_admin_password() {
     # Ensure PostgreSQL is running
     if ! docker ps | grep -q "debt_tracker_postgres"; then
         print_warning "PostgreSQL not running. Starting..."
-        cd "$ROOT_DIR/backend"
-        docker-compose up -d postgres > /dev/null 2>&1
+        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
         sleep 5
-        cd "$ROOT_DIR"
     fi
     
     # Use Rust binary to set admin password (more reliable)
     print_info "Setting admin password..."
-    cd "$ROOT_DIR/backend/rust-api"
     
-    if cargo run --bin set_admin_password -- "$username" "$password" 2>&1 | grep -q "✅"; then
+    if (cd "$ROOT_DIR/backend/rust-api" && cargo run --bin set_admin_password -- "$username" "$password" 2>&1 | grep -q "✅"); then
         print_success "Admin password updated successfully!"
         echo ""
         echo "📧 Username: $username"
@@ -1403,11 +1377,8 @@ cmd_set_admin_password() {
         echo "You can now login to the admin panel with these credentials."
     else
         print_error "Failed to update admin password"
-        cd "$ROOT_DIR"
         exit 1
     fi
-    
-    cd "$ROOT_DIR"
 }
 
 cmd_help() {
