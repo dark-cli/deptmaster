@@ -214,10 +214,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         label: 'Add transaction (tap) or contact (long press)',
         child: GestureDetector(
           onLongPress: _showAddContactDialog,
-          child: FloatingActionButton(
-            onPressed: _showAddTransactionDialog,
-            tooltip: 'Add Transaction (tap) or Contact (long press)',
-            child: const Icon(Icons.add),
+          child: Tooltip(
+            message: 'Add Transaction (tap) or Contact (long press)',
+            child: FloatingActionButton(
+              onPressed: _showAddTransactionDialog,
+              child: const Icon(Icons.add),
+            ),
           ),
         ),
       ),

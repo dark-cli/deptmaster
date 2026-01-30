@@ -16,6 +16,14 @@ import 'auth_service.dart';
 /// Sync result enum
 enum SyncResult { done, failed }
 
+/// Sync status enum for UI
+enum SyncStatus {
+  synced,      // All events synced
+  unsynced,    // Has unsynced events
+  syncing,     // Currently syncing
+  offline,     // Server not reachable
+}
+
 /// Simplified Sync Service - Event-driven architecture
 /// Uses hash comparison and timestamp-based incremental sync
 /// Separates local-to-server and server-to-local sync operations
@@ -31,6 +39,7 @@ class SyncServiceV2 {
   static bool? _serverReachableCache;
   static DateTime? _serverReachableCacheTime;
   static const Duration _serverReachableCacheDuration = Duration(seconds: 10);
+  static bool _hasSyncError = false; // Track if sync has failed with error
 
   /// Initialize sync service
   static Future<void> initialize() async {
@@ -106,7 +115,7 @@ class SyncServiceV2 {
       return SyncResult.done;
     }
 
-    print('📤 syncLocalToServer: Found ${unsyncedEvents.length} unsynced events');
+      print('📤 syncLocalToServer: Found ${unsyncedEvents.length} unsynced events');
 
     // Check if server is reachable
     final isReachable = await _isServerReachable();
@@ -117,10 +126,20 @@ class SyncServiceV2 {
     }
 
     try {
-      print('📤 Sending ${unsyncedEvents.length} unsynced events to server...');
+      // Sort events by priority: DELETED first, then UPDATED, then CREATED
+      final sortedEvents = List<Event>.from(unsyncedEvents);
+      sortedEvents.sort((a, b) {
+        if (a.eventType == 'DELETED' && b.eventType != 'DELETED') return -1;
+        if (a.eventType != 'DELETED' && b.eventType == 'DELETED') return 1;
+        if (a.eventType == 'UPDATED' && b.eventType == 'CREATED') return -1;
+        if (a.eventType == 'CREATED' && b.eventType == 'UPDATED') return 1;
+        return 0;
+      });
+
+      print('📤 Sending ${sortedEvents.length} unsynced events to server (priority: DELETED > UPDATED > CREATED)...');
 
       // Convert local events to server format
-      final eventsToSend = unsyncedEvents.map((e) {
+      final eventsToSend = sortedEvents.map((e) {
         // Ensure timestamp is in RFC3339 format (with Z suffix for UTC)
         String timestamp = e.timestamp.toUtc().toIso8601String();
         if (!timestamp.endsWith('Z')) {
@@ -178,16 +197,22 @@ class SyncServiceV2 {
         // TODO: Handle conflicts (merge strategy)
       }
 
-      // Rebuild state after sync
-      await _rebuildState();
+      // Rebuild state only if we marked events as synced
+      if (accepted.isNotEmpty) {
+        await _rebuildState();
+      } else {
+        print('✅ No events were synced, skipping state rebuild');
+      }
 
       print('✅ Local to server sync completed');
+      _hasSyncError = false; // Clear error on success
       return SyncResult.done;
     } catch (e) {
       // Check if it's an authentication error
       final errorStr = e.toString().toLowerCase();
       if (errorStr.contains('authentication') || errorStr.contains('expired') || errorStr.contains('401')) {
         print('⚠️ Sync failed due to authentication error');
+        _hasSyncError = true; // Mark as error (not just network issue)
         return SyncResult.failed;
       }
 
@@ -198,11 +223,13 @@ class SyncServiceV2 {
           errorStr.contains('socketexception') ||
           errorStr.contains('timeout')) {
         print('⚠️ Sync failed due to network error (offline or server unreachable)');
+        // Don't mark as error for network issues - these are expected when offline
         return SyncResult.failed;
       }
 
-      // For other errors, log them
+      // For other errors, log them and mark as error
       print('❌ Local to server sync error: $e');
+      _hasSyncError = true;
       return SyncResult.failed;
     }
   }
@@ -295,19 +322,25 @@ class SyncServiceV2 {
 
       print('✅ Inserted $insertedCount new events from server');
 
-      // 8. Rebuild state from all events
-      await _rebuildState();
+      // 8. Rebuild state only if we inserted new events
+      if (insertedCount > 0) {
+        await _rebuildState();
+      } else {
+        print('✅ No new events inserted, skipping state rebuild');
+      }
 
       // 9. Update last sync timestamp
       await EventStoreService.setLastSyncTimestamp(DateTime.now());
 
       print('✅ Server to local sync completed');
+      _hasSyncError = false; // Clear error on success
       return SyncResult.done;
     } catch (e) {
       // Check if it's an authentication error
       final errorStr = e.toString().toLowerCase();
       if (errorStr.contains('authentication') || errorStr.contains('expired') || errorStr.contains('401')) {
         print('⚠️ Sync failed due to authentication error');
+        _hasSyncError = true; // Mark as error
         return SyncResult.failed;
       }
 
@@ -318,11 +351,13 @@ class SyncServiceV2 {
           errorStr.contains('socketexception') ||
           errorStr.contains('timeout')) {
         print('⚠️ Sync failed due to network error (offline or server unreachable)');
+        // Don't mark as error for network issues
         return SyncResult.failed;
       }
 
-      // For other errors, log them
+      // For other errors, log them and mark as error
       print('❌ Server to local sync error: $e');
+      _hasSyncError = true;
       return SyncResult.failed;
     }
   }
@@ -598,6 +633,33 @@ class SyncServiceV2 {
       return {'error': e.toString()};
     }
   }
+
+  /// Get sync status for UI (simplified)
+  static Future<SyncStatus> getSyncStatusForUI() async {
+    if (kIsWeb) return SyncStatus.synced;
+
+    // Check if currently syncing
+    if (_isLocalToServerSyncing || _isServerToLocalSyncing) {
+      return SyncStatus.syncing;
+    }
+
+    // Check if server is reachable
+    final isReachable = await _isServerReachable();
+    if (!isReachable) {
+      return SyncStatus.offline;
+    }
+
+    // Check if we have unsynced events
+    final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
+    if (unsyncedEvents.isNotEmpty) {
+      return SyncStatus.unsynced;
+    }
+
+    return SyncStatus.synced;
+  }
+
+  /// Check if sync has failed with an error (not just network issue)
+  static bool get hasSyncError => _hasSyncError;
 
   /// Stop all sync operations
   static void stop() {

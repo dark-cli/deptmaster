@@ -10,6 +10,7 @@ import '../services/local_database_service_v2.dart';
 import '../services/sync_service_v2.dart';
 import '../services/settings_service.dart';
 import '../widgets/contact_list_item.dart';
+import '../widgets/sync_status_icon.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
@@ -444,23 +445,13 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                 child: Text('Oldest First'),
               ),
             ],
-          ),
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: () async {
-                final result = await showScreenAsBottomSheet(
-                  context: context,
-                  screen: const AddContactScreen(),
-                );
-                // Refresh if contact was created
-                if (result == true && mounted) {
-                  _loadContacts();
-                }
-              },
-              tooltip: 'Add Contact',
             ),
-            // Selection button removed - use long press on contact items instead
           ],
+          if (!_selectionMode && !_isSearching)
+            const Padding(
+              padding: EdgeInsets.only(left: 24.0, right: 20.0),
+              child: SyncStatusIcon(),
+            ),
         ],
       ),
       body: RefreshIndicator(

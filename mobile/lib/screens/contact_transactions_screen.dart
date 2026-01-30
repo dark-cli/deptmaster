@@ -224,18 +224,20 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           ],
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await showScreenAsBottomSheet(
-            context: context,
-            screen: AddTransactionScreen(contact: widget.contact),
-          );
-          if (result == true && mounted) {
-            _loadTransactions();
-          }
-        },
-        tooltip: 'Add Transaction',
-        child: const Icon(Icons.add),
+      floatingActionButton: Tooltip(
+        message: 'Add Transaction',
+        child: FloatingActionButton(
+          onPressed: () async {
+            final result = await showScreenAsBottomSheet(
+              context: context,
+              screen: AddTransactionScreen(contact: widget.contact),
+            );
+            if (result == true && mounted) {
+              _loadTransactions();
+            }
+          },
+          child: const Icon(Icons.add),
+        ),
       ),
       body: Builder(
         builder: (context) {

@@ -17,6 +17,7 @@ import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
 import 'edit_transaction_screen.dart';
 import 'add_transaction_screen.dart';
+import '../widgets/sync_status_icon.dart';
 import '../utils/bottom_sheet_helper.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
@@ -421,19 +422,12 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
               ),
             ],
           ),
-          IconButton(
-            icon: Icon(_selectionMode ? Icons.check_box : Icons.check_box_outline_blank),
-            onPressed: () {
-              setState(() {
-                _selectionMode = !_selectionMode;
-                if (!_selectionMode) {
-                  _selectedTransactions.clear();
-                }
-              });
-            },
-            tooltip: 'Select',
-          ),
           ],
+          if (!_selectionMode && !_isSearching)
+            const Padding(
+              padding: EdgeInsets.only(left: 24.0, right: 20.0),
+              child: SyncStatusIcon(),
+            ),
         ],
       ),
       body: Builder(

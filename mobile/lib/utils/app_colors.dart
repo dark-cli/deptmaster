@@ -14,7 +14,7 @@ class AppColors {
   static const Color lightTertiary = Color(0xFF7D5260); // Material 3 default tertiary
   static const Color lightTertiaryDark = Color(0xFF633B48); // Darker tertiary
   static const Color lightError = Color(0xFFBA1A1A); // Material 3 default error
-  static const Color lightSuccess = Color(0xFF16A34A); // Green 600
+  static const Color lightSuccess = Color(0xFF029C76); // Custom green
   static const Color lightWarning = Color(0xFFF59E0B); // Amber 500
   static const Color lightBackground = Color(0xFFFFFBFE); // Material 3 default background
   static const Color lightBackgroundEnd = Color(0xFFFFFBFE); // Same for no gradient
@@ -38,7 +38,7 @@ class AppColors {
   static const Color darkTertiary = Color(0xFFEFB8C8); // Material 3 default tertiary
   static const Color darkTertiaryLight = Color(0xFFF2D8E4); // Lighter tertiary
   static const Color darkError = Color(0xFFFFB4AB); // Material 3 default error
-  static const Color darkSuccess = Color(0xFF4ADE80); // Green 400
+  static const Color darkSuccess = Color(0xFF029C76); // Custom green
   static const Color darkWarning = Color(0xFFFBBF24); // Amber 400
   static const Color darkBackground = Color(0xFF1C1B1F); // Material 3 default background
   static const Color darkBackgroundEnd = Color(0xFF1C1B1F); // Same for no gradient
@@ -55,12 +55,12 @@ class AppColors {
   // Semantic Colors for Give/Received - Material 3 defaults
   // Standardized: Received = red (negative), Gave = green (positive)
   // Light Mode: Gave = green (positive), Received = red (negative)
-  static const Color lightGive = Color(0xFF16A34A); // Green 600 - success (positive)
-  static const Color lightReceived = Color(0xFFBA1A1A); // Material 3 error - red (negative)
+  static const Color lightGive = Color(0xFF029C76); // Custom green
+  static const Color lightReceived = Color(0xFFBA1A1A); // Material 3 default error - red (negative)
   
   // Dark Mode: Gave = green (positive), Received = red (negative)
-  static const Color darkGive = Color(0xFF4ADE80); // Green 400 - success (positive)
-  static const Color darkReceived = Color(0xFFFFB4AB); // Material 3 error - light red (negative)
+  static const Color darkGive = Color(0xFF029C76); // Custom green
+  static const Color darkReceived = Color(0xFFFFB4AB); // Material 3 default error - light red (negative)
   
   // Semantic Colors (Balance) - Respects flipColors setting
   // These will be used with Consumer to watch flipColorsProvider

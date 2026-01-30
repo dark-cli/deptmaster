@@ -14,6 +14,7 @@ import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../widgets/gradient_card.dart';
+import '../widgets/sync_status_icon.dart';
 import '../widgets/debt_chart_widget.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
@@ -174,6 +175,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 onPressed: widget.onOpenDrawer,
               )
             : null,
+        actions: const [
+          Padding(
+            padding: EdgeInsets.only(left: 24.0, right: 20.0),
+            child: SyncStatusIcon(),
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: () => _loadData(sync: true),
