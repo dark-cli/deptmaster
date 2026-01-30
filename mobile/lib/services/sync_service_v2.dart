@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
 import 'event_store_service.dart';
 import 'api_service.dart';
 import 'state_builder.dart';
@@ -7,93 +8,271 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../models/event.dart';
+import 'realtime_service.dart';
+import 'retry_backoff.dart';
+import 'backend_config_service.dart';
+import 'auth_service.dart';
 
-/// Simplified Sync Service - KISS approach
+/// Sync result enum
+enum SyncResult { done, failed }
+
+/// Simplified Sync Service - Event-driven architecture
 /// Uses hash comparison and timestamp-based incremental sync
+/// Separates local-to-server and server-to-local sync operations
 class SyncServiceV2 {
-  static bool _isSyncing = false;
-  static Timer? _periodicSyncTimer;
+  static final RetryBackoff _retryBackoff = RetryBackoff();
+  static Timer? _webSocketNotificationTimer;
+  static Timer? _localToServerSyncTimer;
+  static bool _isLocalToServerSyncing = false;
+  static bool _isServerToLocalSyncing = false;
+  static bool _firstWebSocketRun = true;
+  static bool _firstLocalToServerRun = true;
+  static bool _needsServerToLocalRetry = false;
+  static bool? _serverReachableCache;
+  static DateTime? _serverReachableCacheTime;
+  static const Duration _serverReachableCacheDuration = Duration(seconds: 10);
 
   /// Initialize sync service
   static Future<void> initialize() async {
     if (kIsWeb) return;
-    
-    // No periodic sync - WebSocket handles all real-time updates
-    // WebSocket will trigger sync immediately when server sends updates
-    print('✅ SyncServiceV2 initialized (WebSocket-only, no timers)');
+
+    // Start WebSocket notification listening (permanent loop)
+    startWebSocketNotificationListening();
+
+    print('✅ SyncServiceV2 initialized');
   }
 
-  /// Perform full sync (hash-based comparison)
-  static Future<void> sync() async {
-    if (kIsWeb || _isSyncing) return;
+  // ========== HELPER FUNCTIONS ==========
 
-    _isSyncing = true;
+  /// Check if server is reachable via HTTP
+  /// Uses caching to avoid too many checks
+  static Future<bool> _isServerReachable() async {
+    if (kIsWeb) return false;
+
+    // Check cache first
+    if (_serverReachableCache != null && _serverReachableCacheTime != null) {
+      final elapsed = DateTime.now().difference(_serverReachableCacheTime!);
+      if (elapsed < _serverReachableCacheDuration) {
+        return _serverReachableCache!;
+      }
+    }
+
     try {
-      print('🔄 Starting sync...');
+      final baseUrl = await BackendConfigService.getBaseUrl();
+      final uri = Uri.parse('$baseUrl/api/sync/hash');
+      final token = await AuthService.getToken();
+      
+      final headers = <String, String>{'Content-Type': 'application/json'};
+      if (token != null) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      // Try a lightweight request with short timeout
+      final response = await http.get(uri, headers: headers).timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          throw Exception('Server reachability check timed out');
+        },
+      );
+
+      final isReachable = response.statusCode == 200 || response.statusCode == 401; // 401 means server is reachable but auth failed
+      
+      // Cache the result
+      _serverReachableCache = isReachable;
+      _serverReachableCacheTime = DateTime.now();
+      
+      return isReachable;
+    } catch (e) {
+      // Server not reachable
+      _serverReachableCache = false;
+      _serverReachableCacheTime = DateTime.now();
+      return false;
+    }
+  }
+
+  // ========== PURE SYNC FUNCTIONS ==========
+
+  /// Sync local events to server
+  /// Returns SyncResult.done on success, SyncResult.failed on failure
+  static Future<SyncResult> syncLocalToServer() async {
+    if (kIsWeb) return SyncResult.done;
+
+    print('🔄 syncLocalToServer: Starting...');
+
+    // Check if we have unsynced events
+    final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
+    if (unsyncedEvents.isEmpty) {
+      print('✅ syncLocalToServer: No unsynced events to send');
+      return SyncResult.done;
+    }
+
+    print('📤 syncLocalToServer: Found ${unsyncedEvents.length} unsynced events');
+
+    // Check if server is reachable
+    final isReachable = await _isServerReachable();
+    print('🌐 syncLocalToServer: Server reachable = $isReachable');
+    if (!isReachable) {
+      print('⚠️ syncLocalToServer: Server not reachable, will retry...');
+      return SyncResult.failed;
+    }
+
+    try {
+      print('📤 Sending ${unsyncedEvents.length} unsynced events to server...');
+
+      // Convert local events to server format
+      final eventsToSend = unsyncedEvents.map((e) {
+        // Ensure timestamp is in RFC3339 format (with Z suffix for UTC)
+        String timestamp = e.timestamp.toUtc().toIso8601String();
+        if (!timestamp.endsWith('Z')) {
+          timestamp = '${timestamp}Z';
+        }
+
+        return {
+          'id': e.id,
+          'aggregate_type': e.aggregateType,
+          'aggregate_id': e.aggregateId,
+          'event_type': e.eventType,
+          'event_data': e.eventData,
+          'timestamp': timestamp,
+          'version': e.version,
+        };
+      }).toList();
+
+      // Send to server
+      print('📤 syncLocalToServer: Sending ${eventsToSend.length} events to server...');
+      final result = await ApiService.postSyncEvents(eventsToSend);
+      final accepted = (result['accepted'] as List).cast<String>();
+      final conflicts = (result['conflicts'] as List).cast<String>();
+
+      print('✅ syncLocalToServer: Server accepted ${accepted.length} events, ${conflicts.length} conflicts');
+
+      if (accepted.isEmpty && conflicts.isEmpty && eventsToSend.isNotEmpty) {
+        print('⚠️ Warning: No events were accepted or conflicted. This might indicate a server error.');
+        return SyncResult.failed;
+      }
+
+      // Mark accepted events as synced
+      if (accepted.isNotEmpty) {
+        final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+        for (final eventId in accepted) {
+          final event = eventsBox.get(eventId);
+          if (event != null) {
+            final syncedEvent = Event(
+              id: event.id,
+              aggregateType: event.aggregateType,
+              aggregateId: event.aggregateId,
+              eventType: event.eventType,
+              eventData: event.eventData,
+              timestamp: event.timestamp,
+              version: event.version,
+              synced: true,
+            );
+            await eventsBox.put(eventId, syncedEvent);
+          }
+        }
+      }
+
+      // Handle conflicts (for now, just log them)
+      if (conflicts.isNotEmpty) {
+        print('⚠️ Conflicts detected: $conflicts');
+        // TODO: Handle conflicts (merge strategy)
+      }
+
+      // Rebuild state after sync
+      await _rebuildState();
+
+      print('✅ Local to server sync completed');
+      return SyncResult.done;
+    } catch (e) {
+      // Check if it's an authentication error
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('authentication') || errorStr.contains('expired') || errorStr.contains('401')) {
+        print('⚠️ Sync failed due to authentication error');
+        return SyncResult.failed;
+      }
+
+      // Check if it's a network error
+      if (errorStr.contains('connection refused') ||
+          errorStr.contains('failed host lookup') ||
+          errorStr.contains('network is unreachable') ||
+          errorStr.contains('socketexception') ||
+          errorStr.contains('timeout')) {
+        print('⚠️ Sync failed due to network error (offline or server unreachable)');
+        return SyncResult.failed;
+      }
+
+      // For other errors, log them
+      print('❌ Local to server sync error: $e');
+      return SyncResult.failed;
+    }
+  }
+
+  /// Sync server events to local
+  /// Returns SyncResult.done on success, SyncResult.failed on failure
+  static Future<SyncResult> syncServerToLocal() async {
+    if (kIsWeb) return SyncResult.done;
+
+    // Check if server is reachable
+    final isReachable = await _isServerReachable();
+    print('🌐 syncServerToLocal: Server reachable = $isReachable');
+    if (!isReachable) {
+      print('⚠️ syncServerToLocal: Server not reachable, will retry...');
+      return SyncResult.failed;
+    }
+
+    try {
+      print('🔄 Starting server to local sync...');
 
       // 1. Get server hash
-      print('📡 Fetching server hash...');
       final serverHashData = await ApiService.getSyncHash();
       final serverHash = serverHashData['hash'] as String;
       final serverEventCount = serverHashData['event_count'] as int;
-      print('✅ Server hash received: $serverEventCount events (hash: ${serverHash.substring(0, 8)}...)');
 
       // 2. Get local hash
-      print('💾 Checking local events...');
       final localHash = await EventStoreService.getEventHash();
       final localEventCount = await EventStoreService.getEventCount();
-      print('✅ Local hash: $localEventCount events (hash: ${localHash.substring(0, 8)}...)');
 
-      print('📊 Sync status: Local=$localEventCount events (hash: ${localHash.substring(0, 8)}...), Server=$serverEventCount events (hash: ${serverHash.substring(0, 8)}...)');
+      print('📊 Sync status: Local=$localEventCount events, Server=$serverEventCount events');
 
-      // 3. Check for unsynced events first (even if hashes match, we might have offline events)
-      final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
-      
-      // 4. If hashes match and no unsynced events, we're fully in sync
-      if (localHash == serverHash && localEventCount == serverEventCount && unsyncedEvents.isEmpty) {
-        print('✅ Already in sync');
+      // 3. If hashes match, we're in sync
+      if (localHash == serverHash && localEventCount == serverEventCount) {
+        print('✅ Already in sync with server');
         final lastSync = await EventStoreService.getLastSyncTimestamp();
         if (lastSync == null) {
-          // First sync - mark current time
           await EventStoreService.setLastSyncTimestamp(DateTime.now());
         }
-        // Skip rebuilding state if already in sync - saves significant time
-        // State will be rebuilt automatically when new events arrive
-        return;
-      }
-      
-      // If we have unsynced events, continue with sync even if hashes match
-      if (unsyncedEvents.isNotEmpty) {
-        print('📤 Found ${unsyncedEvents.length} unsynced events, syncing...');
+        return SyncResult.done;
       }
 
-      // 5. Get last sync timestamp for incremental sync
+      // 4. Get last sync timestamp for incremental sync
       final lastSync = await EventStoreService.getLastSyncTimestamp();
-      
-      // 6. Pull new events from server (since last sync or all if first time)
+
+      // 5. Pull new events from server
+      print('📥 Fetching events from server...');
       List<Map<String, dynamic>> serverEvents;
       if (lastSync != null) {
+        print('📥 Using incremental sync since: ${lastSync.toIso8601String()}');
         serverEvents = await ApiService.getSyncEvents(since: lastSync.toIso8601String());
       } else {
         // First sync - get all events
+        print('📥 First sync - fetching all events from server...');
         serverEvents = await ApiService.getSyncEvents();
       }
 
       print('📥 Received ${serverEvents.length} events from server');
 
-      // 7. Load all local events once (performance optimization)
-      // Create a Set of event IDs for O(1) lookup instead of O(n) search in loop
+      // 6. Load all local events once (performance optimization)
       final allLocalEvents = await EventStoreService.getAllEvents();
       final localEventIds = allLocalEvents.map((e) => e.id).toSet();
-      
-      // 8. Insert missing events from server (by timestamp order)
+
+      // 7. Insert missing events from server
       int insertedCount = 0;
       final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
-      
+
       for (final serverEvent in serverEvents) {
         final eventId = serverEvent['id'] as String;
-        
-        // Check if event already exists locally using Set lookup (O(1) instead of O(n))
+
+        // Check if event already exists locally
         if (!localEventIds.contains(eventId)) {
           // Convert server event to local Event
           final event = Event(
@@ -109,130 +288,255 @@ class SyncServiceV2 {
 
           // Insert into local event store
           await eventsBox.put(event.id, event);
-          localEventIds.add(eventId); // Update Set for subsequent checks
+          localEventIds.add(eventId);
           insertedCount++;
         }
       }
 
       print('✅ Inserted $insertedCount new events from server');
 
-      // 8. Send unsynced local events to server (re-fetch to get latest)
-      final unsyncedEventsToSend = await EventStoreService.getUnsyncedEvents();
-      print('📤 Sending ${unsyncedEventsToSend.length} unsynced events to server');
-
-      if (unsyncedEventsToSend.isNotEmpty) {
-        // 9. Convert local events to server format
-        final eventsToSend = unsyncedEventsToSend.map((e) {
-          // Ensure timestamp is in RFC3339 format (with Z suffix for UTC)
-          String timestamp = e.timestamp.toUtc().toIso8601String();
-          if (!timestamp.endsWith('Z')) {
-            timestamp = '${timestamp}Z';
-          }
-          
-          return {
-            'id': e.id,
-            'aggregate_type': e.aggregateType,
-            'aggregate_id': e.aggregateId,
-            'event_type': e.eventType,
-            'event_data': e.eventData,
-            'timestamp': timestamp,
-            'version': e.version,
-          };
-        }).toList();
-
-        // 10. Send to server
-        print('📤 Sending ${eventsToSend.length} events to server...');
-        final result = await ApiService.postSyncEvents(eventsToSend);
-        final accepted = (result['accepted'] as List).cast<String>();
-        final conflicts = (result['conflicts'] as List).cast<String>();
-
-        print('✅ Server accepted ${accepted.length} events, ${conflicts.length} conflicts');
-        
-        if (accepted.isEmpty && conflicts.isEmpty && eventsToSend.isNotEmpty) {
-          print('⚠️ Warning: No events were accepted or conflicted. This might indicate a server error.');
-        }
-
-        // 11. Mark accepted events as synced (batch operation for performance)
-        if (accepted.isNotEmpty) {
-          final eventsBoxForMarking = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
-          for (final eventId in accepted) {
-            final event = eventsBoxForMarking.get(eventId);
-            if (event != null) {
-              final syncedEvent = Event(
-                id: event.id,
-                aggregateType: event.aggregateType,
-                aggregateId: event.aggregateId,
-                eventType: event.eventType,
-                eventData: event.eventData,
-                timestamp: event.timestamp,
-                version: event.version,
-                synced: true, // Mark as synced
-              );
-              await eventsBoxForMarking.put(eventId, syncedEvent);
-            }
-          }
-        }
-
-        // 12. Handle conflicts (for now, just log them)
-        if (conflicts.isNotEmpty) {
-          print('⚠️ Conflicts detected: $conflicts');
-          // TODO: Handle conflicts (merge strategy)
-        }
-      } else {
-        print('✅ No unsynced events to send');
-      }
-
-      // 13. Rebuild state from all events
+      // 8. Rebuild state from all events
       await _rebuildState();
 
-      // 14. Update last sync timestamp
+      // 9. Update last sync timestamp
       await EventStoreService.setLastSyncTimestamp(DateTime.now());
 
-      print('✅ Sync completed');
-      
-      // 15. State was already rebuilt in step 13 (_rebuildState)
-      // The UI will automatically refresh via Hive box listeners when state changes
-    } catch (e, stackTrace) {
+      print('✅ Server to local sync completed');
+      return SyncResult.done;
+    } catch (e) {
       // Check if it's an authentication error
       final errorStr = e.toString().toLowerCase();
       if (errorStr.contains('authentication') || errorStr.contains('expired') || errorStr.contains('401')) {
-        print('⚠️ Sync failed due to authentication error - user has been logged out');
-        print('   Error: $e');
-        // Don't retry - user needs to login again
-        return;
+        print('⚠️ Sync failed due to authentication error');
+        return SyncResult.failed;
       }
-      
+
       // Check if it's a network error
-      if (errorStr.contains('connection refused') || 
+      if (errorStr.contains('connection refused') ||
           errorStr.contains('failed host lookup') ||
           errorStr.contains('network is unreachable') ||
           errorStr.contains('socketexception') ||
           errorStr.contains('timeout')) {
         print('⚠️ Sync failed due to network error (offline or server unreachable)');
-        print('   Error: $e');
-        // Don't throw - network errors are expected when offline
-        return;
+        return SyncResult.failed;
       }
-      
-      // For other errors, log them with full details
-      print('❌ Sync error: $e');
-      print('   Stack trace: $stackTrace');
-      
-      // Check if there are unsynced events that failed to sync
-      try {
-        final unsyncedCount = (await EventStoreService.getUnsyncedEvents()).length;
-        if (unsyncedCount > 0) {
-          print('   ⚠️ Warning: $unsyncedCount events remain unsynced');
-        }
-      } catch (_) {
-        // Ignore errors checking unsynced events
-      }
-      
-      // Don't throw - sync failures shouldn't break the app
-    } finally {
-      _isSyncing = false;
+
+      // For other errors, log them
+      print('❌ Server to local sync error: $e');
+      return SyncResult.failed;
     }
   }
+
+  // ========== LOOP FUNCTIONS ==========
+
+  /// Start WebSocket notification listening (permanent loop)
+  /// Manages retry loop for server-to-local sync failures
+  /// WebSocket notifications are handled by RealtimeService, which calls syncServerToLocal()
+  static void startWebSocketNotificationListening() {
+    if (kIsWeb) return;
+
+    // Cancel existing if any
+    _webSocketNotificationTimer?.cancel();
+    _webSocketNotificationTimer = null;
+    _firstWebSocketRun = true;
+    _needsServerToLocalRetry = false;
+
+    // Start permanent loop for retry management
+    _webSocketNotificationTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      // Check if sync already running
+      if (_isServerToLocalSyncing) {
+        return;
+      }
+
+      // First run: no wait
+      if (_firstWebSocketRun) {
+        _firstWebSocketRun = false;
+        return;
+      }
+
+      // If we need retry, wait per backoff and retry
+      if (_needsServerToLocalRetry) {
+        final waitDuration = _retryBackoff.getWaiting();
+        await Future.delayed(waitDuration);
+
+        // Retry server to local sync
+        _isServerToLocalSyncing = true;
+        try {
+          final result = await syncServerToLocal();
+          if (result == SyncResult.done) {
+            // Success, reset retry flag and backoff
+            _needsServerToLocalRetry = false;
+            _retryBackoff.reset();
+          } else {
+            // Still failed, will retry again
+            _needsServerToLocalRetry = true;
+          }
+        } catch (e) {
+          print('❌ Server to local sync retry error: $e');
+          _needsServerToLocalRetry = true;
+        } finally {
+          _isServerToLocalSyncing = false;
+        }
+      }
+    });
+  }
+
+  /// Start local to server sync loop (temporary loop)
+  /// Runs until sync succeeds, then stops
+  static void startLocalToServerSync() {
+    if (kIsWeb) return;
+
+    print('🔄 Starting local to server sync loop...');
+
+    // Cancel existing if any
+    _localToServerSyncTimer?.cancel();
+    _localToServerSyncTimer = null;
+    _firstLocalToServerRun = true;
+
+    // Reset backoff for immediate sync
+    _retryBackoff.reset();
+
+    // Start temporary loop
+    _localToServerSyncTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      // Check if sync already running
+      if (_isLocalToServerSyncing) {
+        print('⚠️ Local to server sync loop: sync already running, skipping...');
+        return;
+      }
+
+      // Check if we have unsynced events
+      final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
+      if (unsyncedEvents.isEmpty) {
+        // No unsynced events, stop loop
+        timer.cancel();
+        _localToServerSyncTimer = null;
+        _retryBackoff.reset();
+        print('✅ Local to server sync loop stopped - no unsynced events');
+        return;
+      }
+
+      print('🔄 Local to server sync loop: found ${unsyncedEvents.length} unsynced events');
+
+      // First run: no wait
+      if (_firstLocalToServerRun) {
+        _firstLocalToServerRun = false;
+        print('🔄 Local to server sync loop: first run, no wait');
+      } else {
+        // Subsequent runs: wait per backoff
+        final waitDuration = _retryBackoff.getWaiting();
+        print('🔄 Local to server sync loop: waiting ${waitDuration.inSeconds}s before retry...');
+        await Future.delayed(waitDuration);
+      }
+
+      // Attempt sync
+      _isLocalToServerSyncing = true;
+      try {
+        print('🔄 Local to server sync loop: attempting sync...');
+        final result = await syncLocalToServer();
+        if (result == SyncResult.done) {
+          // Sync succeeded, stop loop
+          timer.cancel();
+          _localToServerSyncTimer = null;
+          _retryBackoff.reset();
+          print('✅ Local to server sync loop stopped - sync succeeded');
+        } else {
+          // Sync failed, will retry on next iteration
+          print('⚠️ Local to server sync failed, will retry...');
+        }
+      } catch (e) {
+        print('❌ Local to server sync error: $e');
+        // Will retry on next iteration
+      } finally {
+        _isLocalToServerSyncing = false;
+      }
+    });
+  }
+
+  /// Handle server-to-local sync request (called by RealtimeService on notification)
+  /// If sync fails, sets retry flag for the notification loop to handle
+  static Future<void> handleServerToLocalSyncRequest() async {
+    if (kIsWeb || _isServerToLocalSyncing) return;
+
+    _isServerToLocalSyncing = true;
+    try {
+      final result = await syncServerToLocal();
+      if (result == SyncResult.failed) {
+        // Set retry flag - the notification loop will handle retry
+        _needsServerToLocalRetry = true;
+        _retryBackoff.reset(); // Reset backoff for new retry cycle
+      } else {
+        // Success, reset retry flag and backoff
+        _needsServerToLocalRetry = false;
+        _retryBackoff.reset();
+      }
+    } catch (e) {
+      print('❌ Server to local sync error: $e');
+      _needsServerToLocalRetry = true;
+      _retryBackoff.reset();
+    } finally {
+      _isServerToLocalSyncing = false;
+    }
+  }
+
+  // ========== EVENT HANDLERS ==========
+
+  /// Called when coming back online
+  /// Resets backoff and runs both syncs
+  static void onBackOnline() {
+    if (kIsWeb) return;
+
+    print('🔄 Back online - resetting backoff and running both syncs');
+
+    // Reset backoff
+    _retryBackoff.reset();
+
+    // Trigger server to local sync first (to get server updates)
+    print('🔄 onBackOnline: Triggering server to local sync...');
+    if (!_isServerToLocalSyncing) {
+      _isServerToLocalSyncing = true;
+      syncServerToLocal().then((result) {
+        _isServerToLocalSyncing = false;
+        if (result == SyncResult.done) {
+          print('✅ onBackOnline: Server to local sync completed');
+        } else {
+          print('⚠️ onBackOnline: Server to local sync failed, will retry via notification loop');
+          _needsServerToLocalRetry = true;
+          _retryBackoff.reset();
+        }
+      }).catchError((e) {
+        print('❌ onBackOnline: Server to local sync error: $e');
+        _isServerToLocalSyncing = false;
+        _needsServerToLocalRetry = true;
+        _retryBackoff.reset();
+      });
+    }
+
+    // Check if we have unsynced events and start local to server sync
+    EventStoreService.getUnsyncedEvents().then((unsynced) {
+      if (unsynced.isNotEmpty) {
+        print('🔄 onBackOnline: Found ${unsynced.length} unsynced events, starting local to server sync...');
+        startLocalToServerSync();
+      } else {
+        print('✅ onBackOnline: No unsynced events to sync');
+      }
+    });
+  }
+
+  /// Called on pull-to-refresh (swipe down)
+  /// Resets backoff and starts local to server sync
+  static void onPullToRefresh() {
+    if (kIsWeb) return;
+
+    print('🔄 Pull to refresh - resetting backoff and starting sync');
+
+    // Reset backoff
+    _retryBackoff.reset();
+
+    // Start local to server sync
+    startLocalToServerSync();
+  }
+
+  // ========== HELPER FUNCTIONS ==========
 
   /// Rebuild application state from events
   static Future<void> _rebuildState() async {
@@ -240,59 +544,51 @@ class SyncServiceV2 {
 
     try {
       print('🔄 Rebuilding state from events...');
-      
+
       // Get all events
       final events = await EventStoreService.getAllEvents();
-      
+
       // Build state using StateBuilder
       final state = StateBuilder.buildState(events);
-      
+
       // Save to Hive boxes
       final contactsBox = await Hive.openBox<Contact>('contacts');
       final transactionsBox = await Hive.openBox<Transaction>('transactions');
-      
+
       // Clear existing data
       await contactsBox.clear();
       await transactionsBox.clear();
-      
+
       // Write new state
       for (final contact in state.contacts) {
         await contactsBox.put(contact.id, contact);
       }
-      
+
       for (final transaction in state.transactions) {
         await transactionsBox.put(transaction.id, transaction);
       }
-      
+
       print('✅ State rebuilt: ${state.contacts.length} contacts, ${state.transactions.length} transactions');
     } catch (e) {
       print('❌ Error rebuilding state: $e');
     }
   }
 
-  /// Manual sync trigger
-  static Future<void> manualSync() async {
-    if (_isSyncing) {
-      print('⚠️ Sync already in progress, skipping...');
-      return;
-    }
-    await sync();
-  }
-  
   /// Get sync status for debugging
   static Future<Map<String, dynamic>> getSyncStatus() async {
     if (kIsWeb) {
       return {'error': 'Sync not available on web'};
     }
-    
+
     try {
       final localEventCount = await EventStoreService.getEventCount();
       final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
       final unsyncedCount = unsyncedEvents.length;
       final lastSync = await EventStoreService.getLastSyncTimestamp();
-      
+
       return {
-        'is_syncing': _isSyncing,
+        'is_local_to_server_syncing': _isLocalToServerSyncing,
+        'is_server_to_local_syncing': _isServerToLocalSyncing,
         'local_event_count': localEventCount,
         'unsynced_event_count': unsyncedCount,
         'last_sync': lastSync?.toIso8601String(),
@@ -303,9 +599,38 @@ class SyncServiceV2 {
     }
   }
 
-  /// Stop periodic sync
+  /// Stop all sync operations
   static void stop() {
-    _periodicSyncTimer?.cancel();
-    _periodicSyncTimer = null;
+    _webSocketNotificationTimer?.cancel();
+    _webSocketNotificationTimer = null;
+    _localToServerSyncTimer?.cancel();
+    _localToServerSyncTimer = null;
+  }
+
+  /// Manual sync trigger (for backward compatibility)
+  /// Triggers both server-to-local and local-to-server sync
+  static Future<void> manualSync() async {
+    if (kIsWeb) return;
+
+    print('🔄 manualSync: Triggering both syncs...');
+
+    // First sync server to local (to get latest from server)
+    if (!_isServerToLocalSyncing) {
+      _isServerToLocalSyncing = true;
+      syncServerToLocal().then((result) {
+        _isServerToLocalSyncing = false;
+        if (result == SyncResult.done) {
+          print('✅ manualSync: Server to local sync completed');
+        } else {
+          print('⚠️ manualSync: Server to local sync failed');
+        }
+      }).catchError((e) {
+        print('❌ manualSync: Server to local sync error: $e');
+        _isServerToLocalSyncing = false;
+      });
+    }
+
+    // Then start local to server sync (if there are unsynced events)
+    startLocalToServerSync();
   }
 }

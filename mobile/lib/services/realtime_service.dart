@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'api_service.dart';
 import 'backend_config_service.dart';
-import 'sync_service_v2.dart';
+import 'sync_service_v2.dart' show SyncServiceV2, SyncResult;
 import 'state_builder.dart';
 import 'event_store_service.dart';
 import 'connection_manager.dart';
@@ -125,21 +125,9 @@ class RealtimeService {
               
               // Always trigger sync when reconnecting to sync offline events
               // This ensures events created offline are synced when back online
-              // Trigger sync immediately (no delay) for faster sync after reconnection
               if (!kIsWeb) {
-                print('🔄 Connection established - triggering sync immediately...');
-                // Trigger sync immediately - no delay needed
-                SyncServiceV2.manualSync().catchError((e) {
-                  // Check if it's an auth error
-                  final errorStr = e.toString();
-                  if (!errorStr.contains('Authentication') && 
-                      !errorStr.contains('expired') &&
-                      !errorStr.contains('Connection refused') &&
-                      !errorStr.contains('Failed host lookup') &&
-                      !errorStr.contains('Network is unreachable')) {
-                    print('⚠️ Sync error after reconnection: $e');
-                  }
-                });
+                print('🔄 Connection established - triggering sync...');
+                SyncServiceV2.onBackOnline();
               }
             }
             
@@ -270,13 +258,11 @@ class RealtimeService {
   }
 
   static void _handleRealtimeUpdate(Map<String, dynamic> data) {
-    // Trigger immediate sync for ANY WebSocket message
-    // This ensures hot updates without waiting for periodic sync
-    // WebSocket messages indicate server-side changes, so sync immediately
+    // Trigger server-to-local sync for WebSocket notifications
+    // WebSocket messages indicate server-side changes
     if (!kIsWeb) {
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors
-      });
+      // Trigger server to local sync (to get new events from server)
+      SyncServiceV2.handleServerToLocalSyncRequest();
     }
   }
 

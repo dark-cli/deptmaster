@@ -110,9 +110,7 @@ class LocalDatabaseServiceV2 {
       await _rebuildState();
 
       // 3. Trigger automatic sync to server (like Firebase - immediate push)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      SyncServiceV2.startLocalToServerSync();
 
       print('✅ Contact created: ${contact.name}');
       return contact;
@@ -148,9 +146,7 @@ class LocalDatabaseServiceV2 {
       await _rebuildState();
 
       // 3. Trigger automatic sync to server (like Firebase - immediate push)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      SyncServiceV2.startLocalToServerSync();
 
       print('✅ Contact updated: ${contact.name}');
       return contact;
@@ -181,9 +177,7 @@ class LocalDatabaseServiceV2 {
       await _rebuildState();
 
       // 3. Trigger automatic sync to server (like Firebase - immediate push)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      SyncServiceV2.startLocalToServerSync();
 
       print('✅ Contact deleted: $contactId');
     } catch (e) {
@@ -220,9 +214,7 @@ class LocalDatabaseServiceV2 {
       await _rebuildState();
 
       // 3. Trigger automatic sync to server (like Firebase - immediate push)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      SyncServiceV2.startLocalToServerSync();
 
       print('✅ Transaction created: ${transaction.id}');
       return transaction;
@@ -265,9 +257,7 @@ class LocalDatabaseServiceV2 {
       await _rebuildState();
 
       // 3. Trigger automatic sync to server (like Firebase - immediate push)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      SyncServiceV2.startLocalToServerSync();
 
       print('✅ Transaction updated: ${transaction.id}');
       return transaction;
@@ -326,9 +316,7 @@ class LocalDatabaseServiceV2 {
       await _rebuildState();
 
       // 3. Trigger automatic sync to server (like Firebase - immediate push)
-      SyncServiceV2.manualSync().catchError((e) {
-        // Silently handle sync errors - will retry later
-      });
+      SyncServiceV2.startLocalToServerSync();
 
       print('✅ Transaction deleted: $transactionId');
     } catch (e) {

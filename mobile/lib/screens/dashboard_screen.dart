@@ -98,7 +98,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       
       // If sync requested, do full sync in background
       if (sync && !kIsWeb) {
-        SyncServiceV2.manualSync(); // Don't await, let it run in background
+        SyncServiceV2.onPullToRefresh(); // Reset backoff and start sync
       }
       
       if (mounted) {
