@@ -92,17 +92,31 @@ void main() {
       print('📴 App1 disconnecting...');
       await app1!.disconnect();
       
-      // App2 and App3 create many events
+      // App2 and App3 create many events (contacts and transactions)
       print('📝 App2 and App3 creating events...');
       final contacts = <Contact>[];
+      final transactions = <Transaction>[];
       for (int i = 0; i < 5; i++) {
         final contact2 = await app2!.createContact(name: 'Contact from App2 #$i');
         final contact3 = await app3!.createContact(name: 'Contact from App3 #$i');
         contacts.add(contact2);
         contacts.add(contact3);
+        
+        final transaction2 = await app2!.createTransaction(
+          contactId: contact2.id,
+          direction: TransactionDirection.owed,
+          amount: 1000 + i * 100,
+        );
+        final transaction3 = await app3!.createTransaction(
+          contactId: contact3.id,
+          direction: TransactionDirection.lent,
+          amount: 500 + i * 50,
+        );
+        transactions.add(transaction2);
+        transactions.add(transaction3);
         await Future.delayed(const Duration(milliseconds: 300));
       }
-      print('✅ ${contacts.length} contacts created');
+      print('✅ ${contacts.length} contacts and ${transactions.length} transactions created');
       
       // Wait for App2 and App3 to sync
       print('⏳ Waiting for App2 and App3 to sync...');
@@ -110,8 +124,12 @@ void main() {
       
       // Verify events on server
       final serverEvents = await serverVerifier!.getServerEvents();
-      expect(serverEvents.length, greaterThanOrEqualTo(contacts.length),
-        reason: 'Server should have all events');
+      final contactEvents = serverEvents.where((e) => e['aggregate_type'] == 'contact').toList();
+      final transactionEvents = serverEvents.where((e) => e['aggregate_type'] == 'transaction').toList();
+      expect(contactEvents.length, greaterThanOrEqualTo(contacts.length),
+        reason: 'Server should have all contact events');
+      expect(transactionEvents.length, greaterThanOrEqualTo(transactions.length),
+        reason: 'Server should have all transaction events');
       print('✅ Events synced to server');
       
       // App1 reconnects
@@ -127,17 +145,27 @@ void main() {
       final app1Events = await app1!.getEvents();
       for (final contact in contacts) {
         final event = app1Events.where(
-          (e) => e.aggregateId == contact.id && e.eventType == 'CREATED',
+          (e) => e.aggregateId == contact.id && e.eventType == 'CREATED' && e.aggregateType == 'contact',
         ).toList();
         expect(event.isNotEmpty, true, 
           reason: 'App1 should have event for contact ${contact.id}');
+      }
+      for (final transaction in transactions) {
+        final event = app1Events.where(
+          (e) => e.aggregateId == transaction.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction',
+        ).toList();
+        expect(event.isNotEmpty, true, 
+          reason: 'App1 should have event for transaction ${transaction.id}');
       }
       print('✅ App1 fetched all missed events');
       
       // Verify state rebuilt correctly
       final app1Contacts = await app1!.getContacts();
+      final app1Transactions = await app1!.getTransactions();
       expect(app1Contacts.length, greaterThanOrEqualTo(contacts.length),
         reason: 'App1 should have all contacts');
+      expect(app1Transactions.length, greaterThanOrEqualTo(transactions.length),
+        reason: 'App1 should have all transactions');
       print('✅ State rebuilt correctly');
       
       // Verify all apps in sync
@@ -153,6 +181,17 @@ void main() {
       print('📝 Creating initial events...');
       final contact1 = await app1!.createContact(name: 'Initial Contact 1');
       final contact2 = await app2!.createContact(name: 'Initial Contact 2');
+      
+      final transaction1 = await app1!.createTransaction(
+        contactId: contact1.id,
+        direction: TransactionDirection.owed,
+        amount: 1000,
+      );
+      final transaction2 = await app2!.createTransaction(
+        contactId: contact2.id,
+        direction: TransactionDirection.lent,
+        amount: 500,
+      );
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       await Future.delayed(const Duration(seconds: 2));
       
@@ -164,11 +203,25 @@ void main() {
       print('📴 App1 disconnecting...');
       await app1!.disconnect();
       
-      // App2 and App3 create more events
+      // App2 and App3 create more events (contacts and transactions)
       print('📝 App2 and App3 creating more events...');
+      final newContacts = <Contact>[];
       for (int i = 0; i < 3; i++) {
-        await app2!.createContact(name: 'New Contact from App2 #$i');
-        await app3!.createContact(name: 'New Contact from App3 #$i');
+        final contact2 = await app2!.createContact(name: 'New Contact from App2 #$i');
+        final contact3 = await app3!.createContact(name: 'New Contact from App3 #$i');
+        newContacts.add(contact2);
+        newContacts.add(contact3);
+        
+        await app2!.createTransaction(
+          contactId: contact2.id,
+          direction: TransactionDirection.owed,
+          amount: 1000 + i * 100,
+        );
+        await app3!.createTransaction(
+          contactId: contact3.id,
+          direction: TransactionDirection.lent,
+          amount: 500 + i * 50,
+        );
         await Future.delayed(const Duration(milliseconds: 300));
       }
       
@@ -213,25 +266,40 @@ void main() {
       // Create initial events
       print('📝 Creating initial events...');
       final contact1 = await app1!.createContact(name: 'Initial Contact');
+      final transaction1 = await app1!.createTransaction(
+        contactId: contact1.id,
+        direction: TransactionDirection.owed,
+        amount: 1000,
+      );
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       await Future.delayed(const Duration(seconds: 2));
       
-      // Verify all apps have initial event
+      // Verify all apps have initial events
       final allContacts = await app1!.getContacts();
+      final allTransactions = await app1!.getTransactions();
       expect(allContacts.any((c) => c.id == contact1.id), true);
-      print('✅ Initial event synced');
+      expect(allTransactions.any((t) => t.id == transaction1.id), true);
+      print('✅ Initial events synced');
       
       // App1 disconnects briefly
       print('📴 App1 disconnecting briefly...');
       await app1!.disconnect();
       await Future.delayed(const Duration(seconds: 1));
       
-      // App2 creates events after App1's last sync timestamp
+      // App2 creates events after App1's last sync timestamp (contacts and transactions)
       print('📝 App2 creating events after App1 disconnect...');
       final newContacts = <Contact>[];
+      final newTransactions = <Transaction>[];
       for (int i = 0; i < 3; i++) {
         final contact = await app2!.createContact(name: 'New Contact #$i');
         newContacts.add(contact);
+        
+        final transaction = await app2!.createTransaction(
+          contactId: contact.id,
+          direction: TransactionDirection.owed,
+          amount: 1000 + i * 100,
+        );
+        newTransactions.add(transaction);
         await Future.delayed(const Duration(milliseconds: 300));
       }
       
@@ -249,18 +317,28 @@ void main() {
       
       // Verify App1 received only new events (incremental)
       final app1Events = await app1!.getEvents();
-      final app1NewEvents = app1Events.where(
-        (e) => newContacts.any((c) => c.id == e.aggregateId && e.eventType == 'CREATED'),
+      final app1NewContactEvents = app1Events.where(
+        (e) => newContacts.any((c) => c.id == e.aggregateId && e.eventType == 'CREATED' && e.aggregateType == 'contact'),
       ).toList();
-      expect(app1NewEvents.length, newContacts.length,
-        reason: 'App1 should have all new events');
+      final app1NewTransactionEvents = app1Events.where(
+        (e) => newTransactions.any((t) => t.id == e.aggregateId && e.eventType == 'CREATED' && e.aggregateType == 'transaction'),
+      ).toList();
+      expect(app1NewContactEvents.length, newContacts.length,
+        reason: 'App1 should have all new contact events');
+      expect(app1NewTransactionEvents.length, newTransactions.length,
+        reason: 'App1 should have all new transaction events');
       print('✅ Incremental sync worked - App1 received new events');
       
       // Verify state updated correctly
       final app1Contacts = await app1!.getContacts();
+      final app1Transactions = await app1!.getTransactions();
       for (final contact in newContacts) {
         expect(app1Contacts.any((c) => c.id == contact.id), true,
           reason: 'App1 should have contact ${contact.id}');
+      }
+      for (final transaction in newTransactions) {
+        expect(app1Transactions.any((t) => t.id == transaction.id), true,
+          reason: 'App1 should have transaction ${transaction.id}');
       }
       print('✅ State updated correctly');
       

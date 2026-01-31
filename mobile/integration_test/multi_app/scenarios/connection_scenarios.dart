@@ -90,34 +90,52 @@ void main() {
       print('⚠️ NOTE: NetworkInterceptor is not fully integrated - HTTP calls bypass it');
       print('⚠️ This test verifies sync behavior, but offline simulation is limited');
       
-      // App1 creates contact (sync will happen immediately)
-      print('📝 App1 creating contact...');
+      // App1 creates contact and transaction (sync will happen immediately)
+      print('📝 App1 creating contact and transaction...');
       final contact = await app1!.createContact(name: 'Contact to Interrupt');
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      
+      final transaction = await app1!.createTransaction(
+        contactId: contact.id,
+        direction: TransactionDirection.owed,
+        amount: 1000,
+      );
       await Future.delayed(const Duration(milliseconds: 200)); // Allow sync to complete
       
-      // Verify event created and synced (sync happens immediately)
+      // Verify both events created and synced
       final app1Events = await app1!.getEvents();
-      final createdEvent = app1Events.firstWhere(
-        (e) => e.aggregateId == contact.id && e.eventType == 'CREATED',
-        orElse: () => throw Exception('CREATED event not found'),
+      final contactEvent = app1Events.firstWhere(
+        (e) => e.aggregateId == contact.id && e.eventType == 'CREATED' && e.aggregateType == 'contact',
+        orElse: () => throw Exception('Contact CREATED event not found'),
       );
-      expect(createdEvent.synced, true, reason: 'Event should be synced (sync happens immediately)');
-      print('✅ Event created and synced: ${createdEvent.id}');
+      final transactionEvent = app1Events.firstWhere(
+        (e) => e.aggregateId == transaction.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction',
+        orElse: () => throw Exception('Transaction CREATED event not found'),
+      );
+      expect(contactEvent.synced, true);
+      expect(transactionEvent.synced, true);
+      print('✅ Both events created and synced');
       
-      // Verify event on server
+      // Verify both events on server
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == contact.id,
-        orElse: () => throw Exception('Event not found on server'),
+      final serverContactEvent = serverEvents.firstWhere(
+        (e) => e['aggregate_id'] == contact.id && e['aggregate_type'] == 'contact',
+        orElse: () => throw Exception('Contact event not found on server'),
       );
-      expect(serverEvent['event_type'], 'CREATED');
-      print('✅ Event synced to server');
+      final serverTransactionEvent = serverEvents.firstWhere(
+        (e) => e['aggregate_id'] == transaction.id && e['aggregate_type'] == 'transaction',
+        orElse: () => throw Exception('Transaction event not found on server'),
+      );
+      expect(serverContactEvent['event_type'], 'CREATED');
+      expect(serverTransactionEvent['event_type'], 'CREATED');
+      print('✅ Both events synced to server');
       
-      // Verify other apps receive event (shared boxes)
+      // Verify both exist in all apps (shared boxes)
       final allContacts = await app1!.getContacts();
-      expect(allContacts.any((c) => c.id == contact.id), true,
-        reason: 'Contact should exist in all apps (shared boxes)');
-      print('✅ Contact exists in all apps (shared boxes)');
+      final allTransactions = await app1!.getTransactions();
+      expect(allContacts.any((c) => c.id == contact.id), true);
+      expect(allTransactions.any((t) => t.id == transaction.id), true);
+      print('✅ Contact and transaction exist in all apps (shared boxes)');
       
       print('⚠️ Test completed - offline simulation not fully functional due to interceptor limitation');
       print('⚠️ See NETWORK_INTERCEPTOR_LIMITATION.md for details');
@@ -126,27 +144,46 @@ void main() {
     test('4.2 Multiple Sync Failures', () async {
       print('\n📋 Test 4.2: Multiple Sync Failures');
       print('⚠️ NOTE: NetworkInterceptor is not fully integrated - HTTP calls bypass it');
-      print('⚠️ This test verifies sync behavior with multiple contacts');
+      print('⚠️ This test verifies sync behavior with multiple contacts and transactions');
       
-      // App1 creates multiple contacts (sync will happen immediately)
-      print('📝 App1 creating multiple contacts...');
+      // App1 creates multiple contacts, each with a transaction
+      print('📝 App1 creating multiple contacts and transactions...');
       final contacts = <Contact>[];
+      final transactions = <Transaction>[];
       for (int i = 0; i < 3; i++) {
         final contact = await app1!.createContact(name: 'Contact $i');
         contacts.add(contact);
         await Future.delayed(const Duration(milliseconds: 100)); // Small delay between creates
+        
+        final transaction = await app1!.createTransaction(
+          contactId: contact.id,
+          direction: TransactionDirection.owed,
+          amount: 1000 + i * 100,
+        );
+        transactions.add(transaction);
+        await Future.delayed(const Duration(milliseconds: 100));
       }
-      print('✅ ${contacts.length} contacts created');
+      print('✅ ${contacts.length} contacts and ${transactions.length} transactions created');
       
-      // Verify all events created and synced (sync happens immediately)
+      // Wait for sync
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       await Future.delayed(const Duration(milliseconds: 200));
+      
+      // Verify all events created and synced
       final app1Events = await app1!.getEvents();
       for (final contact in contacts) {
         final event = app1Events.firstWhere(
-          (e) => e.aggregateId == contact.id && e.eventType == 'CREATED',
-          orElse: () => throw Exception('Event not found for contact ${contact.id}'),
+          (e) => e.aggregateId == contact.id && e.eventType == 'CREATED' && e.aggregateType == 'contact',
+          orElse: () => throw Exception('Contact event not found for ${contact.id}'),
         );
-        expect(event.synced, true, reason: 'Event should be synced for contact ${contact.id}');
+        expect(event.synced, true, reason: 'Contact event should be synced for ${contact.id}');
+      }
+      for (final transaction in transactions) {
+        final event = app1Events.firstWhere(
+          (e) => e.aggregateId == transaction.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction',
+          orElse: () => throw Exception('Transaction event not found for ${transaction.id}'),
+        );
+        expect(event.synced, true, reason: 'Transaction event should be synced for ${transaction.id}');
       }
       print('✅ All events synced');
       
@@ -154,10 +191,17 @@ void main() {
       final serverEvents = await serverVerifier!.getServerEvents();
       for (final contact in contacts) {
         final serverEvent = serverEvents.where(
-          (e) => e['aggregate_id'] == contact.id,
+          (e) => e['aggregate_id'] == contact.id && e['aggregate_type'] == 'contact',
         ).toList();
         expect(serverEvent.isNotEmpty, true, 
-          reason: 'Event should be on server for contact ${contact.id}');
+          reason: 'Contact event should be on server for ${contact.id}');
+      }
+      for (final transaction in transactions) {
+        final serverEvent = serverEvents.where(
+          (e) => e['aggregate_id'] == transaction.id && e['aggregate_type'] == 'transaction',
+        ).toList();
+        expect(serverEvent.isNotEmpty, true, 
+          reason: 'Transaction event should be on server for ${transaction.id}');
       }
       print('✅ All events on server');
       
@@ -174,11 +218,27 @@ void main() {
       print('⚠️ NOTE: NetworkInterceptor is not fully integrated - HTTP calls bypass it');
       print('⚠️ This test verifies sync behavior with multiple apps, but offline simulation is limited');
       
-      // Apps create events (sync will happen immediately)
-      print('📝 Apps creating events...');
+      // Apps create contacts and transactions (sync will happen immediately)
+      print('📝 Apps creating contacts and transactions...');
       final contact1 = await app1!.createContact(name: 'Contact from App1');
       final contact2 = await app2!.createContact(name: 'Contact from App2');
       final contact3 = await app3!.createContact(name: 'Contact from App3');
+      
+      final transaction1 = await app1!.createTransaction(
+        contactId: contact1.id,
+        direction: TransactionDirection.owed,
+        amount: 1000,
+      );
+      final transaction2 = await app2!.createTransaction(
+        contactId: contact2.id,
+        direction: TransactionDirection.lent,
+        amount: 500,
+      );
+      final transaction3 = await app3!.createTransaction(
+        contactId: contact3.id,
+        direction: TransactionDirection.owed,
+        amount: 2000,
+      );
       print('✅ Events created');
       
       // Wait for all events to sync (may take multiple sync cycles if events were created during sync)
@@ -191,35 +251,56 @@ void main() {
       final app2Events = await app2!.getEvents();
       final app3Events = await app3!.getEvents();
       
-      final app1ContactEvent = app1Events.where((e) => e.aggregateId == contact1.id && e.eventType == 'CREATED').toList();
-      final app2ContactEvent = app2Events.where((e) => e.aggregateId == contact2.id && e.eventType == 'CREATED').toList();
-      final app3ContactEvent = app3Events.where((e) => e.aggregateId == contact3.id && e.eventType == 'CREATED').toList();
+      final app1ContactEvent = app1Events.where((e) => e.aggregateId == contact1.id && e.eventType == 'CREATED' && e.aggregateType == 'contact').toList();
+      final app1TransactionEvent = app1Events.where((e) => e.aggregateId == transaction1.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction').toList();
+      final app2ContactEvent = app2Events.where((e) => e.aggregateId == contact2.id && e.eventType == 'CREATED' && e.aggregateType == 'contact').toList();
+      final app2TransactionEvent = app2Events.where((e) => e.aggregateId == transaction2.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction').toList();
+      final app3ContactEvent = app3Events.where((e) => e.aggregateId == contact3.id && e.eventType == 'CREATED' && e.aggregateType == 'contact').toList();
+      final app3TransactionEvent = app3Events.where((e) => e.aggregateId == transaction3.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction').toList();
       
       expect(app1ContactEvent.isNotEmpty, true, reason: 'App1 should have contact1 event');
+      expect(app1TransactionEvent.isNotEmpty, true, reason: 'App1 should have transaction1 event');
       expect(app2ContactEvent.isNotEmpty, true, reason: 'App2 should have contact2 event');
+      expect(app2TransactionEvent.isNotEmpty, true, reason: 'App2 should have transaction2 event');
       expect(app3ContactEvent.isNotEmpty, true, reason: 'App3 should have contact3 event');
+      expect(app3TransactionEvent.isNotEmpty, true, reason: 'App3 should have transaction3 event');
       
       // Events should be synced (we waited for sync to complete)
       if (app1ContactEvent.isNotEmpty) {
-        expect(app1ContactEvent.first.synced, true, reason: 'App1 event should be synced');
+        expect(app1ContactEvent.first.synced, true, reason: 'App1 contact event should be synced');
+      }
+      if (app1TransactionEvent.isNotEmpty) {
+        expect(app1TransactionEvent.first.synced, true, reason: 'App1 transaction event should be synced');
       }
       if (app2ContactEvent.isNotEmpty) {
-        expect(app2ContactEvent.first.synced, true, reason: 'App2 event should be synced');
+        expect(app2ContactEvent.first.synced, true, reason: 'App2 contact event should be synced');
+      }
+      if (app2TransactionEvent.isNotEmpty) {
+        expect(app2TransactionEvent.first.synced, true, reason: 'App2 transaction event should be synced');
       }
       if (app3ContactEvent.isNotEmpty) {
-        expect(app3ContactEvent.first.synced, true, reason: 'App3 event should be synced');
+        expect(app3ContactEvent.first.synced, true, reason: 'App3 contact event should be synced');
+      }
+      if (app3TransactionEvent.isNotEmpty) {
+        expect(app3TransactionEvent.first.synced, true, reason: 'App3 transaction event should be synced');
       }
       print('✅ All events synced');
       
       // Verify all events on server
       final serverEventsAfter = await serverVerifier!.getServerEvents();
-      final serverContact1After = serverEventsAfter.where((e) => e['aggregate_id'] == contact1.id).toList();
-      final serverContact2After = serverEventsAfter.where((e) => e['aggregate_id'] == contact2.id).toList();
-      final serverContact3After = serverEventsAfter.where((e) => e['aggregate_id'] == contact3.id).toList();
+      final serverContact1After = serverEventsAfter.where((e) => e['aggregate_id'] == contact1.id && e['aggregate_type'] == 'contact').toList();
+      final serverTransaction1After = serverEventsAfter.where((e) => e['aggregate_id'] == transaction1.id && e['aggregate_type'] == 'transaction').toList();
+      final serverContact2After = serverEventsAfter.where((e) => e['aggregate_id'] == contact2.id && e['aggregate_type'] == 'contact').toList();
+      final serverTransaction2After = serverEventsAfter.where((e) => e['aggregate_id'] == transaction2.id && e['aggregate_type'] == 'transaction').toList();
+      final serverContact3After = serverEventsAfter.where((e) => e['aggregate_id'] == contact3.id && e['aggregate_type'] == 'contact').toList();
+      final serverTransaction3After = serverEventsAfter.where((e) => e['aggregate_id'] == transaction3.id && e['aggregate_type'] == 'transaction').toList();
       
       expect(serverContact1After.isNotEmpty, true, reason: 'Contact1 should be on server');
+      expect(serverTransaction1After.isNotEmpty, true, reason: 'Transaction1 should be on server');
       expect(serverContact2After.isNotEmpty, true, reason: 'Contact2 should be on server');
+      expect(serverTransaction2After.isNotEmpty, true, reason: 'Transaction2 should be on server');
       expect(serverContact3After.isNotEmpty, true, reason: 'Contact3 should be on server');
+      expect(serverTransaction3After.isNotEmpty, true, reason: 'Transaction3 should be on server');
       print('✅ All events on server');
       
       // Verify no data loss
