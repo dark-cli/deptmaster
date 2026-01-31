@@ -287,16 +287,29 @@ class LocalDatabaseServiceV2 {
       final timeSinceLastEvent = now.difference(lastEvent.timestamp);
       final isWithinUndoWindow = timeSinceLastEvent.inSeconds < 5;
       
-      // If within undo window and not synced, remove the last event (undo)
-      if (isWithinUndoWindow && !lastEvent.synced) {
-        // Remove the last event (this effectively undoes the last action)
-        final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
-        await eventsBox.delete(lastEvent.id);
-        
-        // Rebuild state
+      // If within undo window, create an UNDO event instead of removing the event
+      if (isWithinUndoWindow) {
+        // Create UNDO event
+        final undoEventData = {
+          'undone_event_id': lastEvent.id,
+          'comment': comment ?? 'Transaction deleted (undo)',
+          'timestamp': DateTime.now().toIso8601String(),
+        };
+
+        final undoEvent = await EventStoreService.appendEvent(
+          aggregateType: lastEvent.aggregateType,
+          aggregateId: lastEvent.aggregateId,
+          eventType: 'UNDO',
+          eventData: undoEventData,
+        );
+
+        // Rebuild state (which will skip the undone event)
         await _rebuildState();
-        
-        print('✅ Transaction undone (removed last event): $transactionId, event type: ${lastEvent.eventType}');
+
+        // Trigger automatic sync to server
+        SyncServiceV2.startLocalToServerSync();
+
+        print('✅ Transaction undone (created UNDO event): $transactionId, event type: ${lastEvent.eventType}');
         return;
       }
       

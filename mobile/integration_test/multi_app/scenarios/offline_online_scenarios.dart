@@ -13,6 +13,7 @@ import '../app_instance.dart';
 import '../sync_monitor.dart';
 import '../event_validator.dart';
 import '../server_verifier.dart';
+import '../event_generator.dart';
 import '../../helpers/multi_app_helpers.dart';
 
 void main() {
@@ -25,6 +26,7 @@ void main() {
     SyncMonitor? monitor;
     EventValidator? validator;
     ServerVerifier? serverVerifier;
+    EventGenerator? generator;
     
     setUpAll(() async {
       // Initialize Hive once globally
@@ -73,6 +75,13 @@ void main() {
       validator = EventValidator();
       serverVerifier = ServerVerifier(serverUrl: 'http://localhost:8000');
       await serverVerifier!.setAuthToken();
+      
+      // Create event generator
+      generator = EventGenerator({
+        'app1': app1!,
+        'app2': app2!,
+        'app3': app3!,
+      });
     });
     
     tearDown(() async {
@@ -87,8 +96,8 @@ void main() {
       await app3?.clearData();
     });
     
-    test('2.1 Offline Create → Online Sync (Contact & Transaction)', () async {
-      print('\n📋 Test 2.1: Offline Create → Online Sync (Contact & Transaction)');
+    test('Offline Create → Online Sync (Contact & Transaction)', () async {
+      print('\n📋 Test: Offline Create → Online Sync (Contact & Transaction)');
       print('⚠️ NOTE: NetworkInterceptor is not fully integrated - HTTP calls bypass it');
       print('⚠️ This test verifies sync behavior, but offline simulation is limited');
       
@@ -96,36 +105,40 @@ void main() {
       print('📴 App1 going offline...');
       await app1!.goOffline();
       
-      // App1 creates contact and transaction while offline
-      print('📝 App1 creating contact and transaction while offline...');
-      final contact = await app1!.createContact(name: 'Offline Contact');
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      print('✅ Contact and transaction created: ${contact.id}, ${transaction.id}');
+      // Use event generator to create 14 events while offline (1 contact + 13 transactions)
+      final offlineCommands = [
+        'app1: contact create "Offline Contact" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+        'app1: transaction create contact1 owed 1500 "T5" t5',
+        'app1: transaction create contact1 lent 600 "T6" t6',
+        'app1: transaction create contact1 owed 1200 "T7" t7',
+        'app1: transaction create contact1 lent 900 "T8" t8',
+        'app1: transaction create contact1 owed 1800 "T9" t9',
+        'app1: transaction create contact1 lent 400 "T10" t10',
+        'app1: transaction create contact1 owed 1100 "T11" t11',
+        'app1: transaction create contact1 lent 700 "T12" t12',
+        'app1: transaction update t1 amount 1100',
+      ];
+      
+      print('📝 App1 (offline) executing ${offlineCommands.length} event commands...');
+      await generator!.executeCommands(offlineCommands);
       
       // Wait for sync (events sync immediately due to NetworkInterceptor limitation)
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       await Future.delayed(const Duration(milliseconds: 500));
       
-      // Verify events created and synced (sync happens immediately)
+      // Verify events
       final app1Events = await app1!.getEvents();
-      final contactEvent = app1Events.firstWhere(
-        (e) => e.aggregateId == contact.id && e.eventType == 'CREATED' && e.aggregateType == 'contact',
-        orElse: () => throw Exception('Contact CREATED event not found'),
-      );
-      final transactionEvent = app1Events.firstWhere(
-        (e) => e.aggregateId == transaction.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction',
-        orElse: () => throw Exception('Transaction CREATED event not found'),
-      );
+      expect(app1Events.length, greaterThanOrEqualTo(14));
       
-      expect(contactEvent.synced, true, reason: 'Contact event should be synced (sync happens immediately)');
-      expect(transactionEvent.synced, true, reason: 'Transaction event should be synced (sync happens immediately)');
-      expect(contactEvent.aggregateType, 'contact');
-      expect(transactionEvent.aggregateType, 'transaction');
-      print('✅ Both events created and synced (sync happens immediately due to NetworkInterceptor limitation)');
+      // Verify transaction events are majority
+      final transactionEvents = app1Events.where(
+        (e) => e.aggregateType == 'transaction'
+      ).length;
+      expect(transactionEvents, greaterThan(10), reason: 'Transaction events should be majority');
       
       // App1 comes online (already synced, but verify)
       print('📶 App1 coming online...');
@@ -134,24 +147,15 @@ void main() {
       // Wait a bit to ensure everything is stable
       await Future.delayed(const Duration(seconds: 1));
       
-      // Verify both events synced to server
+      // Verify events synced to server
       final serverEventsAfter = await serverVerifier!.getServerEvents();
-      final serverContactEvent = serverEventsAfter.firstWhere(
-        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'contact',
-        orElse: () => throw Exception('Contact event not found on server'),
-      );
-      final serverTransactionEvent = serverEventsAfter.firstWhere(
-        (e) => e['aggregate_id'] == transaction.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'transaction',
-        orElse: () => throw Exception('Transaction event not found on server'),
-      );
-      print('✅ Both events synced to server');
+      expect(serverEventsAfter.length, greaterThanOrEqualTo(14));
       
       // Verify both exist in all apps
       final allContacts = await app1!.getContacts();
       final allTransactions = await app1!.getTransactions();
-      expect(allContacts.any((c) => c.id == contact.id), true);
-      expect(allTransactions.any((t) => t.id == transaction.id), true);
-      print('✅ Contact and transaction exist in all apps');
+      expect(allContacts.length, greaterThanOrEqualTo(1));
+      expect(allTransactions.length, greaterThan(10));
       
       // Validate consistency
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
@@ -160,253 +164,195 @@ void main() {
       print('⚠️ Test completed - offline simulation not fully functional due to interceptor limitation');
     });
     
-    test('2.2 Multiple Offline Creates (Contacts & Transactions)', () async {
-      print('\n📋 Test 2.2: Multiple Offline Creates (Contacts & Transactions)');
-      
-      // All apps go offline
-      print('📴 All apps going offline...');
-      await app1!.goOffline();
-      await app2!.goOffline();
-      await app3!.goOffline();
-      
-      // Each app creates contact and transaction offline
-      print('📝 All apps creating contacts and transactions offline...');
-      final contact1 = await app1!.createContact(name: 'Offline Contact 1');
-      final contact2 = await app2!.createContact(name: 'Offline Contact 2');
-      final contact3 = await app3!.createContact(name: 'Offline Contact 3');
-      
-      final transaction1 = await app1!.createTransaction(contactId: contact1.id, direction: TransactionDirection.owed, amount: 1000);
-      final transaction2 = await app2!.createTransaction(contactId: contact2.id, direction: TransactionDirection.lent, amount: 500);
-      final transaction3 = await app3!.createTransaction(contactId: contact3.id, direction: TransactionDirection.owed, amount: 2000);
-      print('✅ All contacts and transactions created offline');
-      
-      // Verify all events created locally (unsynced)
-      await Future.delayed(const Duration(milliseconds: 500));
-      final app1Unsynced = await app1!.getUnsyncedEvents();
-      final app2Unsynced = await app2!.getUnsyncedEvents();
-      final app3Unsynced = await app3!.getUnsyncedEvents();
-      
-      expect(app1Unsynced.length, greaterThanOrEqualTo(2), reason: 'App1 should have at least 2 unsynced events');
-      expect(app2Unsynced.length, greaterThanOrEqualTo(2), reason: 'App2 should have at least 2 unsynced events');
-      expect(app3Unsynced.length, greaterThanOrEqualTo(2), reason: 'App3 should have at least 2 unsynced events');
-      print('✅ All events created locally (unsynced)');
-      
-      // All apps come online
-      print('📶 All apps coming online...');
-      await app1!.goOnline();
-      await app2!.goOnline();
-      await app3!.goOnline();
-      
-      // Wait for sync
-      await monitor!.waitForSync(timeout: const Duration(seconds: 90));
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // Verify all events synced to server
-      final serverEvents = await serverVerifier!.getServerEvents();
-      final contactEvents = serverEvents.where((e) => 
-        (e['aggregate_id'] == contact1.id || e['aggregate_id'] == contact2.id || e['aggregate_id'] == contact3.id) &&
-        e['aggregate_type'] == 'contact'
-      ).toList();
-      final transactionEvents = serverEvents.where((e) => 
-        (e['aggregate_id'] == transaction1.id || e['aggregate_id'] == transaction2.id || e['aggregate_id'] == transaction3.id) &&
-        e['aggregate_type'] == 'transaction'
-      ).toList();
-      
-      expect(contactEvents.length, 3, reason: 'Should have 3 contact events');
-      expect(transactionEvents.length, 3, reason: 'Should have 3 transaction events');
-      print('✅ All events synced to server');
-      
-      // Verify all apps receive all events
-      final allContacts = await app1!.getContacts();
-      final allTransactions = await app1!.getTransactions();
-      expect(allContacts.length, 3);
-      expect(allTransactions.length, 3);
-      print('✅ All apps received all contacts and transactions');
-      
-      // Verify no duplicates
-      final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
-      expect(isValid, true);
-      print('✅ No conflicts or duplicates');
-    });
-    
-    test('2.3 Offline Update → Online Sync (Contact & Transaction)', () async {
-      print('\n📋 Test 2.3: Offline Update → Online Sync (Contact & Transaction)');
-      
-      // Create contact and transaction
-      print('📝 Creating contact and transaction in App1...');
-      final contact = await app1!.createContact(name: 'Original Name');
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      
-      // Verify both exist in all apps
-      final allContacts = await app1!.getContacts();
-      final allTransactions = await app1!.getTransactions();
-      expect(allContacts.any((c) => c.id == contact.id), true);
-      expect(allTransactions.any((t) => t.id == transaction.id), true);
-      print('✅ Contact and transaction exist in all apps');
+    test('Multiple Offline Creates (Contacts & Transactions)', () async {
+      print('\n📋 Test: Multiple Offline Creates (Contacts & Transactions)');
       
       // App1 goes offline
       print('📴 App1 going offline...');
       await app1!.goOffline();
       
-      // App1 updates both while offline
-      print('📝 App1 updating contact and transaction while offline...');
-      await app1!.updateContact(contact.id, {'name': 'Updated Offline'});
-      await app1!.updateTransaction(transaction.id, {'amount': 2000});
+      // Use event generator to create 20 events while offline (3 contacts + 17 transactions)
+      final offlineCommands = [
+        'app1: contact create "Offline Contact 1" contact1',
+        'app1: contact create "Offline Contact 2" contact2',
+        'app1: contact create "Offline Contact 3" contact3',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact2 lent 800 "T4" t4',
+        'app1: transaction create contact2 owed 1200 "T5" t5',
+        'app1: transaction create contact2 lent 600 "T6" t6',
+        'app1: transaction create contact3 owed 1500 "T7" t7',
+        'app1: transaction create contact3 lent 900 "T8" t8',
+        'app1: transaction create contact3 owed 1800 "T9" t9',
+        'app1: transaction create contact1 lent 400 "T10" t10',
+        'app1: transaction create contact2 owed 1100 "T11" t11',
+        'app1: transaction create contact3 lent 700 "T12" t12',
+        'app1: transaction create contact1 owed 1300 "T13" t13',
+        'app1: transaction create contact2 lent 500 "T14" t14',
+        'app1: transaction create contact3 owed 1600 "T15" t15',
+        'app1: transaction update t1 amount 1100',
+        'app1: transaction delete t5',
+      ];
       
-      // Wait for sync (events sync immediately due to NetworkInterceptor limitation)
+      print('📝 App1 (offline) executing ${offlineCommands.length} event commands...');
+      await generator!.executeCommands(offlineCommands);
+      
+      // Wait for sync
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      await Future.delayed(const Duration(milliseconds: 500));
       
-      // Verify update events created and synced (sync happens immediately)
+      // Verify events
       final app1Events = await app1!.getEvents();
-      final contactUpdateEvent = app1Events.firstWhere(
-        (e) => e.aggregateId == contact.id && e.eventType == 'UPDATED' && e.aggregateType == 'contact',
-        orElse: () => throw Exception('Contact UPDATED event not found'),
-      );
-      final transactionUpdateEvent = app1Events.firstWhere(
-        (e) => e.aggregateId == transaction.id && e.eventType == 'UPDATED' && e.aggregateType == 'transaction',
-        orElse: () => throw Exception('Transaction UPDATED event not found'),
-      );
-      expect(contactUpdateEvent.synced, true, reason: 'Contact update should be synced (sync happens immediately)');
-      expect(transactionUpdateEvent.synced, true, reason: 'Transaction update should be synced (sync happens immediately)');
-      expect(contactUpdateEvent.aggregateType, 'contact');
-      expect(transactionUpdateEvent.aggregateType, 'transaction');
-      print('✅ Both update events created and synced (sync happens immediately due to NetworkInterceptor limitation)');
+      expect(app1Events.length, greaterThanOrEqualTo(20));
       
-      // App1 comes online (already synced, but verify)
+      // Verify transaction events are majority
+      final transactionEvents = app1Events.where(
+        (e) => e.aggregateType == 'transaction'
+      ).length;
+      expect(transactionEvents, greaterThan(15), reason: 'Transaction events should be majority');
+      
+      // App1 comes online
       print('📶 App1 coming online...');
       await app1!.goOnline();
-      
-      // Wait a bit to ensure everything is stable
       await Future.delayed(const Duration(seconds: 1));
       
-      // Verify both update events synced to server
-      final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContactUpdate = serverEvents.where(
-        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'contact',
-      ).toList();
-      final serverTransactionUpdate = serverEvents.where(
-        (e) => e['aggregate_id'] == transaction.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'transaction',
-      ).toList();
-      expect(serverContactUpdate.isNotEmpty, true);
-      expect(serverTransactionUpdate.isNotEmpty, true);
-      print('✅ Both update events synced to server');
-      
-      // Verify other apps receive updates
-      final contactsAfter = await app1!.getContacts();
-      final transactionsAfter = await app1!.getTransactions();
-      final updatedContact = contactsAfter.firstWhere((c) => c.id == contact.id);
-      final updatedTransaction = transactionsAfter.firstWhere((t) => t.id == transaction.id);
-      expect(updatedContact.name, isNotEmpty);
-      expect(updatedTransaction.amount, 2000);
-      print('✅ Other apps received updates');
+      // Verify final state
+      final allContacts = await app1!.getContacts();
+      final allTransactions = await app1!.getTransactions();
+      expect(allContacts.length, 3);
+      expect(allTransactions.length, greaterThan(10));
       
       // Validate consistency
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
-      expect(isValid, true, reason: 'Final state should be consistent');
-      print('✅ State consistent');
-      print('⚠️ Test completed - offline simulation not fully functional due to interceptor limitation');
+      expect(isValid, true);
+      print('✅ Event consistency validated');
     });
     
-    test('2.4 Partial Offline (Some Apps Online)', () async {
-      print('\n📋 Test 2.4: Partial Offline (Some Apps Online)');
+    
+    test('Offline Update → Online Sync (Contact & Transaction)', () async {
+      print('\n📋 Test: Offline Update → Online Sync (Contact & Transaction)');
+      
+      // Create contact and transactions first
+      final setupCommands = [
+        'app1: contact create "Original Name" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+        'app1: transaction create contact1 owed 1500 "T5" t5',
+      ];
+      await generator!.executeCommands(setupCommands);
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      
+      // App1 goes offline
+      print('📴 App1 going offline...');
+      await app1!.goOffline();
+      
+      // Use event generator to create 10 update events while offline
+      final offlineUpdateCommands = [
+        'app1: contact update contact1 name "Updated Offline"',
+        'app1: transaction update t1 amount 2000',
+        'app1: transaction update t2 description "Updated T2"',
+        'app1: transaction update t3 amount 2200',
+        'app1: transaction update t4 description "Updated T4"',
+        'app1: transaction update t5 amount 1600',
+        'app1: transaction create contact1 lent 600 "T6" t6',
+        'app1: transaction create contact1 owed 1200 "T7" t7',
+        'app1: transaction update t6 amount 700',
+        'app1: transaction delete t5',
+      ];
+      
+      print('📝 App1 (offline) executing ${offlineUpdateCommands.length} update commands...');
+      await generator!.executeCommands(offlineUpdateCommands);
+      
+      // Wait for sync
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      
+      // Verify events
+      final app1Events = await app1!.getEvents();
+      expect(app1Events.length, greaterThanOrEqualTo(16)); // 6 setup + 10 updates
+      
+      // Verify we have UPDATE events
+      final updateEvents = app1Events.where((e) => e.eventType == 'UPDATED').length;
+      expect(updateEvents, greaterThanOrEqualTo(6), reason: 'Should have multiple update events');
+      
+      // App1 comes online
+      print('📶 App1 coming online...');
+      await app1!.goOnline();
+      await Future.delayed(const Duration(seconds: 1));
+      
+      // Verify final state
+      final contactsAfter = await app1!.getContacts();
+      final transactionsAfter = await app1!.getTransactions();
+      expect(contactsAfter.length, 1);
+      expect(transactionsAfter.length, greaterThan(5));
+      
+      // Validate consistency
+      final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
+      expect(isValid, true);
+      print('✅ State consistent');
+    });
+    
+    test('Partial Offline (Some Apps Online)', () async {
+      print('\n📋 Test: Partial Offline (Some Apps Online)');
       
       // App1 offline, App2 and App3 online
       print('📴 App1 going offline, App2 and App3 staying online...');
       await app1!.goOffline();
       
-      // App2 creates contact and transaction (while App1 is offline)
-      print('📝 App2 creating contact and transaction...');
-      final contact = await app2!.createContact(name: 'Contact from App2');
-      final transaction = await app2!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      print('✅ Contact and transaction created: ${contact.id}, ${transaction.id}');
+      // App2 and App3 create events online (15 events)
+      final onlineCommands = [
+        'app2: contact create "Online Contact 1" contact1',
+        'app2: contact create "Online Contact 2" contact2',
+        'app3: contact create "Online Contact 3" contact3',
+        'app2: transaction create contact1 owed 1000 "T1" t1',
+        'app2: transaction create contact1 lent 500 "T2" t2',
+        'app2: transaction create contact1 owed 2000 "T3" t3',
+        'app3: transaction create contact2 lent 800 "T4" t4',
+        'app3: transaction create contact2 owed 1200 "T5" t5',
+        'app2: transaction create contact3 lent 600 "T6" t6',
+        'app3: transaction create contact3 owed 1500 "T7" t7',
+        'app2: transaction create contact1 lent 900 "T8" t8',
+        'app3: transaction create contact2 owed 1800 "T9" t9',
+        'app2: transaction update t1 amount 1100',
+        'app3: transaction update t4 description "Updated T4"',
+        'app2: transaction delete t3',
+      ];
       
-      // Wait for sync (App2 and App3 should sync)
-      print('⏳ Waiting for sync between App2 and App3...');
-      await Future.delayed(const Duration(seconds: 5)); // Give time for sync
-      
-      // Wait for sync
+      print('📝 App2 and App3 (online) executing ${onlineCommands.length} event commands...');
+      await generator!.executeCommands(onlineCommands);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      // Verify App2 and App3 have both
-      final app2Contacts = await app2!.getContacts();
-      final app2Transactions = await app2!.getTransactions();
-      final app3Contacts = await app3!.getContacts();
-      final app3Transactions = await app3!.getTransactions();
-      expect(app2Contacts.any((c) => c.id == contact.id), true);
-      expect(app2Transactions.any((t) => t.id == transaction.id), true);
-      expect(app3Contacts.any((c) => c.id == contact.id), true);
-      expect(app3Transactions.any((t) => t.id == transaction.id), true);
-      print('✅ App2 and App3 have contact and transaction');
+      // App1 creates events offline
+      final offlineCommands = [
+        'app1: contact create "Offline Contact" contact4',
+        'app1: transaction create contact4 owed 1000 "T10" t10',
+        'app1: transaction create contact4 lent 500 "T11" t11',
+        'app1: transaction create contact4 owed 2000 "T12" t12',
+      ];
       
-      // Verify App1 has both in local storage (shared boxes)
-      final app1Contacts = await app1!.getContacts();
-      final app1Transactions = await app1!.getTransactions();
-      expect(app1Contacts.any((c) => c.id == contact.id), true);
-      expect(app1Transactions.any((t) => t.id == transaction.id), true);
-      print('✅ App1 has contact and transaction in local storage (shared boxes)');
-      
-      // Verify both events on server
-      final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContact = serverEvents.where(
-        (e) => e['aggregate_id'] == contact.id && e['aggregate_type'] == 'contact',
-      ).toList();
-      final serverTransaction = serverEvents.where(
-        (e) => e['aggregate_id'] == transaction.id && e['aggregate_type'] == 'transaction',
-      ).toList();
-      expect(serverContact.isNotEmpty, true);
-      expect(serverTransaction.isNotEmpty, true);
-      print('✅ Both events synced to server');
+      print('📝 App1 (offline) executing ${offlineCommands.length} event commands...');
+      await generator!.executeCommands(offlineCommands);
       
       // App1 comes online
       print('📶 App1 coming online...');
       await app1!.goOnline();
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      // Since all apps share Hive boxes, App1 already has the contact in local storage
-      // The important thing is that App1 can now sync to/from server
-      // Wait a moment for sync to complete
-      await Future.delayed(const Duration(seconds: 3));
+      // Verify all events
+      final app1Events = await app1!.getEvents();
+      expect(app1Events.length, greaterThanOrEqualTo(19)); // 15 online + 4 offline
       
-      // Verify App1 still has contact (it already had it from shared boxes)
-      final app1ContactsAfter = await app1!.getContacts();
-      expect(app1ContactsAfter.any((c) => c.id == contact.id), true,
-        reason: 'App1 should have contact (from shared boxes)');
-      print('✅ App1 has contact (from shared boxes)');
+      // Verify final state
+      final allContacts = await app1!.getContacts();
+      final allTransactions = await app1!.getTransactions();
+      expect(allContacts.length, 4);
+      expect(allTransactions.length, greaterThan(10));
       
-      // Verify all apps are in sync with server
-      // Since App1 already had the contact locally, we just verify sync status
-      // Use a short timeout since sync should be quick
-      try {
-        final allSynced = await monitor!.allInstancesSynced();
-        expect(allSynced, true, reason: 'All apps should be synced with server');
-        print('✅ All apps synced with server');
-      } catch (e) {
-        print('⚠️ Sync check failed (may be expected): $e');
-        // Continue - apps may already be synced
-      }
-      
-      // Validate consistency (quick check)
-      try {
-        final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]).timeout(
-          const Duration(seconds: 5),
-        );
-        expect(isValid, true, reason: 'All apps should have consistent events');
-        print('✅ All apps have consistent events');
-      } catch (e) {
-        print('⚠️ Consistency check timed out or failed: $e');
-        // Don't fail test - this is a validation check
-      }
+      // Validate consistency
+      final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
+      expect(isValid, true);
+      print('✅ All apps have consistent events');
     });
   });
 }

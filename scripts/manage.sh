@@ -13,6 +13,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Database connection details
@@ -1361,6 +1362,7 @@ cmd_test_flutter_integration_multi_app() {
     declare -a FILE_TEST_PASSED      # Number of passed tests per file
     declare -a FILE_TEST_FAILED      # Number of failed tests per file
     declare -a FILE_RAN_TESTS        # Track which files actually ran tests (1 = ran, 0 = skipped)
+    declare -A FILE_FAILED_TEST_NAMES  # Track failed test numbers per file (e.g., "3.5 7.1")
     local TOTAL_TESTS=${#TEST_SUITES[@]}
     local TOTAL_INDIVIDUAL_TESTS=0
     local TOTAL_PASSED=0
@@ -1482,8 +1484,9 @@ cmd_test_flutter_integration_multi_app() {
         # Run the test and capture output (JSON to one file, stderr to another for verbose mode)
         local TEMP_JSON_OUTPUT=$(mktemp)
         if [ "$VERBOSE" = "true" ]; then
-            # In verbose mode, show all output but still capture JSON
-            eval "$FLUTTER_TEST_CMD" > "$TEMP_JSON_OUTPUT" 2>&1 || TEST_EXIT_CODE=$?
+            # In verbose mode, show all output in real-time AND capture JSON
+            # Use tee to both display and capture output
+            eval "$FLUTTER_TEST_CMD" 2>&1 | tee "$TEMP_JSON_OUTPUT" || TEST_EXIT_CODE=${PIPESTATUS[0]}
             cp "$TEMP_JSON_OUTPUT" "$TEMP_OUTPUT"
         else
             # In non-verbose mode, suppress warnings but capture JSON
@@ -1603,15 +1606,6 @@ cmd_test_flutter_integration_multi_app() {
                     fi
                 fi
                 
-                # Count individual test results
-                if [ "$test_result" = "PASSED" ]; then
-                    ((FILE_PASSED_COUNT++))
-                    ((TOTAL_PASSED++))
-                else
-                    ((FILE_FAILED_COUNT++))
-                    ((TOTAL_FAILED++))
-                fi
-                
                 # Truncate long test names
                 local display_name="$test_name"
                 if [ ${#display_name} -gt 60 ]; then
@@ -1621,11 +1615,21 @@ cmd_test_flutter_integration_multi_app() {
                 # Show test with result - format: [FILE_NUM.TEST_NUM] Test Name
                 printf "  [%d.%d] %-60s" "$TEST_NUM" "$test_num" "$display_name"
                 
-                # Show result
+                # Show result and count
                 if [ "$test_result" = "PASSED" ]; then
                     echo -e " ${GREEN}✓ PASSED${NC}"
+                    ((FILE_PASSED_COUNT++))
+                    ((TOTAL_PASSED++))
                 else
                     echo -e " ${RED}✗ FAILED${NC}"
+                    ((FILE_FAILED_COUNT++))
+                    ((TOTAL_FAILED++))
+                    # Track failed test for verbose message
+                    if [ ${#FAILED_TEST_NAMES[@]} -eq 0 ]; then
+                        FAILED_TEST_NAMES=("$TEST_NUM.$test_num")
+                    else
+                        FAILED_TEST_NAMES+=("$TEST_NUM.$test_num")
+                    fi
                 fi
             done
             
@@ -1636,6 +1640,11 @@ cmd_test_flutter_integration_multi_app() {
             if [ $TESTS_RAN_COUNT -gt 0 ]; then
                 FILE_RAN_TESTS[$i]=1
                 ((TOTAL_INDIVIDUAL_TESTS += TESTS_RAN_COUNT))
+                # Store failed test names for this file
+                if [ ${#FAILED_TEST_NAMES[@]} -gt 0 ]; then
+                    local failed_tests_str=$(IFS=' '; echo "${FAILED_TEST_NAMES[*]}")
+                    FILE_FAILED_TEST_NAMES[$i]="$failed_tests_str"
+                fi
             else
                 FILE_RAN_TESTS[$i]=0
             fi
@@ -1661,78 +1670,188 @@ cmd_test_flutter_integration_multi_app() {
     
     # Print summary table
     echo ""
-    print_info "════════════════════════════════════════════════════════════════"
-    print_info "Test Results Summary"
-    print_info "════════════════════════════════════════════════════════════════"
-    echo ""
     
-    # Calculate column widths for table formatting
-    local max_name_len=0
-    for test_name in "${TEST_NAMES[@]}"; do
-        local len=${#test_name}
-        if [ $len -gt $max_name_len ]; then
-            max_name_len=$len
-        fi
-    done
-    # Ensure minimum width
-    if [ $max_name_len -lt 30 ]; then
-        max_name_len=30
-    fi
+    # Prepare data for Python table formatter
+    local TEMP_TABLE_DATA=$(mktemp)
+    {
+        echo "Test Suite|Result|Passed / Failed / Total"
+        for i in "${!TEST_SUITES[@]}"; do
+            # Skip files that didn't run any tests
+            if [ "${FILE_RAN_TESTS[$i]:-0}" -eq 0 ]; then
+                continue
+            fi
+            
+            local TEST_NAME="${TEST_NAMES[$i]}"
+            local RESULT="${TEST_RESULTS[$i]}"
+            local TEST_COUNT="${FILE_TEST_COUNTS[$i]:-0}"
+            local PASSED_COUNT="${FILE_TEST_PASSED[$i]:-0}"
+            local FAILED_COUNT="${FILE_TEST_FAILED[$i]:-0}"
+            
+            # Truncate long names if needed
+            local display_name="$TEST_NAME"
+            if [ ${#display_name} -gt 50 ]; then
+                display_name="${display_name:0:47}..."
+            fi
+            
+            # Format result
+            local result_str=""
+            if [ "$RESULT" = "PASSED" ]; then
+                result_str="✓ PASSED"
+            else
+                result_str="✗ FAILED"
+            fi
+            
+            # Format counts
+            local counts_str=""
+            if [ "$TEST_COUNT" -gt 0 ] 2>/dev/null; then
+                counts_str="${PASSED_COUNT} / ${FAILED_COUNT} / ${TEST_COUNT}"
+            else
+                counts_str="N/A"
+            fi
+            
+            echo "${display_name}|${result_str}|${counts_str}"
+        done
+    } > "$TEMP_TABLE_DATA"
     
-    # Print table header
-    printf "%-${max_name_len}s  %-12s  %s\n" "Test Suite" "Result" "Passed / Failed / Total"
-    printf "%-${max_name_len}s  %-12s  %s\n" "$(printf '─%.0s' $(seq 1 $max_name_len))" "$(printf '─%.0s' $(seq 1 12))" "$(printf '─%.0s' $(seq 1 30))"
+    # Use Python rich library for beautiful colored tables (if available), otherwise use simple printf
+    GREEN="$GREEN" RED="$RED" YELLOW="$YELLOW" NC="$NC" python3 - "$TEMP_TABLE_DATA" << 'PYTHON_EOF'
+import sys
+import os
+
+# Get color codes from environment
+GREEN = os.environ.get('GREEN', '\033[0;32m')
+RED = os.environ.get('RED', '\033[0;31m')
+YELLOW = os.environ.get('YELLOW', '\033[1;33m')
+NC = os.environ.get('NC', '\033[0m')
+
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich import box
     
-    # Print table rows - only show files that actually ran tests
-    for i in "${!TEST_SUITES[@]}"; do
-        # Skip files that didn't run any tests
-        if [ "${FILE_RAN_TESTS[$i]:-0}" -eq 0 ]; then
+    # Force terminal rendering so colors show even if stdout isn't detected as a TTY
+    console = Console(force_terminal=True, color_system="standard")
+    table = Table(show_header=True, header_style="bold", box=box.SQUARE, pad_edge=True)
+    table.add_column("Test Suite", style="", no_wrap=False)
+    table.add_column("Result", style="", justify="left")
+    table.add_column("Passed / Failed / Total", style="", justify="left")
+    
+    # Read data from file
+    if len(sys.argv) < 2:
+        sys.exit(0)
+    
+    table_file = sys.argv[1]
+    if not os.path.exists(table_file):
+        sys.exit(0)
+    
+    with open(table_file, 'r') as f:
+        lines = f.readlines()
+    
+    if len(lines) < 2:
+        sys.exit(0)
+    
+    # Skip header line, process data rows
+    for line in lines[1:]:
+        parts = line.strip().split('|')
+        if len(parts) != 3:
             continue
-        fi
         
-        local TEST_NAME="${TEST_NAMES[$i]}"
-        local RESULT="${TEST_RESULTS[$i]}"
-        local TEST_COUNT="${FILE_TEST_COUNTS[$i]:-0}"
-        local PASSED_COUNT="${FILE_TEST_PASSED[$i]:-0}"
-        local FAILED_COUNT="${FILE_TEST_FAILED[$i]:-0}"
+        test_suite, result, counts = parts
         
-        # Truncate long names if needed
-        local display_name="$TEST_NAME"
-        if [ ${#display_name} -gt $max_name_len ]; then
-            display_name="${display_name:0:$((max_name_len-3))}..."
-        fi
+        # Colorize result
+        if result == "✓ PASSED":
+            result_colored = f"[green]✓ PASSED[/green]"
+        elif result == "✗ FAILED":
+            result_colored = f"[red]✗ FAILED[/red]"
+        else:
+            result_colored = result
         
-        # Format test counts with colors
-        if [ "$RESULT" = "PASSED" ]; then
-            # Use printf with %b to interpret escape sequences while maintaining alignment
-            if [ "$TEST_COUNT" -gt 0 ] 2>/dev/null; then
-                printf "%-${max_name_len}s  %b%-12s%b  %b%d%b / %b%d%b / %d\n" \
-                    "$display_name" "$GREEN" "✓ PASSED" "$NC" \
-                    "$GREEN" "$PASSED_COUNT" "$NC" \
-                    "$RED" "$FAILED_COUNT" "$NC" \
-                    "$TEST_COUNT"
-            else
-                printf "%-${max_name_len}s  %b%-12s%b  %bN/A%b\n" \
-                    "$display_name" "$GREEN" "✓ PASSED" "$NC" "$YELLOW" "$NC"
-            fi
-        else
-            if [ "$TEST_COUNT" -gt 0 ] 2>/dev/null; then
-                printf "%-${max_name_len}s  %b%-12s%b  %b%d%b / %b%d%b / %d\n" \
-                    "$display_name" "$RED" "✗ FAILED" "$NC" \
-                    "$GREEN" "$PASSED_COUNT" "$NC" \
-                    "$RED" "$FAILED_COUNT" "$NC" \
-                    "$TEST_COUNT"
-            else
-                printf "%-${max_name_len}s  %b%-12s%b  %bN/A%b\n" \
-                    "$display_name" "$RED" "✗ FAILED" "$NC" "$YELLOW" "$NC"
-            fi
-        fi
-    done
+        # Colorize counts
+        if counts != "N/A":
+            count_parts = counts.split(" / ")
+            if len(count_parts) == 3:
+                passed, failed, total = count_parts
+                counts_colored = f"[green]{passed}[/green] / [red]{failed}[/red] / {total}"
+            else:
+                counts_colored = f"[yellow]{counts}[/yellow]"
+        else:
+            counts_colored = f"[yellow]N/A[/yellow]"
+        
+        table.add_row(test_suite, result_colored, counts_colored)
     
-    echo ""
-    print_info "════════════════════════════════════════════════════════════════"
-    print_info "Summary Statistics"
-    print_info "════════════════════════════════════════════════════════════════"
+    console.print(table)
+    
+except ImportError:
+    # Fallback: Use simple printf-based table with colors
+    if len(sys.argv) < 2:
+        sys.exit(0)
+    
+    table_file = sys.argv[1]
+    if not os.path.exists(table_file):
+        sys.exit(0)
+    
+    with open(table_file, 'r') as f:
+        lines = f.readlines()
+    
+    if len(lines) < 2:
+        sys.exit(0)
+    
+    # Calculate max width for first column
+    max_width = 0
+    data_rows = []
+    for line in lines[1:]:
+        parts = line.strip().split('|')
+        if len(parts) == 3:
+            if len(parts[0]) > max_width:
+                max_width = len(parts[0])
+            data_rows.append(parts)
+    
+    max_width = max(max_width, 30)
+    
+    # Print table with colors using printf
+    print(f"┌{'─' * (max_width + 2)}┬{'─' * 18}┬{'─' * 40}┐")
+    print(f"│ {'Test Suite':<{max_width}} │ {'Result':<16} │ {'Passed / Failed / Total':<38} │")
+    print(f"├{'─' * (max_width + 2)}┼{'─' * 18}┼{'─' * 40}┤")
+    
+    for test_suite, result, counts in data_rows:
+        # Colorize result
+        if result == "✓ PASSED":
+            result_str = f"{GREEN}✓ PASSED{NC}"
+        elif result == "✗ FAILED":
+            result_str = f"{RED}✗ FAILED{NC}"
+        else:
+            result_str = result
+        
+        # Colorize counts
+        if counts != "N/A":
+            count_parts = counts.split(" / ")
+            if len(count_parts) == 3:
+                passed, failed, total = count_parts
+                counts_str = f"{GREEN}{passed}{NC} / {RED}{failed}{NC} / {total}"
+            else:
+                counts_str = f"{YELLOW}{counts}{NC}"
+        else:
+            counts_str = f"{YELLOW}N/A{NC}"
+        
+        # Calculate visible lengths for padding (without color codes)
+        # Use the original plain text values
+        result_plain_len = len(result)
+        counts_plain_len = len(counts)
+        
+        result_padding = max(0, 16 - result_plain_len)
+        counts_padding = max(0, 38 - counts_plain_len)
+        
+        # Print row with proper padding (color codes don't count toward width)
+        print(f"│ {test_suite:<{max_width}} │ {result_str}{' ' * result_padding} │ {counts_str}{' ' * counts_padding} │")
+    
+    print(f"└{'─' * (max_width + 2)}┴{'─' * 18}┴{'─' * 40}┘")
+    
+except Exception:
+    pass
+PYTHON_EOF
+    
+    # Clean up
+    rm -f "$TEMP_TABLE_DATA"
     echo ""
     # Count files that actually ran tests
     local FILES_RAN_COUNT=0
@@ -1741,28 +1860,55 @@ cmd_test_flutter_integration_multi_app() {
             ((FILES_RAN_COUNT++))
         fi
     done
-    printf "  Total Test Files:     %d\n" "$FILES_RAN_COUNT"
-    printf "  Total Individual Tests: %d\n" "$TOTAL_INDIVIDUAL_TESTS"
-    echo -e "  ${GREEN}Passed:${NC}                 $TOTAL_PASSED"
-    echo -e "  ${RED}Failed:${NC}                 $TOTAL_FAILED"
     
     # Calculate pass rate
+    local pass_rate="N/A"
     if [ -n "$TOTAL_INDIVIDUAL_TESTS" ] && [ "$TOTAL_INDIVIDUAL_TESTS" -gt 0 ] 2>/dev/null; then
-        local pass_rate=$((TOTAL_PASSED * 100 / TOTAL_INDIVIDUAL_TESTS))
-        printf "  Pass Rate:             %d%%\n" "$pass_rate"
-    else
-        printf "  Pass Rate:             N/A\n"
+        pass_rate=$((TOTAL_PASSED * 100 / TOTAL_INDIVIDUAL_TESTS))
     fi
     
+    # Print summary as a table
+    printf "┌─%-30s─┬─%s─┐\n" "$(printf '─%.0s' $(seq 1 30))" "$(printf '─%.0s' $(seq 1 20))"
+    printf "│ %-30s │ %-20s │\n" "Metric" "Value"
+    printf "├─%-30s─┼─%s─┤\n" "$(printf '─%.0s' $(seq 1 30))" "$(printf '─%.0s' $(seq 1 20))"
+    printf "│ %-30s │ %-20d │\n" "Total Test Files" "$FILES_RAN_COUNT"
+    printf "│ %-30s │ %-20d │\n" "Total Individual Tests" "$TOTAL_INDIVIDUAL_TESTS"
+    printf "│ %-30s │ %b%-20d%b │\n" "Passed" "$GREEN" "$TOTAL_PASSED" "$NC"
+    printf "│ %-30s │ %b%-20d%b │\n" "Failed" "$RED" "$TOTAL_FAILED" "$NC"
+    printf "│ %-30s │ %-20s │\n" "Pass Rate" "${pass_rate}%"
+    printf "└─%-30s─┴─%s─┘\n" "$(printf '─%.0s' $(seq 1 30))" "$(printf '─%.0s' $(seq 1 20))"
     echo ""
-    print_info "════════════════════════════════════════════════════════════════"
     
     # Re-enable exit on error
     set -e
     
     # Exit with appropriate code
     if [ -n "$TOTAL_FAILED" ] && [ "$TOTAL_FAILED" -gt 0 ] 2>/dev/null; then
-        print_error "⚠️  Some tests failed. Check the output above for details."
+        echo ""
+        print_error "⚠️  Some tests failed."
+        echo ""
+        echo -e "${YELLOW}To see detailed error output for failed tests, run:${NC}"
+        echo ""
+        
+        # Collect all failed test numbers
+        local all_failed_tests=()
+        for i in "${!FILE_FAILED_TEST_NAMES[@]}"; do
+            local failed_tests="${FILE_FAILED_TEST_NAMES[$i]}"
+            if [ -n "$failed_tests" ]; then
+                # Split space-separated test numbers and add to array
+                for test_num in $failed_tests; do
+                    all_failed_tests+=("$test_num")
+                done
+            fi
+        done
+        
+        if [ ${#all_failed_tests[@]} -gt 0 ]; then
+            local failed_tests_str=$(IFS=' '; echo "${all_failed_tests[*]}")
+            echo -e "  ${CYAN}$0 test-flutter-integration-multi-app --verbose $failed_tests_str${NC}"
+        else
+            echo -e "  ${CYAN}$0 test-flutter-integration-multi-app --verbose${NC}"
+        fi
+        echo ""
         return 1
     else
         print_success "🎉 All tests passed!"
