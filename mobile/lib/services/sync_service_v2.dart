@@ -534,11 +534,21 @@ class SyncServiceV2 {
       print('🔄 Local to server sync: attempting sync...');
       final result = await syncLocalToServer();
       if (result == SyncResult.done) {
-        // Sync succeeded, stop loop
-        _localToServerSyncTimer?.cancel();
-        _localToServerSyncTimer = null;
-        _retryBackoff.reset();
-        print('✅ Local to server sync loop stopped - sync succeeded');
+        // Sync succeeded, but check if there are more unsynced events
+        // (events may have been created during the sync)
+        final remainingUnsynced = await EventStoreService.getUnsyncedEvents();
+        if (remainingUnsynced.isEmpty) {
+          // No more unsynced events, stop loop
+          _localToServerSyncTimer?.cancel();
+          _localToServerSyncTimer = null;
+          _retryBackoff.reset();
+          print('✅ Local to server sync loop stopped - sync succeeded');
+        } else {
+          // More unsynced events exist, keep loop running
+          print('🔄 Local to server sync succeeded, but ${remainingUnsynced.length} events still unsynced - continuing loop');
+          // Reset backoff for immediate retry of remaining events
+          _retryBackoff.reset();
+        }
       } else {
         // Sync failed, will retry on next iteration (if timer is running)
         print('⚠️ Local to server sync failed, will retry...');
