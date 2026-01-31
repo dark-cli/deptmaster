@@ -122,17 +122,35 @@ void main() {
       final contact = await app1!.createContact(name: 'Test Contact 1');
       print('✅ Contact created: ${contact.id}');
       
-      // Verify event created in App1 (unsynced)
-      // Wait a bit for event to be created
-      await Future.delayed(const Duration(milliseconds: 500));
-      final app1Events = await app1!.getUnsyncedEvents();
-      expect(app1Events.length, greaterThan(0), reason: 'App1 should have unsynced events');
+      // Verify event created in App1
+      // Note: Sync now happens immediately, so we check all events (not just unsynced)
+      // The event should exist, and may already be synced
+      await Future.delayed(const Duration(milliseconds: 100)); // Small delay for event creation
+      final app1Events = await app1!.getEvents();
       final createdEvent = app1Events.firstWhere(
         (e) => e.aggregateId == contact.id && e.eventType == 'CREATED',
         orElse: () => throw Exception('CREATED event not found for contact ${contact.id}'),
       );
-      expect(createdEvent.synced, false);
-      print('✅ Event created in App1 (unsynced): ${createdEvent.id}');
+      print('✅ Event created in App1: ${createdEvent.id} (synced: ${createdEvent.synced})');
+      
+      // If not synced yet, wait a bit more (sync happens immediately but may take a few ms)
+      if (!createdEvent.synced) {
+        print('⏳ Event not yet synced, waiting for immediate sync...');
+        int attempts = 0;
+        while (attempts < 10) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          final updatedEvents = await app1!.getEvents();
+          final updatedEvent = updatedEvents.firstWhere(
+            (e) => e.id == createdEvent.id,
+            orElse: () => throw Exception('Event not found'),
+          );
+          if (updatedEvent.synced) {
+            print('✅ Event synced after ${(attempts + 1) * 100}ms');
+            break;
+          }
+          attempts++;
+        }
+      }
       
       // Wait for sync (with test timeout to match)
       print('⏳ Waiting for sync...');
@@ -302,21 +320,40 @@ void main() {
       // App1 deletes contact
       print('📝 App1 deleting contact...');
       await app1!.deleteContact(contact.id);
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 100)); // Small delay for event creation
       
       // Verify delete event created
+      // Note: Sync now happens immediately, so the event may already be synced
       final app1Events = await app1!.getEvents();
       final deleteEvent = app1Events.firstWhere(
         (e) => e.aggregateId == contact.id && e.eventType == 'DELETED',
         orElse: () => throw Exception('Delete event not found'),
       );
-      expect(deleteEvent.synced, false);
-      print('✅ Delete event created in App1');
+      print('✅ Delete event created in App1: ${deleteEvent.id} (synced: ${deleteEvent.synced})');
       
-      // Wait for sync
+      // If not synced yet, wait a bit more (sync happens immediately but may take a few ms)
+      if (!deleteEvent.synced) {
+        print('⏳ Delete event not yet synced, waiting for immediate sync...');
+        int attempts = 0;
+        while (attempts < 10) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          final updatedEvents = await app1!.getEvents();
+          final updatedEvent = updatedEvents.firstWhere(
+            (e) => e.id == deleteEvent.id,
+            orElse: () => throw Exception('Event not found'),
+          );
+          if (updatedEvent.synced) {
+            print('✅ Delete event synced after ${(attempts + 1) * 100}ms');
+            break;
+          }
+          attempts++;
+        }
+      }
+      
+      // Wait for sync (though sync happens immediately, wait for all instances to be in sync)
       print('⏳ Waiting for sync...');
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(milliseconds: 500)); // Give state rebuild time
       
       // Verify event synced to server
       final serverEvents = await serverVerifier!.getServerEvents();
@@ -327,10 +364,20 @@ void main() {
       print('✅ Delete event synced to server');
       
       // Verify contact removed (they share boxes, so should be immediate after state rebuild)
-      await Future.delayed(const Duration(seconds: 2)); // Give state rebuild time
-      final contactsAfter = await app1!.getContacts();
-      expect(contactsAfter.any((c) => c.id == contact.id), false,
-        reason: 'Contact should be removed after delete');
+      // State rebuild happens immediately, but we need to ensure it completed
+      // Check multiple times to account for async state rebuild
+      bool contactRemoved = false;
+      for (int i = 0; i < 5; i++) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        final contactsAfter = await app1!.getContacts();
+        contactRemoved = !contactsAfter.any((c) => c.id == contact.id);
+        if (contactRemoved) {
+          print('✅ Contact removed after ${(i + 1) * 200}ms');
+          break;
+        }
+      }
+      expect(contactRemoved, true,
+        reason: 'Contact should be removed after delete and state rebuild');
       print('✅ Contact removed from all apps');
       
       // Validate consistency

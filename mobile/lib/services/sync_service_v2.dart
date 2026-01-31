@@ -436,12 +436,14 @@ class SyncServiceV2 {
 
   /// Start local to server sync loop (temporary loop)
   /// Runs until sync succeeds, then stops
+  /// Rule 1: First run executes immediately (no wait)
+  /// Rule 2: Creating events triggers this, which cancels existing timer and starts new one
   static void startLocalToServerSync() {
     if (kIsWeb) return;
 
     print('🔄 Starting local to server sync loop...');
 
-    // Cancel existing if any
+    // Cancel existing if any (Rule 2: clear current timer when new event is created)
     _localToServerSyncTimer?.cancel();
     _localToServerSyncTimer = null;
     _firstLocalToServerRun = true;
@@ -449,7 +451,10 @@ class SyncServiceV2 {
     // Reset backoff for immediate sync
     _retryBackoff.reset();
 
-    // Start temporary loop
+    // Rule 1: Run sync immediately (first run with no wait)
+    _runLocalToServerSyncOnce();
+
+    // Start periodic timer for retries (only runs if first attempt fails)
     _localToServerSyncTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       // Check if sync already running
       if (_isLocalToServerSyncing) {
@@ -470,39 +475,60 @@ class SyncServiceV2 {
 
       print('🔄 Local to server sync loop: found ${unsyncedEvents.length} unsynced events');
 
-      // First run: no wait
-      if (_firstLocalToServerRun) {
-        _firstLocalToServerRun = false;
-        print('🔄 Local to server sync loop: first run, no wait');
-      } else {
-        // Subsequent runs: wait per backoff
-        final waitDuration = _retryBackoff.getWaiting();
-        print('🔄 Local to server sync loop: waiting ${waitDuration.inSeconds}s before retry...');
-        await Future.delayed(waitDuration);
-      }
+      // Subsequent runs: wait per backoff (Rule 1: waiting only for retries)
+      final waitDuration = _retryBackoff.getWaiting();
+      print('🔄 Local to server sync loop: waiting ${waitDuration.inSeconds}s before retry...');
+      await Future.delayed(waitDuration);
 
-      // Attempt sync
-      _isLocalToServerSyncing = true;
-      try {
-        print('🔄 Local to server sync loop: attempting sync...');
-        final result = await syncLocalToServer();
-        if (result == SyncResult.done) {
-          // Sync succeeded, stop loop
-          timer.cancel();
-          _localToServerSyncTimer = null;
-          _retryBackoff.reset();
-          print('✅ Local to server sync loop stopped - sync succeeded');
-        } else {
-          // Sync failed, will retry on next iteration
-          print('⚠️ Local to server sync failed, will retry...');
-        }
-      } catch (e) {
-        print('❌ Local to server sync error: $e');
-        // Will retry on next iteration
-      } finally {
-        _isLocalToServerSyncing = false;
-      }
+      // Attempt sync (retry)
+      await _runLocalToServerSyncOnce();
     });
+  }
+
+  /// Run local to server sync once (helper method)
+  static Future<void> _runLocalToServerSyncOnce() async {
+    // Check if sync already running
+    if (_isLocalToServerSyncing) {
+      print('⚠️ Local to server sync: sync already running, skipping...');
+      return;
+    }
+
+    // Check if we have unsynced events
+    final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
+    if (unsyncedEvents.isEmpty) {
+      // No unsynced events, stop loop if timer exists
+      if (_localToServerSyncTimer != null) {
+        _localToServerSyncTimer!.cancel();
+        _localToServerSyncTimer = null;
+        _retryBackoff.reset();
+      }
+      print('✅ Local to server sync: no unsynced events');
+      return;
+    }
+
+    print('🔄 Local to server sync: found ${unsyncedEvents.length} unsynced events');
+
+    // Attempt sync
+    _isLocalToServerSyncing = true;
+    try {
+      print('🔄 Local to server sync: attempting sync...');
+      final result = await syncLocalToServer();
+      if (result == SyncResult.done) {
+        // Sync succeeded, stop loop
+        _localToServerSyncTimer?.cancel();
+        _localToServerSyncTimer = null;
+        _retryBackoff.reset();
+        print('✅ Local to server sync loop stopped - sync succeeded');
+      } else {
+        // Sync failed, will retry on next iteration (if timer is running)
+        print('⚠️ Local to server sync failed, will retry...');
+      }
+    } catch (e) {
+      print('❌ Local to server sync error: $e');
+      // Will retry on next iteration (if timer is running)
+    } finally {
+      _isLocalToServerSyncing = false;
+    }
   }
 
   /// Handle server-to-local sync request (called by RealtimeService on notification)
