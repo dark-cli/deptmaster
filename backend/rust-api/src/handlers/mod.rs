@@ -18,6 +18,7 @@ pub use admin::{
     get_latest_event_id,
     get_projection_status,
     get_total_debt,
+    dev_clear_database,
 };
 pub use contacts::{
     create_contact, 

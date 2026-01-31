@@ -1,3 +1,4 @@
+import 'package:debt_tracker_mobile/models/event.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,10 +8,7 @@ import 'package:debt_tracker_mobile/models/contact.dart';
 import 'package:debt_tracker_mobile/models/transaction.dart';
 import 'package:debt_tracker_mobile/services/local_database_service_v2.dart';
 import 'package:debt_tracker_mobile/services/event_store_service.dart';
-// Import generated adapters
-import 'package:debt_tracker_mobile/models/contact.g.dart';
-import 'package:debt_tracker_mobile/models/transaction.g.dart';
-import 'package:debt_tracker_mobile/models/event.g.dart';
+
 
 void main() {
   group('ContactTransactionsScreen UI Tests', () {

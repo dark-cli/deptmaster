@@ -674,3 +674,141 @@ pub async fn rebuild_projections(
     }
 }
 
+
+/// Dev-only endpoint: Clear all database data (only available in development mode)
+/// This endpoint is used by integration tests to reset the database state
+pub async fn dev_clear_database(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use std::env;
+    
+    // Only allow in development mode
+    let environment = env::var("ENVIRONMENT")
+        .unwrap_or_else(|_| "development".to_string())
+        .to_lowercase();
+    
+    if environment == "production" {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "This endpoint is only available in development mode"
+            })),
+        ));
+    }
+    
+    tracing::info!("🧹 Dev clear database endpoint called - clearing all data...");
+    
+    // Start a transaction to ensure atomicity
+    let mut tx = state.db_pool.begin().await.map_err(|e| {
+        tracing::error!("Error starting transaction: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+    
+    // Truncate all tables in correct order (respecting foreign key constraints)
+    sqlx::query("TRUNCATE TABLE login_logs CASCADE")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error truncating login_logs: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    
+    sqlx::query("TRUNCATE TABLE projection_snapshots CASCADE")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error truncating projection_snapshots: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    
+    sqlx::query("TRUNCATE TABLE transactions_projection CASCADE")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error truncating transactions_projection: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    
+    sqlx::query("TRUNCATE TABLE contacts_projection CASCADE")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error truncating contacts_projection: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    
+    sqlx::query("TRUNCATE TABLE events CASCADE")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error truncating events: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    
+    // Keep admin_users and users_projection, but clear all users except test user
+    sqlx::query("DELETE FROM users_projection WHERE email != 'max'")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error cleaning users_projection: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    
+    // Ensure test user "max" exists (password will be set by test helper via reset_password binary)
+    let placeholder_hash = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqJqFqJqJq";
+    
+    sqlx::query(
+        r#"
+        INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id)
+        VALUES (gen_random_uuid(), 'max', $1, NOW(), 0)
+        ON CONFLICT (email) DO UPDATE SET last_event_id = 0
+        "#,
+    )
+    .bind(placeholder_hash)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error ensuring test user exists: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+    
+    // Commit transaction
+    tx.commit().await.map_err(|e| {
+        tracing::error!("Error committing transaction: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+    
+    tracing::info!("✅ Database cleared successfully");
+    
+    Ok(Json(serde_json::json!({
+        "message": "Database cleared successfully",
+        "test_user": "max"
+    })))
+}

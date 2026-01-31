@@ -95,7 +95,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/auth/admin/login", post(handlers::admin_login)) // Admin login
         .route("/admin", get(handlers::admin_panel)) // Admin page HTML is public (login form)
         .route("/config.js", get(handlers::config_js)) // Admin config.js (optional, returns empty if not exists)
-        .route("/favicon.ico", get(handlers::favicon)); // Favicon
+        .route("/favicon.ico", get(handlers::favicon)) // Favicon
+        .route("/api/dev/clear-database", axum::routing::post(handlers::dev_clear_database)); // Dev-only: clears database (checks ENVIRONMENT internally)
 
     // Protected API routes (require authentication)
     let protected_api_routes = Router::new()
