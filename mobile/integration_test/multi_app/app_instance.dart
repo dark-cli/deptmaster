@@ -312,16 +312,21 @@ class AppInstance {
     // 1. Block all network calls
     networkInterceptor?.blockNetwork();
     
-    // 2. Disconnect WebSocket
+    // 2. Clear server reachability cache to force fresh check
+    // Note: This helps, but HTTP calls still bypass the interceptor
+    SyncServiceV2.clearServerReachabilityCache();
+    
+    // 3. Disconnect WebSocket
     await RealtimeService.disconnect();
     
-    // 3. Prevent auto-reconnection
+    // 4. Prevent auto-reconnection
     RealtimeServiceTestHelper.setAutoReconnectEnabled(false);
     
-    // 4. Clear any pending reconnection timers
+    // 5. Clear any pending reconnection timers
     RealtimeServiceTestHelper.cancelReconnectTimers();
     
     print('📴 AppInstance $id: Simulated offline - all connections blocked');
+    print('⚠️ Note: NetworkInterceptor exists but HTTP calls bypass it - offline simulation is limited');
   }
   
   /// Simulate going online

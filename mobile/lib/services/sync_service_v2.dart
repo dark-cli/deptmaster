@@ -58,6 +58,13 @@ class SyncServiceV2 {
 
   // ========== HELPER FUNCTIONS ==========
 
+  /// Clear server reachability cache (for testing)
+  /// This allows tests to force a fresh reachability check
+  static void clearServerReachabilityCache() {
+    _serverReachableCache = null;
+    _serverReachableCacheTime = null;
+  }
+
   /// Check if server is reachable via HTTP
   /// Uses caching to avoid too many checks
   static Future<bool> _isServerReachable() async {

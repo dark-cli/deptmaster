@@ -5,6 +5,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Row, postgres::PgRow, QueryBuilder};
+use bcrypt::{hash, DEFAULT_COST};
+use uuid::Uuid;
+use chrono::Utc;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -674,7 +677,6 @@ pub async fn rebuild_projections(
     }
 }
 
-
 /// Dev-only endpoint: Clear all database data (only available in development mode)
 /// This endpoint is used by integration tests to reset the database state
 pub async fn dev_clear_database(
@@ -708,6 +710,7 @@ pub async fn dev_clear_database(
     })?;
     
     // Truncate all tables in correct order (respecting foreign key constraints)
+    // Delete in reverse dependency order
     sqlx::query("TRUNCATE TABLE login_logs CASCADE")
         .execute(&mut *tx)
         .await
@@ -775,21 +778,60 @@ pub async fn dev_clear_database(
             )
         })?;
     
-    // Ensure test user "max" exists (password will be set by test helper via reset_password binary)
-    let placeholder_hash = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5GyYqJqFqJqJq";
+    // Hash passwords using bcrypt
+    // Hash password for regular user "max" with password "12345678"
+    let max_password_hash = hash("12345678", DEFAULT_COST).map_err(|e| {
+        tracing::error!("Error hashing password for max: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
     
+    // Ensure test user "max" exists with password "12345678"
     sqlx::query(
         r#"
         INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id)
         VALUES (gen_random_uuid(), 'max', $1, NOW(), 0)
-        ON CONFLICT (email) DO UPDATE SET last_event_id = 0
+        ON CONFLICT (email) DO UPDATE SET password_hash = $1, last_event_id = 0
         "#,
     )
-    .bind(placeholder_hash)
+    .bind(&max_password_hash)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!("Error ensuring test user exists: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+    
+    // Hash password for admin user "admin" with password "admin"
+    let admin_password_hash = hash("admin", DEFAULT_COST).map_err(|e| {
+        tracing::error!("Error hashing password for admin: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
+    
+    // Ensure admin user "admin" exists with password "admin"
+    let admin_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO admin_users (id, username, password_hash, email, is_active, created_at)
+        VALUES ($1, 'admin', $2, 'admin@debitum.local', true, $3)
+        ON CONFLICT (username) DO UPDATE SET password_hash = $2, is_active = true
+        "#,
+    )
+    .bind(&admin_id)
+    .bind(&admin_password_hash)
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error ensuring admin user exists: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": format!("Database error: {}", e)})),

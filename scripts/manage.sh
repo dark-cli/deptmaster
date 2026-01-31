@@ -274,7 +274,7 @@ cmd_reset_database_complete() {
     
     # Reset admin password to default (ensures admin access after reset)
     print_info "Resetting admin password..."
-    local default_admin_password="admin123456"
+    local default_admin_password="admin"
     
     # Wait for server to be ready (needed for database connection)
     if ! wait_for_service "http://localhost:8000/health" "API server" 30 1; then
@@ -293,6 +293,8 @@ cmd_reset_database_complete() {
     echo ""
     echo "📧 Admin username: admin"
     echo "🔑 Admin password: $default_admin_password"
+    echo "📧 Regular user: max"
+    echo "🔑 Regular user password: 12345678"
     echo ""
 }
 
