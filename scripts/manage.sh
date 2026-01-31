@@ -50,6 +50,7 @@ declare -A VALID_FLAGS=(
     ["test-flutter-app"]="verbose"
     ["test-api-server"]="verbose"
     ["test-flutter-integration"]="verbose,skip-server-build"
+    ["test-flutter-integration-multi-app"]="verbose"
     ["set-admin-password"]="verbose"
     ["show-android-logs"]="verbose"
     ["status"]="verbose"
@@ -1232,6 +1233,219 @@ cmd_test_flutter_integration() {
     print_success "Integration tests complete"
 }
 
+cmd_test_flutter_integration_multi_app() {
+    validate_flags "test-flutter-integration-multi-app"
+    
+    # Temporarily disable exit on error so we can continue even if tests fail
+    set +e
+    
+    print_step "Running multi-app integration test suites..."
+    
+    # Check if server is running
+    print_info "Checking if server is running..."
+    if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+        print_error "Server is not running at http://localhost:8000"
+        print_warning "Please start the server first:"
+        echo "  $0 start-server-direct"
+        exit 1
+    fi
+    print_success "Server is running"
+    echo ""
+    
+    # Flutter path
+    local FLUTTER_CMD
+    if command -v flutter &> /dev/null; then
+        FLUTTER_CMD="flutter"
+    elif [ -f "/home/max/flutter/bin/flutter" ]; then
+        FLUTTER_CMD="/home/max/flutter/bin/flutter"
+    else
+        print_error "Flutter not found. Please install Flutter SDK."
+        exit 1
+    fi
+    
+    local TEST_DIR="integration_test/multi_app/scenarios"
+    local DEVICE="linux"
+    
+    # Change to mobile directory first to discover tests
+    cd "$ROOT_DIR/mobile" || exit 1
+    
+    # Dynamically discover all test files in the scenarios directory
+    if [ ! -d "$TEST_DIR" ]; then
+        print_error "Test directory not found: $TEST_DIR"
+        exit 1
+    fi
+    
+    # Find all .dart files and sort them alphabetically
+    declare -a TEST_SUITES
+    # Use a more portable approach
+    while IFS= read -r file; do
+        if [ -f "$file" ]; then
+            # Get just the filename without path
+            local filename=$(basename "$file")
+            TEST_SUITES+=("$filename")
+        fi
+    done < <(find "$TEST_DIR" -maxdepth 1 -name "*.dart" -type f | sort)
+    
+    if [ ${#TEST_SUITES[@]} -eq 0 ]; then
+        print_error "No test files found in $TEST_DIR"
+        exit 1
+    fi
+    
+    # Generate display names from filenames
+    # Convert snake_case to Title Case (e.g., "basic_sync_scenarios" -> "Basic Sync Scenarios")
+    declare -a TEST_NAMES
+    for test_file in "${TEST_SUITES[@]}"; do
+        # Remove .dart extension
+        local name="${test_file%.dart}"
+        # Replace underscores with spaces
+        name="${name//_/ }"
+        # Convert to title case (capitalize first letter of each word)
+        local title_case=""
+        for word in $name; do
+            # Capitalize first letter, lowercase the rest
+            local first_char=$(echo "${word:0:1}" | tr '[:lower:]' '[:upper:]')
+            local rest_chars=$(echo "${word:1}" | tr '[:upper:]' '[:lower:]')
+            if [ -z "$title_case" ]; then
+                title_case="${first_char}${rest_chars}"
+            else
+                title_case="${title_case} ${first_char}${rest_chars}"
+            fi
+        done
+        TEST_NAMES+=("$title_case")
+    done
+    
+    # Results tracking
+    declare -a TEST_RESULTS
+    local TOTAL_TESTS=${#TEST_SUITES[@]}
+    local PASSED=0
+    local FAILED=0
+    
+    print_info "════════════════════════════════════════════════════════════════"
+    print_info "Discovered $TOTAL_TESTS Integration Test Suites"
+    print_info "════════════════════════════════════════════════════════════════"
+    echo ""
+    
+    # Run each test suite
+    for i in "${!TEST_SUITES[@]}"; do
+        local TEST_FILE="${TEST_SUITES[$i]}"
+        local TEST_NAME="${TEST_NAMES[$i]}"
+        local TEST_NUM=$((i + 1))
+        
+        if [ "$VERBOSE" = "true" ]; then
+            print_info "[$TEST_NUM/$TOTAL_TESTS] Running: $TEST_NAME"
+            print_info "File: $TEST_FILE"
+            print_info "────────────────────────────────────────────────────────────"
+        else
+            # Show minimal progress when not verbose
+            printf "[%d/%d] Running: %s..." "$TEST_NUM" "$TOTAL_TESTS" "$TEST_NAME"
+        fi
+        
+        # Run the test (capture exit code, show output only if verbose)
+        local TEST_EXIT_CODE=0
+        if [ "$VERBOSE" = "true" ]; then
+            # Show full output when verbose
+            $FLUTTER_CMD test "$TEST_DIR/$TEST_FILE" -d "$DEVICE" 2>&1 || TEST_EXIT_CODE=$?
+        else
+            # Suppress output when not verbose
+            $FLUTTER_CMD test "$TEST_DIR/$TEST_FILE" -d "$DEVICE" > /dev/null 2>&1 || TEST_EXIT_CODE=$?
+            # Show result on same line
+            if [ $TEST_EXIT_CODE -eq 0 ]; then
+                echo " ${GREEN}✓ PASSED${NC}"
+            else
+                echo " ${RED}✗ FAILED${NC}"
+            fi
+        fi
+        
+        if [ $TEST_EXIT_CODE -eq 0 ]; then
+            TEST_RESULTS[$i]="PASSED"
+            ((PASSED++))
+            if [ "$VERBOSE" = "true" ]; then
+                print_success "$TEST_NAME: PASSED"
+                echo ""
+            fi
+        else
+            TEST_RESULTS[$i]="FAILED"
+            ((FAILED++))
+            if [ "$VERBOSE" = "true" ]; then
+                print_error "$TEST_NAME: FAILED (exit code: $TEST_EXIT_CODE)"
+                echo ""
+            fi
+        fi
+    done
+    
+    # Print summary table
+    echo ""
+    print_info "════════════════════════════════════════════════════════════════"
+    print_info "Test Results Summary"
+    print_info "════════════════════════════════════════════════════════════════"
+    echo ""
+    
+    # Calculate column widths for table formatting
+    local max_name_len=0
+    for test_name in "${TEST_NAMES[@]}"; do
+        local len=${#test_name}
+        if [ $len -gt $max_name_len ]; then
+            max_name_len=$len
+        fi
+    done
+    # Ensure minimum width
+    if [ $max_name_len -lt 30 ]; then
+        max_name_len=30
+    fi
+    
+    # Print table header
+    printf "%-${max_name_len}s  %-10s\n" "Test Suite" "Result"
+    printf "%-${max_name_len}s  %-10s\n" "$(printf '─%.0s' $(seq 1 $max_name_len))" "$(printf '─%.0s' $(seq 1 10))"
+    
+    # Print table rows
+    for i in "${!TEST_SUITES[@]}"; do
+        local TEST_NAME="${TEST_NAMES[$i]}"
+        local RESULT="${TEST_RESULTS[$i]}"
+        
+        # Truncate long names if needed
+        local display_name="$TEST_NAME"
+        if [ ${#display_name} -gt $max_name_len ]; then
+            display_name="${display_name:0:$((max_name_len-3))}..."
+        fi
+        
+        if [ "$RESULT" = "PASSED" ]; then
+            printf "%-${max_name_len}s  ${GREEN}%-10s${NC}\n" "$display_name" "✓ PASSED"
+        else
+            printf "%-${max_name_len}s  ${RED}%-10s${NC}\n" "$display_name" "✗ FAILED"
+        fi
+    done
+    
+    echo ""
+    print_info "════════════════════════════════════════════════════════════════"
+    print_info "Summary Statistics"
+    print_info "════════════════════════════════════════════════════════════════"
+    echo ""
+    printf "  Total Tests Run:  %d\n" "$TOTAL_TESTS"
+    printf "  ${GREEN}Passed:${NC}            %d\n" "$PASSED"
+    printf "  ${RED}Failed:${NC}            %d\n" "$FAILED"
+    
+    # Calculate pass rate
+    if [ $TOTAL_TESTS -gt 0 ]; then
+        local pass_rate=$((PASSED * 100 / TOTAL_TESTS))
+        printf "  Pass Rate:        %d%%\n" "$pass_rate"
+    fi
+    
+    echo ""
+    print_info "════════════════════════════════════════════════════════════════"
+    
+    # Re-enable exit on error
+    set -e
+    
+    # Exit with appropriate code
+    if [ $FAILED -eq 0 ]; then
+        print_success "🎉 All tests passed!"
+        return 0
+    else
+        print_error "⚠️  Some tests failed. Check the output above for details."
+        return 1
+    fi
+}
+
 cmd_check() {
     validate_flags "check"
     
@@ -1434,6 +1648,10 @@ Flutter App Commands:
   test-flutter-app [test_file]     Run Flutter tests
   test-flutter-integration [test]   Run Flutter integration tests (with database reset)
                                   Use --skip-server-build to skip server build during reset
+  test-flutter-integration-multi-app
+                                  Run all multi-app sync integration test suites
+                                  Dynamically discovers all test files in integration_test/multi_app/scenarios/
+                                  Requires server to be running (use start-server-direct)
 
 Testing Commands:
   test-api-server                  Test API server endpoints
@@ -1471,6 +1689,7 @@ Examples:
   $0 test-flutter-app                             # Run all Flutter tests
   $0 test-api-server                              # Test server endpoints
   $0 test-flutter-integration ui                  # Run UI integration tests
+  $0 test-flutter-integration-multi-app           # Run all multi-app sync tests
   $0 check                                         # Check system requirements
 
 Environment Variables:
@@ -1549,6 +1768,9 @@ case "$COMMAND" in
         ;;
     test-flutter-integration)
         cmd_test_flutter_integration "${2:-integration_test/ui_integration_test.dart}" "${@:3}"
+        ;;
+    test-flutter-integration-multi-app)
+        cmd_test_flutter_integration_multi_app
         ;;
     check)
         cmd_check
