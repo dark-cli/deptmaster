@@ -8,14 +8,14 @@ import '../main.dart'; // For navigatorKey and scaffoldMessengerKey
 /// Centralized Toast Service
 /// All toast notifications should use this service for consistency
 class ToastService {
-  /// Default duration for toasts (3 seconds)
-  static const Duration defaultDuration = Duration(seconds: 3);
+  /// Default duration for toasts (2.5 seconds)
+  static const Duration defaultDuration = Duration(milliseconds: 2500);
   
-  /// Duration for error toasts (4 seconds - slightly longer for errors)
-  static const Duration errorDuration = Duration(seconds: 4);
+  /// Duration for error toasts (5 seconds - longer for errors with dismiss button)
+  static const Duration errorDuration = Duration(seconds: 5);
   
-  /// Duration for undo snack bars (5 seconds - longer since they have actions)
-  static const Duration undoDuration = Duration(seconds: 5);
+  /// Duration for undo snack bars (2.5 seconds)
+  static const Duration undoDuration = Duration(milliseconds: 2500);
   
   /// Margin for snack bars to position them above FAB and bottom navigation
   /// This prevents snack bars from overlapping with the floating action button
@@ -37,11 +37,10 @@ class ToastService {
     );
   }
 
-  /// Show an error toast
+  /// Show an error toast with dismiss button
   static void showError(String message, {Duration? duration}) {
-    _showToast(
+    _showErrorToast(
       message: message,
-      backgroundColor: ThemeColors.snackBarErrorBackground,
       duration: duration ?? errorDuration,
     );
   }
@@ -296,6 +295,100 @@ class ToastService {
     }
   }
 
+  /// Internal method to show error toast with dismiss button
+  static void _showErrorToast({
+    required String message,
+    required Duration duration,
+  }) {
+    // Try to use scaffoldMessengerKey first (most reliable)
+    ScaffoldMessengerState? scaffoldMessenger;
+    if (scaffoldMessengerKey.currentState != null) {
+      scaffoldMessenger = scaffoldMessengerKey.currentState;
+    } else {
+      // Fallback to using context
+      final context = navigatorKey.currentContext;
+      if (context == null) {
+        print('⚠️ ToastService._showErrorToast: navigatorKey.currentContext is null and scaffoldMessengerKey is null');
+        return;
+      }
+
+      // Check if context is still mounted
+      if (!context.mounted) {
+        print('⚠️ ToastService._showErrorToast: context is not mounted');
+        return;
+      }
+
+      // Try to get ScaffoldMessenger, but catch any errors if context is deactivated
+      try {
+        scaffoldMessenger = ScaffoldMessenger.of(context);
+      } catch (e) {
+        // Context is deactivated, can't show toast
+        print('⚠️ ToastService._showErrorToast: ScaffoldMessenger.of failed: $e');
+        return;
+      }
+    }
+    
+    if (scaffoldMessenger == null) {
+      print('⚠️ ToastService._showErrorToast: scaffoldMessenger is null');
+      return;
+    }
+    
+    // Store in non-nullable variable
+    final messenger = scaffoldMessenger;
+    
+    // Get context for theme colors
+    final context = navigatorKey.currentContext;
+    final bgColor = context != null 
+        ? ThemeColors.snackBarErrorBackground(context)
+        : Colors.red[800]!;
+    final textColor = context != null 
+        ? ThemeColors.snackBarTextColor(context)
+        : Colors.white;
+    final actionColor = context != null
+        ? ThemeColors.snackBarActionColor(context)
+        : Colors.white;
+    
+    try {
+      // Dismiss any existing toast before showing new one
+      try {
+        messenger.hideCurrentSnackBar();
+      } catch (e) {
+        // Context became deactivated, ignore
+      }
+      
+      try {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              message,
+              style: TextStyle(
+                color: textColor,
+              ),
+            ),
+            backgroundColor: bgColor,
+            duration: duration,
+            behavior: SnackBarBehavior.floating,
+            margin: snackBarMargin, // Position above FAB and bottom navigation
+            action: SnackBarAction(
+              label: 'DISMISS',
+              textColor: actionColor,
+              onPressed: () {
+                messenger.hideCurrentSnackBar();
+              },
+            ),
+          ),
+        );
+        print('✅ ToastService._showErrorToast: SnackBar shown successfully');
+      } catch (e) {
+        print('❌ ToastService._showErrorToast: Error showing SnackBar: $e');
+        rethrow;
+      }
+    } catch (e) {
+      // Context became deactivated while showing snackbar, log the error
+      print('❌ ToastService._showErrorToast: Exception while showing snackbar: $e');
+    }
+  }
+
   /// Internal method to show toast
   static void _showToast({
     required String message,
@@ -478,6 +571,13 @@ class ToastService {
           duration: duration ?? errorDuration,
           behavior: SnackBarBehavior.floating,
           margin: snackBarMargin, // Position above FAB and bottom navigation
+          action: SnackBarAction(
+            label: 'DISMISS',
+            textColor: ThemeColors.snackBarActionColor(context),
+            onPressed: () {
+              scaffoldMessenger.hideCurrentSnackBar();
+            },
+          ),
         ),
       );
     } catch (e) {
