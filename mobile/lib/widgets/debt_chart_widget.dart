@@ -401,7 +401,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
           avgDebt = (closestBefore.eventData['total_debt'] as num).toDouble();
         } else {
           // Use fallback debt (from before period or first event)
-          avgDebt = fallbackDebt!;
+          avgDebt = fallbackDebt;
         }
       }
       
@@ -689,7 +689,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
                     }
                     return ChartAxisLabel(
                       formatted,
-                      details.textStyle?.copyWith(
+                      details.textStyle.copyWith(
                         fontSize: 10,
                         color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                       ),

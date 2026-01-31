@@ -1,3 +1,6 @@
+// ignore: unused_import
+// ignore_for_file: unused_local_variable, unused_import, duplicate_ignore
+
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +13,7 @@ import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+// ignore: unused_import
 import '../utils/event_formatter.dart';
 import 'events_log_screen.dart';
 
@@ -872,7 +876,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                                 }
                                 return ChartAxisLabel(
                                   formatted,
-                                  details.textStyle?.copyWith(
+                                  details.textStyle.copyWith(
                                     fontSize: 9,
                                     color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                                   ),

@@ -1,13 +1,12 @@
+// ignore_for_file: unused_local_variable, duplicate_ignore
+
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:debt_tracker_mobile/models/contact.dart';
 import 'package:debt_tracker_mobile/models/transaction.dart';
 import 'package:debt_tracker_mobile/models/event.dart';
-import 'package:debt_tracker_mobile/services/backend_config_service.dart';
 import '../app_instance.dart';
 import '../sync_monitor.dart';
 import '../event_validator.dart';
@@ -384,6 +383,7 @@ void main() {
         (e) => e['aggregate_id'] == transaction.id && e['event_type'] == 'DELETED' && e['aggregate_type'] == 'transaction',
         orElse: () => throw Exception('Transaction delete event not found on server'),
       );
+      // ignore: unused_local_variable
       final serverContactDelete = serverEvents.firstWhere(
         (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'DELETED' && e['aggregate_type'] == 'contact',
         orElse: () => throw Exception('Contact delete event not found on server'),

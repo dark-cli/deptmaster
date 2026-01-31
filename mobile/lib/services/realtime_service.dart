@@ -1,3 +1,5 @@
+// ignore_for_file: unused_shown_name, unused_import, unused_local_variable, unused_element, unnecessary_null_comparison
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;

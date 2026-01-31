@@ -1,3 +1,5 @@
+// ignore_for_file: unused_field, unused_local_variable
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../utils/text_utils.dart';

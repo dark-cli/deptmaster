@@ -1,14 +1,10 @@
-import 'dart:io';
-import 'dart:convert';
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:debt_tracker_mobile/services/event_store_service.dart';
 import 'package:debt_tracker_mobile/services/local_database_service_v2.dart';
 import 'package:debt_tracker_mobile/services/sync_service_v2.dart';
-import 'package:debt_tracker_mobile/services/api_service.dart';
 import 'package:debt_tracker_mobile/services/auth_service.dart';
 import 'package:debt_tracker_mobile/services/backend_config_service.dart';
 import 'package:debt_tracker_mobile/services/realtime_service.dart';
@@ -17,7 +13,6 @@ import 'package:debt_tracker_mobile/models/transaction.dart';
 import 'package:debt_tracker_mobile/models/event.dart';
 import 'network_interceptor.dart';
 import 'realtime_service_test_helper.dart';
-import '../helpers/multi_app_helpers.dart';
 
 /// Simulated app instance with isolated Hive database and real server connection
 class AppInstance {

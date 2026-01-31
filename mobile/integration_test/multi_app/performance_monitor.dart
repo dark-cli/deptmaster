@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:debt_tracker_mobile/services/event_store_service.dart';
 import 'app_instance.dart';
 import 'server_verifier.dart';
 

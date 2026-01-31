@@ -1,3 +1,5 @@
+// ignore_for_file: unused_local_variable
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'backend_config_service.dart';
 import 'sync_service_v2.dart';

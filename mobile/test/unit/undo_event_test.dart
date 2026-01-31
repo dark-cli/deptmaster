@@ -1,6 +1,9 @@
+// ignore_for_file: unused_import, duplicate_ignore
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:debt_tracker_mobile/services/state_builder.dart';
 import 'package:debt_tracker_mobile/models/event.dart';
+// ignore: unused_import
 import 'package:debt_tracker_mobile/models/contact.dart';
 import 'package:debt_tracker_mobile/models/transaction.dart';
 

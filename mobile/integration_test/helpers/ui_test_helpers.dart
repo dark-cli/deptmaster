@@ -1,7 +1,8 @@
+// ignore_for_file: unused_local_variable
+
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
-import 'package:integration_test/integration_test.dart';
 import 'package:debt_tracker_mobile/services/event_store_service.dart';
 import 'package:debt_tracker_mobile/services/local_database_service_v2.dart';
 import 'package:debt_tracker_mobile/services/sync_service_v2.dart';
@@ -9,7 +10,6 @@ import 'package:debt_tracker_mobile/services/api_service.dart';
 import 'package:debt_tracker_mobile/services/backend_config_service.dart';
 import 'package:debt_tracker_mobile/models/contact.dart';
 import 'package:debt_tracker_mobile/models/transaction.dart';
-import 'package:intl/intl.dart';
 
 /// Reset server data by calling manage.sh script
 Future<void> resetServerData() async {

@@ -1,3 +1,5 @@
+// ignore_for_file: unused_catch_stack
+
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'backend_config_service.dart';

@@ -1,3 +1,5 @@
+// ignore_for_file: unused_local_variable
+
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';

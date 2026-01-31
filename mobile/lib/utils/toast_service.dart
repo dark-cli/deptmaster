@@ -1,3 +1,5 @@
+// ignore_for_file: unnecessary_null_comparison
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'theme_colors.dart';
@@ -68,7 +70,7 @@ class ToastService {
     if (!context.mounted || scaffoldMessenger == null) return;
     
     // Store in non-nullable variable for use in closures
-    final messenger = scaffoldMessenger!;
+    final messenger = scaffoldMessenger;
     final actualDuration = duration ?? defaultDuration;
     
     try {
@@ -168,7 +170,7 @@ class ToastService {
     if (!context.mounted || scaffoldMessenger == null) return;
     
     // Store in non-nullable variable for use in closures
-    final messenger = scaffoldMessenger!;
+    final messenger = scaffoldMessenger;
     final actualDuration = duration ?? defaultDuration;
     
     try {
@@ -274,7 +276,7 @@ class ToastService {
     if (!context.mounted || scaffoldMessenger == null) return;
     
     // Store in non-nullable variable
-    final messenger = scaffoldMessenger!;
+    final messenger = scaffoldMessenger;
     
     try {
       // Dismiss any existing toast before showing new one
@@ -336,9 +338,9 @@ class ToastService {
       }
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger!.hideCurrentSnackBar();
+      scaffoldMessenger.hideCurrentSnackBar();
       
-      scaffoldMessenger!.showSnackBar(
+      scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
             message,
@@ -431,9 +433,9 @@ class ToastService {
       }
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger!.hideCurrentSnackBar();
+      scaffoldMessenger.hideCurrentSnackBar();
       
-      scaffoldMessenger!.showSnackBar(
+      scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
             message,
@@ -484,12 +486,12 @@ class ToastService {
       final actualDuration = duration ?? defaultDuration;
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger!.hideCurrentSnackBar();
+      scaffoldMessenger.hideCurrentSnackBar();
       
       // Cancel any existing timer for this scaffoldMessenger
-      _activeTimers[scaffoldMessenger!]?.cancel();
+      _activeTimers[scaffoldMessenger]?.cancel();
       
-      scaffoldMessenger!.showSnackBar(
+      scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
             message,
@@ -505,8 +507,8 @@ class ToastService {
             textColor: ThemeColors.snackBarActionColor(context),
             onPressed: () {
               _activeTimers[scaffoldMessenger!]?.cancel();
-              _activeTimers.remove(scaffoldMessenger!);
-              scaffoldMessenger!.hideCurrentSnackBar();
+              _activeTimers.remove(scaffoldMessenger);
+              scaffoldMessenger.hideCurrentSnackBar();
               onUndo();
             },
           ),
@@ -515,16 +517,16 @@ class ToastService {
       
       // Auto-dismiss after duration
       // Note: SnackBars with actions don't auto-dismiss, so we use a timer
-      _activeTimers[scaffoldMessenger!] = Timer(actualDuration, () {
+      _activeTimers[scaffoldMessenger] = Timer(actualDuration, () {
         try {
-          if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger!)) {
-            scaffoldMessenger!.hideCurrentSnackBar();
-            _activeTimers.remove(scaffoldMessenger!);
+          if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger)) {
+            scaffoldMessenger.hideCurrentSnackBar();
+            _activeTimers.remove(scaffoldMessenger);
           }
         } catch (e) {
           // SnackBar might already be dismissed, that's fine
           if (scaffoldMessenger != null) {
-            _activeTimers.remove(scaffoldMessenger!);
+            _activeTimers.remove(scaffoldMessenger);
           }
         }
       });
@@ -586,12 +588,12 @@ class ToastService {
       final actualDuration = duration ?? defaultDuration;
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger!.hideCurrentSnackBar();
+      scaffoldMessenger.hideCurrentSnackBar();
       
       // Cancel any existing timer for this scaffoldMessenger
-      _activeTimers[scaffoldMessenger!]?.cancel();
+      _activeTimers[scaffoldMessenger]?.cancel();
       
-      scaffoldMessenger!.showSnackBar(
+      scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
             message,
@@ -607,8 +609,8 @@ class ToastService {
             textColor: ThemeColors.snackBarActionColor(context),
             onPressed: () async {
               _activeTimers[scaffoldMessenger!]?.cancel();
-              _activeTimers.remove(scaffoldMessenger!);
-              scaffoldMessenger!.hideCurrentSnackBar();
+              _activeTimers.remove(scaffoldMessenger);
+              scaffoldMessenger.hideCurrentSnackBar();
               try {
                 await onUndo();
                 // Check if context is still valid before showing toast
@@ -636,16 +638,16 @@ class ToastService {
       
       // Auto-dismiss after duration
       // Note: SnackBars with actions don't auto-dismiss, so we use a timer
-      _activeTimers[scaffoldMessenger!] = Timer(actualDuration, () {
+      _activeTimers[scaffoldMessenger] = Timer(actualDuration, () {
         try {
-          if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger!)) {
-            scaffoldMessenger!.hideCurrentSnackBar();
-            _activeTimers.remove(scaffoldMessenger!);
+          if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger)) {
+            scaffoldMessenger.hideCurrentSnackBar();
+            _activeTimers.remove(scaffoldMessenger);
           }
         } catch (e) {
           // SnackBar might already be dismissed, that's fine
           if (scaffoldMessenger != null) {
-            _activeTimers.remove(scaffoldMessenger!);
+            _activeTimers.remove(scaffoldMessenger);
           }
         }
       });
