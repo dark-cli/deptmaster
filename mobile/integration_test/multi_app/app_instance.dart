@@ -251,7 +251,7 @@ class AppInstance {
     String? description,
   }) async {
     final transaction = Transaction(
-      id: 'transaction_${DateTime.now().millisecondsSinceEpoch}_$id',
+      id: const Uuid().v4(), // Use UUID for transaction ID (server requires UUIDs)
       contactId: contactId,
       type: TransactionType.money,
       direction: direction,
@@ -264,6 +264,35 @@ class AppInstance {
     );
     
     return await LocalDatabaseServiceV2.createTransaction(transaction);
+  }
+  
+  /// Update a transaction
+  Future<void> updateTransaction(String transactionId, Map<String, dynamic> updates) async {
+    final transaction = await LocalDatabaseServiceV2.getTransaction(transactionId);
+    if (transaction == null) {
+      throw Exception('Transaction not found: $transactionId');
+    }
+    
+    // Apply updates
+    final updated = Transaction(
+      id: transaction.id,
+      contactId: transaction.contactId,
+      type: transaction.type,
+      direction: transaction.direction,
+      amount: updates['amount'] ?? transaction.amount,
+      currency: transaction.currency,
+      description: updates['description'] ?? transaction.description,
+      transactionDate: updates['transactionDate'] ?? transaction.transactionDate,
+      createdAt: transaction.createdAt,
+      updatedAt: DateTime.now(),
+    );
+    
+    await LocalDatabaseServiceV2.updateTransaction(updated);
+  }
+  
+  /// Delete a transaction
+  Future<void> deleteTransaction(String transactionId) async {
+    await LocalDatabaseServiceV2.deleteTransaction(transactionId);
   }
   
   /// Get all events

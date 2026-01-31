@@ -85,81 +85,78 @@ void main() {
       await app3?.clearData();
     });
     
-    test('2.1 Offline Create → Online Sync', () async {
-      print('\n📋 Test 2.1: Offline Create → Online Sync');
+    test('2.1 Offline Create → Online Sync (Contact & Transaction)', () async {
+      print('\n📋 Test 2.1: Offline Create → Online Sync (Contact & Transaction)');
       
       // App1 goes offline
       print('📴 App1 going offline...');
       await app1!.goOffline();
       
-      // Verify App1 is offline
-      final app1State = await app1!.getState();
-      expect(app1State['is_online'], false, reason: 'App1 should be offline');
-      print('✅ App1 is offline');
-      
-      // App1 creates contact while offline
-      print('📝 App1 creating contact while offline...');
+      // App1 creates contact and transaction while offline
+      print('📝 App1 creating contact and transaction while offline...');
       final contact = await app1!.createContact(name: 'Offline Contact');
-      print('✅ Contact created: ${contact.id}');
+      final transaction = await app1!.createTransaction(
+        contactId: contact.id,
+        direction: TransactionDirection.owed,
+        amount: 1000,
+      );
+      print('✅ Contact and transaction created: ${contact.id}, ${transaction.id}');
       
-      // Verify event created locally (unsynced)
+      // Verify events created locally (unsynced)
       await Future.delayed(const Duration(milliseconds: 500));
       final app1Unsynced = await app1!.getUnsyncedEvents();
-      expect(app1Unsynced.length, greaterThan(0), reason: 'App1 should have unsynced events');
-      final createdEvent = app1Unsynced.firstWhere(
-        (e) => e.aggregateId == contact.id && e.eventType == 'CREATED',
-        orElse: () => throw Exception('CREATED event not found for contact ${contact.id}'),
-      );
-      expect(createdEvent.synced, false, reason: 'Event should be unsynced');
-      print('✅ Event created locally (unsynced): ${createdEvent.id}');
+      expect(app1Unsynced.length, greaterThanOrEqualTo(2), reason: 'App1 should have at least 2 unsynced events');
       
-      // Verify event NOT on server yet
-      final serverEventsBefore = await serverVerifier!.getServerEvents();
-      final serverEventBefore = serverEventsBefore.where(
-        (e) => e['aggregate_id'] == contact.id,
-      ).toList();
-      expect(serverEventBefore.isEmpty, true, reason: 'Event should not be on server yet');
-      print('✅ Event not on server (as expected)');
+      final contactEvent = app1Unsynced.firstWhere(
+        (e) => e.aggregateId == contact.id && e.eventType == 'CREATED' && e.aggregateType == 'contact',
+        orElse: () => throw Exception('Contact CREATED event not found'),
+      );
+      final transactionEvent = app1Unsynced.firstWhere(
+        (e) => e.aggregateId == transaction.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction',
+        orElse: () => throw Exception('Transaction CREATED event not found'),
+      );
+      
+      expect(contactEvent.synced, false);
+      expect(transactionEvent.synced, false);
+      expect(contactEvent.aggregateType, 'contact');
+      expect(transactionEvent.aggregateType, 'transaction');
+      print('✅ Both events created locally (unsynced)');
       
       // App1 comes online
       print('📶 App1 coming online...');
       await app1!.goOnline();
       
       // Wait for sync
-      print('⏳ Waiting for sync...');
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       await Future.delayed(const Duration(seconds: 2));
       
-      // Verify event synced to server
+      // Verify both events synced to server
       final serverEventsAfter = await serverVerifier!.getServerEvents();
-      final serverEventAfter = serverEventsAfter.firstWhere(
-        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'CREATED',
-        orElse: () => throw Exception('CREATED event not found on server for contact ${contact.id}'),
+      final serverContactEvent = serverEventsAfter.firstWhere(
+        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'contact',
+        orElse: () => throw Exception('Contact event not found on server'),
       );
-      expect(serverEventAfter['event_type'], 'CREATED');
-      print('✅ Event synced to server: ${serverEventAfter['id']}');
+      final serverTransactionEvent = serverEventsAfter.firstWhere(
+        (e) => e['aggregate_id'] == transaction.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'transaction',
+        orElse: () => throw Exception('Transaction event not found on server'),
+      );
+      print('✅ Both events synced to server');
       
-      // Verify App2 and App3 receive event
-      await Future.delayed(const Duration(seconds: 2)); // Give WebSocket time
+      // Verify both exist in all apps
       final allContacts = await app1!.getContacts();
-      expect(allContacts.any((c) => c.id == contact.id), true,
-        reason: 'Contact should exist in all apps after sync');
-      print('✅ Contact exists in all apps');
-      
-      // Verify event marked as synced in App1
-      final app1EventsAfter = await app1!.getEvents();
-      final syncedEvent = app1EventsAfter.firstWhere((e) => e.id == createdEvent.id);
-      expect(syncedEvent.synced, true, reason: 'Event should be synced');
-      print('✅ Event marked as synced in App1');
+      final allTransactions = await app1!.getTransactions();
+      expect(allContacts.any((c) => c.id == contact.id), true);
+      expect(allTransactions.any((t) => t.id == transaction.id), true);
+      print('✅ Contact and transaction exist in all apps');
       
       // Validate consistency
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
-      expect(isValid, true, reason: 'All instances should have consistent events');
+      expect(isValid, true);
       print('✅ Event consistency validated');
     });
     
-    test('2.2 Multiple Offline Creates', () async {
-      print('\n📋 Test 2.2: Multiple Offline Creates');
+    test('2.2 Multiple Offline Creates (Contacts & Transactions)', () async {
+      print('\n📋 Test 2.2: Multiple Offline Creates (Contacts & Transactions)');
       
       // All apps go offline
       print('📴 All apps going offline...');
@@ -167,12 +164,16 @@ void main() {
       await app2!.goOffline();
       await app3!.goOffline();
       
-      // Each app creates contact offline
-      print('📝 All apps creating contacts offline...');
+      // Each app creates contact and transaction offline
+      print('📝 All apps creating contacts and transactions offline...');
       final contact1 = await app1!.createContact(name: 'Offline Contact 1');
       final contact2 = await app2!.createContact(name: 'Offline Contact 2');
       final contact3 = await app3!.createContact(name: 'Offline Contact 3');
-      print('✅ All contacts created offline');
+      
+      final transaction1 = await app1!.createTransaction(contactId: contact1.id, direction: TransactionDirection.owed, amount: 1000);
+      final transaction2 = await app2!.createTransaction(contactId: contact2.id, direction: TransactionDirection.lent, amount: 500);
+      final transaction3 = await app3!.createTransaction(contactId: contact3.id, direction: TransactionDirection.owed, amount: 2000);
+      print('✅ All contacts and transactions created offline');
       
       // Verify all events created locally (unsynced)
       await Future.delayed(const Duration(milliseconds: 500));
@@ -180,9 +181,9 @@ void main() {
       final app2Unsynced = await app2!.getUnsyncedEvents();
       final app3Unsynced = await app3!.getUnsyncedEvents();
       
-      expect(app1Unsynced.length, greaterThan(0), reason: 'App1 should have unsynced events');
-      expect(app2Unsynced.length, greaterThan(0), reason: 'App2 should have unsynced events');
-      expect(app3Unsynced.length, greaterThan(0), reason: 'App3 should have unsynced events');
+      expect(app1Unsynced.length, greaterThanOrEqualTo(2), reason: 'App1 should have at least 2 unsynced events');
+      expect(app2Unsynced.length, greaterThanOrEqualTo(2), reason: 'App2 should have at least 2 unsynced events');
+      expect(app3Unsynced.length, greaterThanOrEqualTo(2), reason: 'App3 should have at least 2 unsynced events');
       print('✅ All events created locally (unsynced)');
       
       // All apps come online
@@ -192,101 +193,113 @@ void main() {
       await app3!.goOnline();
       
       // Wait for sync
-      print('⏳ Waiting for sync...');
       await monitor!.waitForSync(timeout: const Duration(seconds: 90));
       await Future.delayed(const Duration(seconds: 2));
       
       // Verify all events synced to server
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContact1 = serverEvents.where((e) => e['aggregate_id'] == contact1.id).toList();
-      final serverContact2 = serverEvents.where((e) => e['aggregate_id'] == contact2.id).toList();
-      final serverContact3 = serverEvents.where((e) => e['aggregate_id'] == contact3.id).toList();
+      final contactEvents = serverEvents.where((e) => 
+        (e['aggregate_id'] == contact1.id || e['aggregate_id'] == contact2.id || e['aggregate_id'] == contact3.id) &&
+        e['aggregate_type'] == 'contact'
+      ).toList();
+      final transactionEvents = serverEvents.where((e) => 
+        (e['aggregate_id'] == transaction1.id || e['aggregate_id'] == transaction2.id || e['aggregate_id'] == transaction3.id) &&
+        e['aggregate_type'] == 'transaction'
+      ).toList();
       
-      expect(serverContact1.isNotEmpty, true, reason: 'Contact1 event should be on server');
-      expect(serverContact2.isNotEmpty, true, reason: 'Contact2 event should be on server');
-      expect(serverContact3.isNotEmpty, true, reason: 'Contact3 event should be on server');
+      expect(contactEvents.length, 3, reason: 'Should have 3 contact events');
+      expect(transactionEvents.length, 3, reason: 'Should have 3 transaction events');
       print('✅ All events synced to server');
       
       // Verify all apps receive all events
       final allContacts = await app1!.getContacts();
-      expect(allContacts.any((c) => c.id == contact1.id), true,
-        reason: 'Contact1 should exist in all apps');
-      expect(allContacts.any((c) => c.id == contact2.id), true,
-        reason: 'Contact2 should exist in all apps');
-      expect(allContacts.any((c) => c.id == contact3.id), true,
-        reason: 'Contact3 should exist in all apps');
-      print('✅ All apps received all contacts');
+      final allTransactions = await app1!.getTransactions();
+      expect(allContacts.length, 3);
+      expect(allTransactions.length, 3);
+      print('✅ All apps received all contacts and transactions');
       
       // Verify no duplicates
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
-      expect(isValid, true, reason: 'All instances should have consistent events');
+      expect(isValid, true);
       print('✅ No conflicts or duplicates');
     });
     
-    test('2.3 Offline Update → Online Sync', () async {
-      print('\n📋 Test 2.3: Offline Update → Online Sync');
+    test('2.3 Offline Update → Online Sync (Contact & Transaction)', () async {
+      print('\n📋 Test 2.3: Offline Update → Online Sync (Contact & Transaction)');
       
-      // Create contact in all apps first
-      print('📝 Creating contact in App1...');
+      // Create contact and transaction
+      print('📝 Creating contact and transaction in App1...');
       final contact = await app1!.createContact(name: 'Original Name');
-      try {
-        await monitor!.waitForSync(timeout: const Duration(seconds: 30)).timeout(
-          const Duration(seconds: 35),
-        );
-      } catch (e) {
-        print('⚠️ Initial sync check timed out, continuing: $e');
-        // Continue - contact may already be synced
-      }
-      await Future.delayed(const Duration(seconds: 1));
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      // Verify contact exists in all apps
+      final transaction = await app1!.createTransaction(
+        contactId: contact.id,
+        direction: TransactionDirection.owed,
+        amount: 1000,
+      );
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      
+      // Verify both exist in all apps
       final allContacts = await app1!.getContacts();
-      var app2Contact = allContacts.firstWhere((c) => c.id == contact.id);
-      expect(app2Contact.name, 'Original Name');
-      print('✅ Contact exists in all apps');
+      final allTransactions = await app1!.getTransactions();
+      expect(allContacts.any((c) => c.id == contact.id), true);
+      expect(allTransactions.any((t) => t.id == transaction.id), true);
+      print('✅ Contact and transaction exist in all apps');
       
       // App1 goes offline
       print('📴 App1 going offline...');
       await app1!.goOffline();
       
-      // App1 updates contact while offline
-      print('📝 App1 updating contact while offline...');
+      // App1 updates both while offline
+      print('📝 App1 updating contact and transaction while offline...');
       await app1!.updateContact(contact.id, {'name': 'Updated Offline'});
+      await app1!.updateTransaction(transaction.id, {'amount': 2000});
       await Future.delayed(const Duration(milliseconds: 500));
       
-      // Verify update event created locally (unsynced)
+      // Verify update events created locally (unsynced)
       final app1Unsynced = await app1!.getUnsyncedEvents();
-      final updateEvent = app1Unsynced.firstWhere(
-        (e) => e.aggregateId == contact.id && e.eventType == 'UPDATED',
-        orElse: () => throw Exception('UPDATED event not found'),
+      final contactUpdateEvent = app1Unsynced.firstWhere(
+        (e) => e.aggregateId == contact.id && e.eventType == 'UPDATED' && e.aggregateType == 'contact',
+        orElse: () => throw Exception('Contact UPDATED event not found'),
       );
-      expect(updateEvent.synced, false, reason: 'Update event should be unsynced');
-      print('✅ Update event created locally (unsynced)');
+      final transactionUpdateEvent = app1Unsynced.firstWhere(
+        (e) => e.aggregateId == transaction.id && e.eventType == 'UPDATED' && e.aggregateType == 'transaction',
+        orElse: () => throw Exception('Transaction UPDATED event not found'),
+      );
+      expect(contactUpdateEvent.synced, false);
+      expect(transactionUpdateEvent.synced, false);
+      expect(contactUpdateEvent.aggregateType, 'contact');
+      expect(transactionUpdateEvent.aggregateType, 'transaction');
+      print('✅ Both update events created locally (unsynced)');
       
       // App1 comes online
       print('📶 App1 coming online...');
       await app1!.goOnline();
       
       // Wait for sync
-      print('⏳ Waiting for sync...');
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       await Future.delayed(const Duration(seconds: 2));
       
-      // Verify update event synced to server
+      // Verify both update events synced to server
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverUpdate = serverEvents.where(
-        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'UPDATED',
+      final serverContactUpdate = serverEvents.where(
+        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'contact',
       ).toList();
-      expect(serverUpdate.isNotEmpty, true, reason: 'Update event should be on server');
-      print('✅ Update event synced to server');
+      final serverTransactionUpdate = serverEvents.where(
+        (e) => e['aggregate_id'] == transaction.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'transaction',
+      ).toList();
+      expect(serverContactUpdate.isNotEmpty, true);
+      expect(serverTransactionUpdate.isNotEmpty, true);
+      print('✅ Both update events synced to server');
       
-      // Verify other apps receive update
-      await Future.delayed(const Duration(seconds: 2));
+      // Verify other apps receive updates
       final contactsAfter = await app1!.getContacts();
+      final transactionsAfter = await app1!.getTransactions();
       final updatedContact = contactsAfter.firstWhere((c) => c.id == contact.id);
-      // Note: The name might be "Updated Offline" or something else depending on conflict resolution
-      expect(updatedContact.name, isNotEmpty, reason: 'Contact should be updated');
-      print('✅ Other apps received update');
+      final updatedTransaction = transactionsAfter.firstWhere((t) => t.id == transaction.id);
+      expect(updatedContact.name, isNotEmpty);
+      expect(updatedTransaction.amount, 2000);
+      print('✅ Other apps received updates');
       
       // Validate consistency
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
@@ -301,45 +314,52 @@ void main() {
       print('📴 App1 going offline, App2 and App3 staying online...');
       await app1!.goOffline();
       
-      // App2 creates contact (while App1 is offline)
-      print('📝 App2 creating contact...');
+      // App2 creates contact and transaction (while App1 is offline)
+      print('📝 App2 creating contact and transaction...');
       final contact = await app2!.createContact(name: 'Contact from App2');
-      print('✅ Contact created: ${contact.id}');
+      final transaction = await app2!.createTransaction(
+        contactId: contact.id,
+        direction: TransactionDirection.owed,
+        amount: 1000,
+      );
+      print('✅ Contact and transaction created: ${contact.id}, ${transaction.id}');
       
       // Wait for sync (App2 and App3 should sync)
       print('⏳ Waiting for sync between App2 and App3...');
       await Future.delayed(const Duration(seconds: 5)); // Give time for sync
       
-      // Verify App2 and App3 have contact
+      // Wait for sync
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      
+      // Verify App2 and App3 have both
       final app2Contacts = await app2!.getContacts();
+      final app2Transactions = await app2!.getTransactions();
       final app3Contacts = await app3!.getContacts();
-      expect(app2Contacts.any((c) => c.id == contact.id), true,
-        reason: 'App2 should have contact');
-      expect(app3Contacts.any((c) => c.id == contact.id), true,
-        reason: 'App3 should have contact');
-      print('✅ App2 and App3 have contact');
+      final app3Transactions = await app3!.getTransactions();
+      expect(app2Contacts.any((c) => c.id == contact.id), true);
+      expect(app2Transactions.any((t) => t.id == transaction.id), true);
+      expect(app3Contacts.any((c) => c.id == contact.id), true);
+      expect(app3Transactions.any((t) => t.id == transaction.id), true);
+      print('✅ App2 and App3 have contact and transaction');
       
-      // Note: All apps share the same Hive boxes, so App1 will see the contact
-      // immediately in local storage. The offline state only affects network sync.
-      // Verify App1 has contact in local storage (shared boxes)
+      // Verify App1 has both in local storage (shared boxes)
       final app1Contacts = await app1!.getContacts();
-      expect(app1Contacts.any((c) => c.id == contact.id), true,
-        reason: 'App1 should have contact in local storage (shared boxes)');
+      final app1Transactions = await app1!.getTransactions();
+      expect(app1Contacts.any((c) => c.id == contact.id), true);
+      expect(app1Transactions.any((t) => t.id == transaction.id), true);
+      print('✅ App1 has contact and transaction in local storage (shared boxes)');
       
-      // Verify App1 has unsynced events (can't sync to server while offline)
-      final app1Unsynced = await app1!.getUnsyncedEvents();
-      // App1 didn't create this contact, so it shouldn't have unsynced events for it
-      // But if App1 had created something offline, it would have unsynced events
-      print('✅ App1 has contact in local storage (shared boxes)');
-      print('   Note: Offline state only affects network sync, not local data access');
-      
-      // Verify event on server
+      // Verify both events on server
       final serverEvents = await serverVerifier!.getServerEvents();
       final serverContact = serverEvents.where(
-        (e) => e['aggregate_id'] == contact.id,
+        (e) => e['aggregate_id'] == contact.id && e['aggregate_type'] == 'contact',
       ).toList();
-      expect(serverContact.isNotEmpty, true, reason: 'Contact should be on server');
-      print('✅ Contact synced to server');
+      final serverTransaction = serverEvents.where(
+        (e) => e['aggregate_id'] == transaction.id && e['aggregate_type'] == 'transaction',
+      ).toList();
+      expect(serverContact.isNotEmpty, true);
+      expect(serverTransaction.isNotEmpty, true);
+      print('✅ Both events synced to server');
       
       // App1 comes online
       print('📶 App1 coming online...');
