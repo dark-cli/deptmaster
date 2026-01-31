@@ -28,6 +28,9 @@ import 'utils/app_theme.dart';
 // Global navigator key for showing toasts from anywhere
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+// Global scaffold messenger key for showing snack bars from anywhere
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
@@ -274,6 +277,7 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
+      scaffoldMessengerKey: scaffoldMessengerKey,
       title: 'Debt Tracker',
       // Force LTR text direction to prevent RTL issues
       builder: (context, child) {

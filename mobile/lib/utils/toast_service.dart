@@ -3,7 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'theme_colors.dart';
-import '../main.dart'; // For navigatorKey
+import '../main.dart'; // For navigatorKey and scaffoldMessengerKey
 
 /// Centralized Toast Service
 /// All toast notifications should use this service for consistency
@@ -13,6 +13,17 @@ class ToastService {
   
   /// Duration for error toasts (4 seconds - slightly longer for errors)
   static const Duration errorDuration = Duration(seconds: 4);
+  
+  /// Duration for undo snack bars (5 seconds - longer since they have actions)
+  static const Duration undoDuration = Duration(seconds: 5);
+  
+  /// Margin for snack bars to position them above FAB and bottom navigation
+  /// This prevents snack bars from overlapping with the floating action button
+  static const EdgeInsets snackBarMargin = EdgeInsets.only(
+    bottom: 24.0, // Small space above bottom navigation bar and FAB
+    left: 16.0,
+    right: 16.0,
+  );
   
   /// Track active SnackBars to dismiss them after duration
   static final Map<ScaffoldMessengerState, Timer> _activeTimers = {};
@@ -51,84 +62,109 @@ class ToastService {
     required VoidCallback onUndo,
     Duration? duration,
   }) {
+    // Get context for theme colors and ScaffoldMessenger
     final context = navigatorKey.currentContext;
-    if (context == null) return;
     
-    // Check if context is still mounted
-    if (!context.mounted) return;
-
-    // Try to get ScaffoldMessenger, but catch any errors if context is deactivated
+    // Try to use scaffoldMessengerKey first (most reliable)
     ScaffoldMessengerState? scaffoldMessenger;
-    try {
-      scaffoldMessenger = ScaffoldMessenger.of(context);
-    } catch (e) {
-      // Context is deactivated, can't show toast
+    if (scaffoldMessengerKey.currentState != null) {
+      scaffoldMessenger = scaffoldMessengerKey.currentState;
+    } else {
+      // Fallback to using context
+      if (context == null) {
+        print('⚠️ ToastService.showUndo: navigatorKey.currentContext is null and scaffoldMessengerKey is null');
+        return;
+      }
+      
+      // Check if context is still mounted
+      if (!context.mounted) {
+        print('⚠️ ToastService.showUndo: context is not mounted');
+        return;
+      }
+
+      // Try to get ScaffoldMessenger, but catch any errors if context is deactivated
+      try {
+        scaffoldMessenger = ScaffoldMessenger.of(context);
+      } catch (e) {
+        // Context is deactivated, can't show toast
+        print('⚠️ ToastService.showUndo: ScaffoldMessenger.of failed: $e');
+        return;
+      }
+    }
+    
+    if (scaffoldMessenger == null) {
+      print('⚠️ ToastService.showUndo: scaffoldMessenger is null');
       return;
     }
     
-    // Double-check mounted after getting scaffoldMessenger
-    if (!context.mounted || scaffoldMessenger == null) return;
-    
     // Store in non-nullable variable for use in closures
     final messenger = scaffoldMessenger;
-    final actualDuration = duration ?? defaultDuration;
+    final actualDuration = duration ?? undoDuration;
+    
+    // Get theme colors
+    final textColor = context != null 
+        ? ThemeColors.snackBarTextColor(context)
+        : Colors.white;
+    final backgroundColor = context != null
+        ? ThemeColors.snackBarBackground(context)
+        : Colors.grey[800]!;
+    final actionColor = context != null
+        ? ThemeColors.snackBarActionColor(context)
+        : Colors.blue;
     
     try {
       // Dismiss any existing toast before showing new one
-      // Wrap in try-catch to handle deactivated widget errors
       try {
-        if (context.mounted) {
-          messenger.hideCurrentSnackBar();
-        }
+        messenger.hideCurrentSnackBar();
       } catch (e) {
         // Context became deactivated, ignore
       }
       
       // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[messenger]?.cancel();
+      _activeTimers.remove(messenger);
       
-      // Check context is still mounted before showing snackbar
-      if (!context.mounted) return;
-      
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            message,
-            style: TextStyle(
-              color: ThemeColors.snackBarTextColor(context),
+      try {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              message,
+              style: TextStyle(
+                color: textColor,
+              ),
+            ),
+            backgroundColor: backgroundColor,
+            duration: actualDuration, // Use actual duration - Flutter will handle auto-dismiss
+            behavior: SnackBarBehavior.floating,
+            margin: snackBarMargin, // Position above FAB and bottom navigation
+            action: SnackBarAction(
+              label: 'UNDO',
+              textColor: actionColor,
+              onPressed: () {
+                _activeTimers[messenger]?.cancel();
+                _activeTimers.remove(messenger);
+                try {
+                  messenger.hideCurrentSnackBar();
+                } catch (e) {
+                  // Context deactivated, ignore
+                }
+                onUndo();
+              },
             ),
           ),
-          backgroundColor: ThemeColors.snackBarBackground(context),
-          duration: const Duration(days: 1), // Set to very long duration since we'll dismiss manually
-          behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(
-            label: 'UNDO',
-            textColor: ThemeColors.snackBarActionColor(context),
-            onPressed: () {
-              _activeTimers[messenger]?.cancel();
-              _activeTimers.remove(messenger);
-              try {
-                if (context.mounted) {
-                  messenger.hideCurrentSnackBar();
-                }
-              } catch (e) {
-                // Context deactivated, ignore
-              }
-              onUndo();
-            },
-          ),
-        ),
-      );
+        );
+        print('✅ ToastService.showUndo: SnackBar shown successfully');
+      } catch (e) {
+        print('❌ ToastService.showUndo: Error showing SnackBar: $e');
+        rethrow;
+      }
       
-      // Auto-dismiss after duration
-      // Note: SnackBars with actions don't auto-dismiss, so we use a timer
-      _activeTimers[messenger] = Timer(actualDuration, () {
+      // Set up a backup timer to ensure dismissal even if Flutter's auto-dismiss fails
+      // This is a safety net for snack bars with actions
+      _activeTimers[messenger] = Timer(actualDuration + const Duration(milliseconds: 500), () {
         try {
           if (_activeTimers.containsKey(messenger)) {
-            // Check if context is still mounted before hiding (context is accessible in closure)
-            if (context.mounted) {
-              messenger.hideCurrentSnackBar();
-            }
+            messenger.hideCurrentSnackBar();
             _activeTimers.remove(messenger);
           }
         } catch (e) {
@@ -137,8 +173,8 @@ class ToastService {
         }
       });
     } catch (e) {
-      // Context became deactivated while showing snackbar, ignore
-      // This can happen if the widget is disposed during async operations
+      // Context became deactivated while showing snackbar, log the error
+      print('❌ ToastService.showUndo: Exception while showing snackbar: $e');
     }
   }
 
@@ -151,66 +187,77 @@ class ToastService {
     String? errorMessage,
     Duration? duration,
   }) {
-    final context = navigatorKey.currentContext;
-    if (context == null) return;
-    
-    // Check if context is still mounted
-    if (!context.mounted) return;
-
-    // Try to get ScaffoldMessenger, but catch any errors if context is deactivated
+    // Try to use scaffoldMessengerKey first (most reliable)
     ScaffoldMessengerState? scaffoldMessenger;
-    try {
-      scaffoldMessenger = ScaffoldMessenger.of(context);
-    } catch (e) {
-      // Context is deactivated, can't show toast
-      return;
+    if (scaffoldMessengerKey.currentState != null) {
+      scaffoldMessenger = scaffoldMessengerKey.currentState;
+    } else {
+      // Fallback to using context
+      final context = navigatorKey.currentContext;
+      if (context == null) return;
+      
+      // Check if context is still mounted
+      if (!context.mounted) return;
+
+      // Try to get ScaffoldMessenger, but catch any errors if context is deactivated
+      try {
+        scaffoldMessenger = ScaffoldMessenger.of(context);
+      } catch (e) {
+        // Context is deactivated, can't show toast
+        return;
+      }
     }
     
-    // Double-check mounted after getting scaffoldMessenger
-    if (!context.mounted || scaffoldMessenger == null) return;
+    if (scaffoldMessenger == null) return;
     
     // Store in non-nullable variable for use in closures
     final messenger = scaffoldMessenger;
-    final actualDuration = duration ?? defaultDuration;
+    final actualDuration = duration ?? undoDuration;
+    
+    // Get context for theme colors
+    final context = navigatorKey.currentContext;
+    final textColor = context != null 
+        ? ThemeColors.snackBarTextColor(context)
+        : Colors.white;
+    final backgroundColor = context != null
+        ? ThemeColors.snackBarBackground(context)
+        : Colors.grey[800]!;
+    final actionColor = context != null
+        ? ThemeColors.snackBarActionColor(context)
+        : Colors.blue;
     
     try {
       // Dismiss any existing toast before showing new one
-      // Wrap in try-catch to handle deactivated widget errors
       try {
-        if (context.mounted) {
-          messenger.hideCurrentSnackBar();
-        }
+        messenger.hideCurrentSnackBar();
       } catch (e) {
         // Context became deactivated, ignore
       }
       
       // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[messenger]?.cancel();
-      
-      // Check context is still mounted before showing snackbar
-      if (!context.mounted) return;
+      _activeTimers.remove(messenger);
       
       messenger.showSnackBar(
       SnackBar(
         content: Text(
           message,
           style: TextStyle(
-            color: ThemeColors.snackBarTextColor(context),
+            color: textColor,
           ),
         ),
-        backgroundColor: ThemeColors.snackBarBackground(context),
-        duration: const Duration(days: 1), // Set to very long duration since we'll dismiss manually
+        backgroundColor: backgroundColor,
+        duration: actualDuration, // Use actual duration - Flutter will handle auto-dismiss
         behavior: SnackBarBehavior.floating,
+        margin: snackBarMargin, // Position above FAB and bottom navigation
         action: SnackBarAction(
           label: 'UNDO',
-          textColor: ThemeColors.snackBarActionColor(context),
+          textColor: actionColor,
           onPressed: () async {
             _activeTimers[messenger]?.cancel();
             _activeTimers.remove(messenger);
             try {
-              if (context.mounted) {
-                messenger.hideCurrentSnackBar();
-              }
+              messenger.hideCurrentSnackBar();
             } catch (e) {
               // Context deactivated, ignore
             }
@@ -229,15 +276,12 @@ class ToastService {
       ),
     );
     
-    // Auto-dismiss after duration
-    // Note: SnackBars with actions don't auto-dismiss, so we use a timer
-    _activeTimers[messenger] = Timer(actualDuration, () {
+    // Set up a backup timer to ensure dismissal even if Flutter's auto-dismiss fails
+    // This is a safety net for snack bars with actions
+    _activeTimers[messenger] = Timer(actualDuration + const Duration(milliseconds: 500), () {
       try {
         if (_activeTimers.containsKey(messenger)) {
-          // Check if context is still mounted before hiding (context is accessible in closure)
-          if (context.mounted) {
-            messenger.hideCurrentSnackBar();
-          }
+          messenger.hideCurrentSnackBar();
           _activeTimers.remove(messenger);
         }
       } catch (e) {
@@ -248,6 +292,7 @@ class ToastService {
     } catch (e) {
       // Context became deactivated while showing snackbar, ignore
       // This can happen if the widget is disposed during async operations
+      print('❌ ToastService.showUndoWithErrorHandling: Exception: $e');
     }
   }
 
@@ -257,57 +302,80 @@ class ToastService {
     required Color Function(BuildContext) backgroundColor,
     required Duration duration,
   }) {
-    final context = navigatorKey.currentContext;
-    if (context == null) return;
-
-    // Check if context is still mounted
-    if (!context.mounted) return;
-
-    // Try to get ScaffoldMessenger, but catch any errors if context is deactivated
+    // Try to use scaffoldMessengerKey first (most reliable)
     ScaffoldMessengerState? scaffoldMessenger;
-    try {
-      scaffoldMessenger = ScaffoldMessenger.of(context);
-    } catch (e) {
-      // Context is deactivated, can't show toast
-      return;
+    if (scaffoldMessengerKey.currentState != null) {
+      scaffoldMessenger = scaffoldMessengerKey.currentState;
+    } else {
+      // Fallback to using context
+      final context = navigatorKey.currentContext;
+      if (context == null) {
+        print('⚠️ ToastService._showToast: navigatorKey.currentContext is null and scaffoldMessengerKey is null');
+        return;
+      }
+
+      // Check if context is still mounted
+      if (!context.mounted) {
+        print('⚠️ ToastService._showToast: context is not mounted');
+        return;
+      }
+
+      // Try to get ScaffoldMessenger, but catch any errors if context is deactivated
+      try {
+        scaffoldMessenger = ScaffoldMessenger.of(context);
+      } catch (e) {
+        // Context is deactivated, can't show toast
+        print('⚠️ ToastService._showToast: ScaffoldMessenger.of failed: $e');
+        return;
+      }
     }
     
-    // Double-check mounted after getting scaffoldMessenger
-    if (!context.mounted || scaffoldMessenger == null) return;
+    if (scaffoldMessenger == null) {
+      print('⚠️ ToastService._showToast: scaffoldMessenger is null');
+      return;
+    }
     
     // Store in non-nullable variable
     final messenger = scaffoldMessenger;
     
+    // Get context for theme colors
+    final context = navigatorKey.currentContext;
+    final bgColor = context != null ? backgroundColor(context) : Colors.grey[800]!;
+    final textColor = context != null 
+        ? ThemeColors.snackBarTextColor(context)
+        : Colors.white;
+    
     try {
       // Dismiss any existing toast before showing new one
-      // Wrap in try-catch to handle deactivated widget errors
       try {
-        if (context.mounted) {
-          messenger.hideCurrentSnackBar();
-        }
+        messenger.hideCurrentSnackBar();
       } catch (e) {
         // Context became deactivated, ignore
       }
       
-      // Check context is still mounted before showing snackbar
-      if (!context.mounted) return;
-      
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            message,
-            style: TextStyle(
-              color: ThemeColors.snackBarTextColor(context),
+      try {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              message,
+              style: TextStyle(
+                color: textColor,
+              ),
             ),
+            backgroundColor: bgColor,
+            duration: duration,
+            behavior: SnackBarBehavior.floating,
+            margin: snackBarMargin, // Position above FAB and bottom navigation
           ),
-          backgroundColor: backgroundColor(context),
-          duration: duration,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+        );
+        print('✅ ToastService._showToast: SnackBar shown successfully');
+      } catch (e) {
+        print('❌ ToastService._showToast: Error showing SnackBar: $e');
+        rethrow;
+      }
     } catch (e) {
-      // Context became deactivated while showing snackbar, ignore
-      // This can happen if the widget is disposed during async operations
+      // Context became deactivated while showing snackbar, log the error
+      print('❌ ToastService._showToast: Exception while showing snackbar: $e');
     }
   }
 
@@ -327,9 +395,14 @@ class ToastService {
       try {
         scaffoldMessenger = ScaffoldMessenger.of(context);
       } catch (e) {
-        // Context is deactivated, fallback to global navigator
-        showSuccess(message, duration: duration);
-        return;
+        // Context is deactivated, try scaffoldMessengerKey as fallback
+        if (scaffoldMessengerKey.currentState != null) {
+          scaffoldMessenger = scaffoldMessengerKey.currentState;
+        } else {
+          // Fallback to global method
+          showSuccess(message, duration: duration);
+          return;
+        }
       }
       
       if (scaffoldMessenger == null) {
@@ -351,6 +424,7 @@ class ToastService {
           backgroundColor: ThemeColors.snackBarBackground(context),
           duration: duration ?? defaultDuration,
           behavior: SnackBarBehavior.floating,
+          margin: snackBarMargin, // Position above FAB and bottom navigation
         ),
       );
     } catch (e) {
@@ -374,13 +448,17 @@ class ToastService {
       try {
         scaffoldMessenger = ScaffoldMessenger.of(context);
       } catch (e) {
-        // Context is deactivated, fallback to global navigator
-        showError(message, duration: duration);
-        return;
+        // Context is deactivated, try scaffoldMessengerKey as fallback
+        if (scaffoldMessengerKey.currentState != null) {
+          scaffoldMessenger = scaffoldMessengerKey.currentState;
+        } else {
+          // Fallback to global method
+          showError(message, duration: duration);
+          return;
+        }
       }
       
-      // Double-check mounted after getting scaffoldMessenger
-      if (!context.mounted) {
+      if (scaffoldMessenger == null) {
         showError(message, duration: duration);
         return;
       }
@@ -399,6 +477,7 @@ class ToastService {
           backgroundColor: ThemeColors.snackBarErrorBackground(context),
           duration: duration ?? errorDuration,
           behavior: SnackBarBehavior.floating,
+          margin: snackBarMargin, // Position above FAB and bottom navigation
         ),
       );
     } catch (e) {
@@ -422,9 +501,14 @@ class ToastService {
       try {
         scaffoldMessenger = ScaffoldMessenger.of(context);
       } catch (e) {
-        // Context is deactivated, fallback to global navigator
-        showInfo(message, duration: duration);
-        return;
+        // Context is deactivated, try scaffoldMessengerKey as fallback
+        if (scaffoldMessengerKey.currentState != null) {
+          scaffoldMessenger = scaffoldMessengerKey.currentState;
+        } else {
+          // Fallback to global method
+          showInfo(message, duration: duration);
+          return;
+        }
       }
       
       if (scaffoldMessenger == null) {
@@ -446,6 +530,7 @@ class ToastService {
           backgroundColor: ThemeColors.snackBarBackground(context),
           duration: duration ?? defaultDuration,
           behavior: SnackBarBehavior.floating,
+          margin: snackBarMargin, // Position above FAB and bottom navigation
         ),
       );
     } catch (e) {
@@ -474,22 +559,28 @@ class ToastService {
       try {
         scaffoldMessenger = ScaffoldMessenger.of(context);
       } catch (e) {
-        // Context is deactivated, fallback to global navigator
-        showUndo(message: message, onUndo: onUndo, duration: duration);
-        return;
+        // Context is deactivated, try scaffoldMessengerKey as fallback
+        if (scaffoldMessengerKey.currentState != null) {
+          scaffoldMessenger = scaffoldMessengerKey.currentState;
+        } else {
+          // Fallback to global method
+          showUndo(message: message, onUndo: onUndo, duration: duration);
+          return;
+        }
       }
       
       if (scaffoldMessenger == null) {
         showUndo(message: message, onUndo: onUndo, duration: duration);
         return;
       }
-      final actualDuration = duration ?? defaultDuration;
+      final actualDuration = duration ?? undoDuration;
       
       // Dismiss any existing toast before showing new one
       scaffoldMessenger.hideCurrentSnackBar();
       
       // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[scaffoldMessenger]?.cancel();
+      _activeTimers.remove(scaffoldMessenger);
       
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -500,8 +591,9 @@ class ToastService {
             ),
           ),
           backgroundColor: ThemeColors.snackBarBackground(context),
-          duration: const Duration(days: 1), // Set to very long duration since we'll dismiss manually
+          duration: actualDuration, // Use actual duration - Flutter will handle auto-dismiss
           behavior: SnackBarBehavior.floating,
+          margin: snackBarMargin, // Position above FAB and bottom navigation
           action: SnackBarAction(
             label: 'UNDO',
             textColor: ThemeColors.snackBarActionColor(context),
@@ -515,9 +607,9 @@ class ToastService {
         ),
       );
       
-      // Auto-dismiss after duration
-      // Note: SnackBars with actions don't auto-dismiss, so we use a timer
-      _activeTimers[scaffoldMessenger] = Timer(actualDuration, () {
+      // Set up a backup timer to ensure dismissal even if Flutter's auto-dismiss fails
+      // This is a safety net for snack bars with actions
+      _activeTimers[scaffoldMessenger] = Timer(actualDuration + const Duration(milliseconds: 500), () {
         try {
           if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger)) {
             scaffoldMessenger.hideCurrentSnackBar();
@@ -564,15 +656,20 @@ class ToastService {
       try {
         scaffoldMessenger = ScaffoldMessenger.of(context);
       } catch (e) {
-        // Context is deactivated, fallback to global navigator
-        showUndoWithErrorHandling(
-          message: message,
-          onUndo: onUndo,
-          successMessage: successMessage,
-          errorMessage: errorMessage,
-          duration: duration,
-        );
-        return;
+        // Context is deactivated, try scaffoldMessengerKey as fallback
+        if (scaffoldMessengerKey.currentState != null) {
+          scaffoldMessenger = scaffoldMessengerKey.currentState;
+        } else {
+          // Fallback to global method
+          showUndoWithErrorHandling(
+            message: message,
+            onUndo: onUndo,
+            successMessage: successMessage,
+            errorMessage: errorMessage,
+            duration: duration,
+          );
+          return;
+        }
       }
       
       if (scaffoldMessenger == null) {
@@ -585,13 +682,14 @@ class ToastService {
         );
         return;
       }
-      final actualDuration = duration ?? defaultDuration;
+      final actualDuration = duration ?? undoDuration;
       
       // Dismiss any existing toast before showing new one
       scaffoldMessenger.hideCurrentSnackBar();
       
       // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[scaffoldMessenger]?.cancel();
+      _activeTimers.remove(scaffoldMessenger);
       
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -602,8 +700,9 @@ class ToastService {
             ),
           ),
           backgroundColor: ThemeColors.snackBarBackground(context),
-          duration: const Duration(days: 1), // Set to very long duration since we'll dismiss manually
+          duration: actualDuration, // Use actual duration - Flutter will handle auto-dismiss
           behavior: SnackBarBehavior.floating,
+          margin: snackBarMargin, // Position above FAB and bottom navigation
           action: SnackBarAction(
             label: 'UNDO',
             textColor: ThemeColors.snackBarActionColor(context),
@@ -636,9 +735,9 @@ class ToastService {
         ),
       );
       
-      // Auto-dismiss after duration
-      // Note: SnackBars with actions don't auto-dismiss, so we use a timer
-      _activeTimers[scaffoldMessenger] = Timer(actualDuration, () {
+      // Set up a backup timer to ensure dismissal even if Flutter's auto-dismiss fails
+      // This is a safety net for snack bars with actions
+      _activeTimers[scaffoldMessenger] = Timer(actualDuration + const Duration(milliseconds: 500), () {
         try {
           if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger)) {
             scaffoldMessenger.hideCurrentSnackBar();
