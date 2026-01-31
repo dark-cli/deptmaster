@@ -263,7 +263,17 @@ class AppInstance {
   
   /// Update a transaction
   Future<void> updateTransaction(String transactionId, Map<String, dynamic> updates) async {
-    final transaction = await LocalDatabaseServiceV2.getTransaction(transactionId);
+    // Retry mechanism: wait for transaction to appear (state rebuild might be in progress)
+    Transaction? transaction;
+    for (int i = 0; i < 10; i++) {
+      transaction = await LocalDatabaseServiceV2.getTransaction(transactionId);
+      if (transaction != null) {
+        break;
+      }
+      // Wait a bit before retrying (state rebuild might be in progress)
+      await Future.delayed(Duration(milliseconds: 50 * (i + 1)));
+    }
+    
     if (transaction == null) {
       throw Exception('Transaction not found: $transactionId');
     }

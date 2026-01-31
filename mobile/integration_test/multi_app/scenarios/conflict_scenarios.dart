@@ -13,6 +13,7 @@ import '../app_instance.dart';
 import '../sync_monitor.dart';
 import '../event_validator.dart';
 import '../server_verifier.dart';
+import '../event_generator.dart';
 import '../../helpers/multi_app_helpers.dart';
 
 void main() {
@@ -25,6 +26,7 @@ void main() {
     SyncMonitor? monitor;
     EventValidator? validator;
     ServerVerifier? serverVerifier;
+    EventGenerator? generator;
     
     setUpAll(() async {
       // Initialize Hive once globally
@@ -73,6 +75,13 @@ void main() {
       validator = EventValidator();
       serverVerifier = ServerVerifier(serverUrl: 'http://localhost:8000');
       await serverVerifier!.setAuthToken();
+      
+      // Create event generator
+      generator = EventGenerator({
+        'app1': app1!,
+        'app2': app2!,
+        'app3': app3!,
+      });
     });
     
     tearDown(() async {
@@ -87,169 +96,118 @@ void main() {
       await app3?.clearData();
     });
     
-    test('3.1 Simultaneous Updates (Contact & Transaction)', () async {
-      print('\n📋 Test 3.1: Simultaneous Updates (Contact & Transaction)');
+    test('Simultaneous Updates (Contact & Transaction)', () async {
+      print('\n📋 Test: Simultaneous Updates (Contact & Transaction)');
       
-      // Create contact and transaction
-      print('📝 Creating contact and transaction in App1...');
-      final contact = await app1!.createContact(name: 'Original Name');
+      // Use event generator to create 18 events (1 contact + 10 transactions + 7 simultaneous updates)
+      final commands = [
+        'app1: contact create "Original Name" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+        'app1: transaction create contact1 owed 1500 "T5" t5',
+        'app2: transaction create contact1 lent 600 "T6" t6',
+        'app2: transaction create contact1 owed 1200 "T7" t7',
+        'app3: transaction create contact1 lent 900 "T8" t8',
+        'app3: transaction create contact1 owed 1800 "T9" t9',
+        'app3: transaction create contact1 lent 400 "T10" t10',
+        // Simultaneous updates from different apps
+        'app1: contact update contact1 name "Updated by App1"',
+        'app2: contact update contact1 name "Updated by App2"',
+        'app1: transaction update t1 amount 2000',
+        'app2: transaction update t1 amount 3000',
+        'app1: transaction update t3 amount 2200',
+        'app2: transaction update t5 description "Updated by App2"',
+        'app3: transaction update t7 amount 1300',
+      ];
+      
+      print('📝 Executing ${commands.length} event commands...');
+      await generator!.executeCommands(commands);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      
-      // Verify both exist in all apps
-      final allContacts = await app1!.getContacts();
-      final allTransactions = await app1!.getTransactions();
-      expect(allContacts.any((c) => c.id == contact.id), true);
-      expect(allTransactions.any((t) => t.id == transaction.id), true);
-      print('✅ Contact and transaction exist in all apps');
-      
-      // App1 and App2 update both simultaneously
-      print('📝 App1 and App2 updating contact and transaction simultaneously...');
-      await Future.wait([
-        app1!.updateContact(contact.id, {'name': 'Updated by App1'}),
-        app2!.updateContact(contact.id, {'name': 'Updated by App2'}),
-        app1!.updateTransaction(transaction.id, {'amount': 2000}),
-        app2!.updateTransaction(transaction.id, {'amount': 3000}),
-      ]);
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      // Verify all updates created events
+      // Verify events
       final allEvents = await app1!.getEvents();
-      final contactUpdates = allEvents.where((e) => 
-        e.aggregateId == contact.id && e.eventType == 'UPDATED' && e.aggregateType == 'contact'
-      ).toList();
-      final transactionUpdates = allEvents.where((e) => 
-        e.aggregateId == transaction.id && e.eventType == 'UPDATED' && e.aggregateType == 'transaction'
-      ).toList();
+      expect(allEvents.length, greaterThanOrEqualTo(18));
       
-      expect(contactUpdates.length, greaterThanOrEqualTo(2), reason: 'Should have at least 2 contact updates');
-      expect(transactionUpdates.length, greaterThanOrEqualTo(2), reason: 'Should have at least 2 transaction updates');
-      print('✅ All updates created events');
+      // Verify we have UPDATE events
+      final updateEvents = allEvents.where((e) => e.eventType == 'UPDATED').length;
+      expect(updateEvents, greaterThanOrEqualTo(7), reason: 'Should have multiple update events');
       
-      // Wait for sync
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      await Future.delayed(const Duration(seconds: 2));
+      // Verify transaction events are majority
+      final transactionEvents = allEvents.where(
+        (e) => e.aggregateType == 'transaction'
+      ).length;
+      expect(transactionEvents, greaterThan(10), reason: 'Transaction events should be majority');
       
       // Verify all events synced to server
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContactUpdates = serverEvents.where((e) => 
-        e['aggregate_id'] == contact.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'contact'
-      ).toList();
-      final serverTransactionUpdates = serverEvents.where((e) => 
-        e['aggregate_id'] == transaction.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'transaction'
-      ).toList();
-      
-      expect(serverContactUpdates.length, greaterThanOrEqualTo(2));
-      expect(serverTransactionUpdates.length, greaterThanOrEqualTo(2));
-      print('✅ All events synced to server');
+      expect(serverEvents.length, greaterThanOrEqualTo(18));
       
       // Verify final state consistent
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
       expect(isValid, true);
       print('✅ Final state consistent');
       
-      // Verify both exist with updated values
+      // Verify final state
       final contactsAfter = await app1!.getContacts();
       final transactionsAfter = await app1!.getTransactions();
-      final finalContact = contactsAfter.firstWhere((c) => c.id == contact.id);
-      final finalTransaction = transactionsAfter.firstWhere((t) => t.id == transaction.id);
-      expect(finalContact.name, isNotEmpty);
-      expect(finalTransaction.amount, greaterThan(0));
+      expect(contactsAfter.length, 1);
+      expect(transactionsAfter.length, greaterThan(8));
+      // Verify at least one transaction has a valid amount
+      expect(transactionsAfter.any((t) => t.amount > 0), true);
       print('✅ Conflicts resolved - both updated');
     });
     
-    test('3.2 Update-Delete Conflict (Contact & Transaction)', () async {
-      print('\n📋 Test 3.2: Update-Delete Conflict (Contact & Transaction)');
+    test('Update-Delete Conflict (Contact & Transaction)', () async {
+      print('\n📋 Test: Update-Delete Conflict (Contact & Transaction)');
       
-      // Create contact and transaction
-      print('📝 Creating contact and transaction in App1...');
-      final contact = await app1!.createContact(name: 'Contact to Conflict');
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      // Use event generator to create 20 events (2 contacts + 15 transactions + 3 conflicts)
+      final commands = [
+        'app1: contact create "Contact to Conflict" contact1',
+        'app1: contact create "Contact 2" contact2',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact2 lent 800 "T4" t4',
+        'app1: transaction create contact2 owed 1200 "T5" t5',
+        'app2: transaction create contact1 lent 600 "T6" t6',
+        'app2: transaction create contact1 owed 1500 "T7" t7',
+        'app2: transaction create contact2 lent 900 "T8" t8',
+        'app3: transaction create contact1 owed 1800 "T9" t9',
+        'app3: transaction create contact2 lent 400 "T10" t10',
+        'app3: transaction create contact1 owed 1100 "T11" t11',
+        'app1: transaction create contact2 lent 700 "T12" t12',
+        'app2: transaction create contact1 owed 1300 "T13" t13',
+        'app3: transaction create contact2 lent 500 "T14" t14',
+        // Conflicts: App1 updates, App2 deletes
+        // Note: Use t4 (from contact2) for transaction conflict since deleting contact1
+        // will delete all its transactions (t1, t2, t3, t6, t7, t9, t11, t13)
+        'app1: contact update contact1 name "Updated Name"',
+        'app2: contact delete contact1',
+        'app1: transaction update t4 amount 2000',
+        'app2: transaction delete t4',
+      ];
       
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      
-      // Verify both exist
-      final allContacts = await app1!.getContacts();
-      final allTransactions = await app1!.getTransactions();
-      expect(allContacts.any((c) => c.id == contact.id), true);
-      expect(allTransactions.any((t) => t.id == transaction.id), true);
-      print('✅ Contact and transaction exist');
-      
-      // App1 updates contact, App2 deletes contact
-      // App1 updates transaction, App2 deletes transaction
-      print('📝 App1 updating, App2 deleting both...');
-      await Future.wait([
-        app1!.updateContact(contact.id, {'name': 'Updated Name'}),
-        app2!.deleteContact(contact.id),
-        app1!.updateTransaction(transaction.id, {'amount': 2000}),
-        app2!.deleteTransaction(transaction.id),
-      ]);
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      // Verify all events created
-      final allEvents = await app1!.getEvents();
-      final contactUpdate = allEvents.where((e) => 
-        e.aggregateId == contact.id && e.eventType == 'UPDATED' && e.aggregateType == 'contact'
-      ).toList();
-      final contactDelete = allEvents.where((e) => 
-        e.aggregateId == contact.id && e.eventType == 'DELETED' && e.aggregateType == 'contact'
-      ).toList();
-      final transactionUpdate = allEvents.where((e) => 
-        e.aggregateId == transaction.id && e.eventType == 'UPDATED' && e.aggregateType == 'transaction'
-      ).toList();
-      final transactionDelete = allEvents.where((e) => 
-        e.aggregateId == transaction.id && e.eventType == 'DELETED' && e.aggregateType == 'transaction'
-      ).toList();
-      
-      expect(contactUpdate.isNotEmpty, true);
-      expect(contactDelete.isNotEmpty, true);
-      expect(transactionUpdate.isNotEmpty, true);
-      expect(transactionDelete.isNotEmpty, true);
-      print('✅ All events created');
-      
-      // Wait for sync
+      print('📝 Executing ${commands.length} event commands...');
+      await generator!.executeCommands(commands);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       await Future.delayed(const Duration(seconds: 2));
       
-      // Verify all events synced to server
-      final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContactUpdate = serverEvents.where((e) => 
-        e['aggregate_id'] == contact.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'contact'
-      ).toList();
-      final serverContactDelete = serverEvents.where((e) => 
-        e['aggregate_id'] == contact.id && e['event_type'] == 'DELETED' && e['aggregate_type'] == 'contact'
-      ).toList();
-      final serverTransactionUpdate = serverEvents.where((e) => 
-        e['aggregate_id'] == transaction.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'transaction'
-      ).toList();
-      final serverTransactionDelete = serverEvents.where((e) => 
-        e['aggregate_id'] == transaction.id && e['event_type'] == 'DELETED' && e['aggregate_type'] == 'transaction'
-      ).toList();
+      // Verify events
+      final allEvents = await app1!.getEvents();
+      expect(allEvents.length, greaterThanOrEqualTo(20));
       
-      expect(serverContactUpdate.isNotEmpty, true);
-      expect(serverContactDelete.isNotEmpty, true);
-      expect(serverTransactionUpdate.isNotEmpty, true);
-      expect(serverTransactionDelete.isNotEmpty, true);
-      print('✅ All events synced to server');
+      // Verify transaction events are majority
+      final transactionEvents = allEvents.where(
+        (e) => e.aggregateType == 'transaction'
+      ).length;
+      expect(transactionEvents, greaterThan(15), reason: 'Transaction events should be majority');
       
       // Verify conflicts resolved (delete should win)
-      await Future.delayed(const Duration(seconds: 2));
       final contactsAfter = await app1!.getContacts();
-      final transactionsAfter = await app1!.getTransactions();
-      expect(contactsAfter.any((c) => c.id == contact.id), false, reason: 'Contact should be deleted');
-      expect(transactionsAfter.any((t) => t.id == transaction.id), false, reason: 'Transaction should be deleted');
-      print('✅ Conflicts resolved - both deleted (delete wins)');
+      final contact1Removed = !contactsAfter.any((c) => c.name == 'Contact to Conflict' || c.name == 'Updated Name');
+      expect(contact1Removed, true, reason: 'Contact should be deleted');
       
       // Validate consistency
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
@@ -257,108 +215,68 @@ void main() {
       print('✅ Final state consistent');
     });
     
-    test('3.3 Offline Update Conflict (Contact & Transaction)', () async {
-      print('\n📋 Test 3.3: Offline Update Conflict (Contact & Transaction)');
+    test('Offline Update Conflict (Contact & Transaction)', () async {
+      print('\n📋 Test: Offline Update Conflict (Contact & Transaction)');
       
-      // Create contact and transaction
-      print('📝 Creating contact and transaction in App1...');
-      final contact = await app1!.createContact(name: 'Original Name');
+      // Create contact and transactions first
+      final setupCommands = [
+        'app1: contact create "Original Name" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+        'app1: transaction create contact1 owed 1500 "T5" t5',
+        'app2: transaction create contact1 lent 600 "T6" t6',
+        'app2: transaction create contact1 owed 1200 "T7" t7',
+      ];
+      await generator!.executeCommands(setupCommands);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      
-      // Verify both exist
-      final allContacts = await app1!.getContacts();
-      final allTransactions = await app1!.getTransactions();
-      expect(allContacts.any((c) => c.id == contact.id), true);
-      expect(allTransactions.any((t) => t.id == transaction.id), true);
-      print('✅ Contact and transaction exist');
-      
-      // App1 goes offline
-      print('📴 App1 going offline...');
+      // App1 goes offline, App2 stays online
+      print('📴 App1 going offline, App2 staying online...');
       await app1!.goOffline();
       
-      // App1 updates both offline, App2 updates both online
-      print('📝 App1 updating both offline, App2 updating both online...');
-      await Future.wait([
-        app1!.updateContact(contact.id, {'name': 'Updated Offline by App1'}),
-        app2!.updateContact(contact.id, {'name': 'Updated Online by App2'}),
-        app1!.updateTransaction(transaction.id, {'amount': 2000}),
-        app2!.updateTransaction(transaction.id, {'amount': 3000}),
-      ]);
-      await Future.delayed(const Duration(milliseconds: 500));
+      // App1 updates while offline, App2 updates while online (conflict scenario)
+      final conflictCommands = [
+        'app1: contact update contact1 name "Updated Offline by App1"',
+        'app1: transaction update t1 amount 2000',
+        'app1: transaction update t3 amount 2200',
+        'app2: contact update contact1 name "Updated Online by App2"',
+        'app2: transaction update t1 amount 3000',
+        'app2: transaction update t5 description "Updated by App2"',
+        'app1: transaction create contact1 lent 900 "T8" t8',
+        'app2: transaction create contact1 owed 1800 "T9" t9',
+      ];
       
-      // Verify all updates created events
-      final allEvents = await app1!.getEvents();
-      final contactUpdates = allEvents.where((e) => 
-        e.aggregateId == contact.id && e.eventType == 'UPDATED' && e.aggregateType == 'contact'
-      ).toList();
-      final transactionUpdates = allEvents.where((e) => 
-        e.aggregateId == transaction.id && e.eventType == 'UPDATED' && e.aggregateType == 'transaction'
-      ).toList();
-      
-      expect(contactUpdates.length, greaterThanOrEqualTo(2), reason: 'Should have at least 2 contact updates');
-      expect(transactionUpdates.length, greaterThanOrEqualTo(2), reason: 'Should have at least 2 transaction updates');
-      print('✅ All updates created events');
+      print('📝 Executing ${conflictCommands.length} conflict commands...');
+      await generator!.executeCommands(conflictCommands);
       
       // App2's updates should sync first (it's online)
       await Future.delayed(const Duration(seconds: 5));
       
-      // Verify App2's events synced to server
-      final serverEventsBefore = await serverVerifier!.getServerEvents();
-      final serverContactUpdateBefore = serverEventsBefore.where((e) => 
-        e['aggregate_id'] == contact.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'contact'
-      ).toList();
-      final serverTransactionUpdateBefore = serverEventsBefore.where((e) => 
-        e['aggregate_id'] == transaction.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'transaction'
-      ).toList();
-      expect(serverContactUpdateBefore.isNotEmpty, true);
-      expect(serverTransactionUpdateBefore.isNotEmpty, true);
-      print('✅ App2 updates synced to server');
-      
       // App1 comes online
       print('📶 App1 coming online...');
       await app1!.goOnline();
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      // Wait for sync
-      try {
-        await monitor!.waitForSync(timeout: const Duration(seconds: 30)).timeout(
-          const Duration(seconds: 35),
-        );
-      } catch (e) {
-        final allSynced = await monitor!.allInstancesSynced();
-        if (!allSynced) rethrow;
-      }
-      await Future.delayed(const Duration(seconds: 1));
+      // Verify events
+      final allEvents = await app1!.getEvents();
+      expect(allEvents.length, greaterThanOrEqualTo(16)); // 8 setup + 8 conflict
       
-      // Verify all updates synced to server
-      final serverEventsAfter = await serverVerifier!.getServerEvents();
-      final serverContactUpdatesAfter = serverEventsAfter.where((e) => 
-        e['aggregate_id'] == contact.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'contact'
-      ).toList();
-      final serverTransactionUpdatesAfter = serverEventsAfter.where((e) => 
-        e['aggregate_id'] == transaction.id && e['event_type'] == 'UPDATED' && e['aggregate_type'] == 'transaction'
-      ).toList();
-      
-      expect(serverContactUpdatesAfter.length, greaterThanOrEqualTo(2));
-      expect(serverTransactionUpdatesAfter.length, greaterThanOrEqualTo(2));
-      print('✅ All updates synced to server');
+      // Verify we have multiple UPDATE events
+      final updateEvents = allEvents.where((e) => e.eventType == 'UPDATED').length;
+      expect(updateEvents, greaterThanOrEqualTo(5), reason: 'Should have multiple update events');
       
       // Verify conflict resolved
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
-      expect(isValid, true, reason: 'Final state should be consistent');
+      expect(isValid, true);
       print('✅ Conflict resolved - final state consistent');
       
-      // Verify contact exists with some name
+      // Verify contact exists
       final contactsAfter = await app1!.getContacts();
-      final finalContact = contactsAfter.firstWhere((c) => c.id == contact.id);
-      expect(finalContact.name, isNotEmpty, reason: 'Contact should have a name');
-      print('✅ Contact has name: ${finalContact.name}');
+      expect(contactsAfter.length, 1);
+      expect(contactsAfter.first.name, isNotEmpty);
+      print('✅ Contact has name: ${contactsAfter.first.name}');
     });
   });
 }

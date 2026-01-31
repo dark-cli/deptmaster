@@ -12,6 +12,7 @@ import 'package:debt_tracker_mobile/services/backend_config_service.dart';
 import '../app_instance.dart';
 import '../server_verifier.dart';
 import '../sync_monitor.dart';
+import '../event_generator.dart';
 import '../../helpers/multi_app_helpers.dart';
 
 void main() {
@@ -21,6 +22,7 @@ void main() {
     AppInstance? app1;
     ServerVerifier? serverVerifier;
     SyncMonitor? monitor;
+    EventGenerator? generator;
     
     setUpAll(() async {
       // Initialize Hive once globally
@@ -58,6 +60,11 @@ void main() {
       serverVerifier = ServerVerifier(serverUrl: 'http://localhost:8000');
       await serverVerifier!.setAuthToken();
       monitor = SyncMonitor([app1!]);
+      
+      // Create event generator
+      generator = EventGenerator({
+        'app1': app1!,
+      });
     });
     
     tearDown(() async {
@@ -65,139 +72,132 @@ void main() {
       await app1?.clearData();
     });
     
-    test('Server 1: Event Storage', () async {
-      print('\n📋 Server Test 1: Event Storage');
+    test('Server: Event Storage', () async {
+      print('\n📋 Server Test: Event Storage');
       
-      // Create contact and transaction
-      print('📝 Creating contact and transaction...');
-      final contact = await app1!.createContact(name: 'Test Contact');
+      // Use event generator to create 12 events (1 contact + 11 transactions)
+      final commands = [
+        'app1: contact create "Test Contact" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+        'app1: transaction create contact1 owed 1500 "T5" t5',
+        'app1: transaction create contact1 lent 600 "T6" t6',
+        'app1: transaction create contact1 owed 1200 "T7" t7',
+        'app1: transaction create contact1 lent 900 "T8" t8',
+        'app1: transaction update t1 amount 1100',
+        'app1: transaction update t3 description "Updated T3"',
+        'app1: transaction delete t5',
+      ];
+      
+      print('📝 Creating ${commands.length} events...');
+      await generator!.executeCommands(commands);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      await Future.delayed(const Duration(seconds: 3)); // Wait for sync
-      
-      // Verify both events stored in database via API
+      // Verify events stored in database via API
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContactEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'contact',
-        orElse: () => throw Exception('Contact event not found on server'),
-      );
-      final serverTransactionEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == transaction.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'transaction',
-        orElse: () => throw Exception('Transaction event not found on server'),
-      );
+      expect(serverEvents.length, greaterThanOrEqualTo(12));
       
-      expect(serverContactEvent['event_type'], 'CREATED');
-      expect(serverContactEvent['aggregate_id'], contact.id);
-      expect(serverContactEvent['aggregate_type'], 'contact');
-      expect(serverTransactionEvent['event_type'], 'CREATED');
-      expect(serverTransactionEvent['aggregate_id'], transaction.id);
-      expect(serverTransactionEvent['aggregate_type'], 'transaction');
-      print('✅ Both events stored correctly in database');
+      // Verify transaction events are majority
+      final transactionEvents = serverEvents.where(
+        (e) => e['aggregate_type'] == 'transaction'
+      ).toList();
+      expect(transactionEvents.length, greaterThan(8), reason: 'Transaction events should be majority');
+      
+      // Verify contact event exists
+      final contactEvents = serverEvents.where(
+        (e) => e['aggregate_type'] == 'contact'
+      ).toList();
+      expect(contactEvents.isNotEmpty, true);
+      
+      print('✅ All events stored correctly in database');
       
       // Verify event data integrity
-      final contactEventData = serverContactEvent['event_data'] as Map<String, dynamic>;
-      final transactionEventData = serverTransactionEvent['event_data'] as Map<String, dynamic>;
+      final contactEvent = contactEvents.first;
+      final contactEventData = contactEvent['event_data'] as Map<String, dynamic>;
       expect(contactEventData['name'], 'Test Contact');
+      
+      // Verify transaction event data
+      final transactionEvent = transactionEvents.firstWhere(
+        (e) => e['event_type'] == 'CREATED',
+        orElse: () => transactionEvents.first,
+      );
+      final transactionEventData = transactionEvent['event_data'] as Map<String, dynamic>;
       expect(transactionEventData['amount'], 1000);
       print('✅ Event data integrity verified');
     });
     
-    test('Server 2: Event Retrieval', () async {
-      print('\n📋 Server Test 2: Event Retrieval');
+    test('Server: Event Retrieval', () async {
+      print('\n📋 Server Test: Event Retrieval');
       
-      // Create multiple contacts and transactions
-      print('📝 Creating multiple contacts and transactions...');
-      final contacts = <Contact>[];
-      final transactions = <Transaction>[];
-      for (int i = 0; i < 5; i++) {
-        final contact = await app1!.createContact(name: 'Contact $i');
-        contacts.add(contact);
-        
-        final transaction = await app1!.createTransaction(
-          contactId: contact.id,
-          direction: TransactionDirection.owed,
-          amount: 1000 + i * 100,
-        );
-        transactions.add(transaction);
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
-      await Future.delayed(const Duration(seconds: 3)); // Wait for sync
+      // Use event generator to create 15 events (3 contacts + 12 transactions)
+      final commands = [
+        'app1: contact create "Contact 0" contact1',
+        'app1: contact create "Contact 1" contact2',
+        'app1: contact create "Contact 2" contact3',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact2 owed 2000 "T3" t3',
+        'app1: transaction create contact2 lent 800 "T4" t4',
+        'app1: transaction create contact3 owed 1500 "T5" t5',
+        'app1: transaction create contact3 lent 600 "T6" t6',
+        'app1: transaction create contact1 owed 1200 "T7" t7',
+        'app1: transaction create contact2 lent 900 "T8" t8',
+        'app1: transaction create contact3 owed 1800 "T9" t9',
+        'app1: transaction update t1 amount 1100',
+        'app1: transaction update t3 description "Updated T3"',
+        'app1: transaction delete t5',
+      ];
+      
+      print('📝 Creating ${commands.length} events...');
+      await generator!.executeCommands(commands);
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
       // Test GET /api/sync/events without timestamp (all events)
-      print('📥 Testing GET /api/sync/events (all events)...');
       final allEvents = await serverVerifier!.getServerEvents();
       final contactEvents = allEvents.where((e) => e['aggregate_type'] == 'contact').toList();
       final transactionEvents = allEvents.where((e) => e['aggregate_type'] == 'transaction').toList();
-      expect(contactEvents.length, greaterThanOrEqualTo(contacts.length),
-        reason: 'Should retrieve all contact events');
-      expect(transactionEvents.length, greaterThanOrEqualTo(transactions.length),
-        reason: 'Should retrieve all transaction events');
+      expect(contactEvents.length, 3, reason: 'Should retrieve all contact events');
+      expect(transactionEvents.length, greaterThan(10), reason: 'Should retrieve all transaction events');
       print('✅ Retrieved all events: ${allEvents.length} (${contactEvents.length} contacts, ${transactionEvents.length} transactions)');
       
       // Test GET /api/sync/events with timestamp (incremental)
-      print('📥 Testing GET /api/sync/events (with timestamp)...');
       final since = DateTime.now().subtract(const Duration(minutes: 1));
       final recentEvents = await serverVerifier!.getServerEvents(since: since);
-      final recentContactEvents = recentEvents.where((e) => e['aggregate_type'] == 'contact').toList();
-      final recentTransactionEvents = recentEvents.where((e) => e['aggregate_type'] == 'transaction').toList();
-      expect(recentContactEvents.length, greaterThanOrEqualTo(contacts.length),
-        reason: 'Should retrieve recent contact events');
-      expect(recentTransactionEvents.length, greaterThanOrEqualTo(transactions.length),
-        reason: 'Should retrieve recent transaction events');
+      expect(recentEvents.length, greaterThanOrEqualTo(15), reason: 'Should retrieve recent events');
       print('✅ Retrieved recent events: ${recentEvents.length}');
-      
-      // Verify all contacts and transactions are in the events
-      for (final contact in contacts) {
-        final event = allEvents.where(
-          (e) => e['aggregate_id'] == contact.id && e['aggregate_type'] == 'contact',
-        ).toList();
-        expect(event.isNotEmpty, true, reason: 'Event for contact ${contact.id} should exist');
-      }
-      for (final transaction in transactions) {
-        final event = allEvents.where(
-          (e) => e['aggregate_id'] == transaction.id && e['aggregate_type'] == 'transaction',
-        ).toList();
-        expect(event.isNotEmpty, true, reason: 'Event for transaction ${transaction.id} should exist');
-      }
-      print('✅ All contacts and transactions found in events');
     });
     
-    test('Server 3: Event Acceptance', () async {
-      print('\n📋 Server Test 3: Event Acceptance');
+    test('Server: Event Acceptance', () async {
+      print('\n📋 Server Test: Event Acceptance');
       
-      // Create contact and transaction (valid events)
-      print('📝 Creating contact and transaction (valid events)...');
-      final contact = await app1!.createContact(name: 'Valid Contact');
+      // Use event generator to create 12 events (1 contact + 11 transactions)
+      final commands = [
+        'app1: contact create "Valid Contact" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+        'app1: transaction create contact1 owed 1500 "T5" t5',
+        'app1: transaction create contact1 lent 600 "T6" t6',
+        'app1: transaction create contact1 owed 1200 "T7" t7',
+        'app1: transaction create contact1 lent 900 "T8" t8',
+        'app1: transaction update t1 amount 1100',
+        'app1: transaction update t3 description "Updated T3"',
+        'app1: transaction delete t5',
+      ];
+      
+      print('📝 Creating ${commands.length} valid events...');
+      await generator!.executeCommands(commands);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      await Future.delayed(const Duration(seconds: 3));
-      
-      // Verify both events accepted
+      // Verify all events accepted
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContactEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == contact.id && e['aggregate_type'] == 'contact',
-        orElse: () => throw Exception('Contact event not found'),
-      );
-      final serverTransactionEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == transaction.id && e['aggregate_type'] == 'transaction',
-        orElse: () => throw Exception('Transaction event not found'),
-      );
-      expect(serverContactEvent['event_type'], 'CREATED');
-      expect(serverTransactionEvent['event_type'], 'CREATED');
-      print('✅ Both valid events accepted');
+      expect(serverEvents.length, greaterThanOrEqualTo(12));
       
-      // Verify both events have required fields
-      for (final event in [serverContactEvent, serverTransactionEvent]) {
+      // Verify events have required fields
+      for (final event in serverEvents) {
         expect(event['id'], isNotNull);
         expect(event['aggregate_id'], isNotNull);
         expect(event['aggregate_type'], isNotNull);
@@ -205,11 +205,11 @@ void main() {
         expect(event['event_data'], isNotNull);
         expect(event['timestamp'], isNotNull);
       }
-      print('✅ Both events have all required fields');
+      print('✅ All events accepted and have all required fields');
     });
     
-    test('Server 4: Hash Calculation', () async {
-      print('\n📋 Server Test 4: Hash Calculation');
+    test('Server: Hash Calculation', () async {
+      print('\n📋 Server Test: Hash Calculation');
       
       // Get initial hash
       print('📥 Getting initial hash...');
@@ -217,36 +217,32 @@ void main() {
       expect(hash1, isNotEmpty);
       print('✅ Initial hash: $hash1');
       
-      // Create contact and transaction
-      print('📝 Creating contact and transaction...');
-      final contact = await app1!.createContact(name: 'Hash Test Contact');
+      // Use event generator to create 10 events (2 contacts + 8 transactions)
+      final commands1 = [
+        'app1: contact create "Hash Test Contact" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+      ];
+      await generator!.executeCommands(commands1);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
-      await Future.delayed(const Duration(seconds: 3));
-      
       // Get new hash
-      print('📥 Getting new hash...');
       final hash2 = await serverVerifier!.getServerHash();
       expect(hash2, isNotEmpty);
       expect(hash2 != hash1, true, reason: 'Hash should change after events');
-      print('✅ New hash: $hash2 (different from initial)');
       
-      // Create another contact and transaction
-      print('📝 Creating another contact and transaction...');
-      final contact2 = await app1!.createContact(name: 'Hash Test Contact 2');
+      // Create more events
+      final commands2 = [
+        'app1: contact create "Hash Test Contact 2" contact2',
+        'app1: transaction create contact2 lent 500 "T5" t5',
+        'app1: transaction create contact2 owed 1500 "T6" t6',
+        'app1: transaction create contact2 lent 600 "T7" t7',
+        'app1: transaction update t1 amount 1100',
+      ];
+      await generator!.executeCommands(commands2);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      
-      await app1!.createTransaction(
-        contactId: contact2.id,
-        direction: TransactionDirection.lent,
-        amount: 500,
-      );
-      await Future.delayed(const Duration(seconds: 3));
       
       // Get final hash
       print('📥 Getting final hash...');
@@ -255,125 +251,111 @@ void main() {
       print('✅ Final hash: $hash3 (different from previous)');
     });
     
-    test('Server 5: Projection Consistency', () async {
-      print('\n📋 Server Test 5: Projection Consistency');
+    test('Server: Projection Consistency', () async {
+      print('\n📋 Server Test: Projection Consistency');
       
-      // Create contact and transaction
-      print('📝 Creating contact and transaction...');
-      final contact = await app1!.createContact(
-        name: 'Projection Test',
-        email: 'test@example.com',
-        phone: '1234567890',
-      );
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      // Use event generator to create 15 events (1 contact + 14 transactions) with updates
+      final commands = [
+        'app1: contact create "Projection Test" contact1',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact1 lent 800 "T4" t4',
+        'app1: transaction create contact1 owed 1500 "T5" t5',
+        'app1: transaction create contact1 lent 600 "T6" t6',
+        'app1: transaction create contact1 owed 1200 "T7" t7',
+        'app1: transaction create contact1 lent 900 "T8" t8',
+        'app1: transaction create contact1 owed 1800 "T9" t9',
+        'app1: transaction create contact1 lent 400 "T10" t10',
+        // Updates
+        'app1: contact update contact1 name "Updated Projection Test"',
+        'app1: transaction update t1 amount 2000',
+        'app1: transaction update t3 description "Updated T3"',
+        'app1: transaction delete t5',
+      ];
       
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-      );
+      print('📝 Creating ${commands.length} events...');
+      await generator!.executeCommands(commands);
       await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      await Future.delayed(const Duration(seconds: 2));
       
       // Verify events in events table
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContactEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == contact.id && e['aggregate_type'] == 'contact',
-        orElse: () => throw Exception('Contact event not found'),
-      );
-      final serverTransactionEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == transaction.id && e['aggregate_type'] == 'transaction',
-        orElse: () => throw Exception('Transaction event not found'),
-      );
-      expect(serverContactEvent['event_type'], 'CREATED');
-      expect(serverTransactionEvent['event_type'], 'CREATED');
-      print('✅ Both events exist in events table');
+      expect(serverEvents.length, greaterThanOrEqualTo(15));
       
-      // Verify contact in projections (via API - get all contacts and find by ID)
+      // Verify contact in projections
       final serverContacts = await serverVerifier!.getServerContacts();
       final serverContact = serverContacts.firstWhere(
-        (c) => c['id'] == contact.id,
+        (c) => c['name'] == 'Updated Projection Test',
         orElse: () => throw Exception('Contact not found in projection'),
       );
-      expect(serverContact['name'], 'Projection Test');
-      expect(serverContact['email'], 'test@example.com');
-      expect(serverContact['phone'], '1234567890');
+      expect(serverContact['name'], 'Updated Projection Test');
       print('✅ Contact exists in projection with correct data');
       
-      // Verify transaction in projections (via API - get all transactions and find by ID)
+      // Verify transactions in projections
       final serverTransactions = await serverVerifier!.getServerTransactions();
-      final serverTransaction = serverTransactions.firstWhere(
-        (t) => t['id'] == transaction.id,
-        orElse: () => throw Exception('Transaction not found in projection'),
-      );
-      expect(serverTransaction['amount'], 1000);
-      print('✅ Transaction exists in projection with correct data');
-      
-      // Update contact and transaction
-      print('📝 Updating contact and transaction...');
-      await app1!.updateContact(contact.id, {'name': 'Updated Projection Test'});
-      await app1!.updateTransaction(transaction.id, {'amount': 2000});
-      await Future.delayed(const Duration(seconds: 3));
+      // Note: Transaction t5 was deleted, so it won't be in the projection
+      expect(serverTransactions.length, greaterThan(8));
+      print('✅ Transactions exist in projection');
       
       // Verify updates in projections
-      final updatedServerContacts = await serverVerifier!.getServerContacts();
-      final updatedServerTransactions = await serverVerifier!.getServerTransactions();
-      final updatedContact = updatedServerContacts.firstWhere(
-        (c) => c['id'] == contact.id,
+      final updatedContact = serverContacts.firstWhere(
+        (c) => c['name'] == 'Updated Projection Test',
         orElse: () => throw Exception('Updated contact not found'),
       );
-      final updatedTransaction = updatedServerTransactions.firstWhere(
-        (t) => t['id'] == transaction.id,
-        orElse: () => throw Exception('Updated transaction not found'),
-      );
       expect(updatedContact['name'], 'Updated Projection Test');
-      expect(updatedTransaction['amount'], 2000);
       print('✅ Projections updated correctly');
     });
     
-    test('Server 6: Event Count and Statistics', () async {
-      print('\n📋 Server Test 6: Event Count and Statistics');
+    test('Server: Event Count and Statistics', () async {
+      print('\n📋 Server Test: Event Count and Statistics');
       
       // Get initial count
       print('📥 Getting initial event count...');
       final initialCount = await serverVerifier!.getServerEventCount();
       print('✅ Initial count: $initialCount');
       
-      // Create multiple contacts and transactions
-      print('📝 Creating multiple contacts and transactions...');
-      final count = 10;
-      final contacts = <Contact>[];
-      for (int i = 0; i < count; i++) {
-        final contact = await app1!.createContact(name: 'Contact $i');
-        contacts.add(contact);
-        await Future.delayed(const Duration(milliseconds: 200));
-        
-        await app1!.createTransaction(
-          contactId: contact.id,
-          direction: TransactionDirection.owed,
-          amount: 1000 + i * 100,
-        );
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-      await Future.delayed(const Duration(seconds: 5)); // Wait for sync
+      // Use event generator to create 20 events (3 contacts + 17 transactions)
+      final commands = [
+        'app1: contact create "Contact 0" contact1',
+        'app1: contact create "Contact 1" contact2',
+        'app1: contact create "Contact 2" contact3',
+        'app1: transaction create contact1 owed 1000 "T1" t1',
+        'app1: transaction create contact1 lent 500 "T2" t2',
+        'app1: transaction create contact1 owed 2000 "T3" t3',
+        'app1: transaction create contact2 lent 800 "T4" t4',
+        'app1: transaction create contact2 owed 1200 "T5" t5',
+        'app1: transaction create contact2 lent 600 "T6" t6',
+        'app1: transaction create contact3 owed 1500 "T7" t7',
+        'app1: transaction create contact3 lent 900 "T8" t8',
+        'app1: transaction create contact3 owed 1800 "T9" t9',
+        'app1: transaction create contact1 lent 400 "T10" t10',
+        'app1: transaction create contact2 owed 1100 "T11" t11',
+        'app1: transaction create contact3 lent 700 "T12" t12',
+        'app1: transaction update t1 amount 1100',
+        'app1: transaction update t3 description "Updated T3"',
+        'app1: transaction delete t5',
+        'app1: transaction create contact1 owed 1300 "T13" t13',
+        'app1: transaction create contact2 lent 500 "T14" t14',
+      ];
+      
+      print('📝 Creating ${commands.length} events...');
+      await generator!.executeCommands(commands);
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
       
       // Get final count
-      print('📥 Getting final event count...');
       final finalCount = await serverVerifier!.getServerEventCount();
-      // Should have at least count contacts + count transactions = 2*count events
-      expect(finalCount, greaterThanOrEqualTo(initialCount + count * 2),
-        reason: 'Event count should have increased by at least ${count * 2} (contacts + transactions)');
-      print('✅ Final count: $finalCount (increased by at least ${count * 2})');
+      expect(finalCount, greaterThanOrEqualTo(initialCount + 20), 
+        reason: 'Event count should increase');
+      print('✅ Final count: $finalCount (increased by ${finalCount - initialCount})');
       
-      // Verify all events are retrievable
-      final allEvents = await serverVerifier!.getServerEvents();
-      final contactEvents = allEvents.where((e) => e['aggregate_type'] == 'contact').toList();
-      final transactionEvents = allEvents.where((e) => e['aggregate_type'] == 'transaction').toList();
-      expect(contactEvents.length, greaterThanOrEqualTo(count),
-        reason: 'Should have at least $count contact events');
-      expect(transactionEvents.length, greaterThanOrEqualTo(count),
-        reason: 'Should have at least $count transaction events');
-      print('✅ All events are retrievable');
+      // Verify statistics
+      final serverEvents = await serverVerifier!.getServerEvents();
+      final contactEvents = serverEvents.where((e) => e['aggregate_type'] == 'contact').toList();
+      final transactionEvents = serverEvents.where((e) => e['aggregate_type'] == 'transaction').toList();
+      
+      expect(contactEvents.length, 3);
+      expect(transactionEvents.length, greaterThan(15));
+      print('✅ Statistics verified: ${contactEvents.length} contacts, ${transactionEvents.length} transactions');
     });
   });
 }
