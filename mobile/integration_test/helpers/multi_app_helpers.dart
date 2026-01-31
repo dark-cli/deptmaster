@@ -130,11 +130,30 @@ Future<bool> isServerRunning({String serverUrl = 'http://localhost:8000'}) async
 
 /// Create test user if it doesn't exist
 /// Uses reset_password binary to create/update user in users_projection table
+/// Optimized: Only calls binary if user doesn't exist (saves ~1.2s per call)
 Future<void> ensureTestUserExists({
   String username = 'max',
   String password = '12345678',
 }) async {
   try {
+    // Quick check: Try to login first (fast HTTP call)
+    // If login succeeds, user exists with correct password - skip creation
+    try {
+      final loginUrl = Uri.parse('http://localhost:8000/api/auth/login');
+      final loginResponse = await http.post(
+        loginUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'username': username, 'password': password}),
+      ).timeout(const Duration(seconds: 2));
+      
+      if (loginResponse.statusCode == 200) {
+        print('✅ Test user "$username" already exists with correct password (verified via login)');
+        return; // User exists, skip creation
+      }
+    } catch (e) {
+      // Login failed, user might not exist - continue to create
+    }
+    
     print('🔧 Ensuring test user "$username" exists with password "$password"...');
     
     final projectRoot = '/home/max/dev/debitum';
@@ -156,7 +175,7 @@ Future<void> ensureTestUserExists({
     
     if (result.exitCode == 0 || output.contains('✅')) {
       print('✅ Test user "$username" ensured with password');
-      if (output.isNotEmpty) {
+      if (output.isNotEmpty && !output.contains('Password updated')) {
         print('   $output');
       }
     } else {

@@ -34,6 +34,10 @@ void main() {
       Hive.registerAdapter(TransactionTypeAdapter());
       Hive.registerAdapter(TransactionDirectionAdapter());
       Hive.registerAdapter(EventAdapter());
+      
+      // Ensure test user exists once for all tests (major performance optimization)
+      // This avoids calling the Rust binary before each test
+      await ensureTestUserExists();
     });
     
     setUp(() async {
@@ -41,9 +45,7 @@ void main() {
       await resetServer();
       await waitForServerReady();
       
-      // Ensure test user exists (seed_data creates "max" / "1234" if DB is empty)
-      // But after reset, DB might not be empty, so we ensure the user exists
-      await ensureTestUserExists();
+      // Note: Test user is ensured in setUpAll to avoid 1.2s delay per test
       
       // Clear all Hive boxes
       try {
