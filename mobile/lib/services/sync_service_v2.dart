@@ -106,20 +106,25 @@ class SyncServiceV2 {
   static Future<SyncResult> syncLocalToServer() async {
     if (kIsWeb) return SyncResult.done;
 
+    final syncStart = DateTime.now();
     print('🔄 syncLocalToServer: Starting...');
 
     // Check if we have unsynced events
+    final getUnsyncedStart = DateTime.now();
     final unsyncedEvents = await EventStoreService.getUnsyncedEvents();
+    final getUnsyncedTime = DateTime.now().difference(getUnsyncedStart);
     if (unsyncedEvents.isEmpty) {
       print('✅ syncLocalToServer: No unsynced events to send');
       return SyncResult.done;
     }
 
-      print('📤 syncLocalToServer: Found ${unsyncedEvents.length} unsynced events');
+    print('📤 syncLocalToServer: Found ${unsyncedEvents.length} unsynced events (getUnsynced: ${getUnsyncedTime.inMilliseconds}ms)');
 
     // Check if server is reachable
+    final reachabilityStart = DateTime.now();
     final isReachable = await _isServerReachable();
-    print('🌐 syncLocalToServer: Server reachable = $isReachable');
+    final reachabilityTime = DateTime.now().difference(reachabilityStart);
+    print('🌐 syncLocalToServer: Server reachable = $isReachable (check: ${reachabilityTime.inMilliseconds}ms)');
     if (!isReachable) {
       print('⚠️ syncLocalToServer: Server not reachable, will retry...');
       return SyncResult.failed;
@@ -158,12 +163,14 @@ class SyncServiceV2 {
       }).toList();
 
       // Send to server
+      final postStart = DateTime.now();
       print('📤 syncLocalToServer: Sending ${eventsToSend.length} events to server...');
       final result = await ApiService.postSyncEvents(eventsToSend);
+      final postTime = DateTime.now().difference(postStart);
       final accepted = (result['accepted'] as List).cast<String>();
       final conflicts = (result['conflicts'] as List).cast<String>();
 
-      print('✅ syncLocalToServer: Server accepted ${accepted.length} events, ${conflicts.length} conflicts');
+      print('✅ syncLocalToServer: Server accepted ${accepted.length} events, ${conflicts.length} conflicts (post: ${postTime.inMilliseconds}ms)');
 
       if (accepted.isEmpty && conflicts.isEmpty && eventsToSend.isNotEmpty) {
         print('⚠️ Warning: No events were accepted or conflicted. This might indicate a server error.');
@@ -171,6 +178,7 @@ class SyncServiceV2 {
       }
 
       // Mark accepted events as synced
+      final markSyncedStart = DateTime.now();
       if (accepted.isNotEmpty) {
         final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
         for (final eventId in accepted) {
@@ -190,6 +198,10 @@ class SyncServiceV2 {
           }
         }
       }
+      final markSyncedTime = DateTime.now().difference(markSyncedStart);
+      if (accepted.isNotEmpty) {
+        print('⏱️ Mark events as synced: ${markSyncedTime.inMilliseconds}ms');
+      }
 
       // Handle conflicts (for now, just log them)
       if (conflicts.isNotEmpty) {
@@ -198,13 +210,19 @@ class SyncServiceV2 {
       }
 
       // Rebuild state only if we marked events as synced
+      final rebuildStart = DateTime.now();
       if (accepted.isNotEmpty) {
         await _rebuildState();
       } else {
         print('✅ No events were synced, skipping state rebuild');
       }
+      final rebuildTime = DateTime.now().difference(rebuildStart);
+      if (accepted.isNotEmpty) {
+        print('⏱️ State rebuild: ${rebuildTime.inMilliseconds}ms');
+      }
 
-      print('✅ Local to server sync completed');
+      final totalTime = DateTime.now().difference(syncStart);
+      print('✅ Local to server sync completed (total: ${totalTime.inMilliseconds}ms)');
       _hasSyncError = false; // Clear error on success
       return SyncResult.done;
     } catch (e) {
