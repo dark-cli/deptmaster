@@ -61,10 +61,12 @@ void main() {
       app2 = await AppInstance.create(id: 'app2', serverUrl: 'http://localhost:8000');
       app3 = await AppInstance.create(id: 'app3', serverUrl: 'http://localhost:8000');
       
-      // Initialize all instances
-      await app1!.initialize();
-      await app2!.initialize();
-      await app3!.initialize();
+      // Initialize all instances in parallel (optimization)
+      await Future.wait([
+        app1!.initialize(),
+        app2!.initialize(),
+        app3!.initialize(),
+      ]);
       
       // Login all instances sequentially to avoid conflicts
       // (they'll share auth, which is fine for testing)

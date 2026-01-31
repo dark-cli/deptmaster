@@ -40,6 +40,11 @@ class SyncServiceV2 {
   static DateTime? _serverReachableCacheTime;
   static const Duration _serverReachableCacheDuration = Duration(seconds: 10);
   static bool _hasSyncError = false; // Track if sync has failed with error
+  
+  // Cache Hive box references to avoid opening them multiple times
+  static Box<Contact>? _contactsBox;
+  static Box<Transaction>? _transactionsBox;
+  static Box<Event>? _eventsBox;
 
   /// Initialize sync service
   static Future<void> initialize() async {
@@ -177,14 +182,15 @@ class SyncServiceV2 {
         return SyncResult.failed;
       }
 
-      // Mark accepted events as synced
+      // Mark accepted events as synced (batch operation)
       final markSyncedStart = DateTime.now();
       if (accepted.isNotEmpty) {
-        final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+        _eventsBox ??= await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+        final syncedEvents = <String, Event>{};
         for (final eventId in accepted) {
-          final event = eventsBox.get(eventId);
+          final event = _eventsBox!.get(eventId);
           if (event != null) {
-            final syncedEvent = Event(
+            syncedEvents[eventId] = Event(
               id: event.id,
               aggregateType: event.aggregateType,
               aggregateId: event.aggregateId,
@@ -194,9 +200,9 @@ class SyncServiceV2 {
               version: event.version,
               synced: true,
             );
-            await eventsBox.put(eventId, syncedEvent);
           }
         }
+        await _eventsBox!.putAll(syncedEvents);
       }
       final markSyncedTime = DateTime.now().difference(markSyncedStart);
       if (accepted.isNotEmpty) {
@@ -310,10 +316,11 @@ class SyncServiceV2 {
       final allLocalEvents = await EventStoreService.getAllEvents();
       final localEventIds = allLocalEvents.map((e) => e.id).toSet();
 
-      // 7. Insert missing events from server
+      // 7. Insert missing events from server (batch operation)
       int insertedCount = 0;
-      final eventsBox = await Hive.openBox<Event>(EventStoreService.eventsBoxName);
-
+      _eventsBox ??= await Hive.openBox<Event>(EventStoreService.eventsBoxName);
+      
+      final eventsToInsert = <String, Event>{};
       for (final serverEvent in serverEvents) {
         final eventId = serverEvent['id'] as String;
 
@@ -331,11 +338,16 @@ class SyncServiceV2 {
             synced: true, // From server, so already synced
           );
 
-          // Insert into local event store
-          await eventsBox.put(event.id, event);
+          // Add to batch
+          eventsToInsert[eventId] = event;
           localEventIds.add(eventId);
           insertedCount++;
         }
+      }
+      
+      // Batch insert all events at once
+      if (eventsToInsert.isNotEmpty) {
+        await _eventsBox!.putAll(eventsToInsert);
       }
 
       print('✅ Inserted $insertedCount new events from server');
@@ -455,7 +467,8 @@ class SyncServiceV2 {
     _runLocalToServerSyncOnce();
 
     // Start periodic timer for retries (only runs if first attempt fails)
-    _localToServerSyncTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+    // Reduced polling interval from 1s to 500ms for faster detection
+    _localToServerSyncTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
       // Check if sync already running
       if (_isLocalToServerSyncing) {
         print('⚠️ Local to server sync loop: sync already running, skipping...');
@@ -630,22 +643,26 @@ class SyncServiceV2 {
       // Build state using StateBuilder
       final state = StateBuilder.buildState(events);
 
-      // Save to Hive boxes
-      final contactsBox = await Hive.openBox<Contact>('contacts');
-      final transactionsBox = await Hive.openBox<Transaction>('transactions');
+      // Save to Hive boxes (use cached boxes)
+      _contactsBox ??= await Hive.openBox<Contact>('contacts');
+      _transactionsBox ??= await Hive.openBox<Transaction>('transactions');
 
       // Clear existing data
-      await contactsBox.clear();
-      await transactionsBox.clear();
+      await _contactsBox!.clear();
+      await _transactionsBox!.clear();
 
-      // Write new state
+      // Write new state (batch operations)
+      final contactMap = <String, Contact>{};
       for (final contact in state.contacts) {
-        await contactsBox.put(contact.id, contact);
+        contactMap[contact.id] = contact;
       }
+      await _contactsBox!.putAll(contactMap);
 
+      final transactionMap = <String, Transaction>{};
       for (final transaction in state.transactions) {
-        await transactionsBox.put(transaction.id, transaction);
+        transactionMap[transaction.id] = transaction;
       }
+      await _transactionsBox!.putAll(transactionMap);
 
       print('✅ State rebuilt: ${state.contacts.length} contacts, ${state.transactions.length} transactions');
     } catch (e) {
