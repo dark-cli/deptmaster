@@ -1236,6 +1236,47 @@ cmd_test_flutter_integration() {
 cmd_test_flutter_integration_multi_app() {
     validate_flags "test-flutter-integration-multi-app"
     
+    # Parse test selection arguments (e.g., "2" for file 2, "2.2" for test 2 in file 2, "4.1 4.2" for multiple tests)
+    # Store selections as associative arrays: file_num -> array of test numbers (empty array means all tests in file)
+    declare -A SELECTED_FILES
+    declare -A SELECTED_TESTS  # file_num -> space-separated list of test numbers
+    
+    # Get arguments after the command name (skip the first argument which is the command)
+    local TEST_ARGS=("${ARGS[@]:1}")
+    
+    if [ ${#TEST_ARGS[@]} -gt 0 ]; then
+        for selection in "${TEST_ARGS[@]}"; do
+            if [[ "$selection" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
+                # Format: X.Y (file X, test Y)
+                local file_num="${BASH_REMATCH[1]}"
+                local test_num="${BASH_REMATCH[2]}"
+                SELECTED_FILES["$file_num"]=1
+                # Add test number to the list for this file
+                if [ -z "${SELECTED_TESTS[$file_num]}" ]; then
+                    SELECTED_TESTS["$file_num"]="$test_num"
+                else
+                    SELECTED_TESTS["$file_num"]="${SELECTED_TESTS[$file_num]} $test_num"
+                fi
+            elif [[ "$selection" =~ ^[0-9]+$ ]]; then
+                # Format: X (file X only - all tests)
+                SELECTED_FILES["$selection"]=1
+                # Empty test list means all tests in this file
+                if [ -z "${SELECTED_TESTS[$selection]}" ]; then
+                    SELECTED_TESTS["$selection"]=""
+                fi
+            else
+                print_error "Invalid test selection: $selection"
+                print_info "Usage: $0 test-flutter-integration-multi-app [SELECTIONS...]"
+                print_info "Examples:"
+                print_info "  $0 test-flutter-integration-multi-app 2           # Run file 2 (all tests)"
+                print_info "  $0 test-flutter-integration-multi-app 2.2        # Run test 2 in file 2"
+                print_info "  $0 test-flutter-integration-multi-app 4.1 4.2    # Run tests 1 and 2 in file 4"
+                print_info "  $0 test-flutter-integration-multi-app 2 4.1      # Run all tests in file 2, and test 1 in file 4"
+                exit 1
+            fi
+        done
+    fi
+    
     # Temporarily disable exit on error so we can continue even if tests fail
     set +e
     
@@ -1316,9 +1357,14 @@ cmd_test_flutter_integration_multi_app() {
     
     # Results tracking
     declare -a TEST_RESULTS
+    declare -a FILE_TEST_COUNTS      # Number of tests that actually ran per file
+    declare -a FILE_TEST_PASSED      # Number of passed tests per file
+    declare -a FILE_TEST_FAILED      # Number of failed tests per file
+    declare -a FILE_RAN_TESTS        # Track which files actually ran tests (1 = ran, 0 = skipped)
     local TOTAL_TESTS=${#TEST_SUITES[@]}
-    local PASSED=0
-    local FAILED=0
+    local TOTAL_INDIVIDUAL_TESTS=0
+    local TOTAL_PASSED=0
+    local TOTAL_FAILED=0
     
     print_info "════════════════════════════════════════════════════════════════"
     print_info "Discovered $TOTAL_TESTS Integration Test Suites"
@@ -1331,46 +1377,286 @@ cmd_test_flutter_integration_multi_app() {
         local TEST_NAME="${TEST_NAMES[$i]}"
         local TEST_NUM=$((i + 1))
         
-        if [ "$VERBOSE" = "true" ]; then
-            print_info "[$TEST_NUM/$TOTAL_TESTS] Running: $TEST_NAME"
-            print_info "File: $TEST_FILE"
-            print_info "────────────────────────────────────────────────────────────"
-        else
-            # Show minimal progress when not verbose
-            printf "[%d/%d] Running: %s..." "$TEST_NUM" "$TOTAL_TESTS" "$TEST_NAME"
+        # Skip this file if specific files were selected and this isn't one of them
+        if [ ${#SELECTED_FILES[@]} -gt 0 ] && [ -z "${SELECTED_FILES[$TEST_NUM]}" ]; then
+            continue
         fi
         
-        # Run the test (capture exit code, show output only if verbose)
-        local TEST_EXIT_CODE=0
-        if [ "$VERBOSE" = "true" ]; then
-            # Show full output when verbose
-            $FLUTTER_CMD test "$TEST_DIR/$TEST_FILE" -d "$DEVICE" 2>&1 || TEST_EXIT_CODE=$?
-        else
-            # Suppress output when not verbose
-            $FLUTTER_CMD test "$TEST_DIR/$TEST_FILE" -d "$DEVICE" > /dev/null 2>&1 || TEST_EXIT_CODE=$?
-            # Show result on same line with proper color formatting
-            if [ $TEST_EXIT_CODE -eq 0 ]; then
-                echo -e " ${GREEN}✓ PASSED${NC}"
+        # Show file-level progress
+        if [ ${#SELECTED_FILES[@]} -gt 0 ] && [ -n "${SELECTED_FILES[$TEST_NUM]}" ]; then
+            local test_selection="${SELECTED_TESTS[$TEST_NUM]}"
+            if [ -n "$test_selection" ]; then
+                echo -e "${BLUE}[File $TEST_NUM]${NC} ${YELLOW}$TEST_NAME${NC} ${BLUE}→ Tests: $test_selection${NC}"
             else
-                echo -e " ${RED}✗ FAILED${NC}"
+                echo -e "${BLUE}[File $TEST_NUM]${NC} ${YELLOW}$TEST_NAME${NC} ${BLUE}→ All tests${NC}"
+            fi
+        else
+            echo -e "${BLUE}[File $TEST_NUM]${NC} ${YELLOW}$TEST_NAME${NC}"
+        fi
+        
+        # Parse test names directly from source file FIRST (needed for test selection)
+        # CRITICAL: Declare as local array to avoid contamination between iterations
+        local -a INDIVIDUAL_TESTS=()
+        local TEST_COUNT=0
+        
+        # Use awk to extract test names - more reliable than bash regex
+        # Look for: ^    test('Test Name', () async {
+        # CRITICAL: Only match lines that are actual test declarations, not test names in strings
+        local test_names=$(awk '
+            /^[[:space:]]+test\(['\''"]/ && !/^[[:space:]]*['\''"]/ {
+                # Extract test name from test('Name', or test("Name",
+                match($0, /test\(['\''"]([^'\''"]+)['\''"]/, arr)
+                if (arr[1] != "" && length(arr[1]) > 0 && length(arr[1]) < 200) {
+                    print arr[1]
+                }
+            }
+        ' "$TEST_DIR/$TEST_FILE" 2>/dev/null)
+        
+        # Clear the array first to avoid contamination
+        INDIVIDUAL_TESTS=()
+        TEST_COUNT=0
+        
+        if [ -n "$test_names" ]; then
+            while IFS= read -r test_name || [ -n "$test_name" ]; do
+                # Trim whitespace
+                test_name=$(echo "$test_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                # Skip empty lines
+                if [ -z "$test_name" ]; then
+                    continue
+                fi
+                
+                if [ ${#test_name} -gt 0 ] && [ ${#test_name} -lt 200 ]; then
+                    # Check for duplicates
+                    local is_duplicate=false
+                    for existing in "${INDIVIDUAL_TESTS[@]}"; do
+                        if [ "$existing" = "$test_name" ]; then
+                            is_duplicate=true
+                            break
+                        fi
+                    done
+                    if [ "$is_duplicate" = "false" ]; then
+                        INDIVIDUAL_TESTS+=("$test_name")
+                        ((TEST_COUNT++))
+                    fi
+                fi
+            done <<< "$test_names"
+        fi
+        
+        # CRITICAL: Only use tests from source file, ignore any that might have been added elsewhere
+        # The array should now only contain tests from THIS file
+        
+        # Run test and capture output
+        local TEMP_OUTPUT=$(mktemp)
+        local TEST_EXIT_CODE=0
+        
+        # Build Flutter test command with JSON reporter for reliable parsing
+        local FLUTTER_TEST_CMD="$FLUTTER_CMD test \"$TEST_DIR/$TEST_FILE\" -d \"$DEVICE\" --reporter json"
+        
+        # If specific tests were selected for this file, use --name to run only those tests
+        local selected_tests_for_file="${SELECTED_TESTS[$TEST_NUM]}"
+        if [ -n "$selected_tests_for_file" ] && [ ${#INDIVIDUAL_TESTS[@]} -gt 0 ]; then
+            # Build regex pattern for test names to run
+            local test_patterns=()
+            for test_num_str in $selected_tests_for_file; do
+                local test_idx=$((test_num_str - 1))
+                if [ $test_idx -ge 0 ] && [ $test_idx -lt ${#INDIVIDUAL_TESTS[@]} ]; then
+                    local test_name="${INDIVIDUAL_TESTS[$test_idx]}"
+                    # Escape special regex characters but keep the test name
+                    local escaped_test_name=$(echo "$test_name" | sed 's/[[\.*^$()+?{|]/\\&/g')
+                    test_patterns+=("$escaped_test_name")
+                else
+                    print_warning "Test number $test_num_str not found in file $TEST_NUM (only ${#INDIVIDUAL_TESTS[@]} tests available)"
+                fi
+            done
+            
+            if [ ${#test_patterns[@]} -gt 0 ]; then
+                # Combine patterns with | (OR) for regex matching
+                local combined_pattern=$(IFS='|'; echo "${test_patterns[*]}")
+                FLUTTER_TEST_CMD="$FLUTTER_CMD test \"$TEST_DIR/$TEST_FILE\" -d \"$DEVICE\" --reporter json --name \"$combined_pattern\""
+            else
+                print_error "No valid tests selected for file $TEST_NUM"
+                continue
             fi
         fi
         
+        # Run the test and capture output (JSON to one file, stderr to another for verbose mode)
+        local TEMP_JSON_OUTPUT=$(mktemp)
+        if [ "$VERBOSE" = "true" ]; then
+            # In verbose mode, show all output but still capture JSON
+            eval "$FLUTTER_TEST_CMD" > "$TEMP_JSON_OUTPUT" 2>&1 || TEST_EXIT_CODE=$?
+            cp "$TEMP_JSON_OUTPUT" "$TEMP_OUTPUT"
+        else
+            # In non-verbose mode, suppress warnings but capture JSON
+            eval "$FLUTTER_TEST_CMD" > "$TEMP_JSON_OUTPUT" 2>&1 || TEST_EXIT_CODE=$?
+            # Filter out warnings but keep JSON lines
+            grep -v "warning:" "$TEMP_JSON_OUTPUT" | grep -v "json.hpp" > "$TEMP_OUTPUT" 2>&1 || true
+        fi
+        
+        # Track individual test results for this file
+        local FILE_PASSED_COUNT=0
+        local FILE_FAILED_COUNT=0
+        
+        # Parse and show results after test completes
+        # CRITICAL: Only show tests that were found in THIS file's source code
+        # Do NOT parse test names from output - only show what we found in source
+        # Use the actual array size as the authoritative count
+        local actual_test_count=${#INDIVIDUAL_TESTS[@]}
+        
+        # If array size doesn't match TEST_COUNT, something went wrong - use array size
+        if [ "$actual_test_count" -ne "$TEST_COUNT" ] 2>/dev/null; then
+            TEST_COUNT=$actual_test_count
+        fi
+        
+        # Track how many tests actually ran (for counting purposes)
+        local TESTS_RAN_COUNT=0
+        
+        if [ "$TEST_COUNT" -gt 0 ] 2>/dev/null && [ ${#INDIVIDUAL_TESTS[@]} -gt 0 ]; then
+            local test_idx=0
+            # Only iterate over tests we actually found in the source file
+            for test_name in "${INDIVIDUAL_TESTS[@]}"; do
+                ((test_idx++))
+                local test_num=$test_idx
+                local test_total=$TEST_COUNT
+                
+                # Skip this test if specific tests were selected and this isn't one of them
+                local selected_tests_for_file="${SELECTED_TESTS[$TEST_NUM]}"
+                local should_run_test=true
+                if [ -n "$selected_tests_for_file" ]; then
+                    # Check if this test number is in the selected list
+                    local is_selected=false
+                    for selected_test_num in $selected_tests_for_file; do
+                        if [ "$test_num" -eq "$selected_test_num" ]; then
+                            is_selected=true
+                            break
+                        fi
+                    done
+                    if [ "$is_selected" = "false" ]; then
+                        should_run_test=false
+                    fi
+                fi
+                
+                # Skip if this test shouldn't run
+                if [ "$should_run_test" = "false" ]; then
+                    continue
+                fi
+                
+                # This test will run - increment counter
+                ((TESTS_RAN_COUNT++))
+                
+                # Parse test result from JSON output (much more reliable than text parsing)
+                local test_result="UNKNOWN"
+                
+                # Escape test name for JSON matching (escape special regex chars but keep it searchable)
+                # The test name in JSON appears as "Group Name Test Name", so we need to match just the test name part
+                local escaped_test_name=$(echo "$test_name" | sed 's/\[/\\[/g; s/\]/\\]/g; s/\./\\./g; s/\*/\\*/g; s/\^/\\^/g; s/\$/\\$/g; s/(/\\(/g; s/)/\\)/g; s/+/\\+/g; s/?/\\?/g; s/{/\\{/g; s/}/\\}/g; s/|/\\|/g')
+                
+                # JSON format: {"test":{"id":5,"name":"Group Name Test Name",...},"type":"testStart",...}
+                # Then: {"testID":5,"result":"success","skipped":false,"type":"testDone",...}
+                # We need to find testStart with the test name, get the ID, then find testDone with that ID
+                
+                # Find testStart event - test name in JSON includes group name, so match the test name anywhere in the name field
+                local test_id=""
+                
+                # Try to find testStart line with this test name (case-insensitive, match anywhere in name)
+                local test_start_line=$(grep -i "\"type\":\"testStart\"" "$TEMP_JSON_OUTPUT" 2>/dev/null | \
+                    grep -i "$escaped_test_name" | head -1)
+                
+                if [ -n "$test_start_line" ]; then
+                    # Extract test ID from the testStart event
+                    # Format: {"test":{"id":5,"name":"...",...},...}
+                    test_id=$(echo "$test_start_line" | grep -oE "\"test\":\{[^}]*\"id\":([0-9]+)" | \
+                        grep -oE "\"id\":([0-9]+)" | \
+                        grep -oE "[0-9]+" | head -1)
+                fi
+                
+                if [ -n "$test_id" ]; then
+                    # Found test ID, now look for testDone event with this ID
+                    local test_done_line=$(grep "\"testID\":$test_id," "$TEMP_JSON_OUTPUT" 2>/dev/null | \
+                        grep "\"type\":\"testDone\"" | head -1)
+                    
+                    if [ -n "$test_done_line" ]; then
+                        # Check the result field and skip hidden tests (setUp/tearDown)
+                        if echo "$test_done_line" | grep -qE "\"hidden\":true"; then
+                            # Hidden test (setUp/tearDown) - skip it
+                            continue
+                        elif echo "$test_done_line" | grep -qE "\"result\":\"success\""; then
+                            test_result="PASSED"
+                        elif echo "$test_done_line" | grep -qE "\"result\":\"error\"|\"result\":\"failure\""; then
+                            test_result="FAILED"
+                        elif echo "$test_done_line" | grep -qE "\"skipped\":true"; then
+                            test_result="SKIPPED"
+                        else
+                            # Unknown result type
+                            test_result="UNKNOWN"
+                        fi
+                    fi
+                fi
+                
+                # Fallback: if we couldn't find the test in JSON, use exit code
+                if [ "$test_result" = "UNKNOWN" ]; then
+                    if [ $TEST_EXIT_CODE -eq 0 ]; then
+                        # File passed - assume test passed if we can't determine
+                        test_result="PASSED"
+                    else
+                        # File failed - assume test failed if we can't determine
+                        test_result="FAILED"
+                    fi
+                fi
+                
+                # Count individual test results
+                if [ "$test_result" = "PASSED" ]; then
+                    ((FILE_PASSED_COUNT++))
+                    ((TOTAL_PASSED++))
+                else
+                    ((FILE_FAILED_COUNT++))
+                    ((TOTAL_FAILED++))
+                fi
+                
+                # Truncate long test names
+                local display_name="$test_name"
+                if [ ${#display_name} -gt 60 ]; then
+                    display_name="${display_name:0:57}..."
+                fi
+                
+                # Show test with result - format: [FILE_NUM.TEST_NUM] Test Name
+                printf "  [%d.%d] %-60s" "$TEST_NUM" "$test_num" "$display_name"
+                
+                # Show result
+                if [ "$test_result" = "PASSED" ]; then
+                    echo -e " ${GREEN}✓ PASSED${NC}"
+                else
+                    echo -e " ${RED}✗ FAILED${NC}"
+                fi
+            done
+            
+            # Store counts for this file - use actual number of tests that ran, not total in file
+            FILE_TEST_COUNTS[$i]=$TESTS_RAN_COUNT
+            FILE_TEST_PASSED[$i]=$FILE_PASSED_COUNT
+            FILE_TEST_FAILED[$i]=$FILE_FAILED_COUNT
+            if [ $TESTS_RAN_COUNT -gt 0 ]; then
+                FILE_RAN_TESTS[$i]=1
+                ((TOTAL_INDIVIDUAL_TESTS += TESTS_RAN_COUNT))
+            else
+                FILE_RAN_TESTS[$i]=0
+            fi
+        else
+            echo "  Running tests..."
+            FILE_TEST_COUNTS[$i]=0
+            FILE_TEST_PASSED[$i]=0
+            FILE_TEST_FAILED[$i]=0
+            FILE_RAN_TESTS[$i]=0
+        fi
+        
+        # Clean up
+        rm -f "$TEMP_OUTPUT" "$TEMP_JSON_OUTPUT"
+        
+        # Set file result (no message printed - info is in summary table)
         if [ $TEST_EXIT_CODE -eq 0 ]; then
             TEST_RESULTS[$i]="PASSED"
-            ((PASSED++))
-            if [ "$VERBOSE" = "true" ]; then
-                print_success "$TEST_NAME: PASSED"
-                echo ""
-            fi
         else
             TEST_RESULTS[$i]="FAILED"
-            ((FAILED++))
-            if [ "$VERBOSE" = "true" ]; then
-                print_error "$TEST_NAME: FAILED (exit code: $TEST_EXIT_CODE)"
-                echo ""
-            fi
         fi
+        echo ""
     done
     
     # Print summary table
@@ -1394,13 +1680,21 @@ cmd_test_flutter_integration_multi_app() {
     fi
     
     # Print table header
-    printf "%-${max_name_len}s  %-10s\n" "Test Suite" "Result"
-    printf "%-${max_name_len}s  %-10s\n" "$(printf '─%.0s' $(seq 1 $max_name_len))" "$(printf '─%.0s' $(seq 1 10))"
+    printf "%-${max_name_len}s  %-12s  %s\n" "Test Suite" "Result" "Passed / Failed / Total"
+    printf "%-${max_name_len}s  %-12s  %s\n" "$(printf '─%.0s' $(seq 1 $max_name_len))" "$(printf '─%.0s' $(seq 1 12))" "$(printf '─%.0s' $(seq 1 30))"
     
-    # Print table rows
+    # Print table rows - only show files that actually ran tests
     for i in "${!TEST_SUITES[@]}"; do
+        # Skip files that didn't run any tests
+        if [ "${FILE_RAN_TESTS[$i]:-0}" -eq 0 ]; then
+            continue
+        fi
+        
         local TEST_NAME="${TEST_NAMES[$i]}"
         local RESULT="${TEST_RESULTS[$i]}"
+        local TEST_COUNT="${FILE_TEST_COUNTS[$i]:-0}"
+        local PASSED_COUNT="${FILE_TEST_PASSED[$i]:-0}"
+        local FAILED_COUNT="${FILE_TEST_FAILED[$i]:-0}"
         
         # Truncate long names if needed
         local display_name="$TEST_NAME"
@@ -1408,11 +1702,30 @@ cmd_test_flutter_integration_multi_app() {
             display_name="${display_name:0:$((max_name_len-3))}..."
         fi
         
+        # Format test counts with colors
         if [ "$RESULT" = "PASSED" ]; then
             # Use printf with %b to interpret escape sequences while maintaining alignment
-            printf "%-${max_name_len}s  %b%-10s%b\n" "$display_name" "$GREEN" "✓ PASSED" "$NC"
+            if [ "$TEST_COUNT" -gt 0 ] 2>/dev/null; then
+                printf "%-${max_name_len}s  %b%-12s%b  %b%d%b / %b%d%b / %d\n" \
+                    "$display_name" "$GREEN" "✓ PASSED" "$NC" \
+                    "$GREEN" "$PASSED_COUNT" "$NC" \
+                    "$RED" "$FAILED_COUNT" "$NC" \
+                    "$TEST_COUNT"
+            else
+                printf "%-${max_name_len}s  %b%-12s%b  %bN/A%b\n" \
+                    "$display_name" "$GREEN" "✓ PASSED" "$NC" "$YELLOW" "$NC"
+            fi
         else
-            printf "%-${max_name_len}s  %b%-10s%b\n" "$display_name" "$RED" "✗ FAILED" "$NC"
+            if [ "$TEST_COUNT" -gt 0 ] 2>/dev/null; then
+                printf "%-${max_name_len}s  %b%-12s%b  %b%d%b / %b%d%b / %d\n" \
+                    "$display_name" "$RED" "✗ FAILED" "$NC" \
+                    "$GREEN" "$PASSED_COUNT" "$NC" \
+                    "$RED" "$FAILED_COUNT" "$NC" \
+                    "$TEST_COUNT"
+            else
+                printf "%-${max_name_len}s  %b%-12s%b  %bN/A%b\n" \
+                    "$display_name" "$RED" "✗ FAILED" "$NC" "$YELLOW" "$NC"
+            fi
         fi
     done
     
@@ -1421,14 +1734,24 @@ cmd_test_flutter_integration_multi_app() {
     print_info "Summary Statistics"
     print_info "════════════════════════════════════════════════════════════════"
     echo ""
-    printf "  Total Tests Run:  %d\n" "$TOTAL_TESTS"
-    echo -e "  ${GREEN}Passed:${NC}            $PASSED"
-    echo -e "  ${RED}Failed:${NC}            $FAILED"
+    # Count files that actually ran tests
+    local FILES_RAN_COUNT=0
+    for ran in "${FILE_RAN_TESTS[@]}"; do
+        if [ "${ran:-0}" -eq 1 ]; then
+            ((FILES_RAN_COUNT++))
+        fi
+    done
+    printf "  Total Test Files:     %d\n" "$FILES_RAN_COUNT"
+    printf "  Total Individual Tests: %d\n" "$TOTAL_INDIVIDUAL_TESTS"
+    echo -e "  ${GREEN}Passed:${NC}                 $TOTAL_PASSED"
+    echo -e "  ${RED}Failed:${NC}                 $TOTAL_FAILED"
     
     # Calculate pass rate
-    if [ $TOTAL_TESTS -gt 0 ]; then
-        local pass_rate=$((PASSED * 100 / TOTAL_TESTS))
-        printf "  Pass Rate:        %d%%\n" "$pass_rate"
+    if [ -n "$TOTAL_INDIVIDUAL_TESTS" ] && [ "$TOTAL_INDIVIDUAL_TESTS" -gt 0 ] 2>/dev/null; then
+        local pass_rate=$((TOTAL_PASSED * 100 / TOTAL_INDIVIDUAL_TESTS))
+        printf "  Pass Rate:             %d%%\n" "$pass_rate"
+    else
+        printf "  Pass Rate:             N/A\n"
     fi
     
     echo ""
@@ -1438,12 +1761,12 @@ cmd_test_flutter_integration_multi_app() {
     set -e
     
     # Exit with appropriate code
-    if [ $FAILED -eq 0 ]; then
-        print_success "🎉 All tests passed!"
-        return 0
-    else
+    if [ -n "$TOTAL_FAILED" ] && [ "$TOTAL_FAILED" -gt 0 ] 2>/dev/null; then
         print_error "⚠️  Some tests failed. Check the output above for details."
         return 1
+    else
+        print_success "🎉 All tests passed!"
+        return 0
     fi
 }
 
@@ -1649,10 +1972,21 @@ Flutter App Commands:
   test-flutter-app [test_file]     Run Flutter tests
   test-flutter-integration [test]   Run Flutter integration tests (with database reset)
                                   Use --skip-server-build to skip server build during reset
-  test-flutter-integration-multi-app
+  test-flutter-integration-multi-app [SELECTIONS...]
                                   Run all multi-app sync integration test suites
                                   Dynamically discovers all test files in integration_test/multi_app/scenarios/
                                   Requires server to be running (use start-server-direct)
+                                  
+                                  Optional arguments (can specify multiple):
+                                    FILE_NUM              Run all tests in the specified file (e.g., 2)
+                                    FILE_NUM.TEST_NUM     Run only the specified test in the file (e.g., 2.2)
+                                    
+                                  Examples:
+                                    $0 test-flutter-integration-multi-app                    # Run all tests
+                                    $0 test-flutter-integration-multi-app 2                 # Run file 2 only
+                                    $0 test-flutter-integration-multi-app 2.2               # Run test 2 in file 2
+                                    $0 test-flutter-integration-multi-app 4.1 4.2           # Run tests 1 and 2 in file 4
+                                    $0 test-flutter-integration-multi-app 2 4.1             # Run all tests in file 2, and test 1 in file 4
 
 Testing Commands:
   test-api-server                  Test API server endpoints
@@ -1690,7 +2024,11 @@ Examples:
   $0 test-flutter-app                             # Run all Flutter tests
   $0 test-api-server                              # Test server endpoints
   $0 test-flutter-integration ui                  # Run UI integration tests
-  $0 test-flutter-integration-multi-app           # Run all multi-app sync tests
+  $0 test-flutter-integration-multi-app                    # Run all multi-app sync tests
+  $0 test-flutter-integration-multi-app 2                 # Run file 2 only
+  $0 test-flutter-integration-multi-app 2.2               # Run test 2 in file 2
+  $0 test-flutter-integration-multi-app 4.1 4.2            # Run tests 1 and 2 in file 4
+  $0 test-flutter-integration-multi-app 2 4.1              # Run all tests in file 2, and test 1 in file 4
   $0 check                                         # Check system requirements
 
 Environment Variables:
