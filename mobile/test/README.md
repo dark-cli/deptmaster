@@ -248,10 +248,10 @@ void main() {
       
       // Act
       final result = myFunction(input);
-      
+  
       // Assert
       expect(result, 'expected');
-    });
+});
   });
 }
 ```
@@ -283,7 +283,7 @@ void main() {
       // Verify
       expect(content, findsOneWidget);
     });
-  });
+});
 }
 ```
 

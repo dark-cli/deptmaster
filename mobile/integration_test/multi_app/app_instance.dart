@@ -290,6 +290,16 @@ class AppInstance {
     await LocalDatabaseServiceV2.deleteTransaction(transactionId);
   }
   
+  /// Undo last action for a contact
+  Future<void> undoContactAction(String contactId) async {
+    await LocalDatabaseServiceV2.undoContactAction(contactId);
+  }
+  
+  /// Undo last action for a transaction
+  Future<void> undoTransactionAction(String transactionId) async {
+    await LocalDatabaseServiceV2.undoTransactionAction(transactionId);
+  }
+  
   /// Get all events
   Future<List<Event>> getEvents() async {
     return await EventStoreService.getAllEvents();

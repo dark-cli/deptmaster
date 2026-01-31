@@ -4,6 +4,17 @@
 
 This test framework simulates multiple app instances programmatically to test event synchronization, storage, and conflict resolution across multiple devices syncing to the same server. All tests use the **real server** (not mocks) and provide comprehensive coverage of sync scenarios.
 
+### Event Generator Tool
+
+Tests use the **Event Generator** helper to create complex scenarios with 10-30+ events using a simple text format, minimizing test code. See [EVENT_GENERATOR_GUIDE.md](./EVENT_GENERATOR_GUIDE.md) for details.
+
+**Key Requirements:**
+- **10-30 events per test** (depending on test complexity)
+- **Majority should be transactions** (at least 2x contacts)
+- **Include edits, deletes, and undos** in every test
+- **Test offline scenarios** with multiple apps offline
+- **Verify state builder** handles all event types correctly
+
 ### Key Features
 
 - **Real Server Testing**: All tests use the actual running server at `http://localhost:8000`

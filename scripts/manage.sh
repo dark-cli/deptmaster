@@ -1348,11 +1348,11 @@ cmd_test_flutter_integration_multi_app() {
         else
             # Suppress output when not verbose
             $FLUTTER_CMD test "$TEST_DIR/$TEST_FILE" -d "$DEVICE" > /dev/null 2>&1 || TEST_EXIT_CODE=$?
-            # Show result on same line
+            # Show result on same line with proper color formatting
             if [ $TEST_EXIT_CODE -eq 0 ]; then
-                echo " ${GREEN}✓ PASSED${NC}"
+                echo -e " ${GREEN}✓ PASSED${NC}"
             else
-                echo " ${RED}✗ FAILED${NC}"
+                echo -e " ${RED}✗ FAILED${NC}"
             fi
         fi
         
@@ -1409,9 +1409,10 @@ cmd_test_flutter_integration_multi_app() {
         fi
         
         if [ "$RESULT" = "PASSED" ]; then
-            printf "%-${max_name_len}s  ${GREEN}%-10s${NC}\n" "$display_name" "✓ PASSED"
+            # Use printf with %b to interpret escape sequences while maintaining alignment
+            printf "%-${max_name_len}s  %b%-10s%b\n" "$display_name" "$GREEN" "✓ PASSED" "$NC"
         else
-            printf "%-${max_name_len}s  ${RED}%-10s${NC}\n" "$display_name" "✗ FAILED"
+            printf "%-${max_name_len}s  %b%-10s%b\n" "$display_name" "$RED" "✗ FAILED" "$NC"
         fi
     done
     
@@ -1421,8 +1422,8 @@ cmd_test_flutter_integration_multi_app() {
     print_info "════════════════════════════════════════════════════════════════"
     echo ""
     printf "  Total Tests Run:  %d\n" "$TOTAL_TESTS"
-    printf "  ${GREEN}Passed:${NC}            %d\n" "$PASSED"
-    printf "  ${RED}Failed:${NC}            %d\n" "$FAILED"
+    echo -e "  ${GREEN}Passed:${NC}            $PASSED"
+    echo -e "  ${RED}Failed:${NC}            $FAILED"
     
     # Calculate pass rate
     if [ $TOTAL_TESTS -gt 0 ]; then

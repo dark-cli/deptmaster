@@ -11,6 +11,7 @@ import '../app_instance.dart';
 import '../sync_monitor.dart';
 import '../event_validator.dart';
 import '../server_verifier.dart';
+import '../event_generator.dart';
 import '../../helpers/multi_app_helpers.dart';
 
 void main() {
@@ -24,6 +25,7 @@ void main() {
     SyncMonitor? monitor;
     EventValidator? validator;
     ServerVerifier? serverVerifier;
+    EventGenerator? generator;
     
     setUpAll(() async {
       // Initialize Hive once globally (use Hive.initFlutter() for integration tests)
@@ -101,6 +103,13 @@ void main() {
       validator = EventValidator();
       serverVerifier = ServerVerifier(serverUrl: 'http://localhost:8000');
       await serverVerifier!.setAuthToken();
+      
+      // Create event generator
+      generator = EventGenerator({
+        'app1': app1!,
+        'app2': app2!,
+        'app3': app3!,
+      });
     });
     
     tearDown(() async {
@@ -118,69 +127,56 @@ void main() {
     test('1.1 Single App Create → Multi-App Sync (Contact & Transaction)', () async {
       print('\n📋 Test 1.1: Single App Create → Multi-App Sync (Contact & Transaction)');
       
-      // App1 creates contact
-      print('📝 App1 creating contact...');
-      final contact = await app1!.createContact(name: 'Test Contact 1');
-      print('✅ Contact created: ${contact.id}');
+      // Use event generator to create 12 events (1 contact + 11 transactions)
+      final commands = [
+        'app1: contact create "Test Contact 1" contact1',
+        'app1: transaction create contact1 owed 1000 "Transaction 1" t1',
+        'app1: transaction create contact1 lent 500 "Transaction 2" t2',
+        'app1: transaction create contact1 owed 2000 "Transaction 3" t3',
+        'app1: transaction create contact1 lent 800 "Transaction 4" t4',
+        'app1: transaction create contact1 owed 1500 "Transaction 5" t5',
+        'app1: transaction create contact1 lent 300 "Transaction 6" t6',
+        'app1: transaction create contact1 owed 1200 "Transaction 7" t7',
+        'app1: transaction update t1 amount 1100',
+        'app1: transaction update t3 description "Updated Transaction 3"',
+        'app1: transaction delete t5',
+        'app1: contact update contact1 name "Updated Contact 1"',
+      ];
       
-      // Verify contact event created in App1
-      await Future.delayed(const Duration(milliseconds: 100));
+      print('📝 Executing ${commands.length} event commands...');
+      await generator!.executeCommands(commands);
+      
+      // Wait for sync
+      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      
+      // Verify events
       final app1Events = await app1!.getEvents();
-      final contactCreatedEvent = app1Events.firstWhere(
-        (e) => e.aggregateId == contact.id && e.eventType == 'CREATED' && e.aggregateType == 'contact',
-        orElse: () => throw Exception('CREATED event not found for contact ${contact.id}'),
-      );
-      expect(contactCreatedEvent.aggregateType, 'contact');
-      expect(contactCreatedEvent.eventType, 'CREATED');
-      print('✅ Contact CREATED event: ${contactCreatedEvent.id}');
+      expect(app1Events.length, greaterThanOrEqualTo(12), 
+          reason: 'Should have at least 12 events');
       
-      // Wait for sync
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
+      // Verify transaction events are majority
+      final transactionEvents = app1Events.where(
+        (e) => e.aggregateType == 'transaction'
+      ).length;
+      final contactEvents = app1Events.where(
+        (e) => e.aggregateType == 'contact'
+      ).length;
+      expect(transactionEvents, greaterThan(contactEvents * 2),
+          reason: 'Transaction events should be majority');
       
-      // App1 creates transaction for the contact
-      print('📝 App1 creating transaction...');
-      final transaction = await app1!.createTransaction(
-        contactId: contact.id,
-        direction: TransactionDirection.owed,
-        amount: 1000,
-        description: 'Test transaction',
-      );
-      print('✅ Transaction created: ${transaction.id}');
+      // Verify we have UPDATE events
+      final updateEvents = app1Events.where((e) => e.eventType == 'UPDATED').length;
+      expect(updateEvents, greaterThan(0), reason: 'Should have UPDATE events');
       
-      // Verify transaction event created
-      await Future.delayed(const Duration(milliseconds: 100));
-      final app1EventsAfter = await app1!.getEvents();
-      final transactionCreatedEvent = app1EventsAfter.firstWhere(
-        (e) => e.aggregateId == transaction.id && e.eventType == 'CREATED' && e.aggregateType == 'transaction',
-        orElse: () => throw Exception('CREATED event not found for transaction ${transaction.id}'),
-      );
-      expect(transactionCreatedEvent.aggregateType, 'transaction');
-      expect(transactionCreatedEvent.eventType, 'CREATED');
-      print('✅ Transaction CREATED event: ${transactionCreatedEvent.id}');
-      
-      // Wait for sync
-      await monitor!.waitForSync(timeout: const Duration(seconds: 60));
-      
-      // Verify both events synced to server
+      // Verify server has all events
       final serverEvents = await serverVerifier!.getServerEvents();
-      final serverContactEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == contact.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'contact',
-        orElse: () => throw Exception('Contact CREATED event not found on server'),
-      );
-      final serverTransactionEvent = serverEvents.firstWhere(
-        (e) => e['aggregate_id'] == transaction.id && e['event_type'] == 'CREATED' && e['aggregate_type'] == 'transaction',
-        orElse: () => throw Exception('Transaction CREATED event not found on server'),
-      );
-      expect(serverContactEvent['event_type'], 'CREATED');
-      expect(serverTransactionEvent['event_type'], 'CREATED');
-      print('✅ Both events synced to server');
+      expect(serverEvents.length, greaterThanOrEqualTo(12));
       
-      // Verify both exist in all apps (shared boxes)
-      final allContacts = await app1!.getContacts();
-      final allTransactions = await app1!.getTransactions();
-      expect(allContacts.any((c) => c.id == contact.id), true);
-      expect(allTransactions.any((t) => t.id == transaction.id), true);
-      print('✅ Contact and transaction exist in all apps');
+      // Verify final state
+      final contacts = await app1!.getContacts();
+      final transactions = await app1!.getTransactions();
+      expect(contacts.length, 1);
+      expect(transactions.length, greaterThan(5));
       
       // Validate consistency
       final isValid = await validator!.validateEventConsistency([app1!, app2!, app3!]);
