@@ -22,14 +22,17 @@ use test_helpers::*;
 #[ignore] // Ignore by default - requires test database
 async fn test_snapshot_optimization_with_undo_after_snapshot() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
-    
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -53,12 +56,14 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Verify snapshot was created (at event 10)
-    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -82,6 +87,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
@@ -103,17 +109,19 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo_event]),
     ).await;
 
     // 4. Rebuild projections - should use snapshot optimization (snapshot exists before undone event)
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 5. Verify final state is correct (event 13 was undone, so should have name from event 12 or earlier)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -127,14 +135,17 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 #[ignore] // Ignore by default - requires test database
 async fn test_full_rebuild_when_undo_before_all_snapshots() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
-    
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -158,12 +169,14 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Verify no snapshot exists yet
-    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -185,17 +198,19 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo_event]),
     ).await;
 
     // 3. Rebuild projections - should use full rebuild (no snapshot before undone event)
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state is correct (event 3 was undone)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -206,7 +221,9 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
 #[ignore] // Ignore by default - requires test database
 async fn test_cleaned_event_list_removes_undo_and_undone_events() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -214,6 +231,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -237,6 +255,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
@@ -259,6 +278,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
@@ -279,17 +299,19 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo_event]),
     ).await;
 
     // 4. Rebuild projections - cleaned event list should exclude UNDO and undone event
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 5. Verify final state (event 12 was undone, so should have name from event 11 or earlier)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -303,7 +325,9 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
 #[ignore] // Ignore by default - requires test database
 async fn test_multiple_undo_events_with_snapshot_optimization() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -311,6 +335,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -334,6 +359,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
@@ -356,6 +382,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
@@ -389,17 +416,19 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo1, undo2]),
     ).await;
 
     // 4. Rebuild projections - should use snapshot optimization (snapshot at event 10, undone events are 12 and 14)
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 5. Verify final state (events 12 and 14 were undone)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -411,14 +440,17 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
 #[ignore] // Ignore by default - requires test database
 async fn test_undo_event_finds_position_by_id() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
-    
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -442,12 +474,14 @@ async fn test_undo_event_finds_position_by_id() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Verify snapshots were created
-    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -470,17 +504,19 @@ async fn test_undo_event_finds_position_by_id() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo_event]),
     ).await;
 
     // 3. Rebuild projections - should use snapshot at event 10 (since undone event is at position 16)
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state (event 16 was undone)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();

@@ -31,24 +31,19 @@ void main() {
     EventGenerator? generator;
     
     setUpAll(() async {
-      // Initialize Hive once globally
       await Hive.initFlutter();
       Hive.registerAdapter(ContactAdapter());
       Hive.registerAdapter(TransactionAdapter());
       Hive.registerAdapter(TransactionTypeAdapter());
       Hive.registerAdapter(TransactionDirectionAdapter());
       Hive.registerAdapter(EventAdapter());
+      await ensureTestUserExists();
     });
     
     setUp(() async {
-      // Reset server before each test
-      await resetServer();
       await waitForServerReady();
+      final creds = await createUniqueTestUserAndWallet();
       
-      // Ensure test user exists
-      await ensureTestUserExists();
-      
-      // Clear all Hive boxes
       try {
         await Hive.box<Contact>('contacts').clear();
         await Hive.box<Transaction>('transactions').clear();
@@ -57,12 +52,41 @@ void main() {
         // Boxes might not exist yet
       }
       
-      // Create app instances (5 for stress tests)
-      app1 = await AppInstance.create(id: 'app1', serverUrl: 'http://localhost:8000');
-      app2 = await AppInstance.create(id: 'app2', serverUrl: 'http://localhost:8000');
-      app3 = await AppInstance.create(id: 'app3', serverUrl: 'http://localhost:8000');
-      app4 = await AppInstance.create(id: 'app4', serverUrl: 'http://localhost:8000');
-      app5 = await AppInstance.create(id: 'app5', serverUrl: 'http://localhost:8000');
+      app1 = await AppInstance.create(
+        id: 'app1',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app2 = await AppInstance.create(
+        id: 'app2',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app3 = await AppInstance.create(
+        id: 'app3',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app4 = await AppInstance.create(
+        id: 'app4',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app5 = await AppInstance.create(
+        id: 'app5',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
       
       // Initialize all instances
       await app1!.initialize();

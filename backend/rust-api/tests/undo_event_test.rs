@@ -14,7 +14,9 @@ use test_helpers::*;
 #[ignore] // Ignore by default - requires test database
 async fn test_undo_event_validation() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -22,6 +24,7 @@ async fn test_undo_event_validation() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // Test 1: UNDO event without 'undone_event_id' should be rejected
@@ -35,8 +38,10 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
+    let request = wallet_context_extension(wallet_id, "owner");
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
+        request,
         axum::Json(vec![invalid_undo.clone()]),
     ).await;
 
@@ -57,8 +62,10 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
+    let request = wallet_context_extension(wallet_id, "owner");
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
+        request,
         axum::Json(vec![invalid_uuid_undo.clone()]),
     ).await;
 
@@ -80,8 +87,10 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
+    let request = wallet_context_extension(wallet_id, "owner");
     let result = post_sync_events(
         axum::extract::State(app_state),
+        request,
         axum::Json(vec![valid_undo.clone()]),
     ).await;
 
@@ -94,7 +103,9 @@ async fn test_undo_event_validation() {
 #[ignore] // Ignore by default - requires test database
 async fn test_undo_event_skips_undone_event_in_projections() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -102,6 +113,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -120,8 +132,10 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         version: 1,
     };
 
+    let request = wallet_context_extension(wallet_id, "owner");
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        request,
         axum::Json(vec![created_event.clone()]),
     ).await;
 
@@ -139,16 +153,19 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         version: 1,
     };
 
+    let request = wallet_context_extension(wallet_id, "owner");
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        request,
         axum::Json(vec![updated_event.clone()]),
     ).await;
 
     // Verify update was applied
     let name_after_update: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -168,19 +185,22 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         version: 1,
     };
 
+    let request = wallet_context_extension(wallet_id, "owner");
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        request,
         axum::Json(vec![undo_event.clone()]),
     ).await;
 
     // Rebuild projections to apply UNDO
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state).await;
+    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify projection shows original contact data (update was undone)
     let name_after_undo: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -191,7 +211,9 @@ async fn test_undo_event_skips_undone_event_in_projections() {
 #[ignore] // Ignore by default - requires test database
 async fn test_undo_event_syncs_correctly() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -199,6 +221,7 @@ async fn test_undo_event_syncs_correctly() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -217,8 +240,10 @@ async fn test_undo_event_syncs_correctly() {
         version: 1,
     };
 
+    let request = wallet_context_extension(wallet_id, "owner");
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        request,
         axum::Json(vec![original_event.clone()]),
     ).await;
 
@@ -237,8 +262,10 @@ async fn test_undo_event_syncs_correctly() {
     };
 
     // 3. Server accepts UNDO event
+    let request = wallet_context_extension(wallet_id, "owner");
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
+        request,
         axum::Json(vec![undo_event.clone()]),
     ).await;
 
@@ -248,22 +275,24 @@ async fn test_undo_event_syncs_correctly() {
 
     // 4. Verify UNDO event is in database
     let undo_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1 AND event_type = 'UNDO')"
+        "SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1 AND wallet_id = $2 AND event_type = 'UNDO')"
     )
     .bind(Uuid::parse_str(&undo_event.id).unwrap())
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
     assert!(undo_exists, "UNDO event should be stored in database");
 
     // 5. Rebuild projections - undone event should be skipped
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state).await;
+    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // Verify contact doesn't exist (original event was undone)
     let contact_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1)"
+        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2)"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -274,7 +303,9 @@ async fn test_undo_event_syncs_correctly() {
 #[ignore] // Ignore by default - requires test database
 async fn test_undo_event_creates_snapshot() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -282,6 +313,7 @@ async fn test_undo_event_creates_snapshot() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // 1. Create some events (not reaching snapshot interval of 10)
@@ -302,6 +334,7 @@ async fn test_undo_event_creates_snapshot() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
@@ -329,6 +362,7 @@ async fn test_undo_event_creates_snapshot() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo_event]),
     ).await;
 
@@ -355,7 +389,9 @@ async fn test_undo_event_creates_snapshot() {
 #[ignore] // Ignore by default - requires test database
 async fn test_event_validation_rejects_invalid_undo() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -363,6 +399,7 @@ async fn test_event_validation_rejects_invalid_undo() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // 1. UNDO event without 'undone_event_id' is rejected
@@ -378,6 +415,7 @@ async fn test_event_validation_rejects_invalid_undo() {
 
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![no_undone_id.clone()]),
     ).await;
     let response = result.unwrap().0;
@@ -398,6 +436,7 @@ async fn test_event_validation_rejects_invalid_undo() {
 
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![invalid_uuid.clone()]),
     ).await;
     let response = result.unwrap().0;
@@ -418,6 +457,7 @@ async fn test_event_validation_rejects_invalid_undo() {
 
     let result = post_sync_events(
         axum::extract::State(app_state),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![valid_structure.clone()]),
     ).await;
     let response = result.unwrap().0;
@@ -428,7 +468,9 @@ async fn test_event_validation_rejects_invalid_undo() {
 #[ignore] // Ignore by default - requires test database
 async fn test_multiple_undo_events() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -436,6 +478,7 @@ async fn test_multiple_undo_events() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -482,6 +525,7 @@ async fn test_multiple_undo_events() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![event1.clone(), event2.clone(), event3.clone()]),
     ).await;
 
@@ -514,17 +558,19 @@ async fn test_multiple_undo_events() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo1.clone(), undo2.clone()]),
     ).await;
 
     // 3. Rebuild projections - all undone events should be skipped
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state).await;
+    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify state is correct (should have original name, both updates undone)
     let name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -535,7 +581,9 @@ async fn test_multiple_undo_events() {
 #[ignore] // Ignore by default - requires test database
 async fn test_undo_event_with_snapshot_rebuild() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -543,6 +591,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -569,6 +618,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
@@ -596,18 +646,20 @@ async fn test_undo_event_with_snapshot_rebuild() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo_event]),
     ).await;
 
     // 3. Rebuild projections - should use snapshot and filter undone events
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state).await;
+    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify rebuild filtered out undone events correctly
     // The contact should exist with a name from events after the undone one
     let contact_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1)"
+        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2)"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();

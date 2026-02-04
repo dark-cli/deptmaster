@@ -11,6 +11,9 @@ import 'state_builder.dart';
 import 'sync_service_v2.dart';
 import 'api_service.dart';
 import 'projection_snapshot_service.dart';
+import 'wallet_service.dart';
+import 'dummy_data_service.dart';
+import 'auth_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// Simplified Local Database Service - KISS approach
@@ -25,8 +28,19 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return [];
     
     try {
-      final contactsBox = Hive.box<Contact>('contacts');
-      return contactsBox.values.toList();
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) {
+        print('⚠️ No current wallet set, returning empty contacts list');
+        return [];
+      }
+      
+      final userId = await AuthService.getUserId();
+      final boxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
+      await Hive.openBox<Contact>(boxName);
+      final contactsBox = Hive.box<Contact>(boxName);
+      return contactsBox.values
+          .where((c) => c.walletId == walletId || c.walletId == null) // Include null for migration
+          .toList();
     } catch (e) {
       print('Error reading contacts: $e');
       return [];
@@ -37,8 +51,21 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return null;
     
     try {
-      final contactsBox = Hive.box<Contact>('contacts');
-      return contactsBox.get(id);
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) return null;
+      
+      final userId = await AuthService.getUserId();
+      final boxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
+      await Hive.openBox<Contact>(boxName);
+      final contactsBox = Hive.box<Contact>(boxName);
+      final contact = contactsBox.get(id);
+      
+      // Verify contact belongs to current wallet (or is legacy data)
+      if (contact != null && contact.walletId != null && contact.walletId != walletId) {
+        return null; // Contact belongs to different wallet
+      }
+      
+      return contact;
     } catch (e) {
       print('Error reading contact: $e');
       return null;
@@ -49,8 +76,19 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return [];
     
     try {
-      final transactionsBox = Hive.box<Transaction>('transactions');
-      return transactionsBox.values.toList();
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) {
+        print('⚠️ No current wallet set, returning empty transactions list');
+        return [];
+      }
+      
+      final userId = await AuthService.getUserId();
+      final boxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
+      await Hive.openBox<Transaction>(boxName);
+      final transactionsBox = Hive.box<Transaction>(boxName);
+      return transactionsBox.values
+          .where((t) => t.walletId == walletId || t.walletId == null) // Include null for migration
+          .toList();
     } catch (e) {
       print('Error reading transactions: $e');
       return [];
@@ -61,8 +99,21 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return null;
     
     try {
-      final transactionsBox = Hive.box<Transaction>('transactions');
-      return transactionsBox.get(id);
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) return null;
+      
+      final userId = await AuthService.getUserId();
+      final boxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
+      await Hive.openBox<Transaction>(boxName);
+      final transactionsBox = Hive.box<Transaction>(boxName);
+      final transaction = transactionsBox.get(id);
+      
+      // Verify transaction belongs to current wallet (or is legacy data)
+      if (transaction != null && transaction.walletId != null && transaction.walletId != walletId) {
+        return null; // Transaction belongs to different wallet
+      }
+      
+      return transaction;
     } catch (e) {
       print('Error reading transaction: $e');
       return null;
@@ -73,9 +124,17 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return [];
     
     try {
-      final transactionsBox = Hive.box<Transaction>('transactions');
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) {
+        return [];
+      }
+      
+      final userId = await AuthService.getUserId();
+      final boxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
+      await Hive.openBox<Transaction>(boxName);
+      final transactionsBox = Hive.box<Transaction>(boxName);
       return transactionsBox.values
-          .where((t) => t.contactId == contactId)
+          .where((t) => t.contactId == contactId && (t.walletId == walletId || t.walletId == null))
           .toList();
     } catch (e) {
       print('Error reading transactions by contact: $e');
@@ -90,32 +149,37 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return contact;
     
     try {
-      // 1. Create event
+      // 1. Ensure wallet_id is set on contact
+      final walletId = await WalletService.ensureCurrentWallet();
+      final contactWithWallet = contact.copyWith(walletId: walletId ?? contact.walletId);
+      
+      // 2. Create event
       final eventData = {
-        'name': contact.name,
-        'username': contact.username,
-        'phone': contact.phone,
-        'email': contact.email,
-        'notes': contact.notes,
+        'name': contactWithWallet.name,
+        'username': contactWithWallet.username,
+        'phone': contactWithWallet.phone,
+        'email': contactWithWallet.email,
+        'notes': contactWithWallet.notes,
         'comment': comment ?? 'Contact created',
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       await EventStoreService.appendEvent(
         aggregateType: 'contact',
-        aggregateId: contact.id,
+        aggregateId: contactWithWallet.id,
         eventType: 'CREATED',
         eventData: eventData,
       );
 
-      // 2. Rebuild state
+      // 3. Rebuild state
       await _rebuildState();
 
-      // 3. Trigger automatic sync to server (like Firebase - immediate push)
+      // 4. Trigger automatic sync to server (like Firebase - immediate push)
       SyncServiceV2.startLocalToServerSync();
 
-      print('✅ Contact created: ${contact.name}');
-      return contact;
+      print('✅ Contact created: ${contactWithWallet.name}');
+      return contactWithWallet;
     } catch (e) {
       print('Error creating contact: $e');
       rethrow;
@@ -127,6 +191,7 @@ class LocalDatabaseServiceV2 {
     
     try {
       // 1. Create event
+      final walletId = await WalletService.ensureCurrentWallet();
       final eventData = {
         'name': contact.name,
         'username': contact.username,
@@ -135,6 +200,7 @@ class LocalDatabaseServiceV2 {
         'notes': contact.notes,
         'comment': comment ?? 'Contact updated',
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       await EventStoreService.appendEvent(
@@ -163,9 +229,11 @@ class LocalDatabaseServiceV2 {
     
     try {
       // 1. Create event
+      final walletId = await WalletService.ensureCurrentWallet();
       final eventData = {
         'comment': comment ?? 'Contact deleted',
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       await EventStoreService.appendEvent(
@@ -192,34 +260,54 @@ class LocalDatabaseServiceV2 {
     if (kIsWeb) return transaction;
     
     try {
-      // 1. Create event
+      // 1. Ensure wallet_id is set on transaction
+      final walletId = await WalletService.ensureCurrentWallet();
+      final transactionWithWallet = Transaction(
+        id: transaction.id,
+        contactId: transaction.contactId,
+        type: transaction.type,
+        direction: transaction.direction,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        description: transaction.description,
+        transactionDate: transaction.transactionDate,
+        dueDate: transaction.dueDate,
+        imagePaths: transaction.imagePaths,
+        createdAt: transaction.createdAt,
+        updatedAt: transaction.updatedAt,
+        isSynced: transaction.isSynced,
+        walletId: walletId ?? transaction.walletId,
+      );
+      
+      // 2. Create event
       final eventData = {
-        'contact_id': transaction.contactId,
-        'type': transaction.type == TransactionType.item ? 'item' : 'money',
-        'direction': transaction.direction == TransactionDirection.lent ? 'lent' : 'owed',
-        'amount': transaction.amount,
-        'currency': transaction.currency,
-        'description': transaction.description,
-        'transaction_date': transaction.transactionDate.toIso8601String().split('T')[0],
-        'due_date': transaction.dueDate?.toIso8601String().split('T')[0],
+        'contact_id': transactionWithWallet.contactId,
+        'type': transactionWithWallet.type == TransactionType.item ? 'item' : 'money',
+        'direction': transactionWithWallet.direction == TransactionDirection.lent ? 'lent' : 'owed',
+        'amount': transactionWithWallet.amount,
+        'currency': transactionWithWallet.currency,
+        'description': transactionWithWallet.description,
+        'transaction_date': transactionWithWallet.transactionDate.toIso8601String().split('T')[0],
+        'due_date': transactionWithWallet.dueDate?.toIso8601String().split('T')[0],
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       await EventStoreService.appendEvent(
         aggregateType: 'transaction',
-        aggregateId: transaction.id,
+        aggregateId: transactionWithWallet.id,
         eventType: 'CREATED',
         eventData: eventData,
       );
 
-      // 2. Rebuild state
+      // 3. Rebuild state
       await _rebuildState();
 
-      // 3. Trigger automatic sync to server (like Firebase - immediate push)
+      // 4. Trigger automatic sync to server (like Firebase - immediate push)
       SyncServiceV2.startLocalToServerSync();
 
-      print('✅ Transaction created: ${transaction.id}');
-      return transaction;
+      print('✅ Transaction created: ${transactionWithWallet.id}');
+      return transactionWithWallet;
     } catch (e) {
       print('Error creating transaction: $e');
       rethrow;
@@ -235,6 +323,7 @@ class LocalDatabaseServiceV2 {
       final lastEventBeforeUpdate = events.isNotEmpty ? events.last : null;
       
       // 1. Create event
+      final walletId = await WalletService.ensureCurrentWallet();
       final eventData = {
         'contact_id': transaction.contactId,
         'type': transaction.type == TransactionType.item ? 'item' : 'money',
@@ -246,6 +335,7 @@ class LocalDatabaseServiceV2 {
         'due_date': transaction.dueDate?.toIso8601String().split('T')[0],
         'comment': comment ?? 'Transaction updated',
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       final updateEvent = await EventStoreService.appendEvent(
@@ -289,12 +379,14 @@ class LocalDatabaseServiceV2 {
       
       // If within undo window, create an UNDO event instead of removing the event
       if (isWithinUndoWindow) {
-        // Create UNDO event
-        final undoEventData = {
-          'undone_event_id': lastEvent.id,
-          'comment': comment ?? 'Transaction deleted (undo)',
-          'timestamp': DateTime.now().toIso8601String(),
-        };
+      // Create UNDO event
+      final walletId = await WalletService.ensureCurrentWallet();
+      final undoEventData = {
+        'undone_event_id': lastEvent.id,
+        'comment': comment ?? 'Transaction deleted (undo)',
+        'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
+      };
 
         final undoEvent = await EventStoreService.appendEvent(
           aggregateType: lastEvent.aggregateType,
@@ -315,9 +407,11 @@ class LocalDatabaseServiceV2 {
       
       // Otherwise, create a DELETED event (normal deletion)
       // 1. Create event
+      final walletId = await WalletService.ensureCurrentWallet();
       final eventData = {
         'comment': comment ?? 'Transaction deleted',
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       await EventStoreService.appendEvent(
@@ -366,10 +460,12 @@ class LocalDatabaseServiceV2 {
       }
       
       // Create UNDO event
+      final walletId = await WalletService.ensureCurrentWallet();
       final undoEventData = {
         'undone_event_id': lastEvent.id,
         'comment': 'Action undone',
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       final undoEvent = await EventStoreService.appendEvent(
@@ -430,10 +526,12 @@ class LocalDatabaseServiceV2 {
       }
       
       // Create UNDO event
+      final walletId = await WalletService.ensureCurrentWallet();
       final undoEventData = {
         'undone_event_id': lastEvent.id,
         'comment': 'Action undone',
         'timestamp': DateTime.now().toIso8601String(),
+        'wallet_id': walletId, // Include wallet_id in event data
       };
 
       final undoEvent = await EventStoreService.appendEvent(
@@ -533,8 +631,19 @@ class LocalDatabaseServiceV2 {
 
     try {
       // Get all events ordered by timestamp (same as backend)
-      // Backend: SELECT ... FROM events ORDER BY created_at ASC
-      final events = await EventStoreService.getAllEvents();
+      // Backend: SELECT ... FROM events ORDER BY created_at ASC WHERE wallet_id = ?
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) {
+        print('⚠️ No current wallet set, skipping state rebuild');
+        return;
+      }
+      
+      final allEvents = await EventStoreService.getAllEvents();
+      // Filter events by wallet_id (include null for migration)
+      final events = allEvents.where((e) {
+        final eventWalletId = e.eventData['wallet_id'] as String?;
+        return eventWalletId == walletId || eventWalletId == null;
+      }).toList();
       
       // Always use the same algorithm as backend: full rebuild from all events
       // Backend always does: rebuild_projections_from_events() which:
@@ -548,8 +657,11 @@ class LocalDatabaseServiceV2 {
       
       // Save to Hive boxes (same algorithm as backend: clear then rebuild)
       // Backend does: DELETE FROM transactions_projection, DELETE FROM contacts_projection, then INSERT
-      final contactsBox = await Hive.openBox<Contact>('contacts');
-      final transactionsBox = await Hive.openBox<Transaction>('transactions');
+      final userId = await AuthService.getUserId();
+      final contactsBoxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
+      final transactionsBoxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
+      final contactsBox = await Hive.openBox<Contact>(contactsBoxName);
+      final transactionsBox = await Hive.openBox<Transaction>(transactionsBoxName);
       
       // Clear existing projections (same as backend: DELETE FROM ... WHERE true)
       await contactsBox.clear();

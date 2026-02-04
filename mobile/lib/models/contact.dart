@@ -34,6 +34,9 @@ class Contact extends HiveObject {
   @HiveField(8)
   int balance; // Net balance in cents: positive = they owe you, negative = you owe them
 
+  @HiveField(10)
+  String? walletId; // Wallet ID for multi-wallet support (nullable for migration)
+
   Contact({
     required this.id,
     required this.name,
@@ -45,6 +48,7 @@ class Contact extends HiveObject {
     required this.updatedAt,
     this.isSynced = false,
     this.balance = 0,
+    this.walletId,
   });
 
   Contact copyWith({
@@ -58,6 +62,7 @@ class Contact extends HiveObject {
     DateTime? updatedAt,
     bool? isSynced,
     int? balance,
+    String? walletId,
   }) {
     return Contact(
       id: id ?? this.id,
@@ -70,6 +75,7 @@ class Contact extends HiveObject {
       updatedAt: updatedAt ?? this.updatedAt,
       isSynced: isSynced ?? this.isSynced,
       balance: balance ?? this.balance,
+      walletId: walletId ?? this.walletId,
     );
   }
 
@@ -104,6 +110,7 @@ class Contact extends HiveObject {
       updatedAt: DateTime.parse(createdAtStr), // API doesn't return updated_at, use created_at
       isSynced: true,
       balance: (json['balance'] as num?)?.toInt() ?? 0,
+      walletId: json['wallet_id'] as String?, // Wallet ID from API (may be null for legacy data)
     );
   }
 }

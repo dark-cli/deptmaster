@@ -275,8 +275,9 @@ cmd_reset_database_complete() {
     fi
     
     # Reset admin password to default (ensures admin access after reset)
+    # Must be at least 8 chars (set_admin_password binary requirement)
     print_info "Resetting admin password..."
-    local default_admin_password="admin"
+    local default_admin_password="admin123"
     
     # Wait for server to be ready (needed for database connection)
     if ! wait_for_service "http://localhost:8000/health" "API server" 30 1; then
@@ -403,6 +404,23 @@ BEGIN
     END IF;
 END \$\$;
 EOF
+    
+    # Run wallet migrations after "max" exists so default wallet is assigned to max (not to pre-005 user)
+    if [ "$USE_SQLX" = false ]; then
+        print_info "Running wallet migrations (011, 012)..."
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/backend/rust-api/migrations/011_create_wallets.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/backend/rust-api/migrations/012_add_wallet_id_to_tables.sql" > /dev/null 2>&1 || true
+    else
+        # Sqlx already ran 001-012; block above may have replaced users. Ensure every user has a wallet.
+        print_info "Ensuring all users have a wallet..."
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1 <<WALLETEOF
+INSERT INTO wallet_users (wallet_id, user_id, role)
+SELECT w.id, u.id, 'owner' FROM users_projection u
+CROSS JOIN (SELECT id FROM wallets WHERE is_active = true LIMIT 1) w
+WHERE NOT EXISTS (SELECT 1 FROM wallet_users wu WHERE wu.user_id = u.id);
+WALLETEOF
+    fi
+    
     print_success "Database reset complete"
     
     # If import file provided, import data
@@ -738,19 +756,24 @@ cmd_start_server_direct() {
     export JWT_SECRET="${JWT_SECRET:-your-secret-key-change-in-production}"
     export JWT_EXPIRATION="${JWT_EXPIRATION:-3600}"
     
-    # Use cargo-watch if available, otherwise regular cargo run
-    if command -v cargo-watch &> /dev/null; then
-        print_info "Using cargo-watch for auto-reload..."
-        print_info "Watching: Rust source files (.rs) and static files (.html, .js)"
-        print_info "Note: Static file changes require recompilation (will auto-restart)"
-        # Watch both Rust files and static files
-        (cd "$ROOT_DIR/backend/rust-api" && cargo watch \
+    # Run server with cargo. Use cargo-watch only if explicitly requested and the real binary exists.
+    CARGO_WATCH_BIN=""
+    if [[ -n "${USE_CARGO_WATCH:-}" ]] || [[ -n "${CARGO_WATCH:-}" ]]; then
+        if [[ -x "$HOME/.cargo/bin/cargo-watch" ]]; then
+            CARGO_WATCH_BIN="$HOME/.cargo/bin/cargo-watch"
+        elif command -v cargo-watch &> /dev/null; then
+            CARGO_WATCH_BIN="cargo-watch"
+        fi
+    fi
+    if [[ -n "$CARGO_WATCH_BIN" ]]; then
+        print_info "Using cargo-watch for auto-reload (USE_CARGO_WATCH=1)"
+        (cd "$ROOT_DIR/backend/rust-api" && "$CARGO_WATCH_BIN" \
             --watch "$ROOT_DIR/backend/rust-api/src" \
             --watch "$ROOT_DIR/backend/rust-api/static" \
             -x 'run --bin debt-tracker-api')
     else
-        print_warning "cargo-watch not installed. Install for auto-reload: cargo install cargo-watch"
-        print_info "Note: Static file changes require restarting the server"
+        print_info "Starting server (restart manually after code changes)"
+        print_info "For auto-reload: USE_CARGO_WATCH=1 $0 start-server-direct (after: cargo install cargo-watch)"
         (cd "$ROOT_DIR/backend/rust-api" && cargo run --bin debt-tracker-api)
     fi
 }

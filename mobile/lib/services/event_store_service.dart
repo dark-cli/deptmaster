@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../models/event.dart';
+import 'wallet_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// Local EventStore service
@@ -90,14 +91,22 @@ class EventStoreService {
     }
   }
 
-  /// Get unsynced events
+  /// Get unsynced events (filtered by current wallet)
   static Future<List<Event>> getUnsyncedEvents() async {
     if (kIsWeb) return [];
     if (_eventsBox == null) await initialize();
     
     try {
+      final walletId = WalletService.getCurrentWalletId();
       return _eventsBox!.values
-          .where((e) => !e.synced)
+          .where((e) {
+            if (!e.synced) {
+              // Filter by wallet_id if set, or include null for migration
+              final eventWalletId = e.eventData['wallet_id'] as String?;
+              return eventWalletId == walletId || (eventWalletId == null && walletId != null);
+            }
+            return false;
+          })
           .toList()
         ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     } catch (e) {
@@ -198,40 +207,63 @@ class EventStoreService {
     }
   }
 
-  /// Get event count
-  static Future<int> getEventCount() async {
+  /// Get event count (optionally for a single wallet only; for sync we compare with server per-wallet).
+  static Future<int> getEventCount({String? walletId}) async {
     if (kIsWeb) return 0;
     if (_eventsBox == null) await initialize();
 
     try {
-      return _eventsBox!.length;
+      final events = await _getEventsMaybeFiltered(walletId);
+      return events.length;
     } catch (e) {
       print('Error getting event count: $e');
       return 0;
     }
   }
 
-  /// Get hash of all events (for sync comparison)
-  static Future<String> getEventHash() async {
+  /// Get hash of events (optionally for a single wallet; must match server's per-wallet hash).
+  static Future<String> getEventHash({String? walletId}) async {
     if (kIsWeb) return '';
     if (_eventsBox == null) await initialize();
 
     try {
-      final events = await getAllEvents();
+      final events = await _getEventsMaybeFiltered(walletId);
       final hasher = sha256;
       final buffer = StringBuffer();
-      
       for (final event in events) {
         buffer.write(event.id);
         buffer.write(event.timestamp.toIso8601String());
       }
-      
       final bytes = utf8.encode(buffer.toString());
       final digest = hasher.convert(bytes);
       return digest.toString();
     } catch (e) {
       print('Error getting event hash: $e');
       return '';
+    }
+  }
+
+  /// Get events for a wallet (for rebuild). If walletId is null, returns all (caller beware).
+  static Future<List<Event>> getEventsForWallet(String? walletId) async {
+    return _getEventsMaybeFiltered(walletId);
+  }
+
+  static Future<List<Event>> _getEventsMaybeFiltered(String? walletId) async {
+    if (kIsWeb) return [];
+    if (_eventsBox == null) await initialize();
+    try {
+      var events = _eventsBox!.values.toList();
+      if (walletId != null && walletId.isNotEmpty) {
+        events = events.where((e) {
+          final eventWalletId = e.eventData['wallet_id'] as String?;
+          return eventWalletId == walletId;
+        }).toList();
+      }
+      events.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      return events;
+    } catch (e) {
+      print('Error getting events: $e');
+      return [];
     }
   }
 
@@ -259,6 +291,17 @@ class EventStoreService {
       await prefs.setString(lastSyncTimestampKey, timestamp.toIso8601String());
     } catch (e) {
       print('Error setting last sync timestamp: $e');
+    }
+  }
+
+  /// Clear last sync timestamp (e.g. when switching wallet so we full-sync the new wallet).
+  static Future<void> clearLastSyncTimestamp() async {
+    if (kIsWeb) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(lastSyncTimestampKey);
+    } catch (e) {
+      print('Error clearing last sync timestamp: $e');
     }
   }
 

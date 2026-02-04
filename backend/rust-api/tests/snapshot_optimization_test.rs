@@ -22,7 +22,9 @@ use test_helpers::*;
 #[ignore] // Ignore by default - requires test database
 async fn test_snapshot_optimization_used_when_no_undo_events() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -30,6 +32,7 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -51,12 +54,14 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Verify snapshot was created (at event 10)
-    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -79,18 +84,20 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // 3. Rebuild projections - should use snapshot optimization (no UNDO events)
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state is correct (should have name "Contact 12" from last update)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -101,7 +108,9 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
 #[ignore] // Ignore by default - requires test database
 async fn test_full_rebuild_used_when_undo_events_present() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -109,6 +118,7 @@ async fn test_full_rebuild_used_when_undo_events_present() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -132,12 +142,14 @@ async fn test_full_rebuild_used_when_undo_events_present() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Verify snapshot was created
-    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -160,16 +172,19 @@ async fn test_full_rebuild_used_when_undo_events_present() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(vec![undo_event]),
     ).await;
 
     // 3. Rebuild projections - should use FULL rebuild (undone event is before all snapshots)
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify state is correct (event 6 was undone, so should have name from event 5 or later)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
+    .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -181,7 +196,9 @@ async fn test_full_rebuild_used_when_undo_events_present() {
 #[ignore] // Ignore by default - requires test database
 async fn test_snapshot_restoration_correctness() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -189,6 +206,7 @@ async fn test_snapshot_restoration_correctness() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -210,14 +228,16 @@ async fn test_snapshot_restoration_correctness() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Get snapshot state
     let snapshot = sqlx::query(
-        "SELECT contacts_snapshot FROM projection_snapshots ORDER BY snapshot_index DESC LIMIT 1"
+        "SELECT contacts_snapshot FROM projection_snapshots WHERE wallet_id = $1 ORDER BY snapshot_index DESC LIMIT 1"
     )
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -246,18 +266,20 @@ async fn test_snapshot_restoration_correctness() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // 3. Rebuild - should restore from snapshot and apply events after
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state (should be "After Snapshot 11" from last event)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -268,7 +290,9 @@ async fn test_snapshot_restoration_correctness() {
 #[ignore] // Ignore by default - requires test database
 async fn test_fallback_to_full_rebuild_when_no_snapshot() {
     let pool = setup_test_db().await;
-    let _user_id = create_test_user(&pool).await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -276,6 +300,7 @@ async fn test_fallback_to_full_rebuild_when_no_snapshot() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     let contact_id = Uuid::new_v4();
@@ -297,25 +322,28 @@ async fn test_fallback_to_full_rebuild_when_no_snapshot() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Verify no snapshot exists
-    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(snapshot_count, 0, "No snapshot should exist yet");
 
     // 2. Rebuild - should fallback to full rebuild (no snapshot available)
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 3. Verify state is correct (full rebuild should work)
     let final_name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1"
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -327,7 +355,9 @@ async fn test_fallback_to_full_rebuild_when_no_snapshot() {
 async fn test_snapshot_optimization_with_transactions() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
-    let contact_id = create_test_contact(&pool, user_id, "Test Contact").await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+    let contact_id = create_test_contact(&pool, user_id, wallet_id, "Test Contact").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -335,6 +365,7 @@ async fn test_snapshot_optimization_with_transactions() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // 1. Create 10 transaction events to trigger snapshot
@@ -360,12 +391,14 @@ async fn test_snapshot_optimization_with_transactions() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // Verify snapshot was created
-    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+    let snapshot_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -394,18 +427,20 @@ async fn test_snapshot_optimization_with_transactions() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
             axum::Json(vec![event]),
         ).await;
     }
 
     // 3. Rebuild - should use snapshot optimization
-    let _ = rebuild_projections_from_events(&app_state).await;
+    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify transaction count is correct (should have 12 transactions)
     let transaction_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM transactions_projection WHERE contact_id = $1 AND is_deleted = false"
+        "SELECT COUNT(*) FROM transactions_projection WHERE contact_id = $1 AND wallet_id = $2 AND is_deleted = false"
     )
     .bind(contact_id)
+    .bind(wallet_id)
     .fetch_one(&pool)
     .await
     .unwrap();

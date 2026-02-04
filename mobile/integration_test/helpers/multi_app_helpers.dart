@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import '../multi_app/helpers/test_user_wallet_helpers.dart';
 
 /// Server reset helper using dev-only API endpoint
 /// This is much faster than calling manage.sh reset-database-complete
@@ -125,6 +126,128 @@ Future<bool> isServerRunning({String serverUrl = 'http://localhost:8000'}) async
     return response.statusCode == 200;
   } catch (e) {
     return false;
+  }
+}
+
+/// Cached wallet ID for integration tests (set by ensureTestUserHasWallet)
+String? _testWalletId;
+
+/// Get the test wallet ID (call after ensureTestUserHasWallet in setUpAll)
+String? getTestWalletId() => _testWalletId;
+
+/// Creates a unique test user and wallet for this test. Call in setUp() so each test
+/// has its own isolated wallet. Requires ensureTestUserExists() to have been called
+/// in setUpAll (admin user 'max' is used to create users via API).
+/// Returns map with: email (use as username for AuthService.login), password, walletId, userId.
+Future<Map<String, String>> createUniqueTestUserAndWallet({
+  String serverUrl = 'http://localhost:8000',
+  String testUserPassword = 'test123456',
+}) async {
+  final user = await TestUserWalletHelpers.createTestUser(
+    password: testUserPassword,
+    serverUrl: serverUrl,
+  );
+  final wallet = await TestUserWalletHelpers.createTestWallet(serverUrl: serverUrl);
+  await TestUserWalletHelpers.addUserToWallet(
+    walletId: wallet['id']!,
+    userId: user['id']!,
+    role: 'owner',
+    serverUrl: serverUrl,
+  );
+  return {
+    'email': user['email']!,
+    'password': testUserPassword,
+    'walletId': wallet['id']!,
+    'userId': user['id']!,
+  };
+}
+
+/// Ensure test user has at least one wallet (for multi-wallet integration tests)
+/// Call after ensureTestUserExists - uses admin API to create wallet and add user
+/// Stores wallet ID in _testWalletId for use with AppInstance.create(walletId: getTestWalletId())
+Future<void> ensureTestUserHasWallet({
+  String username = 'max',
+  String password = '12345678',
+}) async {
+  try {
+    // Login as user to get user_id
+    final loginResponse = await http.post(
+      Uri.parse('http://localhost:8000/api/auth/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'password': password}),
+    ).timeout(const Duration(seconds: 5));
+
+    if (loginResponse.statusCode != 200) return;
+
+    final loginData = jsonDecode(loginResponse.body) as Map<String, dynamic>;
+    final userId = loginData['user_id'] as String?;
+    if (userId == null) return;
+
+    // Check if user already has wallets first (e.g. from migration 011 default wallet)
+    final walletsResponse = await http.get(
+      Uri.parse('http://localhost:8000/api/wallets'),
+      headers: {'Authorization': 'Bearer ${loginData['token']}'},
+    ).timeout(const Duration(seconds: 5));
+
+    if (walletsResponse.statusCode == 200) {
+      final walletsData = jsonDecode(walletsResponse.body) as Map<String, dynamic>;
+      final wallets = walletsData['wallets'] as List?;
+      if (wallets != null && wallets.isNotEmpty) {
+        _testWalletId = (wallets.first as Map<String, dynamic>)['id'] as String?;
+        print('✅ Test user "$username" already has ${wallets.length} wallet(s)');
+        return;
+      }
+    }
+
+    // No wallets: login as admin to create wallet and add user
+    final adminLoginResponse = await http.post(
+      Uri.parse('http://localhost:8000/api/auth/admin/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': 'admin', 'password': 'admin123'}),
+    ).timeout(const Duration(seconds: 5));
+
+    if (adminLoginResponse.statusCode != 200) return;
+
+    final adminData = jsonDecode(adminLoginResponse.body) as Map<String, dynamic>;
+    final token = adminData['token'] as String?;
+    if (token == null) return;
+
+    // Create wallet via admin API
+    final createWalletResponse = await http.post(
+      Uri.parse('http://localhost:8000/api/admin/wallets'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({
+        'name': 'Test Wallet',
+        'description': 'Default wallet for integration tests',
+      }),
+    ).timeout(const Duration(seconds: 5));
+
+    if (createWalletResponse.statusCode != 201) return;
+
+    final walletData = jsonDecode(createWalletResponse.body) as Map<String, dynamic>;
+    final walletId = walletData['id'] as String?;
+    if (walletId == null) return;
+
+    _testWalletId = walletId;
+
+    // Add user to wallet
+    final addUserResponse = await http.post(
+      Uri.parse('http://localhost:8000/api/admin/wallets/$walletId/users'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({'user_id': userId, 'role': 'owner'}),
+    ).timeout(const Duration(seconds: 5));
+
+    if (addUserResponse.statusCode == 200 || addUserResponse.statusCode == 201) {
+      print('✅ Created wallet for test user "$username"');
+    }
+  } catch (e) {
+    print('⚠️ Could not ensure test user has wallet: $e');
   }
 }
 

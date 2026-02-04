@@ -6,8 +6,8 @@ class BackendConfigService {
   static const String _keyBackendUseHttps = 'backend_use_https';
   static const String _keyBackendConfigured = 'backend_configured';
 
-  // Default values (temporary defaults for development)
-  static String get defaultIp => '10.95.12.45';
+  // Default values (localhost for local dev/integration tests)
+  static String get defaultIp => 'localhost';
 
   static int get defaultPort => 8000;
 

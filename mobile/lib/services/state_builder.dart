@@ -156,6 +156,7 @@ class StateBuilder {
         updatedAt: _parseTimestamp(eventData['timestamp']),
         isSynced: event.synced,
         balance: 0, // Will be calculated later
+        walletId: eventData['wallet_id'] as String?, // Include wallet_id from event
       );
     } else if (event.eventType == 'UPDATED' && contacts.containsKey(contactId)) {
       final existing = contacts[contactId]!;
@@ -170,6 +171,7 @@ class StateBuilder {
         updatedAt: _parseTimestamp(eventData['timestamp']),
         isSynced: event.synced,
         balance: existing.balance, // Will be recalculated
+        walletId: eventData['wallet_id'] as String? ?? existing.walletId, // Preserve or update wallet_id
       );
     } else if (event.eventType == 'DELETED' && contacts.containsKey(contactId)) {
       // Remove deleted contact
@@ -223,6 +225,7 @@ class StateBuilder {
           createdAt: _parseTimestamp(eventData['timestamp']),
           updatedAt: _parseTimestamp(eventData['timestamp']),
           isSynced: event.synced,
+          walletId: eventData['wallet_id'] as String?, // Include wallet_id from event
         );
       }
       // If contact doesn't exist, don't create transaction (contact was deleted)
@@ -248,6 +251,7 @@ class StateBuilder {
         createdAt: existing.createdAt,
         updatedAt: _parseTimestamp(eventData['timestamp']),
         isSynced: event.synced,
+        walletId: eventData['wallet_id'] as String? ?? existing.walletId, // Preserve or update wallet_id
       );
     } else if (event.eventType == 'DELETED' && transactions.containsKey(transactionId)) {
       // Remove transaction (hard delete for simplicity)
@@ -273,6 +277,7 @@ class StateBuilder {
         updatedAt: contact.updatedAt,
         isSynced: contact.isSynced,
         balance: 0,
+        walletId: contact.walletId, // Preserve wallet_id
       );
     }
 
@@ -294,6 +299,7 @@ class StateBuilder {
           updatedAt: contact.updatedAt,
           isSynced: contact.isSynced,
           balance: contact.balance + amount,
+          walletId: contact.walletId, // Preserve wallet_id
         );
       }
     }

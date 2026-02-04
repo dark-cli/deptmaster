@@ -1,0 +1,5 @@
+# Rust 1.82+ enables wasm reference-types by default; some wasm-bindgen-cli
+# versions fail with "failed to find intrinsics to enable clone_ref function".
+# Disable reference-types for wasm so the bindgen step succeeds.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=-reference-types"]

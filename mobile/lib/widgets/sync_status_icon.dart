@@ -1,5 +1,6 @@
 // ignore_for_file: unused_local_variable
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/sync_service_v2.dart';
@@ -17,19 +18,26 @@ class SyncStatusIcon extends StatefulWidget {
 class _SyncStatusIconState extends State<SyncStatusIcon> {
   SyncStatus _status = SyncStatus.synced;
   bool _hasError = false;
+  Timer? _updateTimer;
 
   @override
   void initState() {
     super.initState();
     if (!kIsWeb) {
       _updateStatus();
-      // Update status every 2 seconds
       _startPeriodicUpdate();
     }
   }
 
+  @override
+  void dispose() {
+    _updateTimer?.cancel();
+    super.dispose();
+  }
+
   void _startPeriodicUpdate() {
-    Future.delayed(const Duration(seconds: 2), () {
+    _updateTimer?.cancel();
+    _updateTimer = Timer(const Duration(seconds: 2), () {
       if (mounted) {
         _updateStatus();
         _startPeriodicUpdate();

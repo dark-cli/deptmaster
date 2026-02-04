@@ -390,6 +390,8 @@ cargo run --bin reset_password -- max 12345678
 
 **Future Fix**: Create a custom `http.Client` that uses the interceptor and pass it to all services.
 
+**Note**: `_isServerReachable()` now uses GET `/health` (no auth or wallet required), so the app correctly reports the server as reachable in integration tests even before a wallet is set.
+
 ## Quick Reference
 
 ```bash

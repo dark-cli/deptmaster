@@ -23,6 +23,7 @@ use websocket::BroadcastChannel;
 use handlers::admin::rebuild_projections;
 use middleware::auth::auth_middleware;
 use middleware::rate_limit::{RateLimiter, rate_limit_middleware};
+use middleware::wallet_context::wallet_context_middleware;
 
 // Define AppState in main.rs (not in shared app_state.rs to avoid library build issues)
 #[derive(Clone)]
@@ -98,8 +99,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/favicon.ico", get(handlers::favicon)) // Favicon
         .route("/api/dev/clear-database", axum::routing::post(handlers::dev_clear_database)); // Dev-only: clears database (checks ENVIRONMENT internally)
 
-    // Protected API routes (require authentication)
-    let protected_api_routes = Router::new()
+    // Protected API routes that require wallet context
+    let wallet_protected_routes = Router::new()
         .route("/api/contacts", get(handlers::get_contacts))
         .route("/api/contacts", post(handlers::create_contact))
         .route("/api/contacts/:id", put(handlers::update_contact))
@@ -108,12 +109,25 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/transactions", post(handlers::create_transaction))
         .route("/api/transactions/:id", put(handlers::update_transaction))
         .route("/api/transactions/:id", delete(handlers::delete_transaction))
-        .route("/api/settings", get(handlers::get_settings))
-        .route("/api/settings/:key", axum::routing::put(handlers::update_setting))
         .route("/api/sync/hash", get(handlers::get_sync_hash))
         .route("/api/sync/events", get(handlers::get_sync_events))
         .route("/api/sync/events", post(handlers::post_sync_events))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            wallet_context_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ));
+
+    // Protected API routes that don't require wallet context
+    let protected_api_routes = Router::new()
+        .route("/api/settings", get(handlers::get_settings))
+        .route("/api/settings/:key", axum::routing::put(handlers::update_setting))
         .route("/api/auth/change-password", axum::routing::put(handlers::change_password))
+        .route("/api/wallets", get(handlers::list_user_wallets).post(handlers::create_my_wallet))
+        .route("/api/wallets/:id", get(handlers::get_wallet))
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth_middleware,
@@ -135,6 +149,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/users/:id/password", axum::routing::put(handlers::admin_change_password))
         .route("/api/admin/users/:id/login-logs", get(handlers::get_user_login_logs))
         .route("/api/admin/users/:id/backup", get(handlers::backup_user_data))
+        .route("/api/admin/wallets", get(handlers::list_wallets))
+        .route("/api/admin/wallets", post(handlers::create_wallet))
+        .route("/api/admin/wallets/:id", get(handlers::get_wallet))
+        .route("/api/admin/wallets/:id", axum::routing::put(handlers::update_wallet))
+        .route("/api/admin/wallets/:id", axum::routing::delete(handlers::delete_wallet))
+        .route("/api/admin/wallets/:id/users", get(handlers::list_wallet_users))
+        .route("/api/admin/wallets/:id/users", post(handlers::add_user_to_wallet))
+        .route("/api/admin/wallets/:id/users/:user_id", axum::routing::put(handlers::update_wallet_user))
+        .route("/api/admin/wallets/:id/users/:user_id", axum::routing::delete(handlers::remove_user_from_wallet))
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth_middleware,
@@ -148,6 +171,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(|| async { axum::response::Redirect::permanent("/admin") }))
         .merge(public_routes)
+        .merge(wallet_protected_routes)
         .merge(protected_api_routes)
         .merge(admin_routes)
         .merge(ws_routes)

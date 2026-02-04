@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Query, State, Extension},
     http::StatusCode,
     response::Json,
 };
@@ -8,10 +8,11 @@ use sqlx::Row;
 use crate::AppState;
 use crate::websocket;
 use crate::services::projection_snapshot_service;
+use crate::middleware::wallet_context::WalletContext;
 use sha2::{Sha256, Digest};
 
-/// Calculate total debt (sum of all contact balances) at current time
-async fn calculate_total_debt(state: &AppState) -> i64 {
+/// Calculate total debt (sum of all contact balances) at current time for a wallet
+async fn calculate_total_debt(state: &AppState, wallet_id: uuid::Uuid) -> i64 {
     sqlx::query_scalar::<_, i64>(
         r#"
         SELECT COALESCE(SUM(
@@ -22,10 +23,11 @@ async fn calculate_total_debt(state: &AppState) -> i64 {
             END
         )::BIGINT, 0)
         FROM contacts_projection c
-        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
-        WHERE c.is_deleted = false
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = $1
+        WHERE c.is_deleted = false AND c.wallet_id = $1
         "#
     )
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .unwrap_or(0)
@@ -41,15 +43,20 @@ pub struct SyncHashResponse {
 /// Get hash of all events for sync comparison
 pub async fn get_sync_hash(
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
 ) -> Result<Json<SyncHashResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Get all events ordered by timestamp
+    let wallet_id = wallet_context.wallet_id;
+    
+    // Get all events for this wallet ordered by timestamp
     let events = sqlx::query(
         r#"
         SELECT event_id, aggregate_type, aggregate_id, event_type, created_at
         FROM events
+        WHERE wallet_id = $1
         ORDER BY created_at ASC
         "#
     )
+    .bind(wallet_id)
     .fetch_all(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -99,7 +106,10 @@ pub struct SyncEvent {
 pub async fn get_sync_events(
     Query(params): Query<SyncEventsQuery>,
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
 ) -> Result<Json<Vec<SyncEvent>>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
+    
     let since_timestamp = params.since.and_then(|s| {
         chrono::DateTime::parse_from_rfc3339(&s)
             .ok()
@@ -111,19 +121,22 @@ pub async fn get_sync_events(
             r#"
             SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, event_version
             FROM events
-            WHERE created_at > $1
+            WHERE wallet_id = $1 AND created_at > $2
             ORDER BY created_at ASC
             "#
         )
+        .bind(wallet_id)
         .bind(since)
     } else {
         sqlx::query(
             r#"
             SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, event_version
             FROM events
+            WHERE wallet_id = $1
             ORDER BY created_at ASC
             "#
         )
+        .bind(wallet_id)
     };
 
     let events = query
@@ -263,8 +276,10 @@ fn validate_event(event: &SyncEventRequest) -> Option<String> {
 /// Accept events from client and insert them
 pub async fn post_sync_events(
     State(state): State<AppState>,
+    axum::extract::Extension(wallet_context): axum::extract::Extension<WalletContext>,
     Json(events): Json<Vec<SyncEventRequest>>,
 ) -> Result<Json<SyncEventsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
 
@@ -326,11 +341,12 @@ pub async fn post_sync_events(
         if event.event_type == "UNDO" {
             if let Some(undone_event_id_str) = event.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
                 if let Ok(undone_event_uuid) = uuid::Uuid::parse_str(undone_event_id_str) {
-                    // Query the undone event to get its creation timestamp
+                    // Query the undone event to get its creation timestamp (must be in same wallet)
                     let undone_event = sqlx::query(
-                        "SELECT created_at FROM events WHERE event_id = $1"
+                        "SELECT created_at FROM events WHERE event_id = $1 AND wallet_id = $2"
                     )
                     .bind(undone_event_uuid)
+                    .bind(wallet_id)
                     .fetch_optional(&*state.db_pool)
                     .await
                     .map_err(|e| {
@@ -367,11 +383,12 @@ pub async fn post_sync_events(
             }
         }
 
-        // Check if event already exists (idempotency)
+        // Check if event already exists (idempotency) - must be in same wallet
         let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1)"
+            "SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1 AND wallet_id = $2)"
         )
         .bind(event_id)
+        .bind(wallet_id)
         .fetch_one(&*state.db_pool)
         .await
         .map_err(|e| {
@@ -385,9 +402,10 @@ pub async fn post_sync_events(
         if exists {
             // Event already exists - check if it's the same
             let existing = sqlx::query(
-                "SELECT event_data, created_at FROM events WHERE event_id = $1"
+                "SELECT event_data, created_at FROM events WHERE event_id = $1 AND wallet_id = $2"
             )
             .bind(event_id)
+            .bind(wallet_id)
             .fetch_optional(&*state.db_pool)
             .await
             .map_err(|e| {
@@ -411,17 +429,32 @@ pub async fn post_sync_events(
             continue;
         }
 
+        // Validate wallet_id in event_data matches request wallet_id
+        if let Some(event_wallet_id_str) = event.event_data.get("wallet_id").and_then(|v| v.as_str()) {
+            if let Ok(event_wallet_id) = uuid::Uuid::parse_str(event_wallet_id_str) {
+                if event_wallet_id != wallet_id {
+                    conflicts.push(event.id);
+                    tracing::warn!("Event wallet_id mismatch: event has {}, request has {}", event_wallet_id, wallet_id);
+                    continue;
+                }
+            }
+        } else {
+            // If wallet_id is missing from event_data, add it
+            // This handles legacy events that don't have wallet_id
+        }
+        
         // Insert event first (without total_debt - we'll add it after execution)
         let insert_result = sqlx::query(
             r#"
-            INSERT INTO events (event_id, user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO events (event_id, user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (event_id) DO NOTHING
             RETURNING event_id
             "#
         )
         .bind(event_id)
         .bind(user_id)
+        .bind(wallet_id)
         .bind(&event.aggregate_type)
         .bind(aggregate_id)
         .bind(&event.event_type)
@@ -437,41 +470,54 @@ pub async fn post_sync_events(
                 accepted.push(event.id.clone());
                 
                 // Apply this single event to projections
-                if let Err(e) = apply_single_event_to_projections(&state, &event, aggregate_id, user_id, timestamp).await {
+                if let Err(e) = apply_single_event_to_projections(&state, &event, aggregate_id, user_id, wallet_id, timestamp).await {
                     tracing::error!("Error applying event to projections: {:?}", e);
                     // Continue anyway - event is inserted
                 }
                 
-                // If this is an UNDO event, trigger a full rebuild to ensure consistency
+                // If this is an UNDO event, trigger a full rebuild to ensure consistency (wallet-scoped)
                 if event.event_type == "UNDO" {
-                    tracing::info!("UNDO event processed, triggering full projection rebuild");
-                    if let Err(e) = rebuild_projections_from_events(&state).await {
+                    tracing::info!("UNDO event processed, triggering full projection rebuild for wallet {}", wallet_id);
+                    if let Err(e) = rebuild_projections_from_events(&state, wallet_id).await {
                         tracing::error!("Error rebuilding projections after UNDO: {:?}", e);
                     }
                 }
                 
                 // Calculate total_debt AFTER this event is applied
-                let total_debt_after = calculate_total_debt(&state).await;
+                let total_debt_after = calculate_total_debt(&state, wallet_id).await;
                 
-                // Update this event with total_debt
-                sqlx::query(
+                // Update this event with total_debt (so event log shows correct running total)
+                let update_result = sqlx::query(
                     r#"
                     UPDATE events
-                    SET event_data = jsonb_set(event_data, '{total_debt}', $1::jsonb)
-                    WHERE event_id = $2
+                    SET event_data = jsonb_set(COALESCE(event_data, '{}'::jsonb), '{total_debt}', $1::jsonb)
+                    WHERE event_id = $2 AND wallet_id = $3
                     "#
                 )
                 .bind(serde_json::json!(total_debt_after))
                 .bind(event_id)
+                .bind(wallet_id)
                 .execute(&*state.db_pool)
-                .await
-                .ok(); // Don't fail if update fails
+                .await;
+                match &update_result {
+                    Ok(result) if result.rows_affected() == 0 => {
+                        tracing::warn!(
+                            "Failed to set total_debt on event {} (0 rows updated); event log may show stale total",
+                            event_id
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("Error updating total_debt on event {}: {:?}", event_id, e);
+                    }
+                    _ => {}
+                }
                 
                 // Save snapshot if needed (every 10 events or after UNDO)
                 if let Ok(Some(event_db_id)) = sqlx::query_scalar::<_, Option<i64>>(
-                    "SELECT id FROM events WHERE event_id = $1"
+                    "SELECT id FROM events WHERE event_id = $1 AND wallet_id = $2"
                 )
                 .bind(event_id)
+                .bind(wallet_id)
                 .fetch_optional(&*state.db_pool)
                 .await {
                     if let Some(db_id) = event_db_id {
@@ -485,13 +531,14 @@ pub async fn post_sync_events(
                         
                         if should_save {
                             // Create snapshot JSON from current projections
-                            if let Ok(snapshot_json) = create_snapshot_json(&state).await {
+                            if let Ok(snapshot_json) = create_snapshot_json(&state, wallet_id).await {
                                 let _ = crate::services::projection_snapshot_service::save_snapshot(
                                     &*state.db_pool,
                                     db_id,
                                     event_count,
                                     snapshot_json.0,
                                     snapshot_json.1,
+                                    wallet_id,
                                 ).await;
                             }
                         }
@@ -527,31 +574,34 @@ pub async fn post_sync_events(
     }))
 }
 
-/// Rebuild projections from all events in the database
+/// Rebuild projections from all events in the database for a specific wallet
 /// Implements the optimized algorithm:
 /// 1. Create projection after any new event
 /// 2. Stack of snapshots (push after every 10 events or after UNDO event)
 /// 3. If UNDO event: find undone event position, find snapshot before it, create cleaned event list
 /// 4. Pass cleaned event list + snapshot to builder
 /// 5. Builder creates new snapshot, make it current projection, save to stack
-pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sqlx::Error> {
-    tracing::info!("Rebuilding projections from events...");
+pub async fn rebuild_projections_from_events(state: &AppState, wallet_id: uuid::Uuid) -> Result<(), sqlx::Error> {
+    tracing::info!("Rebuilding projections from events for wallet {}...", wallet_id);
     
-    // Get user ID
+    // Get user ID (for this wallet, get the first user who has access)
     let user_id = sqlx::query_scalar::<_, uuid::Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
+        "SELECT user_id FROM wallet_users WHERE wallet_id = $1 LIMIT 1"
     )
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await?;
 
-    // Get all events ordered by timestamp (chronological order)
+    // Get all events for this wallet ordered by timestamp (chronological order)
     let events = sqlx::query(
         r#"
         SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
         FROM events
+        WHERE wallet_id = $1
         ORDER BY created_at ASC
         "#
     )
+    .bind(wallet_id)
     .fetch_all(&*state.db_pool)
     .await?;
 
@@ -597,11 +647,12 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
         // Find the minimum undone event position (earliest undone event)
         let min_undone_position = undone_event_positions.iter().min().copied();
 
-        // Step 4: Search snapshot stack for snapshot with event_count < undone_event_count
+        // Step 4: Search snapshot stack for snapshot with event_count < undone_event_count (wallet-scoped)
         let snapshot = if let Some(target_count) = min_undone_position {
             projection_snapshot_service::get_snapshot_before_event_count(
                 &*state.db_pool,
                 target_count,
+                wallet_id,
             ).await.ok().flatten()
         } else {
             None
@@ -631,7 +682,7 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
         // Step 6: Use snapshot if found, otherwise use full cleaned event list
         if let Some(snapshot) = snapshot {
             // Restore from snapshot (pass undone_event_ids to filter them out)
-            if restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok() {
+            if restore_projections_from_snapshot(state, &snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok() {
                 // Get events after the snapshot (from cleaned events)
                 let snapshot_last_db_id = snapshot.last_event_id;
                 let events_after_snapshot: Vec<_> = cleaned_events.iter()
@@ -645,7 +696,7 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                 if !events_after_snapshot.is_empty() {
                     // Apply cleaned events after snapshot
                     let mut empty_undone_set = std::collections::HashSet::new();
-                    if apply_events_to_projections(state, &events_after_snapshot, user_id, &mut empty_undone_set).await.is_ok() {
+                    if apply_events_to_projections(state, &events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
                         tracing::info!("Used snapshot optimization with UNDO: {} events after snapshot", events_after_snapshot.len());
                         true
                     } else {
@@ -668,6 +719,7 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
             if let Ok(Some(snapshot)) = projection_snapshot_service::get_snapshot_before_event(
                 &*state.db_pool,
                 last_id,
+                wallet_id,
             ).await {
                 // Get events after the snapshot
                 let snapshot_last_db_id = snapshot.last_event_id;
@@ -696,10 +748,10 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                         }
                     
                     // Restore projections from snapshot (filter out undone events)
-                    if restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok() {
+                    if restore_projections_from_snapshot(state, &snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok() {
                         // Apply events after snapshot
                         let mut empty_undone_set = std::collections::HashSet::new();
-                        if apply_events_to_projections(state, &events_after_snapshot, user_id, &mut empty_undone_set).await.is_ok() {
+                        if apply_events_to_projections(state, &events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
                             tracing::info!("Used snapshot for optimization: {} events after snapshot", events_after_snapshot.len());
                             true
                         } else {
@@ -723,7 +775,7 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                             }
                         }
                     }
-                    restore_projections_from_snapshot(state, &snapshot, user_id, &undone_event_ids).await.is_ok()
+                    restore_projections_from_snapshot(state, &snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok()
             }
         } else {
             false
@@ -735,12 +787,14 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
 
     // If snapshot optimization failed or not used, do full rebuild
     if !used_snapshot {
-        // Clear existing projections (delete transactions first due to foreign key constraints)
-        sqlx::query("DELETE FROM transactions_projection WHERE true")
+        // Clear existing projections for this wallet (delete transactions first due to foreign key constraints)
+        sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+            .bind(wallet_id)
             .execute(&*state.db_pool)
             .await?;
         
-        sqlx::query("DELETE FROM contacts_projection WHERE true")
+        sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+            .bind(wallet_id)
             .execute(&*state.db_pool)
             .await?;
 
@@ -790,7 +844,7 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
         };
 
         // Process events to rebuild projections
-        apply_events_to_projections(state, &events_to_process, user_id, &mut undone_event_ids).await?;
+        apply_events_to_projections(state, &events_to_process, user_id, wallet_id, &mut undone_event_ids).await?;
     }
 
     // Step 7: Save snapshot after rebuild if needed (every 10 events or after UNDO)
@@ -806,13 +860,14 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
                     || has_undo_events;
                 
                 if should_save {
-                    if let Ok(snapshot_json) = create_snapshot_json(state).await {
+                    if let Ok(snapshot_json) = create_snapshot_json(state, wallet_id).await {
                         let _ = crate::services::projection_snapshot_service::save_snapshot(
                             &*state.db_pool,
                             db_id,
                             event_count,
                             snapshot_json.0,
                             snapshot_json.1,
+                            wallet_id,
                         ).await;
                     }
                 }
@@ -824,18 +879,19 @@ pub async fn rebuild_projections_from_events(state: &AppState) -> Result<(), sql
     Ok(())
 }
 
-/// Create snapshot JSON from current projections
+/// Create snapshot JSON from current projections for a wallet
 /// Returns (contacts_json, transactions_json)
-async fn create_snapshot_json(state: &AppState) -> Result<(serde_json::Value, serde_json::Value), sqlx::Error> {
-    // Get all contacts
+async fn create_snapshot_json(state: &AppState, wallet_id: uuid::Uuid) -> Result<(serde_json::Value, serde_json::Value), sqlx::Error> {
+    // Get all contacts for this wallet
     let contacts = sqlx::query(
         r#"
         SELECT id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at
         FROM contacts_projection
-        WHERE is_deleted = false
+        WHERE wallet_id = $1 AND is_deleted = false
         ORDER BY created_at
         "#
     )
+    .bind(wallet_id)
     .fetch_all(&*state.db_pool)
     .await?;
 
@@ -855,16 +911,17 @@ async fn create_snapshot_json(state: &AppState) -> Result<(serde_json::Value, se
         })
         .collect();
 
-    // Get all transactions
+    // Get all transactions for this wallet
     let transactions = sqlx::query(
         r#"
         SELECT id, user_id, contact_id, type, direction, amount, currency, description, 
                transaction_date, due_date, is_deleted, created_at, updated_at
         FROM transactions_projection
-        WHERE is_deleted = false
+        WHERE wallet_id = $1 AND is_deleted = false
         ORDER BY created_at
         "#
     )
+    .bind(wallet_id)
     .fetch_all(&*state.db_pool)
     .await?;
 
@@ -897,14 +954,17 @@ async fn restore_projections_from_snapshot(
     state: &AppState,
     snapshot: &projection_snapshot_service::ProjectionSnapshot,
     user_id: uuid::Uuid,
+    wallet_id: uuid::Uuid,
     undone_event_ids: &std::collections::HashSet<uuid::Uuid>,
 ) -> Result<(), sqlx::Error> {
-    // Clear existing projections
-    sqlx::query("DELETE FROM transactions_projection WHERE true")
+    // Clear existing projections for this wallet
+    sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
         .execute(&*state.db_pool)
         .await?;
     
-    sqlx::query("DELETE FROM contacts_projection WHERE true")
+    sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
         .execute(&*state.db_pool)
         .await?;
 
@@ -966,12 +1026,13 @@ async fn restore_projections_from_snapshot(
                 sqlx::query(
                     r#"
                     INSERT INTO contacts_projection 
-                    (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, 0)
+                    (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, 0)
                     "#
                 )
                 .bind(contact_id)
                 .bind(user_id)
+                .bind(wallet_id)
                 .bind(name)
                 .bind(username)
                 .bind(phone)
@@ -1026,12 +1087,13 @@ async fn restore_projections_from_snapshot(
                         sqlx::query(
                             r#"
                             INSERT INTO transactions_projection 
-                            (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $12, 0)
+                            (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $13, 0)
                             "#
                         )
                         .bind(transaction_id)
                         .bind(user_id)
+                        .bind(wallet_id)
                         .bind(contact_id)
                         .bind(tx_type)
                         .bind(direction)
@@ -1058,6 +1120,7 @@ async fn apply_events_to_projections(
     state: &AppState,
     events: &[&sqlx::postgres::PgRow],
     user_id: uuid::Uuid,
+    wallet_id: uuid::Uuid,
     undone_event_ids: &mut std::collections::HashSet<uuid::Uuid>,
 ) -> Result<(), sqlx::Error> {
     // First pass: collect UNDO events if not already collected
@@ -1107,8 +1170,8 @@ async fn apply_events_to_projections(
                     sqlx::query(
                         r#"
                         INSERT INTO contacts_projection 
-                        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $8, 0)
+                        (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $9, 0)
                         ON CONFLICT (id) DO UPDATE SET
                             name = EXCLUDED.name,
                             username = EXCLUDED.username,
@@ -1120,6 +1183,7 @@ async fn apply_events_to_projections(
                     )
                     .bind(aggregate_id)
                     .bind(user_id)
+                    .bind(wallet_id)
                     .bind(name)
                     .bind(username)
                     .bind(phone)
@@ -1131,9 +1195,10 @@ async fn apply_events_to_projections(
                 }
                 "UPDATED" => {
                     let current = sqlx::query(
-                        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1"
+                        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
                     )
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .fetch_optional(&*state.db_pool)
                     .await?;
 
@@ -1159,10 +1224,11 @@ async fn apply_events_to_projections(
                                 email = $5,
                                 notes = $6,
                                 updated_at = $7
-                            WHERE id = $1
+                            WHERE id = $1 AND wallet_id = $8
                             "#
                         )
                         .bind(aggregate_id)
+                        .bind(wallet_id)
                         .bind(name)
                         .bind(username)
                         .bind(phone)
@@ -1176,20 +1242,22 @@ async fn apply_events_to_projections(
                 "DELETED" => {
                     // Mark contact as deleted
                     sqlx::query(
-                        "UPDATE contacts_projection SET is_deleted = true, updated_at = $2 WHERE id = $1"
+                        "UPDATE contacts_projection SET is_deleted = true, updated_at = $2 WHERE id = $1 AND wallet_id = $3"
                     )
                     .bind(aggregate_id)
                     .bind(created_at)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                     
                     // Also delete all transactions that reference this deleted contact
                     // This ensures data consistency: deleted contacts don't leave orphaned transactions
                     let deleted_transactions = sqlx::query(
-                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE contact_id = $2 AND is_deleted = false"
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE contact_id = $2 AND wallet_id = $3 AND is_deleted = false"
                     )
                     .bind(created_at)
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                     
@@ -1210,9 +1278,10 @@ async fn apply_events_to_projections(
                     if let Some(cid) = contact_id {
                         // Check if contact exists and is not deleted
                         let contact_exists = sqlx::query_scalar::<_, bool>(
-                            "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND is_deleted = false)"
+                            "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
                         )
                         .bind(cid)
+                        .bind(wallet_id)
                         .fetch_one(&*state.db_pool)
                         .await?;
                         
@@ -1242,8 +1311,8 @@ async fn apply_events_to_projections(
                             sqlx::query(
                                 r#"
                                 INSERT INTO transactions_projection 
-                                (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $11, 0)
+                                (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $12, 0)
                                 ON CONFLICT (id) DO UPDATE SET
                                     contact_id = EXCLUDED.contact_id,
                                     type = EXCLUDED.type,
@@ -1258,6 +1327,7 @@ async fn apply_events_to_projections(
                             )
                             .bind(aggregate_id)
                             .bind(user_id)
+                            .bind(wallet_id)
                             .bind(cid)
                             .bind(tx_type)
                             .bind(direction)
@@ -1274,9 +1344,10 @@ async fn apply_events_to_projections(
                 }
                 "UPDATED" => {
                     let current = sqlx::query(
-                        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
+                        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
                     )
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .fetch_optional(&*state.db_pool)
                     .await?;
 
@@ -1323,10 +1394,11 @@ async fn apply_events_to_projections(
                                 transaction_date = $8,
                                 due_date = $9,
                                 updated_at = $10
-                            WHERE id = $1
+                            WHERE id = $1 AND wallet_id = $11
                             "#
                         )
                         .bind(aggregate_id)
+                        .bind(wallet_id)
                         .bind(contact_id)
                         .bind(tx_type)
                         .bind(direction)
@@ -1342,10 +1414,11 @@ async fn apply_events_to_projections(
                 }
                 "DELETED" => {
                     sqlx::query(
-                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $2 WHERE id = $1"
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $2 WHERE id = $1 AND wallet_id = $3"
                     )
                     .bind(aggregate_id)
                     .bind(created_at)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                 }
@@ -1363,6 +1436,7 @@ async fn apply_single_event_to_projections(
     event: &SyncEventRequest,
     aggregate_id: uuid::Uuid,
     user_id: uuid::Uuid,
+    wallet_id: uuid::Uuid,
     created_at: chrono::NaiveDateTime,
 ) -> Result<(), sqlx::Error> {
     // UNDO events need to remove the undone event's effects from projections
@@ -1396,9 +1470,10 @@ async fn apply_single_event_to_projections(
                             // If the undone event was a transaction CREATED, remove the transaction
                             if undone_event_type == "CREATED" || undone_event_type == "TRANSACTION_CREATED" {
                                 let deleted = sqlx::query(
-                                    "DELETE FROM transactions_projection WHERE id = $1"
+                                    "DELETE FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
                                 )
                                 .bind(undone_aggregate_id)
+                                .bind(wallet_id)
                                 .execute(&*state.db_pool)
                                 .await?;
                                 
@@ -1414,9 +1489,10 @@ async fn apply_single_event_to_projections(
                             // If the undone event was a contact CREATED, remove the contact
                             if undone_event_type == "CREATED" {
                                 let deleted = sqlx::query(
-                                    "DELETE FROM contacts_projection WHERE id = $1"
+                                    "DELETE FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
                                 )
                                 .bind(undone_aggregate_id)
+                                .bind(wallet_id)
                                 .execute(&*state.db_pool)
                                 .await?;
                                 
@@ -1477,8 +1553,8 @@ async fn apply_single_event_to_projections(
                     sqlx::query(
                         r#"
                         INSERT INTO contacts_projection 
-                        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $8, 0)
+                        (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $9, 0)
                         ON CONFLICT (id) DO UPDATE SET
                             name = EXCLUDED.name,
                             username = EXCLUDED.username,
@@ -1490,6 +1566,7 @@ async fn apply_single_event_to_projections(
                     )
                     .bind(aggregate_id)
                     .bind(user_id)
+                    .bind(wallet_id)
                     .bind(name)
                     .bind(event_data.get("username").and_then(|v| v.as_str()))
                     .bind(event_data.get("phone").and_then(|v| v.as_str()))
@@ -1509,7 +1586,7 @@ async fn apply_single_event_to_projections(
                             email = COALESCE($4, email),
                             notes = COALESCE($5, notes),
                             updated_at = $6
-                        WHERE id = $7
+                        WHERE id = $7 AND wallet_id = $8
                         "#
                     )
                     .bind(event_data.get("name").and_then(|v| v.as_str()))
@@ -1519,26 +1596,29 @@ async fn apply_single_event_to_projections(
                     .bind(event_data.get("notes").and_then(|v| v.as_str()))
                     .bind(created_at)
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                 }
                 "DELETED" => {
                     // Mark contact as deleted
                     sqlx::query(
-                        "UPDATE contacts_projection SET is_deleted = true, updated_at = $1 WHERE id = $2"
+                        "UPDATE contacts_projection SET is_deleted = true, updated_at = $1 WHERE id = $2 AND wallet_id = $3"
                     )
                     .bind(created_at)
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                     
                     // Also delete all transactions that reference this deleted contact
                     // This ensures data consistency: deleted contacts don't leave orphaned transactions
                     let deleted_transactions = sqlx::query(
-                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE contact_id = $2 AND is_deleted = false"
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE contact_id = $2 AND wallet_id = $3 AND is_deleted = false"
                     )
                     .bind(created_at)
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                     
@@ -1561,9 +1641,10 @@ async fn apply_single_event_to_projections(
                     // Only create transaction if contact exists and is not deleted
                     // If contact was deleted, its transactions should also be ignored/deleted
                     let contact_exists = sqlx::query_scalar::<_, bool>(
-                        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND is_deleted = false)"
+                        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
                     )
                     .bind(contact_id)
+                    .bind(wallet_id)
                     .fetch_one(&*state.db_pool)
                     .await?;
                     
@@ -1594,8 +1675,8 @@ async fn apply_single_event_to_projections(
                     sqlx::query(
                         r#"
                         INSERT INTO transactions_projection 
-                        (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, $11, $11, 0)
+                        (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $12, 0)
                         ON CONFLICT (id) DO UPDATE SET
                             contact_id = EXCLUDED.contact_id,
                             type = EXCLUDED.type,
@@ -1610,6 +1691,7 @@ async fn apply_single_event_to_projections(
                     )
                     .bind(aggregate_id)
                     .bind(user_id)
+                    .bind(wallet_id)
                     .bind(contact_id)
                     .bind(txn_type)
                     .bind(direction)
@@ -1652,7 +1734,7 @@ async fn apply_single_event_to_projections(
                         UPDATE transactions_projection 
                         SET contact_id = $1, type = $2, direction = $3, amount = $4, currency = $5, 
                             description = $6, transaction_date = $7, due_date = $8, updated_at = $9
-                        WHERE id = $10
+                        WHERE id = $10 AND wallet_id = $11
                         "#
                     )
                     .bind(contact_id)
@@ -1665,15 +1747,17 @@ async fn apply_single_event_to_projections(
                     .bind(due_date)
                     .bind(created_at)
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                 }
                 "DELETED" => {
                     sqlx::query(
-                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE id = $2"
+                        "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE id = $2 AND wallet_id = $3"
                     )
                     .bind(created_at)
                     .bind(aggregate_id)
+                    .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
                 }

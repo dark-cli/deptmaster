@@ -605,7 +605,13 @@
     </div>
 
     <div class="container">
-        <button class="refresh-btn" onclick="loadData()">🔄 Refresh Data</button>
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <button class="refresh-btn" onclick="loadData()">🔄 Refresh Data</button>
+            <label style="font-weight: 600;">Wallet:</label>
+            <select id="walletFilter" onchange="onWalletFilterChange()" style="padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F; min-width: 200px;">
+                <option value="">All wallets</option>
+            </select>
+        </div>
 
         <div class="stats" id="stats">
             <div class="stat-card">
@@ -619,6 +625,10 @@
             <div class="stat-card">
                 <h3>Total Debt</h3>
                 <div class="value" id="totalDebt">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Wallets</h3>
+                <div class="value" id="totalWallets">-</div>
             </div>
         </div>
 
@@ -643,6 +653,7 @@
             <button class="tab" onclick="switchTab('contacts')">Contacts</button>
             <button class="tab" onclick="switchTab('transactions')">Transactions</button>
             <button class="tab" onclick="switchTab('projections')">Projections</button>
+            <button class="tab" onclick="switchTab('wallets')">Wallets</button>
             <button class="tab" onclick="switchTab('users')">User Management</button>
         </div>
 
@@ -848,6 +859,27 @@
             </div>
         </div>
 
+        <div id="wallets" class="tab-content">
+            <div class="table-container">
+                <div style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC; margin-bottom: 1rem;">
+                    <button onclick="showCreateWalletModal()" class="refresh-btn" style="margin: 0; background: #4caf50;">+ Create Wallet</button>
+                </div>
+                <div class="loading" id="walletsLoading">Loading wallets...</div>
+                <table id="walletsTable" style="display: none; width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Description</th>
+                            <th>Active</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="walletsBody"></tbody>
+                </table>
+            </div>
+        </div>
+
         <div id="users" class="tab-content">
             <div class="table-container">
                 <div style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC; margin-bottom: 1rem;">
@@ -898,12 +930,12 @@
             </div>
             <div style="padding: 1rem;">
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Email:</label>
-                    <input type="email" id="loginEmail" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" placeholder="admin@debitum.local">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Username:</label>
+                    <input type="text" id="loginEmail" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" value="admin" placeholder="admin">
                 </div>
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Password:</label>
-                    <input type="password" id="loginPassword" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" placeholder="Enter password">
+                    <input type="password" id="loginPassword" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" value="admin123" placeholder="admin123">
                 </div>
                 <button onclick="performLogin()" class="refresh-btn" style="width: 100%; margin: 0;">Login</button>
                 <div id="loginError" style="color: #f44336; margin-top: 0.5rem; display: none;"></div>
@@ -917,7 +949,22 @@
         // Use config from config.js if available, otherwise use defaults
         const API_URL = window.ADMIN_CONFIG?.API_URL || window.location.origin + '/api';
         const WS_URL = window.ADMIN_CONFIG?.WS_URL || ((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws');
-        
+
+        function getWalletFilterId() {
+            const el = document.getElementById('walletFilter');
+            return el ? el.value : '';
+        }
+
+        function walletQuerySuffix() {
+            const id = getWalletFilterId();
+            return id ? '?wallet_id=' + encodeURIComponent(id) : '';
+        }
+
+        function onWalletFilterChange() {
+            allTransactions = [];
+            loadData();
+        }
+
         // Authentication
         // Logout function to clear all auth data
         function logout() {
@@ -1026,7 +1073,7 @@
             const errorDiv = document.getElementById('loginError');
 
             if (!email || !password) {
-                errorDiv.textContent = 'Please enter email and password';
+                errorDiv.textContent = 'Please enter username and password';
                 errorDiv.style.display = 'block';
                 return;
             }
@@ -1179,7 +1226,9 @@
                 const params = new URLSearchParams();
                 params.append('date_from', periodStart.toISOString());
                 params.append('limit', '10000'); // Get all events in range
-                
+                const wId = getWalletFilterId();
+                if (wId) params.append('wallet_id', wId);
+
                 const response = await authenticatedFetch(`${API_URL}/admin/events?${params.toString()}`);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
@@ -1737,6 +1786,22 @@
             
             try {
                 console.log('🔄 Loading admin data...');
+                // Populate wallet filter dropdown
+                try {
+                    const walletsRes = await authenticatedFetch(`${API_URL}/admin/wallets`);
+                    if (walletsRes.ok) {
+                        const data = await walletsRes.json();
+                        const wallets = data.wallets || [];
+                        const sel = document.getElementById('walletFilter');
+                        const current = sel ? sel.value : '';
+                        if (sel) {
+                            sel.innerHTML = '<option value="">All wallets</option>' + wallets.map(w => '<option value="' + escapeHtml(w.id) + '">' + escapeHtml(w.name) + '</option>').join('');
+                            if (current && wallets.some(w => w.id === current)) sel.value = current;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Could not load wallets for filter:', e);
+                }
                 // Load stats first to populate currentTotalDebt
                 await loadStats();
                 // Then load events (which will use currentTotalDebt as fallback)
@@ -1759,16 +1824,21 @@
 
         async function loadStats() {
             try {
-                const [contacts, transactions, totalDebtResponse] = await Promise.all([
-                    authenticatedFetch(`${API_URL}/admin/contacts`).then(r => {
+                const walletSuffix = walletQuerySuffix();
+                const [contacts, transactions, totalDebtResponse, walletsResponse] = await Promise.all([
+                    authenticatedFetch(`${API_URL}/admin/contacts${walletSuffix}`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
                     }),
-                    authenticatedFetch(`${API_URL}/admin/transactions`).then(r => {
+                    authenticatedFetch(`${API_URL}/admin/transactions${walletSuffix}`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
                     }),
-                    authenticatedFetch(`${API_URL}/admin/total-debt`).then(r => {
+                    authenticatedFetch(`${API_URL}/admin/total-debt${walletSuffix}`).then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        return r.json();
+                    }),
+                    authenticatedFetch(`${API_URL}/admin/wallets`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
                     })
@@ -1776,6 +1846,7 @@
 
                 // Use total_debt from latest event (more efficient and solid)
                 const totalDebt = totalDebtResponse.total_debt || 0;
+                const wallets = walletsResponse.wallets || [];
 
                 const formatAmount = (amt) => {
                     return amt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -1785,11 +1856,14 @@
                 document.getElementById('totalTransactions').textContent = transactions.length;
                 const totalDebtText = `${formatAmount(totalDebt)} IQD`;
                 document.getElementById('totalDebt').textContent = totalDebtText;
+                document.getElementById('totalWallets').textContent = wallets.length;
                 currentTotalDebt = totalDebt; // Store for fallback in events
             } catch (error) {
                 console.error('Error loading stats:', error);
                 document.getElementById('totalContacts').textContent = 'Error';
                 document.getElementById('totalTransactions').textContent = 'Error';
+                const totalWalletsEl = document.getElementById('totalWallets');
+                if (totalWalletsEl) totalWalletsEl.textContent = 'Error';
             }
         }
 
@@ -1916,6 +1990,11 @@
                 params.append('date_to', dateTo + 'T23:59:59');
             }
 
+            const walletId = getWalletFilterId();
+            if (walletId) {
+                params.append('wallet_id', walletId);
+            }
+
             try {
                 if (!silent) {
                     loading.style.display = 'block';
@@ -1999,7 +2078,7 @@
                 // Fetch missing contact data from contacts endpoint
                 if (contactIds.size > 0) {
                     try {
-                        const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
+                        const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts${walletQuerySuffix()}`);
                         if (contactsResponse.ok) {
                             const contacts = await contactsResponse.json();
                             contacts.forEach(contact => {
@@ -3073,7 +3152,7 @@
             const body = document.getElementById('contactsBody');
 
             try {
-                const response = await authenticatedFetch(`${API_URL}/admin/contacts`);
+                const response = await authenticatedFetch(`${API_URL}/admin/contacts${walletQuerySuffix()}`);
                 if (!response.ok) {
                     const text = await response.text();
                     throw new Error(`HTTP ${response.status}: ${text}`);
@@ -3119,7 +3198,7 @@
             try {
                 // Load all transactions if not already loaded
                 if (allTransactions.length === 0) {
-                    const response = await authenticatedFetch(`${API_URL}/admin/transactions`);
+                    const response = await authenticatedFetch(`${API_URL}/admin/transactions${walletQuerySuffix()}`);
                     if (!response.ok) {
                         const text = await response.text();
                         throw new Error(`HTTP ${response.status}: ${text}`);
@@ -3128,7 +3207,7 @@
                 }
 
                 // Load contacts for name and username mapping
-                const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
+                const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts${walletQuerySuffix()}`);
                 let contacts = [];
                 if (contactsResponse.ok) {
                     contacts = await contactsResponse.json();
@@ -3298,10 +3377,105 @@
             // Load data when switching to specific tabs
             if (tabName === 'users') {
                 loadUsers();
+            } else if (tabName === 'wallets') {
+                loadWallets();
             } else if (tabName === 'transactions') {
                 // Reset transactions cache when switching to tab to ensure fresh data
                 allTransactions = [];
                 loadTransactions();
+            }
+        }
+
+        // Wallet Management Functions
+        async function loadWallets() {
+            const loading = document.getElementById('walletsLoading');
+            const table = document.getElementById('walletsTable');
+            const body = document.getElementById('walletsBody');
+
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/wallets`);
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Authentication required. Please login.');
+                    }
+                    const text = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                }
+                const data = await response.json();
+                const wallets = data.wallets || [];
+
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                body.innerHTML = wallets.map(w => `
+                    <tr>
+                        <td>${escapeHtml(w.name)}</td>
+                        <td>${escapeHtml(w.description || '-')}</td>
+                        <td>${w.is_active ? 'Yes' : 'No'}</td>
+                        <td>${formatDateTime(w.created_at)}</td>
+                        <td>
+                            <button onclick="showWalletUsersModal('${w.id}', '${escapeHtml(w.name).replace(/'/g, "\\'")}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">Manage Users</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                loading.innerHTML = '<div class="error">Error loading wallets: ' + error.message + '</div>';
+                loading.style.display = 'block';
+                table.style.display = 'none';
+                console.error('Error:', error);
+            }
+        }
+
+        function showCreateWalletModal() {
+            const name = prompt('Wallet name:');
+            if (!name || !name.trim()) return;
+            const description = prompt('Description (optional):') || null;
+            createWallet(name.trim(), description);
+        }
+
+        async function createWallet(name, description) {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/wallets`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description: description || null })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || 'Failed to create wallet');
+                }
+
+                alert('Wallet created successfully!');
+                loadWallets();
+            } catch (error) {
+                alert('Error creating wallet: ' + error.message);
+            }
+        }
+
+        function showWalletUsersModal(walletId, walletName) {
+            const userId = prompt('Enter user ID (UUID) to add to wallet "' + walletName + '":');
+            if (!userId || !userId.trim()) return;
+            const role = prompt('Role (owner / admin / member):', 'member') || 'member';
+            addUserToWallet(walletId, userId.trim(), role);
+        }
+
+        async function addUserToWallet(walletId, userId, role) {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/admin/wallets/${walletId}/users`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, role })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || 'Failed to add user to wallet');
+                }
+
+                alert('User added to wallet!');
+                loadWallets();
+            } catch (error) {
+                alert('Error: ' + error.message);
             }
         }
 

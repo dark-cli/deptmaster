@@ -18,8 +18,10 @@ use test_helpers::*;
 async fn test_update_transaction_updates_projection() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
-    let contact_id = create_test_contact(&pool, user_id, "Test Contact").await;
-    let transaction_id = create_test_transaction(&pool, user_id, contact_id, 10000, "lent").await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+    let contact_id = create_test_contact(&pool, user_id, wallet_id, "Test Contact").await;
+    let transaction_id = create_test_transaction(&pool, user_id, wallet_id, contact_id, 10000, "lent").await;
 
     // Create app state
     let config = Arc::new(Config::from_env().unwrap());
@@ -28,6 +30,7 @@ async fn test_update_transaction_updates_projection() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // Update transaction
@@ -46,6 +49,7 @@ async fn test_update_transaction_updates_projection() {
     let result = debt_tracker_api::handlers::transactions::update_transaction(
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(update_request),
     )
     .await;
@@ -72,13 +76,15 @@ async fn test_update_transaction_updates_projection() {
 async fn test_update_transaction_recalculates_contact_balance() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
-    let contact_id = create_test_contact(&pool, user_id, "Test Contact").await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+    let contact_id = create_test_contact(&pool, user_id, wallet_id, "Test Contact").await;
     
     // Create initial transaction: lent 10000
-    let transaction_id = create_test_transaction(&pool, user_id, contact_id, 10000, "lent").await;
+    let transaction_id = create_test_transaction(&pool, user_id, wallet_id, contact_id, 10000, "lent").await;
     
     // Verify initial balance
-    let initial_balance = get_contact_balance(&pool, contact_id).await;
+    let initial_balance = get_contact_balance(&pool, wallet_id, contact_id).await;
     assert_eq!(initial_balance, 10000);
 
     // Create app state
@@ -88,6 +94,7 @@ async fn test_update_transaction_recalculates_contact_balance() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // Update transaction amount to 20000
@@ -106,6 +113,7 @@ async fn test_update_transaction_recalculates_contact_balance() {
     let result = debt_tracker_api::handlers::transactions::update_transaction(
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(update_request),
     )
     .await;
@@ -113,7 +121,7 @@ async fn test_update_transaction_recalculates_contact_balance() {
     assert!(result.is_ok());
 
     // Verify balance was recalculated
-    let new_balance = get_contact_balance(&pool, contact_id).await;
+    let new_balance = get_contact_balance(&pool, wallet_id, contact_id).await;
     assert_eq!(new_balance, 20000);
 }
 
@@ -122,8 +130,10 @@ async fn test_update_transaction_recalculates_contact_balance() {
 async fn test_delete_transaction_soft_deletes() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
-    let contact_id = create_test_contact(&pool, user_id, "Test Contact").await;
-    let transaction_id = create_test_transaction(&pool, user_id, contact_id, 10000, "lent").await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+    let contact_id = create_test_contact(&pool, user_id, wallet_id, "Test Contact").await;
+    let transaction_id = create_test_transaction(&pool, user_id, wallet_id, contact_id, 10000, "lent").await;
 
     // Create app state
     let config = Arc::new(Config::from_env().unwrap());
@@ -132,6 +142,7 @@ async fn test_delete_transaction_soft_deletes() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // Delete transaction
@@ -141,6 +152,7 @@ async fn test_delete_transaction_soft_deletes() {
     let result = debt_tracker_api::handlers::transactions::delete_transaction(
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(delete_request),
     )
     .await;
@@ -167,13 +179,15 @@ async fn test_delete_transaction_soft_deletes() {
 async fn test_delete_transaction_recalculates_contact_balance() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
-    let contact_id = create_test_contact(&pool, user_id, "Test Contact").await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+    let contact_id = create_test_contact(&pool, user_id, wallet_id, "Test Contact").await;
     
     // Create transaction: lent 10000
-    let transaction_id = create_test_transaction(&pool, user_id, contact_id, 10000, "lent").await;
+    let transaction_id = create_test_transaction(&pool, user_id, wallet_id, contact_id, 10000, "lent").await;
     
     // Verify initial balance
-    let initial_balance = get_contact_balance(&pool, contact_id).await;
+    let initial_balance = get_contact_balance(&pool, wallet_id, contact_id).await;
     assert_eq!(initial_balance, 10000);
 
     // Create app state
@@ -183,6 +197,7 @@ async fn test_delete_transaction_recalculates_contact_balance() {
         db_pool: Arc::new(pool.clone()),
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
     // Delete transaction
@@ -192,6 +207,7 @@ async fn test_delete_transaction_recalculates_contact_balance() {
     let result = debt_tracker_api::handlers::transactions::delete_transaction(
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
+        wallet_context_extension(wallet_id, "owner"),
         axum::Json(delete_request),
     )
     .await;
@@ -199,6 +215,6 @@ async fn test_delete_transaction_recalculates_contact_balance() {
     assert!(result.is_ok());
 
     // Verify balance was recalculated (should be 0 after deletion)
-    let new_balance = get_contact_balance(&pool, contact_id).await;
+    let new_balance = get_contact_balance(&pool, wallet_id, contact_id).await;
     assert_eq!(new_balance, 0);
 }

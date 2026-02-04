@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/contact.dart';
 import '../models/transaction.dart';
+import '../models/wallet.dart';
 import 'auth_service.dart';
 import 'backend_config_service.dart';
 import 'connection_manager.dart';
+import 'wallet_service.dart';
 
 class ApiService {
   // Get base URL from backend configuration
@@ -12,14 +14,30 @@ class ApiService {
     return await BackendConfigService.getApiBaseUrl();
   }
 
-  // Get auth headers with token
+  // Get auth headers with token and wallet_id
   static Future<Map<String, String>> _getHeaders() async {
     final headers = {'Content-Type': 'application/json'};
     final token = await AuthService.getToken();
     if (token != null) {
       headers['Authorization'] = 'Bearer $token';
     }
+    // Add wallet_id to header (middleware prefers header over query param)
+    final walletId = await WalletService.getCurrentWalletId();
+    if (walletId != null && walletId.isNotEmpty) {
+      headers['X-Wallet-Id'] = walletId;
+    }
     return headers;
+  }
+
+  // Helper to add wallet_id to query parameters as fallback
+  static Future<Uri> _addWalletIdToUri(Uri uri) async {
+    final walletId = await WalletService.getCurrentWalletId();
+    if (walletId != null && walletId.isNotEmpty) {
+      final queryParams = Map<String, String>.from(uri.queryParameters);
+      queryParams['wallet_id'] = walletId;
+      return uri.replace(queryParameters: queryParams);
+    }
+    return uri;
   }
 
   // Helper method to handle HTTP responses and check for 401 errors
@@ -38,8 +56,9 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
+      final uri = await _addWalletIdToUri(Uri.parse('$apiBaseUrl/contacts'));
       final response = await _handleResponse(await http.get(
-        Uri.parse('$apiBaseUrl/contacts'),
+        uri,
         headers: headers,
       ));
       if (response.statusCode == 200) {
@@ -78,8 +97,9 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/contacts'));
       final response = await _handleResponse(await http.post(
-        Uri.parse('$apiUrl/contacts'),
+        uri,
         headers: headers,
         body: json.encode({
           'name': contact.name,
@@ -92,6 +112,7 @@ class ApiService {
       if (response.statusCode == 201 || response.statusCode == 200) {
         final data = json.decode(response.body);
         // Return a contact with the data from response
+        final walletId = await WalletService.getCurrentWalletId();
         return Contact(
           id: data['id'] as String,
           name: data['name'] as String,
@@ -101,6 +122,7 @@ class ApiService {
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
           balance: (data['balance'] as num?)?.toInt() ?? 0,
+          walletId: walletId, // Set wallet_id from current wallet
         );
       } else {
         final errorBody = response.body;
@@ -123,8 +145,9 @@ class ApiService {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/contacts/$contactId'));
       final response = await _handleResponse(await http.put(
-        Uri.parse('$apiUrl/contacts/$contactId'),
+        uri,
         headers: headers,
         body: json.encode({
           'name': contact.name,
@@ -157,8 +180,9 @@ class ApiService {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/contacts/$contactId'));
       final response = await _handleResponse(await http.delete(
-        Uri.parse('$apiUrl/contacts/$contactId'),
+        uri,
         headers: headers,
         body: json.encode({
           'comment': comment ?? 'Contact deleted via mobile app',
@@ -214,8 +238,9 @@ class ApiService {
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
       final headers = await _getHeaders();
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/transactions'));
       final response = await _handleResponse(await http.get(
-        Uri.parse('$apiUrl/transactions'),
+        uri,
         headers: headers,
       ));
       if (response.statusCode == 200) {
@@ -261,8 +286,9 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/transactions'));
       final response = await _handleResponse(await http.post(
-        Uri.parse('$apiUrl/transactions'),
+        uri,
         headers: headers,
         body: json.encode({
           'contact_id': transaction.contactId,
@@ -279,6 +305,7 @@ class ApiService {
       if (response.statusCode == 201 || response.statusCode == 200) {
         final data = json.decode(response.body);
         // Return a transaction with the data from request
+        final walletId = await WalletService.getCurrentWalletId();
         return Transaction(
           id: data['id'] as String,
           contactId: data['contact_id'] as String,
@@ -290,6 +317,7 @@ class ApiService {
           transactionDate: transaction.transactionDate,
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
+          walletId: walletId, // Set wallet_id from current wallet
         );
       } else {
         final errorBody = response.body;
@@ -336,8 +364,9 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/transactions/$transactionId'));
       final response = await _handleResponse(await http.put(
-        Uri.parse('$apiUrl/transactions/$transactionId'),
+        uri,
         headers: headers,
         body: json.encode(body),
       ));
@@ -362,8 +391,9 @@ class ApiService {
       final headers = await _getHeaders();
       final apiBaseUrl = await baseUrl;
       final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/transactions/$transactionId'));
       final response = await _handleResponse(await http.delete(
-        Uri.parse('$apiUrl/transactions/$transactionId'),
+        uri,
         headers: headers,
         body: json.encode({
           'comment': comment ?? 'Transaction deleted via mobile app',
@@ -390,8 +420,9 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final baseUrl = await BackendConfigService.getBaseUrl();
+      final uri = await _addWalletIdToUri(Uri.parse('$baseUrl/api/sync/hash'));
       final response = await _handleResponse(await http.get(
-        Uri.parse('$baseUrl/api/sync/hash'),
+        uri,
         headers: headers,
       ));
 
@@ -410,13 +441,14 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final baseUrl = await BackendConfigService.getBaseUrl();
-      final uri = Uri.parse('$baseUrl/api/sync/events');
-      final uriWithParams = since != null
-          ? uri.replace(queryParameters: {'since': since})
-          : uri;
+      var uri = Uri.parse('$baseUrl/api/sync/events');
+      if (since != null) {
+        uri = uri.replace(queryParameters: {'since': since});
+      }
+      uri = await _addWalletIdToUri(uri);
 
       final response = await _handleResponse(await http.get(
-        uriWithParams,
+        uri,
         headers: headers,
       ));
 
@@ -436,8 +468,9 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final baseUrl = await BackendConfigService.getBaseUrl();
+      final uri = await _addWalletIdToUri(Uri.parse('$baseUrl/api/sync/events'));
       final response = await _handleResponse(await http.post(
-        Uri.parse('$baseUrl/api/sync/events'),
+        uri,
         headers: headers,
         body: json.encode(events),
       ));
@@ -471,5 +504,93 @@ class ApiService {
     print('⚠️ deleteEvent is deprecated - use UNDO events instead');
     // Endpoint no longer exists - return false
     return false;
+  }
+
+  // Wallet methods
+  /// Create a new wallet for the current user (user becomes owner). No X-Wallet-Id needed.
+  static Future<Wallet?> createWallet({required String name, String? description}) async {
+    try {
+      final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final response = await _handleResponse(await http.post(
+        Uri.parse('$apiUrl/wallets'),
+        headers: headers,
+        body: json.encode({'name': name, 'description': description ?? ''}),
+      ));
+      if (response.statusCode == 201) {
+        final data = json.decode(response.body);
+        final id = data['id'] as String?;
+        final nameStr = data['name'] as String? ?? name;
+        if (id == null) return null;
+        return Wallet(
+          id: id,
+          name: nameStr,
+          description: description != null && description.isNotEmpty ? description : null,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          createdBy: null,
+          isActive: true,
+        );
+      }
+    } catch (e) {
+      print('Error creating wallet: $e');
+    }
+    return null;
+  }
+
+  static Future<List<Wallet>> getWallets() async {
+    final headers = await _getHeaders();
+    final apiBaseUrl = await baseUrl;
+    final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+    final response = await _handleResponse(await http.get(
+      Uri.parse('$apiUrl/wallets'),
+      headers: headers,
+    ));
+    if (response.statusCode != 200) {
+      final errorStr = response.body;
+      print('Error fetching wallets: HTTP ${response.statusCode}');
+      print('Response: $errorStr');
+      throw Exception('Failed to load wallets: ${response.statusCode}');
+    }
+    final responseData = json.decode(response.body);
+    List<dynamic> walletsData;
+    if (responseData is Map && responseData.containsKey('wallets')) {
+      walletsData = responseData['wallets'] as List<dynamic>;
+    } else if (responseData is List) {
+      walletsData = responseData;
+    } else {
+      walletsData = [];
+    }
+    try {
+      return walletsData.map((json) => Wallet.fromJson(json as Map<String, dynamic>)).toList();
+    } catch (e, st) {
+      print('Error parsing wallets response: $e');
+      print('Stack: $st');
+      print('Data: $walletsData');
+      rethrow;
+    }
+  }
+
+  static Future<Wallet?> getWalletById(String walletId) async {
+    try {
+      final headers = await _getHeaders();
+      final apiBaseUrl = await baseUrl;
+      final apiUrl = apiBaseUrl.replaceAll('/admin', '');
+      final uri = await _addWalletIdToUri(Uri.parse('$apiUrl/wallets/$walletId'));
+      final response = await _handleResponse(await http.get(
+        uri,
+        headers: headers,
+      ));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return Wallet.fromJson(data);
+      } else {
+        print('Error fetching wallet: HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching wallet: $e');
+    }
+    return null;
   }
 }

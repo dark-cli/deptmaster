@@ -36,19 +36,17 @@ void main() {
       Hive.registerAdapter(TransactionDirectionAdapter());
       Hive.registerAdapter(EventAdapter());
       
-      // Ensure test user exists once for all tests (major performance optimization)
-      // This avoids calling the Rust binary before each test
+      // Ensure admin user exists (used by createUniqueTestUserAndWallet to create users via API)
       await ensureTestUserExists();
     });
     
     setUp(() async {
-      // Reset server before each test
-      await resetServer();
       await waitForServerReady();
       
-      // Note: Test user is ensured in setUpAll to avoid 1.2s delay per test
+      // Each test gets its own user and wallet for isolation
+      final creds = await createUniqueTestUserAndWallet();
       
-      // Clear all Hive boxes
+      // Clear local Hive boxes (these are namespaced per user/wallet, but clear defaults for safety)
       try {
         await Hive.box<Contact>('contacts').clear();
         await Hive.box<Transaction>('transactions').clear();
@@ -57,10 +55,28 @@ void main() {
         // Boxes might not exist yet
       }
       
-      // Create app instances
-      app1 = await AppInstance.create(id: 'app1', serverUrl: 'http://localhost:8000');
-      app2 = await AppInstance.create(id: 'app2', serverUrl: 'http://localhost:8000');
-      app3 = await AppInstance.create(id: 'app3', serverUrl: 'http://localhost:8000');
+      // Create app instances with this test's unique user and wallet
+      app1 = await AppInstance.create(
+        id: 'app1',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app2 = await AppInstance.create(
+        id: 'app2',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app3 = await AppInstance.create(
+        id: 'app3',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
       
       // Initialize all instances in parallel (optimization)
       await Future.wait([

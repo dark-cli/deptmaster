@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../services/local_database_service_v2.dart';
+import '../services/wallet_service.dart';
 import '../services/dummy_data_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/toast_service.dart';
@@ -31,6 +32,20 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
     super.initState();
     if (widget.initialName != null) {
       _nameController.text = widget.initialName!;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _requireWallet());
+  }
+
+  /// If user has no wallet, tell them to create one first and navigate to create-wallet.
+  Future<void> _requireWallet() async {
+    if (WalletService.getCurrentWalletId() != null) return;
+    final wallets = await WalletService.getUserWallets();
+    if (wallets.isEmpty && mounted) {
+      ToastService.showInfoFromContext(context, 'Create a wallet first to add contacts.');
+      Navigator.of(context).pop();
+      Navigator.of(context).pushNamed('/create-wallet');
+    } else if (wallets.isNotEmpty && mounted) {
+      await WalletService.setCurrentWalletId(wallets.first.id);
     }
   }
 

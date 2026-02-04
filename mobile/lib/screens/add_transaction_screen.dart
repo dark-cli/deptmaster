@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
 import '../services/local_database_service_v2.dart';
+import '../services/wallet_service.dart';
 import '../services/dummy_data_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/settings_service.dart';
@@ -79,6 +80,20 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     _descriptionController.addListener(_onDescriptionChanged);
     _amountHasText = _amountController.text.isNotEmpty;
     _isClosingTransaction = _descriptionController.text.startsWith('Close:');
+    WidgetsBinding.instance.addPostFrameCallback((_) => _requireWallet());
+  }
+
+  /// If user has no wallet, tell them to create one first and navigate to create-wallet.
+  Future<void> _requireWallet() async {
+    if (WalletService.getCurrentWalletId() != null) return;
+    final wallets = await WalletService.getUserWallets();
+    if (wallets.isEmpty && mounted) {
+      ToastService.showInfoFromContext(context, 'Create a wallet first to add transactions.');
+      Navigator.of(context).pop();
+      Navigator.of(context).pushNamed('/create-wallet');
+    } else if (wallets.isNotEmpty && mounted) {
+      await WalletService.setCurrentWalletId(wallets.first.id);
+    }
   }
 
   void _onAmountChanged() {

@@ -7,10 +7,15 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import '../models/event.dart';
+import '../models/wallet.dart';
 import '../services/event_store_service.dart';
 import '../services/local_database_service_v2.dart';
 import '../services/state_builder.dart';
 import '../services/realtime_service.dart';
+import '../services/wallet_service.dart';
+import '../services/auth_service.dart';
+import '../services/sync_service_v2.dart';
+import '../services/dummy_data_service.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
@@ -36,6 +41,11 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   bool _showFilters = false; // Collapsible filters for mobile
   bool _isReloading = false; // Guard to prevent infinite loops
   
+  // Wallet selection (events are scoped to selected wallet)
+  List<Wallet> _wallets = [];
+  String? _selectedWalletId;
+  bool _walletsLoading = true;
+  
   // Filters
   String _searchQuery = '';
   String _eventTypeFilter = 'all';
@@ -46,19 +56,52 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   @override
   void initState() {
     super.initState();
-    // Set initial date filters if provided
     _dateFrom = widget.initialDateFrom;
     _dateTo = widget.initialDateTo;
-    _loadEvents();
-    
-    // Listen for real-time updates
+    _selectedWalletId = WalletService.getCurrentWalletId();
+    _loadWalletsThenEvents();
     RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Connect WebSocket if not connected
     RealtimeService.connect();
-    
-    // Listen to local event store changes for sync state updates
     _setupLocalListeners();
+  }
+
+  Future<void> _loadWalletsThenEvents() async {
+    setState(() {
+      _walletsLoading = true;
+    });
+    try {
+      final wallets = await WalletService.getUserWallets();
+      if (mounted) {
+        final currentId = WalletService.getCurrentWalletId();
+        final validId = currentId != null &&
+            wallets.any((w) => w.id == currentId);
+        String? newSelected = wallets.isNotEmpty
+            ? (validId ? currentId : wallets.first.id)
+            : null;
+        if (!validId && newSelected != null) {
+          await WalletService.setCurrentWalletId(newSelected);
+          final userId = await AuthService.getUserId();
+          if (userId != null && !kIsWeb) {
+            await DummyDataService.initializeForUserAndWallet(userId, newSelected);
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _wallets = wallets;
+            _walletsLoading = false;
+            _selectedWalletId = newSelected;
+          });
+          await _loadEvents();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _walletsLoading = false;
+        });
+        await _loadEvents();
+      }
+    }
   }
 
   void _setupLocalListeners() {
@@ -126,6 +169,22 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     super.dispose();
   }
 
+  Future<void> _onWalletSelected(String? walletId) async {
+    if (walletId == null || walletId == _selectedWalletId) return;
+    setState(() {
+      _selectedWalletId = walletId;
+    });
+    await WalletService.setCurrentWalletId(walletId);
+    final userId = await AuthService.getUserId();
+    if (userId != null && !kIsWeb) {
+      await DummyDataService.initializeForUserAndWallet(userId, walletId);
+    }
+    if (mounted) await _loadEvents();
+    if (!kIsWeb) {
+      SyncServiceV2.manualSync();
+    }
+  }
+
   Future<void> _loadEvents() async {
     if (!mounted || _isReloading) return;
     
@@ -135,21 +194,30 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     });
 
     try {
-      // Ensure event store is initialized before loading
       await EventStoreService.initialize();
       
-      // Set up local listeners if not already set up (events box is now initialized)
       if (!kIsWeb) {
         try {
           final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-          // Add listener (it's safe to add multiple times, but we'll track it)
           eventsBox.listenable().addListener(_onLocalEventsChanged);
         } catch (e) {
           // Ignore if box not available
         }
       }
       
-      final events = await EventStoreService.getAllEvents();
+      // Load events for the selected wallet only (none if no wallet selected)
+      final walletId = _selectedWalletId;
+      if (walletId == null || walletId.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _allEvents = [];
+          _loading = false;
+          _isReloading = false;
+        });
+        _applyFilters();
+        return;
+      }
+      final events = await EventStoreService.getEventsForWallet(walletId);
       
       if (!mounted) return;
       
@@ -461,6 +529,65 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       ),
       body: Column(
         children: [
+          // Wallet selector
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).dividerColor,
+                  width: 1,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.account_balance_wallet, size: 20, color: ThemeColors.gray(context)),
+                const SizedBox(width: 8),
+                Text(
+                  'Wallet:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: ThemeColors.gray(context),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _walletsLoading
+                      ? const SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : _wallets.isEmpty
+                          ? Text(
+                              'No wallets',
+                              style: TextStyle(
+                                color: ThemeColors.gray(context),
+                                fontStyle: FontStyle.italic,
+                              ),
+                            )
+                          : DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _selectedWalletId,
+                                isExpanded: true,
+                                items: _wallets.map((w) {
+                                  return DropdownMenuItem<String>(
+                                    value: w.id,
+                                    child: Text(
+                                      w.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: _onWalletSelected,
+                              ),
+                            ),
+                ),
+              ],
+            ),
+          ),
           // Search Bar (always visible)
           Container(
             padding: const EdgeInsets.all(16),

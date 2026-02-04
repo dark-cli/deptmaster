@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/auth_service.dart';
 import '../services/sync_service_v2.dart';
 import '../services/realtime_service.dart';
+import '../services/wallet_service.dart';
 import 'home_screen.dart';
 import 'backend_setup_screen.dart';
 import '../widgets/gradient_background.dart';
@@ -20,8 +21,8 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController(text: 'max'); // Temporary default
-  final _passwordController = TextEditingController(text: '1234'); // Temporary default
+  final _usernameController = TextEditingController(text: 'max');
+  final _passwordController = TextEditingController(text: '12345678');
   bool _loading = false;
   String? _error;
 
@@ -48,7 +49,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
       if (mounted) {
         if (result['success'] == true) {
-          // After successful login, immediately trigger sync and connect WebSocket
+          try {
+            print('🔄 Ensuring wallet after login...');
+            await WalletService.ensureCurrentWallet();
+            print('✅ Wallet ready');
+          } catch (e) {
+            print('⚠️ Error ensuring wallet: $e');
+          }
+
+          // After successful login, trigger sync and WebSocket
           // Sync happens immediately, not waiting for WebSocket
           try {
             // Trigger immediate sync first (don't wait for WebSocket)
@@ -75,10 +84,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             print('⚠️ Error initializing after login: $e');
           }
           
-          // Navigate to home - use pushNamedAndRemoveUntil to ensure clean navigation stack
+          if (!mounted) return;
           Navigator.of(context).pushNamedAndRemoveUntil(
             '/',
-            (route) => false, // Remove all previous routes
+            (route) => false,
           );
         } else {
           setState(() {

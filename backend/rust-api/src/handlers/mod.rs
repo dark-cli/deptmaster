@@ -6,6 +6,7 @@ pub mod auth;
 pub mod admin_auth;
 pub mod sync;
 pub mod users;
+pub mod wallets;
 
 pub use admin::{
     admin_panel,
@@ -48,4 +49,17 @@ pub use users::{
     admin_change_password,
     get_user_login_logs,
     backup_user_data,
+};
+pub use wallets::{
+    create_wallet,
+    create_my_wallet,
+    list_wallets,
+    get_wallet,
+    update_wallet,
+    delete_wallet,
+    add_user_to_wallet,
+    list_wallet_users,
+    update_wallet_user,
+    remove_user_from_wallet,
+    list_user_wallets,
 };

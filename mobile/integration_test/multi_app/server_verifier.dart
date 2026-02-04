@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:debt_tracker_mobile/services/auth_service.dart';
 import 'package:debt_tracker_mobile/services/backend_config_service.dart';
+import 'package:debt_tracker_mobile/services/wallet_service.dart';
 
 /// Server verification utilities for testing
 class ServerVerifier {
@@ -15,9 +16,9 @@ class ServerVerifier {
     _authToken = await AuthService.getToken();
   }
   
-  /// Get auth headers
+  /// Get auth headers (includes X-Wallet-Id for wallet-scoped API)
   Future<Map<String, String>> _getHeaders() async {
-    final headers = {'Content-Type': 'application/json'};
+    final headers = <String, String>{'Content-Type': 'application/json'};
     if (_authToken != null) {
       headers['Authorization'] = 'Bearer $_authToken';
     } else {
@@ -25,6 +26,10 @@ class ServerVerifier {
       if (_authToken != null) {
         headers['Authorization'] = 'Bearer $_authToken';
       }
+    }
+    final walletId = WalletService.getCurrentWalletId();
+    if (walletId != null && walletId.isNotEmpty) {
+      headers['X-Wallet-Id'] = walletId;
     }
     return headers;
   }

@@ -11,6 +11,8 @@ import 'package:debt_tracker_mobile/services/backend_config_service.dart';
 import 'package:debt_tracker_mobile/services/event_store_service.dart';
 import 'package:debt_tracker_mobile/services/local_database_service_v2.dart';
 import 'package:debt_tracker_mobile/services/sync_service_v2.dart';
+import 'package:debt_tracker_mobile/services/wallet_service.dart';
+import 'package:debt_tracker_mobile/services/dummy_data_service.dart';
 import '../helpers/multi_app_helpers.dart';
 
 void main() {
@@ -30,9 +32,9 @@ void main() {
     Hive.registerAdapter(TransactionDirectionAdapter());
     Hive.registerAdapter(EventAdapter());
     
-    await resetServer();
     await waitForServerReady();
     await ensureTestUserExists();
+    final creds = await createUniqueTestUserAndWallet();
     
     final uri = Uri.parse('http://localhost:8000');
     await BackendConfigService.setBackendConfig(uri.host, uri.port);
@@ -42,10 +44,15 @@ void main() {
     await LocalDatabaseServiceV2.initialize();
     await SyncServiceV2.initialize();
     
-    // Test 1: Login
+    // Test 1: Login (unique user and wallet for this test)
     stopwatch.start();
     print('📊 Test 1: Login (POST /api/auth/login)');
-    final loginResult = await AuthService.login('max', '12345678');
+    final loginResult = await AuthService.login(creds['email']!, creds['password']!);
+    await WalletService.setCurrentWalletId(creds['walletId']!);
+    final userId = await AuthService.getUserId();
+    if (userId != null) {
+      await DummyDataService.initializeForUserAndWallet(userId, creds['walletId']!);
+    }
     stopwatch.stop();
     timings['Login'] = stopwatch.elapsed;
     print('   ⏱️  ${stopwatch.elapsedMilliseconds}ms');

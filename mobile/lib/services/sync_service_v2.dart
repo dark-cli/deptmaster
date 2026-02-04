@@ -14,6 +14,8 @@ import 'realtime_service.dart';
 import 'retry_backoff.dart';
 import 'backend_config_service.dart';
 import 'auth_service.dart';
+import 'wallet_service.dart';
+import 'dummy_data_service.dart';
 
 /// Sync result enum
 enum SyncResult { done, failed }
@@ -68,7 +70,7 @@ class SyncServiceV2 {
   }
 
   /// Check if server is reachable via HTTP
-  /// Uses caching to avoid too many checks
+  /// Uses /health endpoint (no auth or wallet required) and caching to avoid too many checks
   static Future<bool> _isServerReachable() async {
     if (kIsWeb) return false;
 
@@ -82,31 +84,21 @@ class SyncServiceV2 {
 
     try {
       final baseUrl = await BackendConfigService.getBaseUrl();
-      final uri = Uri.parse('$baseUrl/api/sync/hash');
-      final token = await AuthService.getToken();
-      
-      final headers = <String, String>{'Content-Type': 'application/json'};
-      if (token != null) {
-        headers['Authorization'] = 'Bearer $token';
-      }
+      final uri = Uri.parse('$baseUrl/health');
 
-      // Try a lightweight request with short timeout
-      final response = await http.get(uri, headers: headers).timeout(
+      // Use /health so we don't need auth or X-Wallet-Id (avoids 400 when no wallet set)
+      final response = await http.get(uri).timeout(
         const Duration(seconds: 3),
         onTimeout: () {
           throw Exception('Server reachability check timed out');
         },
       );
 
-      final isReachable = response.statusCode == 200 || response.statusCode == 401; // 401 means server is reachable but auth failed
-      
-      // Cache the result
+      final isReachable = response.statusCode == 200;
       _serverReachableCache = isReachable;
       _serverReachableCacheTime = DateTime.now();
-      
       return isReachable;
     } catch (e) {
-      // Server not reachable
       _serverReachableCache = false;
       _serverReachableCacheTime = DateTime.now();
       return false;
@@ -283,16 +275,23 @@ class SyncServiceV2 {
     try {
       print('🔄 Starting server to local sync...');
 
-      // 1. Get server hash
+      // Sync is per-wallet: server returns hash/count for current wallet only
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) {
+        print('⚠️ syncServerToLocal: No current wallet set, skipping');
+        return SyncResult.failed;
+      }
+
+      // 1. Get server hash (for this wallet)
       final serverHashData = await ApiService.getSyncHash();
       final serverHash = serverHashData['hash'] as String;
       final serverEventCount = serverHashData['event_count'] as int;
 
-      // 2. Get local hash
-      final localHash = await EventStoreService.getEventHash();
-      final localEventCount = await EventStoreService.getEventCount();
+      // 2. Get local hash/count for this wallet only (must match server scope)
+      final localHash = await EventStoreService.getEventHash(walletId: walletId);
+      final localEventCount = await EventStoreService.getEventCount(walletId: walletId);
 
-      print('📊 Sync status: Local=$localEventCount events, Server=$serverEventCount events');
+      print('📊 Sync status (wallet $walletId): Local=$localEventCount events, Server=$serverEventCount events');
 
       // 3. If hashes match, we're in sync
       if (localHash == serverHash && localEventCount == serverEventCount) {
@@ -361,12 +360,8 @@ class SyncServiceV2 {
 
       print('✅ Inserted $insertedCount new events from server');
 
-      // 8. Rebuild state only if we inserted new events
-      if (insertedCount > 0) {
-        await _rebuildState();
-      } else {
-        print('✅ No new events inserted, skipping state rebuild');
-      }
+      // 8. Always rebuild state for current wallet (so projection matches server for this wallet)
+      await _rebuildState();
 
       // 9. Update last sync timestamp
       await EventStoreService.setLastSyncTimestamp(DateTime.now());
@@ -649,39 +644,53 @@ class SyncServiceV2 {
 
   // ========== HELPER FUNCTIONS ==========
 
-  /// Rebuild application state from events
+  /// Rebuild application state from events for the current wallet only.
   static Future<void> _rebuildState() async {
     if (kIsWeb) return;
 
     try {
-      print('🔄 Rebuilding state from events...');
+      final walletId = WalletService.getCurrentWalletId();
+      if (walletId == null) {
+        print('⚠️ Cannot rebuild state: no current wallet');
+        return;
+      }
 
-      // Get all events
-      final events = await EventStoreService.getAllEvents();
+      print('🔄 Rebuilding state from events for wallet $walletId...');
+
+      // Get events for this wallet only (server sends per-wallet; local box may have multiple wallets)
+      final events = await EventStoreService.getEventsForWallet(walletId);
 
       // Build state using StateBuilder
       final state = StateBuilder.buildState(events);
 
-      // Save to Hive boxes (use cached boxes)
-      _contactsBox ??= await Hive.openBox<Contact>('contacts');
-      _transactionsBox ??= await Hive.openBox<Transaction>('transactions');
+      // Save to Hive boxes (use namespaced boxes)
+      final userId = await AuthService.getUserId();
+      if (userId == null) {
+        print('⚠️ Cannot rebuild state: missing userId');
+        return;
+      }
+      final contactsBoxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
+      final transactionsBoxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
+      // Open wallet-specific boxes (do not use static cache — wallet can change)
+      final contactsBox = await Hive.openBox<Contact>(contactsBoxName);
+      final transactionsBox = await Hive.openBox<Transaction>(transactionsBoxName);
 
-      // Clear existing data
-      await _contactsBox!.clear();
-      await _transactionsBox!.clear();
+      // Clear existing data for this wallet
+      await contactsBox.clear();
+      await transactionsBox.clear();
 
       // Write new state (batch operations)
       final contactMap = <String, Contact>{};
       for (final contact in state.contacts) {
         contactMap[contact.id] = contact;
       }
-      await _contactsBox!.putAll(contactMap);
+      await contactsBox.putAll(contactMap);
 
       final transactionMap = <String, Transaction>{};
       for (final transaction in state.transactions) {
         transactionMap[transaction.id] = transaction;
       }
-      await _transactionsBox!.putAll(transactionMap);
+      await transactionsBox.putAll(transactionMap);
 
       print('✅ State rebuilt: ${state.contacts.length} contacts, ${state.transactions.length} transactions');
     } catch (e) {

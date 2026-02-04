@@ -327,6 +327,173 @@ All existing endpoints need wallet context:
 - Wallet usage statistics
 - User activity per wallet
 
+### 11. Testing Benefits - Parallel Test Execution
+
+The multi-wallet system provides a significant opportunity to run tests in parallel, dramatically improving test execution speed and reliability.
+
+#### Test Isolation Strategy
+
+**Per-App User and Wallet Assignment**
+- Each test app instance (app1, app2, app3, etc.) gets its own unique user
+- Each app instance gets its own dedicated wallet(s)
+- Tests can run completely in parallel without data conflicts
+- No need to clear data between individual tests
+
+**Example Test Setup:**
+```
+App 1: User "test_user_1" → Wallet "test_wallet_1"
+App 2: User "test_user_2" → Wallet "test_wallet_2"
+App 3: User "test_user_3" → Wallet "test_wallet_3"
+```
+
+#### Local Database Isolation
+
+**Hive Box Namespacing**
+- Each user has its own isolated Hive box namespace
+- Box names: `contacts_${user_id}_${wallet_id}`, `transactions_${user_id}_${wallet_id}`
+- No data conflicts between test instances
+- Each test app maintains its own local state independently
+
+**Benefits:**
+- Tests can run simultaneously without interference
+- No race conditions on shared data
+- Each test has clean, isolated state
+- Faster test execution (parallel vs sequential)
+
+#### Test Execution Flow
+
+**Before (Current - Sequential):**
+1. Start test → Clear all data
+2. Run test → Use shared data
+3. End test → Clear all data
+4. Next test waits for previous to finish
+
+**After (Multi-Wallet - Parallel):**
+1. Start all tests → Each gets unique user + wallet
+2. Run all tests in parallel → No conflicts
+3. End tests → Each cleans its own namespace
+4. All tests run simultaneously
+
+#### Implementation for Tests
+
+**Test Helper Functions:**
+```dart
+// Create unique test user and wallet
+Future<TestUser> createTestUser(int appIndex) async {
+  final userId = 'test_user_$appIndex';
+  final walletId = 'test_wallet_$appIndex';
+  // Create user and wallet via API
+  // Return test user with credentials
+}
+
+// Initialize test app with isolated data
+Future<void> initializeTestApp(int appIndex) async {
+  final testUser = await createTestUser(appIndex);
+  // Initialize Hive boxes with user-specific names
+  // Set up API client with test user credentials
+  // No need to clear existing data - it's already isolated
+}
+```
+
+**Test Configuration:**
+```dart
+// Each test app gets unique configuration
+final testConfig = {
+  'app1': {
+    'user_id': 'test_user_1',
+    'wallet_id': 'test_wallet_1',
+    'hive_prefix': 'test_user_1_',
+  },
+  'app2': {
+    'user_id': 'test_user_2',
+    'wallet_id': 'test_wallet_2',
+    'hive_prefix': 'test_user_2_',
+  },
+  // ... more apps
+};
+```
+
+#### Test Data Management
+
+**One-Time Setup:**
+- Create test users and wallets once at test suite start
+- Or create them dynamically per test run
+- No need to clear data between tests (each has own space)
+
+**Cleanup Strategy:**
+- Only clear data at the very first test start (optional)
+- Or use fresh users/wallets per test run
+- Each test instance is completely isolated
+
+#### Integration Test Benefits
+
+**Multi-App Scenarios:**
+- Test real multi-user scenarios with actual parallel apps
+- Test wallet sharing between users
+- Test concurrent operations on different wallets
+- Test sync conflicts between wallets (if applicable)
+
+**Performance Testing:**
+- Run multiple apps simultaneously to test load
+- Test database performance with parallel wallets
+- Test API rate limiting per wallet
+- Test WebSocket broadcasting to multiple wallets
+
+#### Test Infrastructure Changes
+
+**Test Helpers:**
+- [ ] Create `TestUserFactory` for generating unique test users
+- [ ] Create `TestWalletFactory` for generating unique test wallets
+- [ ] Update test setup to use isolated namespaces
+- [ ] Create parallel test runner configuration
+- [ ] Update test cleanup to only clear on first run
+
+**Hive Box Management:**
+- [ ] Update Hive initialization to use user-specific prefixes
+- [ ] Create helper to get user-specific box names
+- [ ] Update all test data access to use namespaced boxes
+- [ ] Ensure box cleanup is per-user, not global
+
+**API Test Updates:**
+- [ ] Update API test helpers to use wallet-scoped endpoints
+- [ ] Create test user authentication helpers
+- [ ] Update test data creation to include wallet_id
+- [ ] Ensure test isolation in API tests
+
+#### Example Test Structure
+
+```dart
+// Before: Sequential tests with shared data
+test('create transaction', () async {
+  await clearAllData(); // Required before each test
+  // ... test code
+});
+
+// After: Parallel tests with isolated data
+test('create transaction in wallet 1', () async {
+  final app = await initializeTestApp(1); // Unique user/wallet
+  // ... test code - no clearing needed
+});
+
+test('create transaction in wallet 2', () async {
+  final app = await initializeTestApp(2); // Different user/wallet
+  // ... test code - runs in parallel with above
+});
+```
+
+#### Performance Improvements
+
+**Expected Benefits:**
+- **Test Execution Time**: Reduce from sequential (sum of all tests) to parallel (longest test)
+- **Reliability**: Eliminate flaky tests caused by shared state
+- **Scalability**: Add more test apps without linear time increase
+- **Resource Usage**: Better CPU/core utilization
+
+**Example:**
+- 10 tests × 30 seconds each = 300 seconds sequential
+- 10 tests in parallel = ~30 seconds (longest test)
+- **10x speedup** in this example
+
 ## Notes
 
 - Consider using "workspace" or "space" terminology instead of "wallet" if it better fits the use case
@@ -334,3 +501,4 @@ All existing endpoints need wallet context:
 - Plan for data export/backup before major changes
 - Consider rate limiting per wallet
 - Plan for wallet deletion and data retention policies
+- **Testing**: Multi-wallet system enables true parallel test execution with complete isolation

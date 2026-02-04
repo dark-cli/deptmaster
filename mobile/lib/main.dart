@@ -10,11 +10,13 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'models/contact.dart';
 import 'models/transaction.dart'; // This imports the generated adapters too
 import 'models/event.dart';
+import 'models/wallet.dart';
 import 'services/event_store_service.dart';
 import 'services/state_builder.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/backend_setup_screen.dart';
+import 'screens/create_wallet_screen.dart';
 import 'services/dummy_data_service.dart';
 import 'services/data_service.dart';
 import 'services/realtime_service.dart';
@@ -23,6 +25,7 @@ import 'services/auth_service.dart';
 import 'services/backend_config_service.dart';
 import 'services/sync_service_v2.dart';
 import 'services/local_database_service_v2.dart';
+import 'services/wallet_service.dart';
 import 'utils/app_theme.dart';
 
 // Global navigator key for showing toasts from anywhere
@@ -110,6 +113,7 @@ void main() async {
     Hive.registerAdapter(TransactionTypeAdapter());
     Hive.registerAdapter(TransactionDirectionAdapter());
     Hive.registerAdapter(EventAdapter());
+    Hive.registerAdapter(WalletAdapter());
     
     // Open boxes
     await Hive.openBox<Contact>(DummyDataService.contactsBoxName);
@@ -118,6 +122,9 @@ void main() async {
     // Initialize EventStore for event sourcing
     await EventStoreService.initialize();
     
+    // Initialize WalletService (must be before LocalDatabaseServiceV2)
+    await WalletService.initialize();
+    
     // Initialize LocalDatabaseServiceV2 (rebuilds state from events)
     await LocalDatabaseServiceV2.initialize();
     
@@ -125,6 +132,21 @@ void main() async {
     await SyncServiceV2.initialize();
     
     if (isBackendConfigured) {
+      // If user is already logged in, ensure current wallet is set and open namespaced boxes
+      // so that data loads and sync writes to the correct wallet
+      final isLoggedIn = await AuthService.isLoggedIn();
+      if (isLoggedIn) {
+        try {
+          await WalletService.ensureCurrentWallet();
+          final userId = await AuthService.getUserId();
+          final walletId = WalletService.getCurrentWalletId();
+          if (userId != null && walletId != null) {
+            await DummyDataService.initializeForUserAndWallet(userId, walletId);
+          }
+        } catch (e) {
+          // Non-fatal: user may have no wallets yet
+        }
+      }
       // Try to sync with server
       try {
         // Initial sync to get server events
@@ -234,6 +256,7 @@ class DebtTrackerApp extends ConsumerStatefulWidget {
 class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
   bool _darkMode = true; // Default to dark mode
   DateTime? _lastBackPressTime;
+  Timer? _themeWatchTimer;
 
   @override
   void initState() {
@@ -243,6 +266,12 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
     _watchTheme();
     // Set up error callback for WebSocket connection errors
     _setupRealtimeErrorHandler();
+  }
+
+  @override
+  void dispose() {
+    _themeWatchTimer?.cancel();
+    super.dispose();
   }
 
   void _setupRealtimeErrorHandler() {
@@ -265,7 +294,8 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
 
   void _watchTheme() {
     // Periodically check for theme changes
-    Future.delayed(const Duration(seconds: 1), () {
+    _themeWatchTimer?.cancel();
+    _themeWatchTimer = Timer(const Duration(seconds: 1), () {
       if (mounted) {
         _loadTheme();
         _watchTheme();
@@ -294,6 +324,7 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
         '/': (context) => _DoubleBackToExitWrapper(child: const HomeScreen()),
         '/setup': (context) => const BackendSetupScreen(),
         '/login': (context) => const LoginScreen(),
+        '/create-wallet': (context) => const CreateWalletScreen(),
       },
       debugShowCheckedModeBanner: false,
     );

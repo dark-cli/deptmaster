@@ -1,0 +1,7 @@
+# When building from repo root (e.g. dev server), Cargo only reads this directory,
+# not frontend/.cargo. So we set wasm flags here too to fix "clone_ref" when
+# running dx serve from root.
+# Rust 1.82+ enables wasm reference-types by default; wasm-bindgen-cli can fail
+# with "failed to find intrinsics to enable clone_ref function" unless we disable.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=-reference-types"]

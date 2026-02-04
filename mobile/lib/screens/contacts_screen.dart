@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../services/dummy_data_service.dart';
+import '../services/auth_service.dart';
+import '../services/wallet_service.dart';
 import '../services/local_database_service_v2.dart';
 import '../services/sync_service_v2.dart';
 import '../services/settings_service.dart';
@@ -52,6 +54,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   Color? _defaultDirectionColor; // Color for default direction (for swipe background)
+  Box<Contact>? _contactsBox;
+  Box<Transaction>? _transactionsBox;
 
   @override
   void initState() {
@@ -72,13 +76,24 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
 
   void _setupLocalListeners() {
     if (kIsWeb) return;
-    
-    // Listen to local Hive box changes for offline updates
-    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-    
-    contactsBox.listenable().addListener(_onLocalDataChanged);
-    transactionsBox.listenable().addListener(_onLocalDataChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final userId = await AuthService.getUserId();
+      final walletId = WalletService.getCurrentWalletId();
+      if (userId == null || walletId == null || !mounted) return;
+      final contactsBoxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
+      final transactionsBoxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
+      await Hive.openBox<Contact>(contactsBoxName);
+      await Hive.openBox<Transaction>(transactionsBoxName);
+      if (!mounted) return;
+      final contactsBox = Hive.box<Contact>(contactsBoxName);
+      final transactionsBox = Hive.box<Transaction>(transactionsBoxName);
+      contactsBox.listenable().addListener(_onLocalDataChanged);
+      transactionsBox.listenable().addListener(_onLocalDataChanged);
+      setState(() {
+        _contactsBox = contactsBox;
+        _transactionsBox = transactionsBox;
+      });
+    });
   }
 
   void _onLocalDataChanged() {
@@ -179,11 +194,9 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   @override
   void dispose() {
     _searchController.dispose();
-    if (!kIsWeb) {
-      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-      contactsBox.listenable().removeListener(_onLocalDataChanged);
-      transactionsBox.listenable().removeListener(_onLocalDataChanged);
+    if (!kIsWeb && _contactsBox != null && _transactionsBox != null) {
+      _contactsBox!.listenable().removeListener(_onLocalDataChanged);
+      _transactionsBox!.listenable().removeListener(_onLocalDataChanged);
     }
     RealtimeService.removeListener(_onRealtimeUpdate);
     super.dispose();

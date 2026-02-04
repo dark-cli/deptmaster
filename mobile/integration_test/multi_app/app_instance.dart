@@ -8,9 +8,12 @@ import 'package:debt_tracker_mobile/services/sync_service_v2.dart';
 import 'package:debt_tracker_mobile/services/auth_service.dart';
 import 'package:debt_tracker_mobile/services/backend_config_service.dart';
 import 'package:debt_tracker_mobile/services/realtime_service.dart';
+import 'package:debt_tracker_mobile/services/wallet_service.dart';
+import 'package:debt_tracker_mobile/services/dummy_data_service.dart';
 import 'package:debt_tracker_mobile/models/contact.dart';
 import 'package:debt_tracker_mobile/models/transaction.dart';
 import 'package:debt_tracker_mobile/models/event.dart';
+import 'package:debt_tracker_mobile/models/wallet.dart';
 import 'network_interceptor.dart';
 import 'realtime_service_test_helper.dart';
 
@@ -21,6 +24,8 @@ class AppInstance {
   final String username;
   final String password;
   final String hivePath;
+  final String? userId;  // User ID after login
+  final String? walletId;  // Wallet ID to use
   
   bool _simulatedOffline = false;
   bool _initialized = false;
@@ -37,24 +42,26 @@ class AppInstance {
     required this.username,
     required this.password,
     required this.hivePath,
+    this.userId,
+    this.walletId,
   });
   
   /// Create a new app instance with isolated storage
-  /// Note: We use shared Hive boxes (all instances sync to same server)
+  /// Each instance should have its own user and wallet for parallel testing
   static Future<AppInstance> create({
     required String id,
     String serverUrl = 'http://localhost:8000',
-    String username = 'max',  // Default test user
+    String username = 'max',  // Default test user (or unique user per instance)
     String password = '12345678',  // Default test password
+    String? walletId,  // Wallet ID to use (should be shared across test users)
   }) async {
-    // We don't need separate Hive paths - all instances share boxes
-    // This is realistic since they all sync to the same server
     return AppInstance(
       id: id,
       serverUrl: serverUrl,
       username: username,
       password: password,
-      hivePath: '', // Not used - we use shared boxes
+      hivePath: '', // Not used - we use namespaced boxes
+      walletId: walletId,
     );
   }
   
@@ -94,9 +101,14 @@ class AppInstance {
     } catch (e) {
       // Already registered
     }
+    try {
+      Hive.registerAdapter(WalletAdapter());
+    } catch (e) {
+      // Already registered
+    }
     
-    // Open boxes (shared names - all instances sync to same server)
-    // Each instance will have isolated auth state via SharedPreferences keys
+    // Open default boxes (for migration compatibility)
+    // Namespaced boxes will be opened after login when we have userId and walletId
     try {
       contactsBox = await Hive.openBox<Contact>('contacts');
     } catch (e) {
@@ -117,6 +129,15 @@ class AppInstance {
       // Box already open
       eventsBox = Hive.box<Event>('events');
     }
+    
+    try {
+      await Hive.openBox<Wallet>('wallets');
+    } catch (e) {
+      // Box already open
+    }
+    
+    // Note: Namespaced boxes (contacts_${userId}_${walletId}) will be opened
+    // after login when we have both userId and walletId
     
     // Initialize services (they use the shared boxes)
     await EventStoreService.initialize();
@@ -160,6 +181,43 @@ class AppInstance {
       
       if (result['success'] == true) {
         print('✅ AppInstance $id: Login successful');
+        
+        // Store userId from login result
+        final loggedInUserId = result['user_id'] as String?;
+        if (loggedInUserId != null) {
+          // userId is stored in AppInstance but we can't modify final fields
+          // It's stored in AuthService.getUserId() which we'll use
+          print('✅ AppInstance $id: User ID: $loggedInUserId');
+        }
+        
+        // Set wallet if provided
+        final currentWalletId = walletId;
+        if (currentWalletId != null) {
+          await WalletService.setCurrentWalletId(currentWalletId);
+          print('✅ AppInstance $id: Wallet set to: $currentWalletId');
+          
+          // Initialize namespaced boxes for this user and wallet
+          final userId = await AuthService.getUserId();
+          if (userId != null) {
+            await DummyDataService.initializeForUserAndWallet(userId, currentWalletId);
+            print('✅ AppInstance $id: Initialized namespaced boxes for user $userId and wallet $currentWalletId');
+          }
+        } else {
+          // Try to get first wallet and set it
+          try {
+            final wallets = await WalletService.getUserWallets();
+            if (wallets.isNotEmpty) {
+              await WalletService.setCurrentWalletId(wallets.first.id);
+              final userId = await AuthService.getUserId();
+              if (userId != null) {
+                await DummyDataService.initializeForUserAndWallet(userId, wallets.first.id);
+                print('✅ AppInstance $id: Auto-selected wallet: ${wallets.first.id}');
+              }
+            }
+          } catch (e) {
+            print('⚠️ AppInstance $id: Could not set wallet: $e');
+          }
+        }
         
         // Skip WebSocket connection during login to speed up tests
         // WebSocket is not critical for sync (works over HTTP)

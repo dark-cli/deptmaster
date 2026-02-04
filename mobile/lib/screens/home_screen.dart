@@ -20,6 +20,11 @@ import '../widgets/gradient_background.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
+import '../services/wallet_service.dart';
+import '../services/event_store_service.dart';
+import '../services/sync_service_v2.dart';
+import '../models/wallet.dart';
+import 'wallet_selection_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -33,6 +38,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _biometricEnabled = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   DateTime? _lastBackPressTime;
+  int _walletChangeKey = 0; // Incremented when wallet changes so tab content reloads
 
   @override
   void initState() {
@@ -122,6 +128,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         backgroundColor: Colors.transparent,
         drawer: _buildDrawer(),
         body: IndexedStack(
+          key: ValueKey(_walletChangeKey),
           index: _selectedIndex,
           children: [
             TransactionsScreen(
@@ -262,6 +269,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ],
             ),
           ),
+          // Wallet Selection
+          _WalletSelectionTile(
+            onWalletChanged: () {
+              setState(() => _walletChangeKey++);
+            },
+          ),
+          const Divider(),
           // Events Log
           ListTile(
             leading: const Icon(Icons.event_note),
@@ -285,17 +299,117 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  void _showAddTransactionDialog() {
+  Future<void> _showAddTransactionDialog() async {
+    final walletId = WalletService.getCurrentWalletId();
+    if (walletId == null) {
+      final wallets = await WalletService.getUserWallets();
+      if (wallets.isEmpty) {
+        if (!mounted) return;
+        ToastService.showInfoFromContext(context, 'Create a wallet first to add transactions.');
+        Navigator.pushNamed(context, '/create-wallet');
+        return;
+      }
+      await WalletService.setCurrentWalletId(wallets.first.id);
+      if (mounted) setState(() => _walletChangeKey++);
+    }
+    if (!mounted) return;
     showScreenAsBottomSheet(
       context: context,
       screen: const AddTransactionScreen(),
     );
   }
 
-  void _showAddContactDialog() {
+  Future<void> _showAddContactDialog() async {
+    final walletId = WalletService.getCurrentWalletId();
+    if (walletId == null) {
+      final wallets = await WalletService.getUserWallets();
+      if (wallets.isEmpty) {
+        if (!mounted) return;
+        ToastService.showInfoFromContext(context, 'Create a wallet first to add contacts.');
+        Navigator.pushNamed(context, '/create-wallet');
+        return;
+      }
+      await WalletService.setCurrentWalletId(wallets.first.id);
+      if (mounted) setState(() => _walletChangeKey++);
+    }
+    if (!mounted) return;
     showScreenAsBottomSheet(
       context: context,
       screen: const AddContactScreen(),
+    );
+  }
+}
+
+// Wallet selection tile for drawer
+class _WalletSelectionTile extends ConsumerStatefulWidget {
+  const _WalletSelectionTile({this.onWalletChanged});
+
+  final VoidCallback? onWalletChanged;
+
+  @override
+  ConsumerState<_WalletSelectionTile> createState() => _WalletSelectionTileState();
+}
+
+class _WalletSelectionTileState extends ConsumerState<_WalletSelectionTile> {
+  Wallet? _currentWallet;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentWallet();
+  }
+
+  Future<void> _loadCurrentWallet() async {
+    setState(() {
+      _loading = true;
+    });
+    try {
+            final walletId = WalletService.getCurrentWalletId();
+            final wallet = walletId != null ? await WalletService.getWallet(walletId) : null;
+      if (mounted) {
+        setState(() {
+          _currentWallet = wallet;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.account_balance_wallet),
+      title: const Text('Wallet'),
+      subtitle: _loading
+          ? const Text('Loading...')
+          : Text(
+              _currentWallet?.name ?? 'No wallet selected',
+              style: TextStyle(
+                color: _currentWallet == null
+                    ? Theme.of(context).colorScheme.error
+                    : null,
+              ),
+            ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        Navigator.pop(context);
+        final result = await showWalletSelectionSheet(context);
+        // Reload current wallet if selection changed
+        if (result == true) {
+          _loadCurrentWallet();
+          widget.onWalletChanged?.call();
+          // Fetch server events for the new wallet and rebuild its state
+          EventStoreService.clearLastSyncTimestamp();
+          SyncServiceV2.manualSync();
+        }
+      },
     );
   }
 }

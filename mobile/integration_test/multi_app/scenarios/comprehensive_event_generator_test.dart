@@ -39,8 +39,8 @@ void main() {
     });
     
     setUp(() async {
-      await resetServer();
       await waitForServerReady();
+      final creds = await createUniqueTestUserAndWallet();
       
       try {
         await Hive.box<Contact>('contacts').clear();
@@ -50,9 +50,27 @@ void main() {
         // Boxes might not exist yet
       }
       
-      app1 = await AppInstance.create(id: 'app1', serverUrl: 'http://localhost:8000');
-      app2 = await AppInstance.create(id: 'app2', serverUrl: 'http://localhost:8000');
-      app3 = await AppInstance.create(id: 'app3', serverUrl: 'http://localhost:8000');
+      app1 = await AppInstance.create(
+        id: 'app1',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app2 = await AppInstance.create(
+        id: 'app2',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
+      app3 = await AppInstance.create(
+        id: 'app3',
+        serverUrl: 'http://localhost:8000',
+        username: creds['email']!,
+        password: creds['password']!,
+        walletId: creds['walletId'],
+      );
       
       await Future.wait([
         app1!.initialize(),

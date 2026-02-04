@@ -17,9 +17,15 @@ pub struct EventQuery {
     event_type: Option<String>,
     aggregate_type: Option<String>,
     user_id: Option<String>,
+    wallet_id: Option<String>, // Filter by wallet (admin)
     search: Option<String>, // Search in event_data (comment, name, etc.)
     date_from: Option<String>, // ISO date string
     date_to: Option<String>, // ISO date string
+}
+
+#[derive(Deserialize)]
+pub struct AdminListQuery {
+    pub wallet_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -287,6 +293,14 @@ pub async fn get_events(
             query_builder.push_bind(user_id);
         }
     }
+
+    // Filter by wallet_id (admin view)
+    if let Some(wallet_id) = &params.wallet_id {
+        if !wallet_id.is_empty() {
+            query_builder.push(" AND e.wallet_id::text = ");
+            query_builder.push_bind(wallet_id);
+        }
+    }
     
     // Filter by date range
     if let Some(date_from) = &params.date_from {
@@ -495,38 +509,24 @@ pub async fn backfill_transaction_events(
 }
 
 pub async fn get_contacts(
+    Query(params): Query<AdminListQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ContactResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    // Optional wallet filter: when wallet_id is None or empty, show all; otherwise filter.
     let contacts = sqlx::query_as::<_, ContactResponse>(
         r#"
         SELECT 
-            c.id,
-            c.name,
-            c.username,
-            c.email,
-            c.phone,
-            COALESCE(SUM(
-                CASE 
-                    WHEN t.direction = 'lent' THEN t.amount
-                    WHEN t.direction = 'owed' THEN -t.amount
-                    ELSE 0
-                END
-            )::BIGINT, 0) as balance,
-            c.is_deleted,
-            c.created_at
+            c.id, c.name, c.username, c.email, c.phone,
+            COALESCE(SUM(CASE WHEN t.direction = 'lent' THEN t.amount WHEN t.direction = 'owed' THEN -t.amount ELSE 0 END)::BIGINT, 0) as balance,
+            c.is_deleted, c.created_at
         FROM contacts_projection c
-        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
-        WHERE c.is_deleted = false
-        GROUP BY c.id, c.name, c.username, c.email, c.phone, c.is_deleted, c.created_at
-        ORDER BY ABS(COALESCE(SUM(
-            CASE 
-                WHEN t.direction = 'lent' THEN t.amount
-                WHEN t.direction = 'owed' THEN -t.amount
-                ELSE 0
-            END
-        )::BIGINT, 0)) DESC, c.name
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = c.wallet_id
+        WHERE c.is_deleted = false AND ($1::text IS NULL OR $1 = '' OR c.wallet_id::text = $1)
+        GROUP BY c.id, c.name, c.username, c.email, c.phone, c.is_deleted, c.created_at, c.wallet_id
+        ORDER BY ABS(COALESCE(SUM(CASE WHEN t.direction = 'lent' THEN t.amount WHEN t.direction = 'owed' THEN -t.amount ELSE 0 END)::BIGINT, 0)) DESC, c.name
         "#
     )
+    .bind(params.wallet_id.as_deref())
     .fetch_all(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -542,28 +542,20 @@ pub async fn get_contacts(
 
 #[allow(dead_code)]
 pub async fn get_transactions(
+    Query(params): Query<AdminListQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<TransactionResponse>>, (StatusCode, Json<serde_json::Value>)> {
     let transactions = sqlx::query_as::<_, TransactionResponse>(
         r#"
-        SELECT 
-            t.id,
-            t.contact_id,
-            t.type,
-            t.direction,
-            t.amount,
-            t.currency,
-            t.description,
-            t.transaction_date,
-            t.due_date,
-            t.created_at,
-            t.updated_at
+        SELECT t.id, t.contact_id, t.type, t.direction, t.amount, t.currency, t.description,
+            t.transaction_date, t.due_date, t.created_at, t.updated_at
         FROM transactions_projection t
-        INNER JOIN contacts_projection c ON c.id = t.contact_id
-        WHERE t.is_deleted = false AND c.is_deleted = false
+        INNER JOIN contacts_projection c ON c.id = t.contact_id AND c.wallet_id = t.wallet_id
+        WHERE t.is_deleted = false AND c.is_deleted = false AND ($1::text IS NULL OR $1 = '' OR t.wallet_id::text = $1)
         ORDER BY t.transaction_date DESC
         "#
     )
+    .bind(params.wallet_id.as_deref())
     .fetch_all(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -600,39 +592,67 @@ pub async fn get_projection_status(
     }))
 }
 
-/// Get total debt from the latest event (most efficient and solid)
+/// Get total debt.
+/// - Optional query param wallet_id: when set, returns total debt for that wallet (from latest event or projection).
+/// - When not set ("All wallets"), returns the sum of total debt across all wallets (from projections).
 pub async fn get_total_debt(
+    Query(params): Query<std::collections::HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Get total_debt from the latest event that has it
-    let result: Option<String> = sqlx::query_scalar(
-        r#"
-        SELECT event_data->>'total_debt'
-        FROM events
-        WHERE event_data->>'total_debt' IS NOT NULL
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
-        "#
-    )
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching total debt: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-        )
-    })?;
+    let wallet_id_param = params.get("wallet_id").and_then(|s| {
+        let s = s.trim();
+        if s.is_empty() { None } else { Some(s) }
+    });
 
-    // If no event has total_debt, calculate from projections as fallback
-    let total_debt = if let Some(debt_str) = result {
-        // Parse the string value to i64
-        debt_str.parse::<i64>().unwrap_or_else(|_| {
-            // If parsing fails, try parsing as JSON number
-            serde_json::from_str::<i64>(&debt_str).unwrap_or(0)
-        })
+    let total_debt = if let Some(wid) = wallet_id_param {
+        // Single wallet: use latest event total_debt when available, else projection
+        let result: Option<String> = sqlx::query_scalar(
+            r#"
+            SELECT event_data->>'total_debt'
+            FROM events
+            WHERE event_data->>'total_debt' IS NOT NULL
+              AND wallet_id::text = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            "#
+        )
+        .bind(wid)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching total debt: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+
+        if let Some(debt_str) = result {
+            debt_str.parse::<i64>().unwrap_or_else(|_| {
+                serde_json::from_str::<i64>(&debt_str).unwrap_or(0)
+            })
+        } else {
+            sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COALESCE(SUM(
+                    CASE 
+                        WHEN t.direction = 'lent' THEN t.amount
+                        WHEN t.direction = 'owed' THEN -t.amount
+                        ELSE 0
+                    END
+                )::BIGINT, 0)
+                FROM contacts_projection c
+                LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = c.wallet_id
+                WHERE c.is_deleted = false AND c.wallet_id::text = $1
+                "#
+            )
+            .bind(wid)
+            .fetch_one(&*state.db_pool)
+            .await
+            .unwrap_or(0)
+        }
     } else {
-        // Fallback: calculate from projections
+        // All wallets: always use projection sum so we get the sum of every wallet's total
         sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COALESCE(SUM(
@@ -643,7 +663,7 @@ pub async fn get_total_debt(
                 END
             )::BIGINT, 0)
             FROM contacts_projection c
-            LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
+            LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = c.wallet_id
             WHERE c.is_deleted = false
             "#
         )
@@ -657,13 +677,32 @@ pub async fn get_total_debt(
     })))
 }
 
-/// Rebuild projections from all events
+/// Rebuild projections from all events for a specific wallet
+/// Requires wallet_id query parameter: ?wallet_id=...
 pub async fn rebuild_projections(
+    Query(params): Query<std::collections::HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     use crate::handlers::sync::rebuild_projections_from_events;
     
-    match rebuild_projections_from_events(&state).await {
+    // Get wallet_id from query parameters
+    let wallet_id_str = params.get("wallet_id")
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "wallet_id query parameter is required"})),
+            )
+        })?;
+    
+    let wallet_id = uuid::Uuid::parse_str(wallet_id_str)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+            )
+        })?;
+    
+    match rebuild_projections_from_events(&state, wallet_id).await {
         Ok(_) => Ok(Json(serde_json::json!({
             "message": "Projections rebuilt successfully"
         }))),

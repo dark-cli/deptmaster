@@ -59,6 +59,9 @@ class Transaction extends HiveObject {
   @HiveField(11)
   bool isSynced;
 
+  @HiveField(13)
+  String? walletId; // Wallet ID for multi-wallet support (nullable for migration)
+
   Transaction({
     required this.id,
     required this.contactId,
@@ -73,6 +76,7 @@ class Transaction extends HiveObject {
     required this.createdAt,
     required this.updatedAt,
     this.isSynced = false,
+    this.walletId,
   });
 
   String getFormattedAmount(int decimals) {
@@ -159,6 +163,7 @@ class Transaction extends HiveObject {
         createdAt: createdAt,
         updatedAt: updatedAt,
         isSynced: true,
+        walletId: json['wallet_id'] as String?, // Wallet ID from API (may be null for legacy data)
       );
     } catch (e, stackTrace) {
       print('❌ Error parsing transaction JSON: $e');

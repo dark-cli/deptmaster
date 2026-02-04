@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Extension},
     http::StatusCode,
     response::Json,
 };
@@ -9,9 +9,10 @@ use uuid::Uuid;
 use chrono::Utc;
 use crate::AppState;
 use crate::websocket;
+use crate::middleware::wallet_context::WalletContext;
 
-/// Calculate total debt (sum of all contact balances) at current time
-async fn calculate_total_debt(state: &AppState) -> i64 {
+/// Calculate total debt (sum of all contact balances) at current time for a wallet
+async fn calculate_total_debt(state: &AppState, wallet_id: Uuid) -> i64 {
     sqlx::query_scalar::<_, i64>(
         r#"
         SELECT COALESCE(SUM(
@@ -22,10 +23,11 @@ async fn calculate_total_debt(state: &AppState) -> i64 {
             END
         )::BIGINT, 0)
         FROM contacts_projection c
-        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
-        WHERE c.is_deleted = false
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = $1
+        WHERE c.is_deleted = false AND c.wallet_id = $1
         "#
     )
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .unwrap_or(0)
@@ -109,7 +111,10 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for TransactionResponse {
 
 pub async fn get_transactions(
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
 ) -> Result<Json<Vec<TransactionResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
+    
     let transactions = sqlx::query_as::<_, TransactionResponse>(
         r#"
         SELECT 
@@ -125,10 +130,11 @@ pub async fn get_transactions(
             created_at,
             updated_at
         FROM transactions_projection
-        WHERE is_deleted = false
+        WHERE is_deleted = false AND wallet_id = $1
         ORDER BY transaction_date DESC
         "#
     )
+    .bind(wallet_id)
     .fetch_all(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -144,8 +150,10 @@ pub async fn get_transactions(
 
 pub async fn create_transaction(
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
     Json(payload): Json<CreateTransactionRequest>,
 ) -> Result<(StatusCode, Json<CreateTransactionResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
     // Validate contact exists
     let contact_uuid = Uuid::parse_str(&payload.contact_id).map_err(|e| {
         (
@@ -155,9 +163,10 @@ pub async fn create_transaction(
     })?;
 
     let contact_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND is_deleted = false)"
+        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -216,6 +225,7 @@ pub async fn create_transaction(
     
     // Create event data with full audit trail (without total_debt initially)
     let mut event_data = serde_json::json!({
+        "wallet_id": wallet_id.to_string(),
         "contact_id": payload.contact_id,
         "type": payload.r#type,
         "direction": payload.direction,
@@ -234,12 +244,13 @@ pub async fn create_transaction(
     sqlx::query(
         r#"
         INSERT INTO transactions_projection 
-        (id, user_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false, NOW(), NOW(), 0)
+        (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, NOW(), NOW(), 0)
         "#
     )
     .bind(transaction_id)
     .bind(user_id)
+    .bind(wallet_id)
     .bind(contact_uuid)
     .bind(&payload.r#type)
     .bind(&payload.direction)
@@ -259,18 +270,19 @@ pub async fn create_transaction(
     })?;
 
     // Calculate total debt AFTER creating the transaction (this changes total debt - we want the value AFTER the action)
-    let total_debt_after = calculate_total_debt(&state).await;
+    let total_debt_after = calculate_total_debt(&state, wallet_id).await;
     event_data["total_debt"] = serde_json::json!(total_debt_after);
     
     // Write to PostgreSQL events table with total_debt included (AFTER the action)
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_CREATED', 1, $3, NOW())
+        INSERT INTO events (user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ($1, $2, 'transaction', $3, 'TRANSACTION_CREATED', 1, $4, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
+    .bind(wallet_id)
     .bind(transaction_id)
     .bind(&event_data)
     .fetch_one(&*state.db_pool)
@@ -285,10 +297,11 @@ pub async fn create_transaction(
 
     // Update projection with event_id
     sqlx::query(
-        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2"
+        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2 AND wallet_id = $3"
     )
     .bind(event_id)
     .bind(transaction_id)
+    .bind(wallet_id)
     .execute(&*state.db_pool)
     .await
     .ok(); // Non-blocking update
@@ -314,8 +327,10 @@ pub async fn create_transaction(
 pub async fn update_transaction(
     Path(transaction_id): Path<String>,
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
     Json(payload): Json<UpdateTransactionRequest>,
 ) -> Result<(StatusCode, Json<UpdateTransactionResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
     let transaction_uuid = Uuid::parse_str(&transaction_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -360,9 +375,10 @@ pub async fn update_transaction(
 
     // Get current transaction data
     let current = sqlx::query(
-        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
+        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -402,9 +418,10 @@ pub async fn update_transaction(
     // Validate new contact if changed
     if new_contact_id != contact_id {
         let contact_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND is_deleted = false)"
+            "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
         )
         .bind(new_contact_id)
+        .bind(wallet_id)
         .fetch_one(&*state.db_pool)
         .await
         .map_err(|e| {
@@ -425,9 +442,10 @@ pub async fn update_transaction(
 
     // Get current transaction data for audit trail
     let current_txn = sqlx::query(
-        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
+        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .fetch_optional(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -440,6 +458,7 @@ pub async fn update_transaction(
     
     // Create event data with full audit trail
     let event_data = serde_json::json!({
+        "wallet_id": wallet_id.to_string(),
         "contact_id": new_contact_id.to_string(),
         "type": new_type,
         "direction": new_direction,
@@ -464,9 +483,10 @@ pub async fn update_transaction(
 
     // Get current version for optimistic concurrency
     let current_version = sqlx::query_scalar::<_, i32>(
-        "SELECT version FROM transactions_projection WHERE id = $1"
+        "SELECT version FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .fetch_optional(&*state.db_pool)
         .await
         .map_err(|e| {
@@ -486,7 +506,7 @@ pub async fn update_transaction(
         UPDATE transactions_projection 
         SET contact_id = $1, type = $2, direction = $3, amount = $4, currency = $5, 
             description = $6, transaction_date = $7, due_date = $8, updated_at = NOW(), version = $9
-        WHERE id = $10 AND version = $11
+        WHERE id = $10 AND wallet_id = $11 AND version = $12
         "#
     )
     .bind(new_contact_id)
@@ -499,6 +519,7 @@ pub async fn update_transaction(
     .bind(new_due_date)
     .bind(new_version)
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .bind(current_version)
     .execute(&*state.db_pool)
     .await
@@ -512,9 +533,10 @@ pub async fn update_transaction(
 
     // Check if update actually happened (optimistic locking)
     let rows_affected = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM transactions_projection WHERE id = $1 AND version = $2"
+        "SELECT COUNT(*) FROM transactions_projection WHERE id = $1 AND wallet_id = $2 AND version = $3"
     )
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .bind(new_version)
     .fetch_one(&*state.db_pool)
     .await
@@ -534,19 +556,20 @@ pub async fn update_transaction(
     }
 
     // Calculate total debt AFTER updating the transaction (this changes total debt - we want the value AFTER the action)
-    let total_debt_after = calculate_total_debt(&state).await;
+    let total_debt_after = calculate_total_debt(&state, wallet_id).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
     // Write to PostgreSQL events table
     let update_event_id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_UPDATED', $3, $4, NOW())
+        INSERT INTO events (user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ($1, $2, 'transaction', $3, 'TRANSACTION_UPDATED', $4, $5, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
+    .bind(wallet_id)
     .bind(transaction_uuid)
     .bind(new_version)
     .bind(&event_data_with_debt)
@@ -562,10 +585,11 @@ pub async fn update_transaction(
 
     // Update projection with event_id
     sqlx::query(
-        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2"
+        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2 AND wallet_id = $3"
     )
     .bind(update_event_id)
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .execute(&*state.db_pool)
     .await
     .ok(); // Non-blocking update
@@ -591,8 +615,10 @@ pub async fn update_transaction(
 pub async fn delete_transaction(
     Path(transaction_id): Path<String>,
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
     Json(payload): Json<DeleteTransactionRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
     let transaction_uuid = Uuid::parse_str(&transaction_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -645,9 +671,10 @@ pub async fn delete_transaction(
 
     // Get transaction data before deletion for audit trail
     let transaction_data = sqlx::query(
-        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1"
+        "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .fetch_optional(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -660,6 +687,7 @@ pub async fn delete_transaction(
 
     // Prepare delete event data with full audit trail
     let event_data = serde_json::json!({
+        "wallet_id": wallet_id.to_string(),
         "comment": payload.comment,
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "deleted_transaction": transaction_data.map(|row| serde_json::json!({
@@ -676,9 +704,10 @@ pub async fn delete_transaction(
     
     // Get current version for optimistic concurrency
     let current_version = sqlx::query_scalar::<_, i32>(
-        "SELECT version FROM transactions_projection WHERE id = $1"
+        "SELECT version FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .fetch_optional(&*state.db_pool)
         .await
         .map_err(|e| {
@@ -697,11 +726,12 @@ pub async fn delete_transaction(
         r#"
         UPDATE transactions_projection 
         SET is_deleted = true, updated_at = NOW(), version = $1
-        WHERE id = $2 AND version = $3
+        WHERE id = $2 AND wallet_id = $3 AND version = $4
         "#
     )
     .bind(new_version)
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .bind(current_version)
     .execute(&*state.db_pool)
     .await
@@ -715,9 +745,10 @@ pub async fn delete_transaction(
 
     // Check if delete actually happened (optimistic locking)
     let rows_affected = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM transactions_projection WHERE id = $1 AND version = $2"
+        "SELECT COUNT(*) FROM transactions_projection WHERE id = $1 AND wallet_id = $2 AND version = $3"
     )
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .bind(new_version)
     .fetch_one(&*state.db_pool)
     .await
@@ -737,19 +768,20 @@ pub async fn delete_transaction(
     }
 
     // Calculate total debt AFTER deleting the transaction (this changes total debt - we want the value AFTER the action)
-    let total_debt_after = calculate_total_debt(&state).await;
+    let total_debt_after = calculate_total_debt(&state, wallet_id).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
     // Write to PostgreSQL events table
     let delete_event_id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ($1, 'transaction', $2, 'TRANSACTION_DELETED', $3, $4, NOW())
+        INSERT INTO events (user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ($1, $2, 'transaction', $3, 'TRANSACTION_DELETED', $4, $5, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
+    .bind(wallet_id)
     .bind(transaction_uuid)
     .bind(new_version)
     .bind(&event_data_with_debt)
@@ -765,10 +797,11 @@ pub async fn delete_transaction(
 
     // Update projection with event_id
     sqlx::query(
-        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2"
+        "UPDATE transactions_projection SET last_event_id = $1 WHERE id = $2 AND wallet_id = $3"
     )
     .bind(delete_event_id)
     .bind(transaction_uuid)
+    .bind(wallet_id)
     .execute(&*state.db_pool)
     .await
     .ok(); // Non-blocking update

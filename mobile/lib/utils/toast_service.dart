@@ -504,7 +504,7 @@ class ToastService {
       }
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger.hideCurrentSnackBar();
+      scaffoldMessenger?.hideCurrentSnackBar();
       
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -557,7 +557,7 @@ class ToastService {
       }
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger.hideCurrentSnackBar();
+      scaffoldMessenger?.hideCurrentSnackBar();
       
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -575,7 +575,7 @@ class ToastService {
             label: 'DISMISS',
             textColor: ThemeColors.snackBarActionColor(context),
             onPressed: () {
-              scaffoldMessenger.hideCurrentSnackBar();
+              scaffoldMessenger?.hideCurrentSnackBar();
             },
           ),
         ),
@@ -617,7 +617,7 @@ class ToastService {
       }
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger.hideCurrentSnackBar();
+      scaffoldMessenger?.hideCurrentSnackBar();
       
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -676,7 +676,7 @@ class ToastService {
       final actualDuration = duration ?? undoDuration;
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger.hideCurrentSnackBar();
+      scaffoldMessenger?.hideCurrentSnackBar();
       
       // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[scaffoldMessenger]?.cancel();
@@ -700,7 +700,7 @@ class ToastService {
             onPressed: () {
               _activeTimers[scaffoldMessenger!]?.cancel();
               _activeTimers.remove(scaffoldMessenger);
-              scaffoldMessenger.hideCurrentSnackBar();
+              scaffoldMessenger?.hideCurrentSnackBar();
               onUndo();
             },
           ),
@@ -712,7 +712,7 @@ class ToastService {
       _activeTimers[scaffoldMessenger] = Timer(actualDuration + const Duration(milliseconds: 500), () {
         try {
           if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger)) {
-            scaffoldMessenger.hideCurrentSnackBar();
+            scaffoldMessenger?.hideCurrentSnackBar();
             _activeTimers.remove(scaffoldMessenger);
           }
         } catch (e) {
@@ -785,7 +785,7 @@ class ToastService {
       final actualDuration = duration ?? undoDuration;
       
       // Dismiss any existing toast before showing new one
-      scaffoldMessenger.hideCurrentSnackBar();
+      scaffoldMessenger?.hideCurrentSnackBar();
       
       // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[scaffoldMessenger]?.cancel();
@@ -809,7 +809,7 @@ class ToastService {
             onPressed: () async {
               _activeTimers[scaffoldMessenger!]?.cancel();
               _activeTimers.remove(scaffoldMessenger);
-              scaffoldMessenger.hideCurrentSnackBar();
+              scaffoldMessenger?.hideCurrentSnackBar();
               try {
                 await onUndo();
                 // Check if context is still valid before showing toast
@@ -840,7 +840,7 @@ class ToastService {
       _activeTimers[scaffoldMessenger] = Timer(actualDuration + const Duration(milliseconds: 500), () {
         try {
           if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger)) {
-            scaffoldMessenger.hideCurrentSnackBar();
+            scaffoldMessenger?.hideCurrentSnackBar();
             _activeTimers.remove(scaffoldMessenger);
           }
         } catch (e) {

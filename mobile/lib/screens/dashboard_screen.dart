@@ -10,6 +10,8 @@ import '../services/sync_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/dummy_data_service.dart';
+import '../services/auth_service.dart';
+import '../services/wallet_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -34,6 +36,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   List<Contact>? _contacts;
   List<Transaction>? _transactions;
   bool _loading = true;
+  Box<Contact>? _contactsBox;
+  Box<Transaction>? _transactionsBox;
 
   @override
   void initState() {
@@ -46,13 +50,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   void _setupLocalListeners() {
     if (kIsWeb) return;
-    
-    // Listen to local Hive box changes for offline updates
-    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-    
-    contactsBox.listenable().addListener(_onLocalDataChanged);
-    transactionsBox.listenable().addListener(_onLocalDataChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final userId = await AuthService.getUserId();
+      final walletId = WalletService.getCurrentWalletId();
+      if (userId == null || walletId == null || !mounted) return;
+      final contactsBoxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
+      final transactionsBoxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
+      await Hive.openBox<Contact>(contactsBoxName);
+      await Hive.openBox<Transaction>(transactionsBoxName);
+      if (!mounted) return;
+      final contactsBox = Hive.box<Contact>(contactsBoxName);
+      final transactionsBox = Hive.box<Transaction>(transactionsBoxName);
+      contactsBox.listenable().addListener(_onLocalDataChanged);
+      transactionsBox.listenable().addListener(_onLocalDataChanged);
+      setState(() {
+        _contactsBox = contactsBox;
+        _transactionsBox = transactionsBox;
+      });
+    });
   }
 
   void _onLocalDataChanged() {
@@ -73,11 +88,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   void dispose() {
-    if (!kIsWeb) {
-      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-      contactsBox.listenable().removeListener(_onLocalDataChanged);
-      transactionsBox.listenable().removeListener(_onLocalDataChanged);
+    if (!kIsWeb && _contactsBox != null && _transactionsBox != null) {
+      _contactsBox!.listenable().removeListener(_onLocalDataChanged);
+      _transactionsBox!.listenable().removeListener(_onLocalDataChanged);
     }
     RealtimeService.removeListener(_onRealtimeUpdate);
     super.dispose();
