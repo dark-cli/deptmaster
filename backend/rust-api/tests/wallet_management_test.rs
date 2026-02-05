@@ -12,6 +12,7 @@
 use debt_tracker_api::handlers::wallets;
 use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
+use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::websocket;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -121,7 +122,9 @@ async fn test_get_wallet() {
 #[ignore]
 async fn test_update_wallet() {
     let pool = setup_test_db().await;
+    let acting_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Original Name").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -136,6 +139,7 @@ async fn test_update_wallet() {
     let result = wallets::update_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
         axum::Json(update_request),
     ).await;
 
@@ -158,7 +162,9 @@ async fn test_update_wallet() {
 #[ignore]
 async fn test_delete_wallet() {
     let pool = setup_test_db().await;
+    let acting_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -167,6 +173,7 @@ async fn test_delete_wallet() {
     let result = wallets::delete_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
     ).await;
 
     assert!(result.is_ok());
@@ -188,21 +195,24 @@ async fn test_delete_wallet() {
 #[ignore]
 async fn test_add_user_to_wallet() {
     let pool = setup_test_db().await;
-    let user_id = create_test_user(&pool).await;
+    let acting_user_id = create_test_user(&pool).await;
+    let target_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "owner").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let add_request = wallets::AddUserToWalletRequest {
-        user_id: user_id.to_string(),
+        user_id: target_user_id.to_string(),
         role: "member".to_string(),
     };
 
     let result = wallets::add_user_to_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
         axum::Json(add_request),
     ).await;
 
@@ -215,7 +225,7 @@ async fn test_add_user_to_wallet() {
         "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
     )
     .bind(wallet_id)
-    .bind(user_id)
+    .bind(target_user_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -226,9 +236,11 @@ async fn test_add_user_to_wallet() {
 #[ignore]
 async fn test_update_wallet_user_role() {
     let pool = setup_test_db().await;
-    let user_id = create_test_user(&pool).await;
+    let acting_user_id = create_test_user(&pool).await;
+    let target_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
-    add_user_to_wallet(&pool, user_id, wallet_id, "member").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
+    add_user_to_wallet(&pool, target_user_id, wallet_id, "member").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -239,8 +251,9 @@ async fn test_update_wallet_user_role() {
     };
 
     let result = wallets::update_wallet_user(
-        axum::extract::Path((wallet_id.to_string(), user_id.to_string())),
+        axum::extract::Path((wallet_id.to_string(), target_user_id.to_string())),
         axum::extract::State(app_state),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
         axum::Json(update_request),
     ).await;
 
@@ -253,7 +266,7 @@ async fn test_update_wallet_user_role() {
         "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
     )
     .bind(wallet_id)
-    .bind(user_id)
+    .bind(target_user_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -264,17 +277,20 @@ async fn test_update_wallet_user_role() {
 #[ignore]
 async fn test_remove_user_from_wallet() {
     let pool = setup_test_db().await;
-    let user_id = create_test_user(&pool).await;
+    let acting_user_id = create_test_user(&pool).await;
+    let target_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
-    add_user_to_wallet(&pool, user_id, wallet_id, "member").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
+    add_user_to_wallet(&pool, target_user_id, wallet_id, "member").await;
     
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let result = wallets::remove_user_from_wallet(
-        axum::extract::Path((wallet_id.to_string(), user_id.to_string())),
+        axum::extract::Path((wallet_id.to_string(), target_user_id.to_string())),
         axum::extract::State(app_state),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
     ).await;
 
     assert!(result.is_ok());
@@ -286,7 +302,7 @@ async fn test_remove_user_from_wallet() {
         "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
     )
     .bind(wallet_id)
-    .bind(user_id)
+    .bind(target_user_id)
     .fetch_one(&pool)
     .await
     .unwrap();

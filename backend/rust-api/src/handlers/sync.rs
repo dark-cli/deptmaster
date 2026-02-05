@@ -561,8 +561,9 @@ pub async fn post_sync_events(
 
     // Broadcast WebSocket message when events are synced (so other clients get notified immediately)
     if !accepted.is_empty() {
-        websocket::broadcast_change(
+        websocket::broadcast_wallet_change(
             &state.broadcast_tx,
+            wallet_id,
             "events_synced",
             &serde_json::json!({
                 "accepted_count": accepted.len(),

@@ -1510,6 +1510,10 @@
                 clearInterval(pollingInterval);
                 pollingInterval = null;
             }
+            if (reconnectTimeoutId) {
+                clearTimeout(reconnectTimeoutId);
+                reconnectTimeoutId = null;
+            }
         }
 
         function checkAuth() {
@@ -1668,8 +1672,19 @@
         let lastEventId = null;
         let wsConnection = null;
         let pollingInterval = null;
+        let reconnectTimeoutId = null; // Single reconnection timer to avoid storm
+        let lastEventsLatestTime = 0;  // Throttle /admin/events/latest calls
+        const EVENTS_LATEST_THROTTLE_MS = 2000; // Min 2s between events/latest calls
         let isUpdating = false;
         let currentTotalDebt = null; // Store current total debt for fallback in events
+
+        function scheduleReconnect(delayMs) {
+            if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId);
+            reconnectTimeoutId = setTimeout(() => {
+                reconnectTimeoutId = null;
+                if (checkAuth()) startSmartUpdates();
+            }, delayMs);
+        }
         
         // Chart state
         let debtChart = null;
@@ -3477,14 +3492,21 @@
         
         // Smart update system - only updates when there are changes
         function startSmartUpdates() {
+            if (reconnectTimeoutId) {
+                clearTimeout(reconnectTimeoutId);
+                reconnectTimeoutId = null;
+            }
             // Check auth first
             if (!checkAuth()) {
                 console.log('⚠️ Cannot start smart updates - not authenticated');
                 return;
             }
             
-            // Get the latest event ID (with rate limit handling)
-            authenticatedFetch(`${API_URL}/admin/events/latest`)
+            // Get the latest event ID (throttled to avoid request storm)
+            const now = Date.now();
+            if (now - lastEventsLatestTime >= EVENTS_LATEST_THROTTLE_MS) {
+                lastEventsLatestTime = now;
+                authenticatedFetch(`${API_URL}/admin/events/latest`)
                 .then(r => {
                     // Handle rate limiting gracefully
                     if (r.status === 429) {
@@ -3514,6 +3536,7 @@
                     
                     console.error('Error getting latest event ID:', err);
                 });
+            }
             
             // Try WebSocket first (real-time)
             try {
@@ -3562,48 +3585,34 @@
                     // Check if it's an auth error (401)
                     if (wsConnection.readyState === WebSocket.CLOSED) {
                         console.log('⚠️ WebSocket closed due to auth error - checking token validity...');
-                        // Validate token and reconnect if valid
                         validateAuth().then(isValid => {
                             if (isValid) {
                                 console.log('✅ Token is valid, reconnecting WebSocket...');
-                                setTimeout(() => startSmartUpdates(), 5000); // Longer delay to avoid rate limits
+                                scheduleReconnect(5000);
                             } else {
                                 console.log('⚠️ Token invalid - not reconnecting');
                             }
                         });
                     } else {
-                        // Other error - try to reconnect (longer delay to avoid rate limits)
-                        setTimeout(() => {
-                            if (checkAuth()) {
-                                startSmartUpdates();
-                            }
-                        }, 5000); // Increased from 2000 to 5000ms
+                        scheduleReconnect(5000);
                     }
                 };
                 
                 wsConnection.onclose = (event) => {
                     console.log('WebSocket closed', event.code, event.reason);
-                    // Don't reconnect if it was closed due to auth error (401)
                     if (event.code === 1008 || event.code === 1002) {
                         console.log('⚠️ WebSocket closed due to protocol/auth error - checking token...');
                         validateAuth().then(isValid => {
                             if (isValid) {
                                 console.log('✅ Token is valid, reconnecting WebSocket...');
-                                setTimeout(() => startSmartUpdates(), 5000); // Longer delay to avoid rate limits
+                                scheduleReconnect(5000);
                             } else {
                                 console.log('⚠️ Token invalid - not reconnecting');
                             }
                         });
                         return;
                     }
-                    // Normal close - reconnect if authenticated (longer delay to avoid rate limits)
-                    setTimeout(() => {
-                        if (checkAuth()) {
-                            startSmartUpdates();
-                        } else {
-                            console.log('⚠️ Not reconnecting WebSocket - user logged out');
-                        }
-                    }, 5000); // Increased from 2000 to 5000ms
+                    scheduleReconnect(5000);
                 };
             } catch (e) {
                 console.log('WebSocket not available, using polling:', e);
@@ -3621,12 +3630,15 @@
         
         // Check for updates (used by WebSocket and polling)
         async function checkForUpdates() {
-            // Check auth first
             if (!checkAuth()) {
                 console.log('⚠️ Cannot check for updates - not authenticated');
                 return;
             }
-            
+            const now = Date.now();
+            if (now - lastEventsLatestTime < EVENTS_LATEST_THROTTLE_MS) {
+                return; // Throttle: skip to avoid request storm
+            }
+            lastEventsLatestTime = now;
             try {
                 const response = await authenticatedFetch(`${API_URL}/admin/events/latest`);
                 

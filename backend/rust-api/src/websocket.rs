@@ -9,16 +9,20 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::Deserialize;
+use std::collections::HashSet;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 use crate::AppState;
 use crate::middleware::auth::Claims;
 
-pub type BroadcastChannel = broadcast::Sender<(Uuid, String)>; // (user_id, message)
+/// Wallet-scoped broadcast channel.
+/// The first element is the wallet_id the message is for.
+pub type BroadcastChannel = broadcast::Sender<(Uuid, String)>; // (wallet_id, message)
 
 #[derive(Deserialize)]
 pub struct WebSocketQuery {
     token: Option<String>,
+    wallet_id: Option<String>,
 }
 
 pub fn create_broadcast_channel() -> BroadcastChannel {
@@ -61,9 +65,9 @@ pub async fn websocket_handler(
             StatusCode::UNAUTHORIZED
         })?;
 
-    // Verify user exists in either users_projection or admin_users
+    // WebSocket is only for regular users (admins must not create events / subscribe to realtime).
     let user_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1) OR EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)"
+        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)"
     )
     .bind(user_id)
     .fetch_one(&*state.db_pool)
@@ -74,28 +78,74 @@ pub async fn websocket_handler(
     })?;
 
     if !user_exists {
-        tracing::warn!("WebSocket connection attempt for non-existent user: {}", user_id);
+        tracing::warn!("WebSocket connection attempt for invalid user: {}", user_id);
         return Err(StatusCode::UNAUTHORIZED);
     }
     
     tracing::info!("WebSocket connection authenticated for user: {}", user_id);
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, user_id)))
+    // Load wallets the user is a member of. We use this to filter wallet-scoped broadcasts.
+    let wallet_ids: Vec<Uuid> = sqlx::query_scalar::<_, Uuid>(
+        "SELECT wallet_id FROM wallet_users WHERE user_id = $1"
+    )
+    .bind(user_id)
+    .fetch_all(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("WebSocket database error loading user wallets: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let allowed_wallet_ids: HashSet<Uuid> = wallet_ids.into_iter().collect();
+
+    // Stage 2: Client must tell us which wallet is currently open; we restrict realtime to that wallet only.
+    let active_wallet_id: Uuid = match query.wallet_id.as_deref() {
+        None => {
+            tracing::warn!("WebSocket connection attempt without wallet_id (user={})", user_id);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        Some(s) if s.trim().is_empty() => {
+            tracing::warn!("WebSocket connection attempt with empty wallet_id (user={})", user_id);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        Some(s) => {
+            let parsed = Uuid::parse_str(s).map_err(|_| {
+                tracing::warn!("WebSocket invalid wallet_id in query: {}", s);
+                StatusCode::BAD_REQUEST
+            })?;
+            if !allowed_wallet_ids.contains(&parsed) {
+                tracing::warn!("WebSocket user {} tried to subscribe to wallet {} without access", user_id, parsed);
+                return Err(StatusCode::FORBIDDEN);
+            }
+            parsed
+        }
+    };
+
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, allowed_wallet_ids, active_wallet_id)))
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: AppState,
+    allowed_wallet_ids: HashSet<Uuid>,
+    active_wallet_id: Uuid,
+) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.broadcast_tx.subscribe();
 
     // Spawn task to send messages from broadcast channel to client
-    // Only send messages intended for this user
     let mut send_task = tokio::spawn(async move {
-        while let Ok((target_user_id, msg)) = rx.recv().await {
-            // Only send if message is for this user or broadcast (user_id is NULL/UUID::nil)
-            if target_user_id == user_id || target_user_id == Uuid::nil() {
-                if sender.send(Message::Text(msg)).await.is_err() {
-                    break;
-                }
+        while let Ok((wallet_id, msg)) = rx.recv().await {
+            // Primary filter: only the wallet the client is currently viewing.
+            if wallet_id != active_wallet_id {
+                continue;
+            }
+            // Safety: wallet is still required to be a member wallet.
+            if !allowed_wallet_ids.contains(&wallet_id) {
+                continue;
+            }
+            if sender.send(Message::Text(msg)).await.is_err() {
+                break;
             }
         }
     });
@@ -116,14 +166,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid) {
     };
 }
 
-// Broadcast to all users (user_id = nil)
-pub fn broadcast_change(channel: &BroadcastChannel, event_type: &str, data: &str) {
-    broadcast_to_user(channel, None, event_type, data);
-}
-
-// Broadcast to specific user or all users if user_id is None
-pub fn broadcast_to_user(channel: &BroadcastChannel, user_id: Option<Uuid>, event_type: &str, data: &str) {
-    let message = format!(r#"{{"type":"{}","data":{}}}"#, event_type, data);
-    let target_user_id = user_id.unwrap_or(Uuid::nil());
-    let _ = channel.send((target_user_id, message));
+/// Broadcast a realtime message scoped to a specific wallet.
+///
+/// Only websocket connections belonging to users that are members of `wallet_id` will receive it.
+pub fn broadcast_wallet_change(channel: &BroadcastChannel, wallet_id: Uuid, event_type: &str, data: &str) {
+    let message = format!(
+        r#"{{"type":"{}","wallet_id":"{}","data":{}}}"#,
+        event_type,
+        wallet_id,
+        data
+    );
+    let _ = channel.send((wallet_id, message));
 }

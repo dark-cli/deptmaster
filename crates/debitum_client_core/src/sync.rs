@@ -32,9 +32,31 @@ pub fn push_unsynced() -> Result<(), String> {
             serde_json::to_string(&v).unwrap_or_else(|_| "{}".to_string())
         })
         .collect();
-    let accepted = api::post_sync_events(payload)?;
-    storage::events_mark_synced(&accepted)?;
-    Ok(())
+    match api::post_sync_events(payload) {
+        Ok(accepted) => {
+            storage::events_mark_synced(&accepted)?;
+            Ok(())
+        }
+        Err(e) => {
+            let s = e.to_lowercase();
+            let is_unauthorized = s.contains("401") || s.contains("403") || s.contains("forbidden") || s.contains("unauthorized");
+            if is_unauthorized {
+                // Server rejected our pending writes. Drop local pending events so we don't keep retrying
+                // and rollback local projection state to last known-good (synced) data.
+                let dropped = storage::events_delete_unsynced(&wallet_id)?;
+                rust_log!(
+                    "[debitum_rs] push_unsynced: unauthorized/forbidden -> dropped {} local pending events (wallet_id={})",
+                    dropped,
+                    wallet_id
+                );
+                let events = storage::events_get_all(&wallet_id)?;
+                let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
+                storage::state_save(&wallet_id, &contacts, &transactions)?;
+                return Err(format!("FORBIDDEN_WRITE: {} (dropped {} local pending events)", e, dropped));
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Pull server events (since last sync for this wallet), merge into local, rebuild state.

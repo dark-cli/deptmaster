@@ -11,6 +11,61 @@ use crate::AppState;
 use crate::middleware::auth::AuthUser;
 use crate::websocket;
 
+async fn require_wallet_role_at_least(
+    state: &AppState,
+    wallet_id: Uuid,
+    auth_user: &AuthUser,
+    required_role: &str,
+) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    if auth_user.is_admin {
+        return Ok("admin".to_string());
+    }
+    let role = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT role
+        FROM wallet_users
+        WHERE wallet_id = $1 AND user_id = $2
+        "#
+    )
+    .bind(wallet_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet role: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "You do not have access to this wallet"})),
+        )
+    })?;
+
+    // member < admin < owner
+    let role_hierarchy = ["member", "admin", "owner"];
+    let user_level = role_hierarchy
+        .iter()
+        .position(|&r| r == role.as_str())
+        .unwrap_or(0);
+    let required_level = role_hierarchy
+        .iter()
+        .position(|&r| r == required_role)
+        .unwrap_or(0);
+
+    if user_level < required_level {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Insufficient wallet permissions"})),
+        ));
+    }
+
+    Ok(role)
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Wallet {
     pub id: String,
@@ -133,8 +188,9 @@ pub async fn create_my_wallet(
         message: "Wallet created successfully".to_string(),
     };
 
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "wallet_created",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
@@ -221,8 +277,9 @@ pub async fn create_wallet(
     };
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "wallet_created",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
@@ -319,6 +376,7 @@ pub async fn get_wallet(
 pub async fn update_wallet(
     Path(wallet_id): Path<String>,
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<UpdateWalletRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
@@ -327,6 +385,9 @@ pub async fn update_wallet(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
+
+    // Enforce permissions: only wallet admins/owners may edit wallet details.
+    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
 
     // Check if wallet exists
     let wallet_exists = sqlx::query_scalar::<_, bool>(
@@ -408,8 +469,9 @@ pub async fn update_wallet(
         })?;
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_uuid,
         "wallet_updated",
         &serde_json::json!({"wallet_id": wallet_id}).to_string(),
     );
@@ -424,6 +486,7 @@ pub async fn update_wallet(
 pub async fn delete_wallet(
     Path(wallet_id): Path<String>,
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
         (
@@ -431,6 +494,9 @@ pub async fn delete_wallet(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
+
+    // Enforce permissions: only wallet owners may delete a wallet.
+    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "owner").await?;
 
     // Soft delete by setting is_active = false
     sqlx::query(
@@ -449,8 +515,9 @@ pub async fn delete_wallet(
     })?;
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_uuid,
         "wallet_deleted",
         &serde_json::json!({"wallet_id": wallet_id}).to_string(),
     );
@@ -465,6 +532,7 @@ pub async fn delete_wallet(
 pub async fn add_user_to_wallet(
     Path(wallet_id): Path<String>,
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<AddUserToWalletRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
@@ -473,6 +541,9 @@ pub async fn add_user_to_wallet(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
+
+    // Enforce permissions: only wallet admins/owners may manage members.
+    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
 
     let user_uuid = Uuid::parse_str(&payload.user_id).map_err(|e| {
         (
@@ -557,8 +628,9 @@ pub async fn add_user_to_wallet(
     })?;
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_uuid,
         "wallet_user_added",
         &serde_json::json!({
             "wallet_id": wallet_id,
@@ -618,6 +690,7 @@ pub async fn list_wallet_users(
 pub async fn update_wallet_user(
     Path((wallet_id, user_id)): Path<(String, String)>,
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<UpdateWalletUserRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
@@ -626,6 +699,9 @@ pub async fn update_wallet_user(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
+
+    // Enforce permissions: only wallet admins/owners may manage members.
+    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
 
     let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
         (
@@ -667,8 +743,9 @@ pub async fn update_wallet_user(
     }
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_uuid,
         "wallet_user_updated",
         &serde_json::json!({
             "wallet_id": wallet_id,
@@ -687,6 +764,7 @@ pub async fn update_wallet_user(
 pub async fn remove_user_from_wallet(
     Path((wallet_id, user_id)): Path<(String, String)>,
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
         (
@@ -694,6 +772,9 @@ pub async fn remove_user_from_wallet(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
+
+    // Enforce permissions: only wallet admins/owners may manage members.
+    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
 
     let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
         (
@@ -726,8 +807,9 @@ pub async fn remove_user_from_wallet(
     }
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_uuid,
         "wallet_user_removed",
         &serde_json::json!({
             "wallet_id": wallet_id,

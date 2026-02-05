@@ -196,6 +196,17 @@ pub fn events_mark_synced(ids: &[String]) -> Result<(), String> {
     })
 }
 
+/// Delete all unsynced (pending) events for a wallet.
+pub fn events_delete_unsynced(wallet_id: &str) -> Result<u64, String> {
+    with_db(|conn| {
+        let affected = conn.execute(
+            "DELETE FROM events WHERE wallet_id = ?1 AND synced = 0",
+            params![wallet_id],
+        )?;
+        Ok(affected as u64)
+    })
+}
+
 pub fn events_count(wallet_id: &str) -> Result<i64, String> {
     with_db(|conn| {
         let count: i64 = conn.query_row(

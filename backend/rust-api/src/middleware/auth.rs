@@ -21,6 +21,8 @@ pub struct AuthUser {
     pub user_id: Uuid,
     #[allow(dead_code)] // Reserved for future use (e.g., logging, user info display)
     pub email: String,
+    /// True if this token belongs to an active admin user.
+    pub is_admin: bool,
 }
 
 pub async fn auth_middleware(
@@ -60,23 +62,52 @@ pub async fn auth_middleware(
     let user_id = Uuid::parse_str(&claims.user_id)
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-    // Verify user exists in either users_projection or admin_users
-    let user_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1) OR EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)"
+    // Determine if this token belongs to an active admin.
+    let is_admin = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)"
     )
     .bind(user_id)
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if !user_exists {
-        return Err(StatusCode::UNAUTHORIZED);
+    // Verify user exists (regular user or active admin).
+    if !is_admin {
+        let user_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)"
+        )
+        .bind(user_id)
+        .fetch_one(&*state.db_pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if !user_exists {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    // Admin access rules:
+    // - /api/admin/** requires an admin token
+    // - admin tokens must NOT be used to create events / sync / realtime
+    if path.starts_with("/api/admin/") {
+        if !is_admin {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    } else if is_admin {
+        // Disallow admin tokens from using user-facing event/sync/realtime endpoints.
+        if path == "/ws"
+            || path.starts_with("/api/contacts")
+            || path.starts_with("/api/transactions")
+            || path.starts_with("/api/sync/")
+        {
+            return Err(StatusCode::FORBIDDEN);
+        }
     }
 
     // Attach user info to request
     let auth_user = AuthUser {
         user_id,
         email: claims.email,
+        is_admin,
     };
     req.extensions_mut().insert(auth_user);
 

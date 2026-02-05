@@ -279,8 +279,9 @@ pub async fn create_contact(
     };
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "contact_created",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
@@ -501,8 +502,9 @@ pub async fn update_contact(
     };
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "contact_updated",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
@@ -701,8 +703,9 @@ pub async fn delete_contact(
     });
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "contact_deleted",
         &serde_json::to_string(&response).unwrap_or_default(),
     );

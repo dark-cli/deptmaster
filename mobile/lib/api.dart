@@ -10,6 +10,7 @@ import 'package:local_auth/local_auth.dart';
 
 import 'src/frb_generated.dart';
 import 'src/lib.dart' as rust;
+import 'utils/toast_service.dart';
 
 class Api {
   static bool _initialized = false;
@@ -232,6 +233,9 @@ class Api {
     if (kIsWeb) return;
     try {
       await rust.setCurrentWalletId(walletId: walletId);
+      // Stage 2 realtime: reconnect websocket to subscribe to the active wallet only.
+      await _wsDisconnect();
+      connectRealtime().catchError((_) {});
     } catch (e) {
       rethrow;
     }
@@ -322,15 +326,24 @@ class Api {
     String? notes,
   }) async {
     if (kIsWeb) throw UnsupportedError('Not on web');
-    final result = await rust.createContact(
-      name: name,
-      username: username,
-      phone: phone,
-      email: email,
-      notes: notes,
-    );
-    _notifyDataChanged();
-    return result;
+    try {
+      final result = await rust.createContact(
+        name: name,
+        username: username,
+        phone: phone,
+        email: email,
+        notes: notes,
+      );
+      _notifyDataChanged();
+      return result;
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged(); // reflect rollback
+      }
+      rethrow;
+    }
   }
 
   static Future<void> updateContact({
@@ -342,21 +355,39 @@ class Api {
     String? notes,
   }) async {
     if (kIsWeb) return;
-    await rust.updateContact(
-      id: id,
-      name: name,
-      username: username,
-      phone: phone,
-      email: email,
-      notes: notes,
-    );
-    _notifyDataChanged();
+    try {
+      await rust.updateContact(
+        id: id,
+        name: name,
+        username: username,
+        phone: phone,
+        email: email,
+        notes: notes,
+      );
+      _notifyDataChanged();
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged();
+      }
+      rethrow;
+    }
   }
 
   static Future<void> deleteContact(String contactId) async {
     if (kIsWeb) return;
-    await rust.deleteContact(contactId: contactId);
-    _notifyDataChanged();
+    try {
+      await rust.deleteContact(contactId: contactId);
+      _notifyDataChanged();
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged();
+      }
+      rethrow;
+    }
   }
 
   static Future<String> createTransaction({
@@ -370,18 +401,27 @@ class Api {
     String? dueDate,
   }) async {
     if (kIsWeb) throw UnsupportedError('Not on web');
-    final result = await rust.createTransaction(
-      contactId: contactId,
-      type: type,
-      direction: direction,
-      amount: amount,
-      currency: currency,
-      description: description,
-      transactionDate: transactionDate,
-      dueDate: dueDate,
-    );
-    _notifyDataChanged();
-    return result;
+    try {
+      final result = await rust.createTransaction(
+        contactId: contactId,
+        type: type,
+        direction: direction,
+        amount: amount,
+        currency: currency,
+        description: description,
+        transactionDate: transactionDate,
+        dueDate: dueDate,
+      );
+      _notifyDataChanged();
+      return result;
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged();
+      }
+      rethrow;
+    }
   }
 
   static Future<void> updateTransaction({
@@ -396,24 +436,42 @@ class Api {
     String? dueDate,
   }) async {
     if (kIsWeb) return;
-    await rust.updateTransaction(
-      id: id,
-      contactId: contactId,
-      type: type,
-      direction: direction,
-      amount: amount,
-      currency: currency,
-      description: description,
-      transactionDate: transactionDate,
-      dueDate: dueDate,
-    );
-    _notifyDataChanged();
+    try {
+      await rust.updateTransaction(
+        id: id,
+        contactId: contactId,
+        type: type,
+        direction: direction,
+        amount: amount,
+        currency: currency,
+        description: description,
+        transactionDate: transactionDate,
+        dueDate: dueDate,
+      );
+      _notifyDataChanged();
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged();
+      }
+      rethrow;
+    }
   }
 
   static Future<void> deleteTransaction(String transactionId) async {
     if (kIsWeb) return;
-    await rust.deleteTransaction(transactionId: transactionId);
-    _notifyDataChanged();
+    try {
+      await rust.deleteTransaction(transactionId: transactionId);
+      _notifyDataChanged();
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged();
+      }
+      rethrow;
+    }
   }
 
   static Future<void> undoContactAction(String contactId) async {
@@ -488,6 +546,11 @@ class Api {
     } catch (e) {
       _hasSyncError = true;
       debugPrint('Api.manualSync failed: $e');
+      final s = e.toString().toLowerCase();
+      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
+        _notifyDataChanged(); // reflect rollback done in Rust
+      }
       await drainRustLogsToConsole();
       rethrow;
     }
@@ -532,11 +595,16 @@ class Api {
     final token = await getToken();
     if (token == null || token.isEmpty) return;
     if (_isTokenExpired(token)) return;
+    final walletId = await getCurrentWalletId();
+    if (walletId == null || walletId.isEmpty) return;
+    final subscribedWalletId = walletId;
 
     _wsConnecting = true;
     try {
       final wsUrl = await getWebSocketUrl();
-      final uri = Uri.parse(wsUrl).replace(queryParameters: {'token': token});
+      final uri = Uri.parse(wsUrl).replace(
+        queryParameters: {'token': token, 'wallet_id': subscribedWalletId},
+      );
       final channel = WebSocketChannel.connect(uri);
 
       _wsSubscription = channel.stream.listen(
@@ -549,6 +617,11 @@ class Api {
           }
           try {
             final data = json.decode(message as String) as Map<String, dynamic>;
+            // Stage 2 safety: ignore messages for other wallets (shouldn't happen if server filters correctly).
+            final msgWalletId = data['wallet_id'];
+            if (msgWalletId is String && msgWalletId.isNotEmpty && msgWalletId != subscribedWalletId) {
+              return;
+            }
             for (final fn in _realtimeListeners) fn(data);
             manualSync().catchError((_) {});
           } catch (_) {}

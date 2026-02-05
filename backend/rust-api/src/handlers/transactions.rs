@@ -310,8 +310,9 @@ pub async fn create_transaction(
     };
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "transaction_created",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
@@ -594,8 +595,9 @@ pub async fn update_transaction(
     };
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "transaction_updated",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
@@ -806,8 +808,9 @@ pub async fn delete_transaction(
     });
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "transaction_deleted",
         &serde_json::to_string(&response).unwrap_or_default(),
     );

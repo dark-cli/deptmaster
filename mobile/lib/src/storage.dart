@@ -40,6 +40,10 @@ Future<List<StoredEvent>> eventsGetUnsynced({required String walletId}) =>
 Future<void> eventsMarkSynced({required List<String> ids}) =>
     RustLib.instance.api.crateStorageEventsMarkSynced(ids: ids);
 
+/// Delete all unsynced (pending) events for a wallet.
+Future<BigInt> eventsDeleteUnsynced({required String walletId}) =>
+    RustLib.instance.api.crateStorageEventsDeleteUnsynced(walletId: walletId);
+
 Future<PlatformInt64> eventsCount({required String walletId}) =>
     RustLib.instance.api.crateStorageEventsCount(walletId: walletId);
 

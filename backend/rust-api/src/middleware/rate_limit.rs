@@ -1,9 +1,10 @@
 use axum::{
     extract::{Request, State},
-    http::StatusCode,
+    http::{header::AUTHORIZATION, StatusCode},
     middleware::Next,
     response::Response,
 };
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -161,23 +162,28 @@ pub async fn rate_limit_middleware(
     
     // Skip rate limiting for health checks, WebSocket upgrades, and static admin page
     // The admin page is static HTML and shouldn't be rate limited
-    if path == "/health" || path == "/ws" || path == "/admin" {
+    // Also skip /api/admin/* since the admin UI can burst-load data.
+    if path == "/health" || path == "/ws" || path == "/admin" || path.starts_with("/api/admin/") {
         return Ok(next.run(req).await);
     }
     
-    // Extract IP address
-    let ip = extract_ip(&req);
-    
     // For authenticated requests, use a more lenient rate limit
     // Check if request has Authorization header (authenticated user)
-    let is_authenticated = req.headers().get("authorization").is_some();
+    let auth_header = req.headers().get(AUTHORIZATION).and_then(|h| h.to_str().ok());
+    let is_authenticated = auth_header.is_some();
     
     // Use different rate limits: authenticated users get higher limits
     // This prevents legitimate users from hitting limits while still protecting against abuse
     if is_authenticated {
-        // Authenticated users: use higher limits (5x default)
-        rate_limiter.check_limit_auth(&ip).await?;
+        // Authenticated users: key by token hash (not by IP).
+        // This avoids the "unknown IP" problem in local dev and keeps separate users isolated.
+        let mut hasher = Sha256::new();
+        hasher.update(auth_header.unwrap().as_bytes());
+        let key = format!("auth:{:x}", hasher.finalize());
+        rate_limiter.check_limit_auth(&key).await?;
     } else {
+        // Extract IP address
+        let ip = extract_ip(&req);
         // Unauthenticated requests: use default rate limit
         rate_limiter.check_limit(&ip).await?;
     }
