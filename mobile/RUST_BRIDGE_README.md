@@ -39,7 +39,7 @@ Then rebuild the Rust crate and the Flutter app.
   1. Build the Rust lib: `cd crates/debitum_client_core && cargo build --release` (or `cargo build` for debug).
   2. If you only built debug, copy so the loader finds it: `cp target/debug/libdebitum_client_core.so target/release/`.
   3. Run from `mobile/` with `LD_LIBRARY_PATH` set: `LD_LIBRARY_PATH="../crates/debitum_client_core/target/release" flutter run -d linux`
-- **Android / iOS**: Use flutter_rust_bridge’s build instructions (e.g. copy the built lib into `android/app/src/main/jniLibs/` or use the recommended build script for your version).
+- **Android**: Use flutter_rust_bridge’s build instructions From repo root run **`./manage.sh run-flutter-app android`** so the script builds the Rust lib for Android (cargo-ndk) into jniLibs. Otherwise the app shows "Native library not loaded". Prerequisites: cargo-ndk, Android targets (aarch64-linux-android, etc.), Android NDK.
 
 ## Current API
 

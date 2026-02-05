@@ -13,7 +13,9 @@ import '../helpers/multi_app_helpers.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   
-  test('Performance Test - Time Each Step', () async {
+  test(
+    'Performance Test - Time Each Step',
+    () async {
     print('\n⏱️ Performance Test - Timing Each Step\n');
     
     final timings = <String, Duration>{};
@@ -179,5 +181,7 @@ void main() {
       final percentage = (entry.value.inMilliseconds / total.inMilliseconds * 100).toStringAsFixed(1);
       print('   ${i + 1}. ${entry.key}: ${entry.value.inMilliseconds}ms (${percentage}%)');
     }
-  });
+  },
+    tags: ['standalone'],
+  );
 }

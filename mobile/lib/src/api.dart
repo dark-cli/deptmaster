@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `auth_headers`, `base_url`, `get_sync_events`, `get_sync_hash`, `post_sync_events`
+// These functions are ignored because they are not marked as `pub`: `auth_headers`, `base_url`, `get_sync_events`, `post_sync_events`
 
 /// POST /api/auth/login -> { token, user_id, username }
 Future<void> login({required String username, required String password}) =>

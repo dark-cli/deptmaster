@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint, defaultTargetPlatform;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -19,7 +19,13 @@ final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<Scaffol
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Api.init();
+  final rustOk = await Api.init();
+  if (!kIsWeb && !rustOk) {
+    runApp(ProviderScope(
+      child: DebtTrackerApp(initialRoute: '/rust-load-error'),
+    ));
+    return;
+  }
   if (!kIsWeb) {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -187,8 +193,87 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
         '/setup': (context) => const BackendSetupScreen(),
         '/login': (context) => const LoginScreen(),
         '/create-wallet': (context) => const CreateWalletScreen(),
+        '/rust-load-error': (context) => const RustLoadErrorScreen(),
       },
       debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+/// Shown when the Rust native library fails to load (e.g. Android .so not in jniLibs).
+class RustLoadErrorScreen extends StatelessWidget {
+  const RustLoadErrorScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final rawError = Api.initError ?? '';
+    final error = rawError.isEmpty
+        ? 'Rust library (libdebitum_client_core.so) could not be loaded.'
+        : rawError;
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(height: 24),
+              const Icon(Icons.error_outline, size: 64, color: Colors.orange),
+              const SizedBox(height: 24),
+              const Text(
+                'Native library not loaded',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                error,
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                maxLines: 6,
+              ),
+              if (isAndroid) ...[
+                const SizedBox(height: 28),
+                const Text(
+                  'Build and run from the project root (the folder that contains manage.sh and the mobile/ directory).',
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                const Text('In a terminal:', style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 6),
+                SelectableText(
+                  './manage.sh run-flutter-app android',
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    backgroundColor: Color(0xFF1E1E1E),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('Prerequisites (run once):', style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 4),
+                const SelectableText(
+                  'cargo install cargo-ndk\n'
+                  'rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android',
+                  style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Android NDK is also required (e.g. via Android Studio SDK Manager).',
+                  style: TextStyle(fontSize: 11),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'If the script failed before launching, fix the error it printed (e.g. install cargo-ndk, set ANDROID_NDK). If it launched but you still see this, the .so files may not have been copied into the app—run the script again and check that it says "Rust Android libs ready".',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -15,10 +15,12 @@ use crate::middleware::auth::AuthUser;
 #[derive(Clone, Debug)]
 pub struct WalletContext {
     pub wallet_id: Uuid,
-    pub user_role: String, // 'owner', 'admin', 'member'
+    #[allow(dead_code)]
+    pub user_role: String, // 'owner', 'admin', 'member' (for future require_wallet_role)
 }
 
 impl WalletContext {
+    #[allow(dead_code)]
     pub fn new(wallet_id: Uuid, user_role: String) -> Self {
         Self { wallet_id, user_role }
     }
@@ -150,11 +152,13 @@ where
 }
 
 /// Extractor to get wallet context from request (legacy helper)
+#[allow(dead_code)]
 pub fn get_wallet_context(req: &Request) -> Option<WalletContext> {
     req.extensions().get::<WalletContext>().cloned()
 }
 
 /// Helper to require specific role
+#[allow(dead_code)]
 pub fn require_wallet_role(context: &WalletContext, required_role: &str) -> Result<(), StatusCode> {
     let role_hierarchy = ["member", "admin", "owner"];
     let user_role_level = role_hierarchy.iter()

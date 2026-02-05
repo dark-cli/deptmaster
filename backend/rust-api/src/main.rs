@@ -1,10 +1,14 @@
 use axum::{
+    body::Body,
+    http::{Request, Response},
     Router,
     routing::{get, post, put, delete},
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::signal;
-use tracing::{info, error};
+use tower_http::trace::TraceLayer;
+use tracing::{info, error, Span};
 
 mod config;
 mod handlers;
@@ -185,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
             rate_limit_middleware,
         ))
         .layer(axum::middleware::from_fn(middleware::security_headers::security_headers_middleware))
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(compact_trace_layer())
         .with_state(app_state);
 
     // Start server
@@ -274,6 +278,29 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+/// One compact log line per request: method, path (no query), status, latency.
+/// Avoids logging tokens in /ws?token=... and reduces noise.
+fn compact_trace_layer() -> TraceLayer<
+    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>,
+    impl Fn(&Request<Body>) -> Span + Clone + Send + Sync + 'static,
+    impl Fn(&Request<Body>, &Span) + Clone + Send + Sync + 'static,
+    impl Fn(&Response<Body>, Duration, &Span) + Clone + Send + Sync + 'static,
+    tower_http::trace::DefaultOnBodyChunk,
+    tower_http::trace::DefaultOnEos,
+    tower_http::trace::DefaultOnFailure,
+> {
+    TraceLayer::new_for_http()
+        .make_span_with(|req: &Request<Body>| {
+            let method = req.method().clone();
+            let path = req.uri().path().to_string();
+            tracing::info_span!("http", method = %method, path = %path)
+        })
+        .on_request(|_req: &Request<Body>, _span: &Span| {})
+        .on_response(|res: &Response<Body>, latency: Duration, _span: &Span| {
+            tracing::debug!(status = %res.status(), latency_ms = latency.as_millis());
+        })
 }
 
 fn create_cors_layer(config: &Config) -> tower_http::cors::CorsLayer {

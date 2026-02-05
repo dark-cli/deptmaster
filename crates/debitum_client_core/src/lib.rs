@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)] // flutter_rust_bridge macro emits frb_expand cfg
 use std::sync::Mutex;
 use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;

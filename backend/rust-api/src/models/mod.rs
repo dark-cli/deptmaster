@@ -4,4 +4,4 @@ pub mod currency;
 pub mod ids;
 
 pub use currency::Currency;
-pub use ids::{ContactId, EventId, TransactionId, UserId, WalletId};
+// ids::UserId, WalletId, etc. available via models::ids when needed

@@ -55,28 +55,6 @@ pub fn login(username: String, password: String) -> Result<(), String> {
     })
 }
 
-/// GET /api/sync/hash (internal; not exposed to FFI)
-pub(crate) fn get_sync_hash() -> Result<(String, i64), String> {
-    let base = base_url()?;
-    let wallet_id = storage::config_get("current_wallet_id")?
-        .ok_or_else(|| "No wallet selected".to_string())?;
-    let mut headers = auth_headers()?;
-    headers.insert(
-        reqwest::header::HeaderName::from_static("x-wallet-id"),
-        wallet_id.parse().map_err(|e: reqwest::header::InvalidHeaderValue| e.to_string())?,
-    );
-    let url = format!("{}/api/sync/hash", base);
-    let (hash, event_count) = RUNTIME.block_on(async {
-        let resp = CLIENT.get(&url).query(&[("wallet_id", wallet_id.as_str())]).headers(headers).send().await.map_err(|e| e.to_string())?;
-        let text = resp.text().await.map_err(|e| e.to_string())?;
-        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-        let hash = json.get("hash").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let event_count = json.get("event_count").and_then(|v| v.as_i64()).unwrap_or(0);
-        Ok::<_, String>((hash, event_count))
-    })?;
-    Ok((hash, event_count))
-}
-
 /// GET /api/sync/events?since=... (internal; not exposed to FFI)
 pub(crate) fn get_sync_events(since: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     let base = base_url()?;

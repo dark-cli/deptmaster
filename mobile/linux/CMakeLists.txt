@@ -34,9 +34,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     "Debug" "Profile" "Release")
 endif()
 
-# Global compiler flags to suppress deprecated warnings from plugins (like flutter_secure_storage_linux)
-# This must be set before plugins are loaded so it applies to all targets
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations -Wno-error=deprecated-literal-operator")
+# Global compiler flags to suppress deprecated warnings from plugins (like flutter_secure_storage_linux).
+# The plugin bundles nlohmann/json (json.hpp) which uses deprecated C++ literal operator syntax
+# (space before _json / _json_pointer). We can't fix the third-party header, so suppress the warning.
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-literal-operator -Wno-error=deprecated-declarations -Wno-error=deprecated-literal-operator")
 
 # Compilation settings that should be applied to most targets.
 #
@@ -45,8 +46,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations -Wno-
 # of modifying this function.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_14)
-  # Use -Werror but allow deprecated warnings for plugins (like flutter_secure_storage)
-  target_compile_options(${TARGET} PRIVATE -Wall -Werror -Wno-error=deprecated-declarations -Wno-error=deprecated-literal-operator)
+  # Use -Werror but allow/suppress deprecated warnings from plugins (e.g. flutter_secure_storage_linux json.hpp)
+  target_compile_options(${TARGET} PRIVATE -Wall -Werror -Wno-deprecated-literal-operator -Wno-error=deprecated-declarations -Wno-error=deprecated-literal-operator)
   target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
 endfunction()

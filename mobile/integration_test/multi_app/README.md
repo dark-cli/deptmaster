@@ -61,6 +61,17 @@ cd /home/max/dev/debitum/mobile
 flutter test integration_test/multi_app/scenarios/ -d linux
 ```
 
+**Run full integration suite (all files under `integration_test/`) on Linux:**  
+On Linux, switching between test files can trigger "Error waiting for a debug connection" (log reader stops). To avoid that, either run only scenario tests (command above) or exclude standalone tests and run them separately:
+
+```bash
+# Main suite (excludes performance/standalone tests)
+flutter test integration_test/ -d linux --exclude-tags standalone
+
+# Run performance test alone
+flutter test integration_test/multi_app/performance_test.dart -d linux
+```
+
 **Run Specific Test Suite:**
 ```bash
 # Basic sync scenarios

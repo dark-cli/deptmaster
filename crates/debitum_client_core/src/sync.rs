@@ -4,20 +4,9 @@ use crate::api;
 use crate::rust_log;
 use crate::state_builder;
 use crate::storage;
-use sha2::{Sha256, Digest};
 
 fn last_sync_key(wallet_id: &str) -> String {
     format!("last_sync_timestamp_{}", wallet_id)
-}
-
-fn local_hash(wallet_id: &str) -> Result<String, String> {
-    let events = storage::events_get_all(wallet_id)?;
-    let mut hasher = Sha256::new();
-    for e in &events {
-        hasher.update(e.id.as_bytes());
-        hasher.update(e.timestamp.as_bytes());
-    }
-    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Push unsynced events to server, mark accepted as synced.

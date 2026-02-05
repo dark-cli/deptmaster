@@ -181,6 +181,23 @@ class Api {
     }
   }
 
+  /// True if JWT is expired or invalid. Used to avoid WebSocket 401 spam.
+  static bool _isTokenExpired(String? token) {
+    if (token == null || token.isEmpty) return true;
+    final parts = token.split('.');
+    if (parts.length != 3) return true;
+    try {
+      final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final map = json.decode(payload) as Map<String, dynamic>;
+      final exp = map['exp'];
+      if (exp == null) return true;
+      final expSec = exp is int ? exp : (exp as num).toInt();
+      return DateTime.now().millisecondsSinceEpoch ~/ 1000 >= expSec;
+    } catch (_) {
+      return true;
+    }
+  }
+
   static Future<bool> validateAuth() async {
     if (kIsWeb) return false;
     try {
@@ -514,6 +531,7 @@ class Api {
     if (_wsConnecting) return;
     final token = await getToken();
     if (token == null || token.isEmpty) return;
+    if (_isTokenExpired(token)) return;
 
     _wsConnecting = true;
     try {
@@ -560,6 +578,7 @@ class Api {
   static void _reconnectWs() {
     getToken().then((token) {
       if (token == null || token.isEmpty) return;
+      if (_isTokenExpired(token)) return;
       Future.delayed(const Duration(seconds: 5), () {
         if (!_wsConnected) connectRealtime().catchError((_) => _reconnectWs());
       });
