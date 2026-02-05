@@ -163,6 +163,229 @@
             opacity: 0.7;
         }
 
+        /* Themed dialog modal (replaces alert/confirm/prompt) */
+        .ui-dialog-content {
+            max-width: 560px;
+            width: 100%;
+        }
+
+        .ui-dialog-body {
+            padding: 0.5rem 0 0;
+        }
+
+        .ui-dialog-message {
+            color: inherit;
+            line-height: 1.4;
+            white-space: pre-wrap;
+        }
+
+        .ui-field {
+            margin-top: 1rem;
+        }
+
+        .ui-field label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: inherit;
+        }
+
+        .ui-field input,
+        .ui-field select,
+        .ui-field textarea {
+            width: 100%;
+            padding: 0.6rem 0.75rem;
+            border: 1px solid #E7E0EC;
+            border-radius: 8px;
+            background: #FFFBFE;
+            color: #1C1B1F;
+        }
+
+        body.dark-mode .ui-field input,
+        body.dark-mode .ui-field select,
+        body.dark-mode .ui-field textarea {
+            background: #1C1B1F;
+            border-color: #49454F;
+            color: #E6E1E5;
+        }
+
+        .ui-dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            padding-top: 1rem;
+            margin-top: 1.25rem;
+            border-top: 2px solid #E7E0EC;
+        }
+
+        body.dark-mode .ui-dialog-actions {
+            border-top-color: #49454F;
+        }
+
+        .ui-btn {
+            border: none;
+            padding: 0.6rem 1.1rem;
+            border-radius: 999px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 600;
+            transition: background-color 0.2s, opacity 0.2s;
+        }
+
+        .ui-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .ui-btn-primary {
+            background: #6750A4;
+            color: white;
+        }
+
+        .ui-btn-primary:hover {
+            background: #4F378B;
+        }
+
+        body.dark-mode .ui-btn-primary:hover {
+            background: #B69DF8;
+        }
+
+        .ui-btn-secondary {
+            background: #E7E0EC;
+            color: #1C1B1F;
+        }
+
+        .ui-btn-secondary:hover {
+            background: #D9D1E3;
+        }
+
+        body.dark-mode .ui-btn-secondary {
+            background: #49454F;
+            color: #E6E1E5;
+        }
+
+        body.dark-mode .ui-btn-secondary:hover {
+            background: #3A3640;
+        }
+
+        .ui-btn-danger {
+            background: #BA1A1A;
+            color: white;
+        }
+
+        .ui-btn-danger:hover {
+            background: #93000A;
+        }
+
+        body.dark-mode .ui-btn-danger {
+            background: #FFB4AB;
+            color: #1C1B1F;
+        }
+
+        body.dark-mode .ui-btn-danger:hover {
+            background: #FF897D;
+        }
+
+        .ui-dialog-error {
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .ui-dialog-pre {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            border: 1px solid #E7E0EC;
+            border-radius: 8px;
+            background: #FFFBFE;
+            color: inherit;
+            max-height: 45vh;
+            overflow: auto;
+            white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 0.9rem;
+        }
+
+        body.dark-mode .ui-dialog-pre {
+            background: #1C1B1F;
+            border-color: #49454F;
+        }
+
+        .ui-dialog-toolbar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+
+        .ui-muted {
+            color: #79747E;
+        }
+
+        body.dark-mode .ui-muted {
+            color: #938F99;
+        }
+
+        .ui-mini {
+            font-size: 0.85rem;
+        }
+
+        .ui-inline-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .ui-inline-table th,
+        .ui-inline-table td {
+            padding: 0.6rem 0.5rem;
+            border-bottom: 1px solid #E7E0EC;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        body.dark-mode .ui-inline-table th,
+        body.dark-mode .ui-inline-table td {
+            border-bottom-color: #49454F;
+        }
+
+        .ui-inline-table th {
+            font-weight: 700;
+            color: #6750A4;
+            font-size: 0.9rem;
+        }
+
+        body.dark-mode .ui-inline-table th {
+            color: #D0BCFF;
+        }
+
+        .ui-row-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        .ui-btn-compact {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.85rem;
+        }
+
+        .ui-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            background: rgba(103, 80, 164, 0.1);
+            color: #6750A4;
+            font-weight: 700;
+            font-size: 0.8rem;
+        }
+
+        body.dark-mode .ui-pill {
+            background: rgba(208, 188, 255, 0.15);
+            color: #D0BCFF;
+        }
+
         .event-modal-field {
             margin-bottom: 1rem;
         }
@@ -911,14 +1134,19 @@
         </div>
     </div>
 
-    <!-- Event Detail Modal -->
-    <div id="eventModal" class="event-modal" onclick="closeEventModal(event)">
-        <div class="event-modal-content" onclick="event.stopPropagation()">
+    <!-- Themed Dialog Modal (replaces alert/confirm/prompt) -->
+    <div id="uiDialogModal" class="event-modal" onclick="handleUiDialogBackdrop(event)">
+        <div class="event-modal-content ui-dialog-content" onclick="event.stopPropagation()">
             <div class="event-modal-header">
-                <h2>Event Details</h2>
-                <button class="event-modal-close" onclick="closeEventModal()">&times;</button>
+                <h2 id="uiDialogTitle">Dialog</h2>
+                <button class="event-modal-close" onclick="closeUiDialog(false)">&times;</button>
             </div>
-            <div id="eventModalBody"></div>
+            <div id="uiDialogBody" class="ui-dialog-body"></div>
+            <div id="uiDialogError" class="error ui-dialog-error"></div>
+            <div class="ui-dialog-actions">
+                <button id="uiDialogCancel" class="ui-btn ui-btn-secondary" type="button">Cancel</button>
+                <button id="uiDialogOk" class="ui-btn ui-btn-primary" type="button">OK</button>
+            </div>
         </div>
     </div>
 
@@ -949,6 +1177,299 @@
         // Use config from config.js if available, otherwise use defaults
         const API_URL = window.ADMIN_CONFIG?.API_URL || window.location.origin + '/api';
         const WS_URL = window.ADMIN_CONFIG?.WS_URL || ((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws');
+
+        // ---- Themed dialogs (replace alert/confirm/prompt) ----
+        const uiDialog = (() => {
+            const modal = () => document.getElementById('uiDialogModal');
+            const titleEl = () => document.getElementById('uiDialogTitle');
+            const bodyEl = () => document.getElementById('uiDialogBody');
+            const errorEl = () => document.getElementById('uiDialogError');
+            const okBtn = () => document.getElementById('uiDialogOk');
+            const cancelBtn = () => document.getElementById('uiDialogCancel');
+
+            let state = null; // { resolve, cancelable, onOk, onCancel, focusId }
+
+            function setError(msg) {
+                const el = errorEl();
+                if (!el) return;
+                if (!msg) {
+                    el.style.display = 'none';
+                    el.textContent = '';
+                    return;
+                }
+                el.style.display = 'block';
+                el.textContent = msg;
+            }
+
+            function cleanup() {
+                document.removeEventListener('keydown', onKeyDown, true);
+                const ok = okBtn();
+                const cancel = cancelBtn();
+                if (ok) ok.onclick = null;
+                if (cancel) cancel.onclick = null;
+                state = null;
+            }
+
+            function close(result) {
+                const m = modal();
+                if (m) m.classList.remove('active');
+                setError(null);
+                const resolve = state?.resolve;
+                cleanup();
+                if (resolve) resolve(result);
+            }
+
+            function onKeyDown(e) {
+                if (!state) return;
+                if (e.key === 'Escape') {
+                    if (state.cancelable) {
+                        e.preventDefault();
+                        close({ ok: false, values: null });
+                    }
+                    return;
+                }
+                if (e.key === 'Enter') {
+                    const target = e.target;
+                    const isTextArea = target && target.tagName === 'TEXTAREA';
+                    if (isTextArea) return;
+                    // If focused element is inside dialog, treat Enter as OK
+                    if (modal()?.classList.contains('active')) {
+                        e.preventDefault();
+                        okBtn()?.click();
+                    }
+                }
+            }
+
+            function open({ title, message, fields = [], okText = 'OK', cancelText = null, okVariant = 'primary', cancelVariant = 'secondary', focusId = null, buildExtraBody = null, onOk = null }) {
+                const m = modal();
+                if (!m) throw new Error('uiDialogModal not found');
+                if (state) {
+                    // Close any existing dialog before opening a new one
+                    close({ ok: false, values: null });
+                }
+
+                titleEl().textContent = title || 'Dialog';
+                bodyEl().innerHTML = '';
+                setError(null);
+
+                if (message) {
+                    const p = document.createElement('div');
+                    p.className = 'ui-dialog-message';
+                    p.textContent = message;
+                    bodyEl().appendChild(p);
+                }
+
+                const values = {};
+                for (const f of fields) {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'ui-field';
+
+                    if (f.label) {
+                        const lab = document.createElement('label');
+                        lab.htmlFor = f.id;
+                        lab.textContent = f.label;
+                        wrap.appendChild(lab);
+                    }
+
+                    let input;
+                    if (f.type === 'select') {
+                        input = document.createElement('select');
+                        for (const opt of (f.options || [])) {
+                            const o = document.createElement('option');
+                            o.value = opt.value;
+                            o.textContent = opt.label;
+                            input.appendChild(o);
+                        }
+                        if (f.value != null) input.value = f.value;
+                    } else if (f.type === 'textarea') {
+                        input = document.createElement('textarea');
+                        input.rows = f.rows || 6;
+                        if (f.placeholder) input.placeholder = f.placeholder;
+                        if (f.value != null) input.value = f.value;
+                    } else {
+                        input = document.createElement('input');
+                        input.type = f.type || 'text';
+                        if (f.placeholder) input.placeholder = f.placeholder;
+                        if (f.value != null) input.value = f.value;
+                        if (f.autocomplete) input.autocomplete = f.autocomplete;
+                    }
+
+                    input.id = f.id;
+                    if (f.required) input.required = true;
+                    wrap.appendChild(input);
+                    bodyEl().appendChild(wrap);
+
+                    values[f.id] = () => (input.value ?? '').toString();
+                }
+
+                if (typeof buildExtraBody === 'function') {
+                    buildExtraBody(bodyEl());
+                }
+
+                const ok = okBtn();
+                const cancel = cancelBtn();
+
+                ok.textContent = okText || 'OK';
+                ok.className = `ui-btn ui-btn-${okVariant === 'danger' ? 'danger' : 'primary'}`;
+
+                if (cancelText) {
+                    cancel.style.display = 'inline-flex';
+                    cancel.textContent = cancelText;
+                    cancel.className = `ui-btn ui-btn-${cancelVariant === 'secondary' ? 'secondary' : 'secondary'}`;
+                } else {
+                    cancel.style.display = 'none';
+                }
+
+                state = {
+                    resolve: null,
+                    cancelable: Boolean(cancelText),
+                };
+
+                return new Promise((resolve) => {
+                    state.resolve = resolve;
+
+                    ok.onclick = async () => {
+                        setError(null);
+
+                        const out = {};
+                        for (const f of fields) out[f.id] = values[f.id]();
+
+                        // Basic required validation
+                        for (const f of fields) {
+                            if (f.required && !out[f.id]?.trim()) {
+                                setError(f.requiredMessage || 'Please fill out the required fields.');
+                                return;
+                            }
+                            if (typeof f.validate === 'function') {
+                                const msg = f.validate(out[f.id], out);
+                                if (msg) {
+                                    setError(msg);
+                                    return;
+                                }
+                            }
+                        }
+
+                        if (typeof onOk === 'function') {
+                            const maybeError = await onOk(out);
+                            if (typeof maybeError === 'string' && maybeError) {
+                                setError(maybeError);
+                                return;
+                            }
+                        }
+
+                        close({ ok: true, values: out });
+                    };
+
+                    cancel.onclick = () => close({ ok: false, values: null });
+
+                    m.classList.add('active');
+                    document.addEventListener('keydown', onKeyDown, true);
+
+                    // Focus handling
+                    const focusTargetId = focusId || fields.find(f => f.type !== 'select')?.id || fields[0]?.id;
+                    setTimeout(() => {
+                        const el = focusTargetId ? document.getElementById(focusTargetId) : null;
+                        if (el && typeof el.focus === 'function') el.focus();
+                        else ok.focus();
+                    }, 0);
+                });
+            }
+
+            return {
+                open,
+                close,
+                setError,
+            };
+        })();
+
+        function handleUiDialogBackdrop(e) {
+            // Only allow backdrop close when cancel is available
+            const cancel = document.getElementById('uiDialogCancel');
+            if (cancel && cancel.style.display !== 'none') {
+                closeUiDialog(false);
+            }
+        }
+
+        function closeUiDialog(ok) {
+            uiDialog.close({ ok: Boolean(ok), values: null });
+        }
+
+        async function uiAlert(message, { title = 'Notice', okText = 'OK' } = {}) {
+            await uiDialog.open({ title, message, okText, cancelText: null });
+        }
+
+        async function uiConfirm(message, { title = 'Confirm', okText = 'OK', cancelText = 'Cancel', danger = false } = {}) {
+            const res = await uiDialog.open({
+                title,
+                message,
+                okText,
+                cancelText,
+                okVariant: danger ? 'danger' : 'primary',
+                cancelVariant: 'secondary',
+            });
+            return Boolean(res.ok);
+        }
+
+        async function uiPrompt({ title = 'Input', label, placeholder, value = '', okText = 'OK', cancelText = 'Cancel', type = 'text', required = true, requiredMessage = 'Please enter a value.', validate = null, autocomplete = null }) {
+            const res = await uiDialog.open({
+                title,
+                message: null,
+                fields: [{
+                    id: 'value',
+                    label,
+                    placeholder,
+                    value,
+                    type,
+                    required,
+                    requiredMessage,
+                    validate,
+                    autocomplete,
+                }],
+                okText,
+                cancelText,
+                focusId: 'value',
+            });
+            return res.ok ? (res.values.value ?? '') : null;
+        }
+
+        async function uiFormDialog({ title, message = null, fields, okText = 'OK', cancelText = 'Cancel', okVariant = 'primary', focusId = null, onOk = null }) {
+            const res = await uiDialog.open({ title, message, fields, okText, cancelText, okVariant, focusId, onOk });
+            return res.ok ? res.values : null;
+        }
+
+        async function uiTextDialog({ title, message = null, text, okText = 'Close' }) {
+            await uiDialog.open({
+                title,
+                message,
+                okText,
+                cancelText: null,
+                buildExtraBody: (body) => {
+                    const pre = document.createElement('div');
+                    pre.className = 'ui-dialog-pre';
+                    pre.textContent = text || '';
+                    body.appendChild(pre);
+
+                    const toolbar = document.createElement('div');
+                    toolbar.className = 'ui-dialog-toolbar';
+                    const copyBtn = document.createElement('button');
+                    copyBtn.className = 'ui-btn ui-btn-secondary';
+                    copyBtn.type = 'button';
+                    copyBtn.textContent = 'Copy';
+                    copyBtn.onclick = async () => {
+                        try {
+                            await navigator.clipboard.writeText(text || '');
+                            copyBtn.textContent = 'Copied';
+                            setTimeout(() => (copyBtn.textContent = 'Copy'), 900);
+                        } catch (e) {
+                            copyBtn.textContent = 'Copy failed';
+                            setTimeout(() => (copyBtn.textContent = 'Copy'), 900);
+                        }
+                    };
+                    toolbar.appendChild(copyBtn);
+                    body.appendChild(toolbar);
+                }
+            });
+        }
 
         function getWalletFilterId() {
             const el = document.getElementById('walletFilter');
@@ -1817,7 +2338,7 @@
                 console.error('❌ Error loading admin data:', error);
                 // Don't show alert for authentication errors - logout() already handled it
                 if (!error.message.includes('Authentication') && !error.message.includes('expired')) {
-                    alert('Error loading data: ' + error.message + '\n\nPlease check the browser console for details.');
+                    await uiAlert('Error loading data: ' + error.message + '\n\nPlease check the browser console for details.', { title: 'Load error' });
                 }
             }
         }
@@ -3425,11 +3946,35 @@
             }
         }
 
-        function showCreateWalletModal() {
-            const name = prompt('Wallet name:');
-            if (!name || !name.trim()) return;
-            const description = prompt('Description (optional):') || null;
-            createWallet(name.trim(), description);
+        async function showCreateWalletModal() {
+            const values = await uiFormDialog({
+                title: 'Create wallet',
+                fields: [
+                    {
+                        id: 'name',
+                        label: 'Wallet name',
+                        type: 'text',
+                        placeholder: 'e.g. Personal',
+                        required: true,
+                        requiredMessage: 'Wallet name is required.',
+                    },
+                    {
+                        id: 'description',
+                        label: 'Description (optional)',
+                        type: 'text',
+                        placeholder: 'Optional',
+                        required: false,
+                    }
+                ],
+                okText: 'Create',
+                cancelText: 'Cancel',
+                focusId: 'name',
+            });
+            if (!values) return;
+            const name = (values.name || '').trim();
+            const description = (values.description || '').trim() || null;
+            if (!name) return;
+            createWallet(name, description);
         }
 
         async function createWallet(name, description) {
@@ -3445,18 +3990,312 @@
                     throw new Error(err.error || 'Failed to create wallet');
                 }
 
-                alert('Wallet created successfully!');
+                await uiAlert('Wallet created successfully!', { title: 'Success' });
                 loadWallets();
             } catch (error) {
-                alert('Error creating wallet: ' + error.message);
+                await uiAlert('Error creating wallet: ' + error.message, { title: 'Error' });
             }
         }
 
-        function showWalletUsersModal(walletId, walletName) {
-            const userId = prompt('Enter user ID (UUID) to add to wallet "' + walletName + '":');
-            if (!userId || !userId.trim()) return;
-            const role = prompt('Role (owner / admin / member):', 'member') || 'member';
-            addUserToWallet(walletId, userId.trim(), role);
+        async function showWalletUsersModal(walletId, walletName) {
+            const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+            const escapeAttr = (s) => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const shortId = (id) => (id && id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : (id || ''));
+
+            const res = uiDialog.open({
+                title: `Wallet users`,
+                message: `Wallet: ${walletName}`,
+                okText: 'Close',
+                cancelText: null,
+                buildExtraBody: (body) => {
+                    const topRow = document.createElement('div');
+                    topRow.style.display = 'flex';
+                    topRow.style.justifyContent = 'space-between';
+                    topRow.style.alignItems = 'center';
+                    topRow.style.gap = '0.75rem';
+                    topRow.style.marginTop = '0.75rem';
+
+                    const hint = document.createElement('div');
+                    hint.className = 'ui-muted ui-mini';
+                    hint.textContent = 'Shows current subscribers for this wallet.';
+                    topRow.appendChild(hint);
+
+                    const refreshBtn = document.createElement('button');
+                    refreshBtn.type = 'button';
+                    refreshBtn.className = 'ui-btn ui-btn-secondary ui-btn-compact';
+                    refreshBtn.textContent = 'Refresh';
+                    topRow.appendChild(refreshBtn);
+
+                    body.appendChild(topRow);
+
+                    // Add user section
+                    const addWrap = document.createElement('div');
+                    addWrap.className = 'ui-field';
+                    addWrap.style.marginTop = '1rem';
+
+                    const addTitle = document.createElement('div');
+                    addTitle.style.display = 'flex';
+                    addTitle.style.alignItems = 'center';
+                    addTitle.style.justifyContent = 'space-between';
+                    addTitle.style.gap = '0.75rem';
+
+                    const addLabel = document.createElement('div');
+                    addLabel.innerHTML = `<span class="ui-pill">Add user</span>`;
+                    addTitle.appendChild(addLabel);
+
+                    addWrap.appendChild(addTitle);
+
+                    const grid = document.createElement('div');
+                    grid.style.display = 'grid';
+                    grid.style.gridTemplateColumns = '2fr 1fr auto';
+                    grid.style.gap = '0.75rem';
+                    grid.style.marginTop = '0.75rem';
+
+                    const userIdInput = document.createElement('input');
+                    userIdInput.type = 'text';
+                    userIdInput.placeholder = 'User ID (UUID)';
+                    userIdInput.autocomplete = 'off';
+                    userIdInput.id = 'walletUserAddUserId';
+
+                    const roleSelect = document.createElement('select');
+                    roleSelect.id = 'walletUserAddRole';
+                    roleSelect.innerHTML = `
+                        <option value="owner">owner</option>
+                        <option value="admin">admin</option>
+                        <option value="member" selected>member</option>
+                    `;
+
+                    const addBtn = document.createElement('button');
+                    addBtn.type = 'button';
+                    addBtn.className = 'ui-btn ui-btn-primary ui-btn-compact';
+                    addBtn.textContent = 'Add';
+
+                    grid.appendChild(userIdInput);
+                    grid.appendChild(roleSelect);
+                    grid.appendChild(addBtn);
+                    addWrap.appendChild(grid);
+
+                    const addHelp = document.createElement('div');
+                    addHelp.className = 'ui-muted ui-mini';
+                    addHelp.style.marginTop = '0.5rem';
+                    addHelp.textContent = 'Tip: you can copy a user UUID from the Users tab.';
+                    addWrap.appendChild(addHelp);
+
+                    body.appendChild(addWrap);
+
+                    // List section
+                    const listWrap = document.createElement('div');
+                    listWrap.style.marginTop = '1.25rem';
+
+                    const listTitle = document.createElement('div');
+                    listTitle.style.display = 'flex';
+                    listTitle.style.alignItems = 'baseline';
+                    listTitle.style.justifyContent = 'space-between';
+                    listTitle.style.gap = '0.75rem';
+
+                    const listLeft = document.createElement('div');
+                    listLeft.innerHTML = `<span class="ui-pill">Members</span> <span id="walletUsersCount" class="ui-muted ui-mini"></span>`;
+                    listTitle.appendChild(listLeft);
+                    listWrap.appendChild(listTitle);
+
+                    const listBody = document.createElement('div');
+                    listBody.id = 'walletUsersListBody';
+                    listBody.className = 'ui-muted';
+                    listBody.style.marginTop = '0.75rem';
+                    listBody.textContent = 'Loading…';
+                    listWrap.appendChild(listBody);
+
+                    body.appendChild(listWrap);
+
+                    const setListError = (msg) => {
+                        listBody.className = 'error';
+                        listBody.textContent = msg;
+                    };
+
+                    const render = (walletUsers, userIndex) => {
+                        const countEl = document.getElementById('walletUsersCount');
+                        if (countEl) countEl.textContent = `(${walletUsers.length})`;
+
+                        if (!walletUsers.length) {
+                            listBody.className = 'ui-muted';
+                            listBody.textContent = 'No users subscribed to this wallet.';
+                            return;
+                        }
+
+                        const rows = walletUsers.map(u => {
+                            const email = userIndex.get(u.user_id)?.email || null;
+                            const who = email ? escapeHtml(email) : `<code title="${escapeAttr(u.user_id)}">${escapeHtml(shortId(u.user_id))}</code>`;
+                            const subscribed = u.subscribed_at ? escapeHtml(formatDateTime(u.subscribed_at)) : '-';
+                            const role = escapeAttr(u.role || 'member');
+                            const uid = escapeAttr(u.user_id);
+
+                            return `
+                                <tr>
+                                    <td>${who}<div class="ui-muted ui-mini"><code title="${escapeAttr(u.user_id)}">${escapeHtml(u.user_id)}</code></div></td>
+                                    <td>
+                                        <select data-role-select="1" data-user-id="${uid}">
+                                            <option value="owner" ${role === 'owner' ? 'selected' : ''}>owner</option>
+                                            <option value="admin" ${role === 'admin' ? 'selected' : ''}>admin</option>
+                                            <option value="member" ${role === 'member' ? 'selected' : ''}>member</option>
+                                        </select>
+                                    </td>
+                                    <td>${subscribed}</td>
+                                    <td>
+                                        <div class="ui-row-actions">
+                                            <button type="button" class="ui-btn ui-btn-danger ui-btn-compact" data-remove-user="1" data-user-id="${uid}">Remove</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('');
+
+                        listBody.className = '';
+                        listBody.innerHTML = `
+                            <table class="ui-inline-table">
+                                <thead>
+                                    <tr>
+                                        <th>User</th>
+                                        <th>Role</th>
+                                        <th>Subscribed</th>
+                                        <th style="text-align:right;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rows}
+                                </tbody>
+                            </table>
+                        `;
+
+                        // Hook role updates
+                        listBody.querySelectorAll('select[data-role-select="1"]').forEach(sel => {
+                            sel.addEventListener('change', async (ev) => {
+                                const newRole = ev.target.value;
+                                const userId = ev.target.getAttribute('data-user-id');
+                                try {
+                                    ev.target.disabled = true;
+                                    const r = await authenticatedFetch(`${API_URL}/admin/wallets/${walletId}/users/${userId}`, {
+                                        method: 'PUT',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ role: newRole })
+                                    });
+                                    if (!r.ok) {
+                                        const err = await r.json().catch(() => ({}));
+                                        throw new Error(err.error || `HTTP ${r.status}`);
+                                    }
+                                } catch (e) {
+                                    await uiAlert(`Failed to update role: ${e.message}`, { title: 'Error' });
+                                } finally {
+                                    ev.target.disabled = false;
+                                }
+                            });
+                        });
+
+                        // Hook removals
+                        listBody.querySelectorAll('button[data-remove-user="1"]').forEach(btn => {
+                            btn.addEventListener('click', async (ev) => {
+                                const userId = ev.target.getAttribute('data-user-id');
+                                const email = userIndex.get(userId)?.email || userId;
+                                const ok = await uiConfirm(`Remove ${email} from this wallet?`, { title: 'Remove user', okText: 'Remove', cancelText: 'Cancel', danger: true });
+                                if (!ok) return;
+
+                                try {
+                                    ev.target.disabled = true;
+                                    const r = await authenticatedFetch(`${API_URL}/admin/wallets/${walletId}/users/${userId}`, {
+                                        method: 'DELETE'
+                                    });
+                                    if (!r.ok) {
+                                        const err = await r.json().catch(() => ({}));
+                                        throw new Error(err.error || `HTTP ${r.status}`);
+                                    }
+                                    await refresh();
+                                } catch (e) {
+                                    await uiAlert(`Failed to remove user: ${e.message}`, { title: 'Error' });
+                                } finally {
+                                    ev.target.disabled = false;
+                                }
+                            });
+                        });
+                    };
+
+                    const fetchUserIndex = async () => {
+                        const r = await authenticatedFetch(`${API_URL}/admin/users`);
+                        if (!r.ok) {
+                            const t = await r.text().catch(() => '');
+                            throw new Error(`HTTP ${r.status}: ${t}`);
+                        }
+                        const users = await r.json();
+                        const map = new Map();
+                        for (const u of users) {
+                            if (u && u.id) map.set(u.id, u);
+                        }
+                        return map;
+                    };
+
+                    const fetchWalletUsers = async () => {
+                        const r = await authenticatedFetch(`${API_URL}/admin/wallets/${walletId}/users`);
+                        if (!r.ok) {
+                            const err = await r.json().catch(() => ({}));
+                            throw new Error(err.error || `HTTP ${r.status}`);
+                        }
+                        const data = await r.json();
+                        return data.users || [];
+                    };
+
+                    const refresh = async () => {
+                        listBody.className = 'ui-muted';
+                        listBody.textContent = 'Loading…';
+                        try {
+                            const [userIndex, walletUsers] = await Promise.all([fetchUserIndex(), fetchWalletUsers()]);
+                            render(walletUsers, userIndex);
+                        } catch (e) {
+                            setListError(`Error loading wallet users: ${e.message}`);
+                        }
+                    };
+
+                    refreshBtn.onclick = refresh;
+
+                    addBtn.onclick = async () => {
+                        const userId = (userIdInput.value || '').trim();
+                        const role = roleSelect.value || 'member';
+                        if (!userId) {
+                            await uiAlert('Please enter a user ID (UUID).', { title: 'Validation' });
+                            return;
+                        }
+                        if (!uuidRe.test(userId)) {
+                            await uiAlert('Please enter a valid UUID.', { title: 'Validation' });
+                            return;
+                        }
+                        try {
+                            addBtn.disabled = true;
+                            const r = await authenticatedFetch(`${API_URL}/admin/wallets/${walletId}/users`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ user_id: userId, role })
+                            });
+                            if (!r.ok) {
+                                const err = await r.json().catch(() => ({}));
+                                throw new Error(err.error || `HTTP ${r.status}`);
+                            }
+                            userIdInput.value = '';
+                            await refresh();
+                        } catch (e) {
+                            await uiAlert(`Failed to add user: ${e.message}`, { title: 'Error' });
+                        } finally {
+                            addBtn.disabled = false;
+                        }
+                    };
+
+                    // initial load
+                    refresh();
+
+                    // focus
+                    setTimeout(() => userIdInput.focus(), 0);
+                }
+            });
+
+            // keep eslint/linters happy about unused promise
+            await res;
         }
 
         async function addUserToWallet(walletId, userId, role) {
@@ -3472,10 +4311,10 @@
                     throw new Error(err.error || 'Failed to add user to wallet');
                 }
 
-                alert('User added to wallet!');
+                await uiAlert('User added to wallet!', { title: 'Success' });
                 loadWallets();
             } catch (error) {
-                alert('Error: ' + error.message);
+                await uiAlert('Error: ' + error.message, { title: 'Error' });
             }
         }
 
@@ -3516,16 +4355,48 @@
             }
         }
 
-        function showCreateUserModal() {
-            const email = prompt('Enter email for new user:');
+        async function showCreateUserModal() {
+            const values = await uiFormDialog({
+                title: 'Create user',
+                fields: [
+                    {
+                        id: 'email',
+                        label: 'Email',
+                        type: 'email',
+                        placeholder: 'user@example.com',
+                        required: true,
+                        requiredMessage: 'Email is required.',
+                        validate: (v) => {
+                            const s = (v || '').trim();
+                            if (!s) return null;
+                            // Very lightweight email check
+                            return /\S+@\S+\.\S+/.test(s) ? null : 'Please enter a valid email.';
+                        },
+                        autocomplete: 'email',
+                    },
+                    {
+                        id: 'password',
+                        label: 'Password (min 8 characters)',
+                        type: 'password',
+                        placeholder: '••••••••',
+                        required: true,
+                        requiredMessage: 'Password is required.',
+                        validate: (v) => ((v || '').length >= 8 ? null : 'Password must be at least 8 characters.'),
+                        autocomplete: 'new-password',
+                    }
+                ],
+                okText: 'Create',
+                cancelText: 'Cancel',
+                focusId: 'email',
+            });
+            if (!values) return;
+            const email = (values.email || '').trim();
+            const password = values.password || '';
             if (!email) return;
-            
-            const password = prompt('Enter password (min 8 characters):');
             if (!password || password.length < 8) {
-                alert('Password must be at least 8 characters');
+                await uiAlert('Password must be at least 8 characters', { title: 'Validation error' });
                 return;
             }
-
             createUser(email, password);
         }
 
@@ -3544,15 +4415,16 @@
                     throw new Error(error.error || 'Failed to create user');
                 }
 
-                alert('User created successfully!');
+                await uiAlert('User created successfully!', { title: 'Success' });
                 loadUsers();
             } catch (error) {
-                alert(`Error creating user: ${error.message}`);
+                await uiAlert(`Error creating user: ${error.message}`, { title: 'Error' });
             }
         }
 
         async function deleteUser(userId, email) {
-            if (!confirm(`Are you sure you want to delete user ${email}? This action cannot be undone.`)) {
+            const ok = await uiConfirm(`Are you sure you want to delete user ${email}? This action cannot be undone.`, { title: 'Delete user', okText: 'Delete', cancelText: 'Cancel', danger: true });
+            if (!ok) {
                 return;
             }
 
@@ -3566,20 +4438,29 @@
                     throw new Error(error.error || 'Failed to delete user');
                 }
 
-                alert('User deleted successfully!');
+                await uiAlert('User deleted successfully!', { title: 'Success' });
                 loadUsers();
             } catch (error) {
-                alert(`Error deleting user: ${error.message}`);
+                await uiAlert(`Error deleting user: ${error.message}`, { title: 'Error' });
             }
         }
 
-        function showChangePasswordModal(userId, email) {
-            const newPassword = prompt(`Enter new password for ${email} (min 8 characters):`);
-            if (!newPassword || newPassword.length < 8) {
-                alert('Password must be at least 8 characters');
+        async function showChangePasswordModal(userId, email) {
+            const newPassword = await uiPrompt({
+                title: 'Change password',
+                label: `New password for ${email} (min 8 characters)`,
+                type: 'password',
+                required: true,
+                validate: (v) => ((v || '').length >= 8 ? null : 'Password must be at least 8 characters.'),
+                autocomplete: 'new-password',
+                okText: 'Change',
+                cancelText: 'Cancel',
+            });
+            if (!newPassword) return;
+            if (newPassword.length < 8) {
+                await uiAlert('Password must be at least 8 characters', { title: 'Validation error' });
                 return;
             }
-
             changeUserPassword(userId, newPassword);
         }
 
@@ -3598,9 +4479,9 @@
                     throw new Error(error.error || 'Failed to change password');
                 }
 
-                alert('Password changed successfully!');
+                await uiAlert('Password changed successfully!', { title: 'Success' });
             } catch (error) {
-                alert(`Error changing password: ${error.message}`);
+                await uiAlert(`Error changing password: ${error.message}`, { title: 'Error' });
             }
         }
 
@@ -3618,9 +4499,14 @@
                     `${formatDateTime(log.login_at)} - ${log.success ? '✅ Success' : '❌ Failed'}${log.failure_reason ? ' (' + log.failure_reason + ')' : ''}${log.ip_address ? ' - IP: ' + log.ip_address : ''}`
                 ).join('\n');
 
-                alert(`Login Logs for ${email}:\n\n${logsText || 'No login logs found'}`);
+                await uiTextDialog({
+                    title: `Login logs: ${email}`,
+                    message: null,
+                    text: logsText || 'No login logs found',
+                    okText: 'Close',
+                });
             } catch (error) {
-                alert(`Error loading login logs: ${error.message}`);
+                await uiAlert(`Error loading login logs: ${error.message}`, { title: 'Error' });
             }
         }
 
@@ -3645,9 +4531,9 @@
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
 
-                alert(`Backup downloaded for ${email}!`);
+                await uiAlert(`Backup downloaded for ${email}!`, { title: 'Backup' });
             } catch (error) {
-                alert(`Error backing up user data: ${error.message}`);
+                await uiAlert(`Error backing up user data: ${error.message}`, { title: 'Error' });
             }
         }
 
