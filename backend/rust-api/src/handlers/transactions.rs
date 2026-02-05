@@ -8,6 +8,7 @@ use sqlx::Row;
 use uuid::Uuid;
 use chrono::Utc;
 use crate::AppState;
+use crate::models::Currency;
 use crate::websocket;
 use crate::middleware::wallet_context::WalletContext;
 
@@ -41,8 +42,10 @@ pub struct CreateTransactionRequest {
     pub amount: i64,
     pub currency: Option<String>,
     pub description: Option<String>,
-    pub transaction_date: String, // ISO date string
-    pub due_date: Option<String>, // Optional ISO date string
+    #[serde(deserialize_with = "crate::utils::date::deserialize")]
+    pub transaction_date: chrono::NaiveDate,
+    #[serde(default, deserialize_with = "crate::utils::date::deserialize_opt")]
+    pub due_date: Option<chrono::NaiveDate>,
     pub comment: String, // Required: explanation for why this transaction is being created
 }
 
@@ -54,8 +57,10 @@ pub struct UpdateTransactionRequest {
     pub amount: Option<i64>,
     pub currency: Option<String>,
     pub description: Option<String>,
-    pub transaction_date: Option<String>,
-    pub due_date: Option<String>,
+    #[serde(default, deserialize_with = "crate::utils::date::deserialize_opt")]
+    pub transaction_date: Option<chrono::NaiveDate>,
+    #[serde(default, deserialize_with = "crate::utils::date::deserialize_opt")]
+    pub due_date: Option<chrono::NaiveDate>,
     pub comment: String, // Required: explanation for why this transaction is being updated
 }
 
@@ -83,7 +88,7 @@ pub struct TransactionResponse {
     pub r#type: String,
     pub direction: String,
     pub amount: i64,
-    pub currency: Option<String>,
+    pub currency: Currency,
     pub description: Option<String>,
     pub transaction_date: chrono::NaiveDate,
     pub due_date: Option<chrono::NaiveDate>,
@@ -93,13 +98,18 @@ pub struct TransactionResponse {
 
 impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for TransactionResponse {
     fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        let currency_str: Option<String> = row.try_get("currency").ok();
+        let currency = currency_str
+            .as_deref()
+            .and_then(Currency::from_str)
+            .unwrap_or(Currency::IQD);
         Ok(Self {
             id: row.try_get::<uuid::Uuid, _>("id")?.to_string(),
             contact_id: row.try_get::<uuid::Uuid, _>("contact_id")?.to_string(),
             r#type: row.try_get("type")?,
             direction: row.try_get("direction")?,
             amount: row.try_get("amount")?,
-            currency: row.try_get("currency").ok(),
+            currency,
             description: row.try_get("description").ok(),
             transaction_date: row.try_get("transaction_date")?,
             due_date: row.try_get("due_date").ok(),
@@ -207,22 +217,10 @@ pub async fn create_transaction(
         )
     })?;
 
-    // Parse transaction date
-    let transaction_date = chrono::NaiveDate::parse_from_str(&payload.transaction_date, "%Y-%m-%d")
-        .map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Invalid date format: {}", e)})),
-            )
-        })?;
+    let transaction_date = payload.transaction_date;
+    let due_date = payload.due_date;
+    let currency = payload.currency.as_deref().and_then(Currency::from_str).unwrap_or(Currency::IQD);
 
-    // Get currency value (clone to avoid move)
-    let currency = payload.currency.as_deref().unwrap_or("USD").to_string();
-    
-    // Parse due date if provided
-    let due_date = payload.due_date.as_ref()
-        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-    
     // Create event data with full audit trail (without total_debt initially)
     let mut event_data = serde_json::json!({
         "wallet_id": wallet_id.to_string(),
@@ -230,12 +228,12 @@ pub async fn create_transaction(
         "type": payload.r#type,
         "direction": payload.direction,
         "amount": payload.amount,
-        "currency": currency,
+        "currency": currency.as_str(),
         "description": payload.description,
-        "transaction_date": payload.transaction_date,
-        "due_date": payload.due_date,
-        "comment": payload.comment, // Required: user's explanation for this action
-        "timestamp": Utc::now().to_rfc3339() // When the action was performed
+        "transaction_date": transaction_date.format("%Y-%m-%d").to_string(),
+        "due_date": due_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        "comment": payload.comment,
+        "timestamp": Utc::now().to_rfc3339()
     });
 
     // Transaction creation - no idempotency check needed (each transaction is unique)
@@ -255,7 +253,7 @@ pub async fn create_transaction(
     .bind(&payload.r#type)
     .bind(&payload.direction)
     .bind(payload.amount)
-    .bind(payload.currency.as_deref().unwrap_or("USD"))
+    .bind(currency.as_str())
     .bind(payload.description.as_deref())
     .bind(transaction_date)
     .bind(due_date)
@@ -405,15 +403,11 @@ pub async fn update_transaction(
     let new_type = payload.r#type.as_ref().unwrap_or(&current_type);
     let new_direction = payload.direction.as_ref().unwrap_or(&current_direction);
     let new_amount = payload.amount.unwrap_or(current_amount);
-    let current_currency_str = current_currency.as_ref().map(|s| s.as_str()).unwrap_or("USD");
-    let new_currency = payload.currency.as_ref().map(|s| s.as_str()).unwrap_or(current_currency_str);
+    let current_currency = current_currency.as_ref().and_then(|s| Currency::from_str(s)).unwrap_or(Currency::IQD);
+    let new_currency = payload.currency.as_deref().and_then(Currency::from_str).unwrap_or(current_currency);
     let new_description = payload.description.as_ref().or(current_description.as_ref());
-    let new_date = payload.transaction_date.as_ref()
-        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-        .unwrap_or(current_date);
-    let new_due_date = payload.due_date.as_ref()
-        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-        .or(current_due_date);
+    let new_date = payload.transaction_date.unwrap_or(current_date);
+    let new_due_date = payload.due_date.or(current_due_date);
 
     // Validate new contact if changed
     if new_contact_id != contact_id {
@@ -463,7 +457,7 @@ pub async fn update_transaction(
         "type": new_type,
         "direction": new_direction,
         "amount": new_amount,
-        "currency": new_currency,
+        "currency": new_currency.as_str(),
         "description": new_description,
         "transaction_date": new_date.format("%Y-%m-%d").to_string(),
         "due_date": new_due_date.map(|d| d.format("%Y-%m-%d").to_string()),
@@ -513,7 +507,7 @@ pub async fn update_transaction(
     .bind(new_type)
     .bind(new_direction)
     .bind(new_amount)
-    .bind(new_currency)
+    .bind(new_currency.as_str())
     .bind(new_description)
     .bind(new_date)
     .bind(new_due_date)

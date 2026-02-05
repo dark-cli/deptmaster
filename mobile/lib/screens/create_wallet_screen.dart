@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
-import '../services/wallet_service.dart';
-import '../services/auth_service.dart';
-import '../services/dummy_data_service.dart';
+import 'dart:convert';
+import '../models/wallet.dart';
+import '../api.dart';
 import '../widgets/gradient_background.dart';
 import '../utils/toast_service.dart';
 
@@ -39,20 +38,16 @@ class _CreateWalletScreenState extends ConsumerState<CreateWalletScreen> {
           ? null
           : _descriptionController.text.trim();
 
-      final wallet = await ApiService.createWallet(name: name, description: description);
-      if (wallet == null || !mounted) {
+      final result = await Api.createWallet(name, description ?? '');
+      if (result == null || !mounted) {
         setState(() => _loading = false);
         ToastService.showErrorFromContext(context, 'Failed to create wallet');
         return;
       }
+      final wallet = Wallet.fromJson(result);
 
-      await WalletService.setCurrentWalletId(wallet.id);
-      await WalletService.getUserWallets(); // Refresh cache
-
-      final userId = await AuthService.getUserId();
-      if (userId != null) {
-        await DummyDataService.initializeForUserAndWallet(userId, wallet.id);
-      }
+      await Api.setCurrentWalletId(wallet.id);
+      await Api.getWallets();
 
       if (!mounted) return;
       ToastService.showSuccessFromContext(context, 'Wallet "${wallet.name}" created');

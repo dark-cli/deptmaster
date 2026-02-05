@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api.dart';
 import '../models/contact.dart';
-import '../services/local_database_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/toast_service.dart';
 
@@ -53,22 +53,14 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     });
 
     try {
-      final contact = Contact(
+      await Api.updateContact(
         id: widget.contact.id,
         name: _nameController.text.trim(),
-        username: widget.contact.username, // Preserve username
+        username: widget.contact.username,
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-        createdAt: widget.contact.createdAt,
-        updatedAt: DateTime.now(),
-        isSynced: false, // Mark as unsynced since we're updating locally
-        balance: widget.contact.balance,
       );
-
-      // Update local database (creates event, rebuilds state)
-      // Background sync service will handle server communication
-      await LocalDatabaseServiceV2.updateContact(contact);
 
       if (mounted) {
         Navigator.of(context).pop(true);

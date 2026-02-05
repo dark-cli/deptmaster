@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:intl/intl.dart';
+import 'dart:convert';
+import '../api.dart';
+import '../models/contact.dart';
 import '../models/event.dart';
-import '../services/event_store_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -91,7 +91,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   }
 
   Future<void> _loadDefaultPeriod() async {
-    final defaultPeriod = await SettingsService.getGraphDefaultPeriod();
+    final defaultPeriod = await Api.getGraphDefaultPeriod();
     if (mounted) {
       setState(() {
         _chartPeriod = defaultPeriod;
@@ -119,7 +119,9 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     });
 
     try {
-      final events = await EventStoreService.getAllEvents();
+      final jsonStr = await Api.getEvents();
+      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
+      final events = list.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
       
       if (_isDisposed || !mounted) return;
       
@@ -240,7 +242,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     
     for (final contactId in contactIds) {
       try {
-        final contact = await LocalDatabaseServiceV2.getContact(contactId);
+        final jsonStr = await Api.getContact(contactId);
+        final contact = jsonStr != null ? Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>) : null;
         if (contact != null) {
           _contactNameCache[contactId] = contact.name;
         }

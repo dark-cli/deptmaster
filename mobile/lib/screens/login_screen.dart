@@ -2,10 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/auth_service.dart';
-import '../services/sync_service_v2.dart';
-import '../services/realtime_service.dart';
-import '../services/wallet_service.dart';
+import '../api.dart';
 import 'home_screen.dart';
 import 'backend_setup_screen.dart';
 import '../widgets/gradient_background.dart';
@@ -42,63 +39,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     try {
-      Map<String, dynamic> result = await AuthService.login(
+      await Api.login(
         _usernameController.text.trim(),
         _passwordController.text,
       );
-
-      if (mounted) {
-        if (result['success'] == true) {
-          try {
-            print('🔄 Ensuring wallet after login...');
-            await WalletService.ensureCurrentWallet();
-            print('✅ Wallet ready');
-          } catch (e) {
-            print('⚠️ Error ensuring wallet: $e');
-          }
-
-          // After successful login, trigger sync and WebSocket
-          // Sync happens immediately, not waiting for WebSocket
-          try {
-            // Trigger immediate sync first (don't wait for WebSocket)
-            print('🔄 Triggering immediate sync after login...');
-            SyncServiceV2.manualSync().then((_) {
-              print('✅ Initial sync completed after login');
-            }).catchError((e, stackTrace) {
-              // Log all sync errors for debugging
-              final errorStr = e.toString().toLowerCase();
-              print('❌ Initial sync error after login: $e');
-              if (!errorStr.contains('connection refused') && 
-                  !errorStr.contains('failed host lookup') &&
-                  !errorStr.contains('network is unreachable')) {
-                print('   Stack trace: $stackTrace');
-              }
-            });
-            
-            // Connect WebSocket for real-time updates (in background)
-            RealtimeService.connect().catchError((e) {
-              // Silently handle connection errors
-            });
-          } catch (e) {
-            // Silently handle initialization errors
-            print('⚠️ Error initializing after login: $e');
-          }
-          
-          if (!mounted) return;
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            '/',
-            (route) => false,
-          );
-        } else {
-          setState(() {
-            _error = result['error'] as String? ?? 'Unknown error occurred';
-            _loading = false;
-          });
-        }
-      }
+      if (!mounted) return;
+      try {
+        await Api.ensureCurrentWallet();
+      } catch (_) {}
+      Api.manualSync().catchError((_) {});
+      Api.connectRealtime().catchError((_) {});
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e, stackTrace) {
-      print('Login error: $e');
-      print('Stack trace: $stackTrace');
       if (mounted) {
         setState(() {
           _error = e.toString();

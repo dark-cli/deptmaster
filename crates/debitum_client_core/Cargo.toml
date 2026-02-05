@@ -1,0 +1,24 @@
+[package]
+name = "debitum_client_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+flutter_rust_bridge = "=2.11.1"
+log = "0.4"
+once_cell = "1.19"
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1.36", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.14"

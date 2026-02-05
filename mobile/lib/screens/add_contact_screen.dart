@@ -1,11 +1,11 @@
 // ignore_for_file: unused_import
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api.dart';
 import '../models/contact.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/wallet_service.dart';
-import '../services/dummy_data_service.dart';
+import '../models/wallet.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/toast_service.dart';
 
@@ -36,16 +36,16 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _requireWallet());
   }
 
-  /// If user has no wallet, tell them to create one first and navigate to create-wallet.
   Future<void> _requireWallet() async {
-    if (WalletService.getCurrentWalletId() != null) return;
-    final wallets = await WalletService.getUserWallets();
+    if (await Api.getCurrentWalletId() != null) return;
+    final list = await Api.getWallets();
+    final wallets = list.map((m) => Wallet.fromJson(m)).toList();
     if (wallets.isEmpty && mounted) {
       ToastService.showInfoFromContext(context, 'Create a wallet first to add contacts.');
       Navigator.of(context).pop();
       Navigator.of(context).pushNamed('/create-wallet');
     } else if (wallets.isNotEmpty && mounted) {
-      await WalletService.setCurrentWalletId(wallets.first.id);
+      await Api.setCurrentWalletId(wallets.first.id);
     }
   }
 
@@ -67,27 +67,16 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
     });
 
     try {
-      // Generate UUID for local ID (server expects UUID format)
-      final contactId = DummyDataService.uuid.v4();
-      
-      final contact = Contact(
-        id: contactId,
+      final jsonStr = await Api.createContact(
         name: _nameController.text.trim(),
         username: _usernameController.text.trim().isEmpty ? null : _usernameController.text.trim(),
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-        balance: 0,
       );
-
-      // Save to local database (creates event, rebuilds state)
-      // Background sync service will handle server communication
-      final createdContact = await LocalDatabaseServiceV2.createContact(contact);
-
+      final createdContact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
       if (mounted) {
-        Navigator.of(context).pop(createdContact); // Return the created contact
+        Navigator.of(context).pop(createdContact);
         ToastService.showSuccessFromContext(context, '✅ Contact created!');
       }
     } catch (e) {

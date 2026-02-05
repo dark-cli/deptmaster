@@ -243,8 +243,22 @@ wait_for_service() {
 # Commands
 cmd_reset_database_complete() {
     local import_file="${1:-}"
+    local import_username="${2:-}"
+    local import_wallet="${3:-}"
     
     validate_flags "reset-database-complete"
+    
+    # When importing, username and wallet are required
+    if [ -n "$import_file" ]; then
+        if [ -z "$import_username" ] || [ -z "$import_wallet" ]; then
+            print_error "Username and wallet are required when importing from a backup."
+            echo ""
+            echo "Usage: $0 reset-database-complete <backup.zip> <username> <wallet>"
+            echo "  username  User to import as (e.g. max)"
+            echo "  wallet    Wallet name to import into (created if it does not exist)"
+            exit 1
+        fi
+    fi
     
     print_step "Complete Database Reset: Resetting system..."
     
@@ -254,7 +268,7 @@ cmd_reset_database_complete() {
     pkill -f "debt-tracker-api" > /dev/null 2>&1 || true
     sleep 2
     
-    # Reset database
+    # Reset database (no import here; we import after server is started)
     print_info "Resetting database..."
     cmd_reset_database_only
     
@@ -268,7 +282,7 @@ cmd_reset_database_complete() {
     
     # If import file provided, import data (import already rebuilds projections)
     if [ -n "$import_file" ]; then
-        cmd_import_backup "$import_file"
+        cmd_import_backup "$import_file" "$import_username" "$import_wallet"
     else
         print_step "Rebuilding projections..."
         cmd_rebuild_database_projections
@@ -305,6 +319,20 @@ cmd_reset_database_only() {
     validate_flags "reset-database-only"
     
     local import_file="${1:-}"
+    local import_username="${2:-}"
+    local import_wallet="${3:-}"
+    
+    # When importing, username and wallet are required
+    if [ -n "$import_file" ]; then
+        if [ -z "$import_username" ] || [ -z "$import_wallet" ]; then
+            print_error "Username and wallet are required when importing from a backup."
+            echo ""
+            echo "Usage: $0 reset-database-only <backup.zip> <username> <wallet>"
+            echo "  username  User to import as (e.g. max)"
+            echo "  wallet    Wallet name to import into (created if it does not exist)"
+            exit 1
+        fi
+    fi
     
     print_info "Resetting system (database only)..."
     
@@ -377,13 +405,11 @@ EOF
     
     # Ensure only the "max" user exists (clean up any other users)
     print_info "Ensuring only default user exists..."
-    # Generate password hash for "max" (bcrypt cost 12)
-    # Hash: $2b$12$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK is for "1234"
-    # We'll use Python to generate a hash for "max" if available, otherwise use "1234" hash
-    MAX_PASSWORD_HASH="\$2b\$12\$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK"  # Default: "1234"
+    # Generate password hash for "12345678" (bcrypt cost 12) to match the password we advertise
+    MAX_USER_PASSWORD="12345678"
+    MAX_PASSWORD_HASH="\$2b\$12\$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK"  # Fallback: "1234" if bcrypt unavailable
     if command -v python3 &> /dev/null; then
-        # Try to generate hash for "max"
-        NEW_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'max', bcrypt.gensalt(rounds=12)).decode())" 2>/dev/null)
+        NEW_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'$MAX_USER_PASSWORD', bcrypt.gensalt(rounds=12)).decode())" 2>/dev/null)
         if [ -n "$NEW_HASH" ]; then
             MAX_PASSWORD_HASH="$NEW_HASH"
         fi
@@ -392,7 +418,7 @@ EOF
     docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1 <<EOF
 -- Delete all users except "max"
 DELETE FROM users_projection WHERE email != 'max';
--- Ensure "max" user exists with password "max" (migration 005 should have created it, but just in case)
+-- Ensure "max" user exists with password 12345678 (migration 005 may have created it, but we set the hash)
 -- Update password hash if user exists, or create new user
 DO \$\$
 BEGIN
@@ -423,9 +449,9 @@ WALLETEOF
     
     print_success "Database reset complete"
     
-    # If import file provided, import data
+    # If import file provided, import data (server must be running; cmd_import_backup will start it if needed)
     if [ -n "$import_file" ]; then
-        cmd_import_backup "$import_file"
+        cmd_import_backup "$import_file" "$import_username" "$import_wallet"
     else
         print_info "No import file provided. Database is clean and ready."
     fi
@@ -434,7 +460,16 @@ WALLETEOF
 cmd_import_backup() {
     validate_flags "import-backup"
     
-    local backup_file="${1:-debitum-backup-2026-01-18T05_51_03.zip}"
+    local backup_file="${1:-}"
+    local import_username="${2:-}"
+    local import_wallet="${3:-}"
+    
+    # Backup file is required
+    if [ -z "$backup_file" ]; then
+        print_error "Backup file is required."
+        echo "Usage: $0 import-backup <path-to-backup.zip> <username> <wallet>"
+        exit 1
+    fi
     
     # Expand ~ to home directory
     if [[ "$backup_file" == ~* ]]; then
@@ -465,10 +500,20 @@ cmd_import_backup() {
         fi
     fi
     
+    # Username and wallet are required for import
+    if [ -z "$import_username" ] || [ -z "$import_wallet" ]; then
+        print_error "Username and wallet are required for import."
+        echo ""
+        echo "Usage: $0 import-backup <path-to-backup.zip> <username> <wallet>"
+        echo "  username  User to import as (must exist)"
+        echo "  wallet    Wallet name to import into (created if it does not exist)"
+        exit 1
+    fi
+    
     if [ ! -f "$backup_file" ]; then
         print_error "Backup file not found: $backup_file"
         echo ""
-        echo "Usage: $0 import-backup <path-to-backup.zip>"
+        echo "Usage: $0 import-backup <path-to-backup.zip> <username> <wallet>"
         echo ""
         echo "Searched in:"
         echo "  - Current directory: $(pwd)"
@@ -480,7 +525,7 @@ cmd_import_backup() {
         exit 1
     fi
     
-    print_step "Importing data from: $backup_file"
+    print_step "Importing data from: $backup_file (user: $import_username, wallet: $import_wallet)"
     
     # Ensure server is running
     if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
@@ -506,17 +551,17 @@ cmd_import_backup() {
         }
     fi
     
-    # Run migration
+    # Run migration (username and wallet required; wallet is created if it does not exist)
     print_info "Running migration via API..."
     if [ "$VERBOSE" = true ]; then
-        python3 "$migrate_script" "$backup_file" || {
+        python3 "$migrate_script" "$backup_file" "$import_username" "$import_wallet" || {
             print_error "Failed to import data"
             print_error "Check the output above for details"
             exit 1
         }
     else
         # Show output on error, but suppress success messages
-        if ! python3 "$migrate_script" "$backup_file" 2>&1 | tee /tmp/import_output.log | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" || [ ${PIPESTATUS[0]} -eq 0 ]; then
+        if ! python3 "$migrate_script" "$backup_file" "$import_username" "$import_wallet" 2>&1 | tee /tmp/import_output.log | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" || [ ${PIPESTATUS[0]} -eq 0 ]; then
             if [ ${PIPESTATUS[0]} -ne 0 ]; then
                 print_error "Failed to import data"
                 print_error "Last 20 lines of output:"
@@ -590,8 +635,8 @@ cmd_start_server_docker() {
     # Ensure services are running
     cmd_start_docker_services
     
-    # Build if needed
-    if [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
+    # Build so we run the latest code (use --skip-server-build to skip and use existing binary)
+    if [ "$SKIP_SERVER_BUILD" != true ]; then
         print_step "Building server (this may take a minute)..."
         if [ "$VERBOSE" = true ]; then
             (cd "$ROOT_DIR/backend/rust-api" && cargo build --release) || {
@@ -599,12 +644,16 @@ cmd_start_server_docker() {
                 exit 1
             }
         else
-            if ! (cd "$ROOT_DIR/backend/rust-api" && cargo build --release 2>&1 | tee /tmp/cargo-build.log | grep -E "error|Finished|Compiling" | head -20); then
+            (cd "$ROOT_DIR/backend/rust-api" && cargo build --release 2>&1 | tee /tmp/cargo-build.log) || true
+            if [ "${PIPESTATUS[0]}" -ne 0 ]; then
                 print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
                 print_error "Build log: /tmp/cargo-build.log"
                 exit 1
             fi
         fi
+    elif [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
+        print_error "Server binary not found and --skip-server-build was used. Build first: $0 build-server"
+        exit 1
     fi
     
     # Start server
@@ -873,6 +922,55 @@ cmd_rebuild_database_projections() {
     fi
 }
 
+# Build and prepare Rust bridge so Dart and native lib are in sync. Call before run-flutter-app.
+prepare_rust_bridge_for_flutter() {
+    local platform="$1"
+    local crate_dir="$ROOT_DIR/crates/debitum_client_core"
+    local jni_libs_dir="$ROOT_DIR/mobile/android/app/src/main/jniLibs"
+    
+    print_info "Preparing Rust bridge (codegen + build for $platform)..."
+    
+    # 1. Regenerate Dart/Rust bindings so content hash matches
+    if [ ! -f "$SCRIPT_DIR/codegen-rust-bridge.sh" ]; then
+        print_error "codegen script not found: $SCRIPT_DIR/codegen-rust-bridge.sh"
+        exit 1
+    fi
+    "$SCRIPT_DIR/codegen-rust-bridge.sh" 2>/dev/null || {
+        print_error "Flutter Rust Bridge codegen failed. Install: cargo install flutter_rust_bridge_codegen"
+        exit 1
+    }
+    
+    # 2. Build Rust for the target platform
+    if [ "$platform" = "android" ]; then
+        if command -v cargo-ndk &>/dev/null; then
+            print_info "Building Rust for Android (cargo-ndk)..."
+            mkdir -p "$jni_libs_dir"
+            (cd "$crate_dir" && cargo ndk -o "$jni_libs_dir" build 2>&1) || {
+                print_error "cargo ndk build failed. Ensure Android NDK is set (e.g. ANDROID_NDK in gradle.properties or env)."
+                exit 1
+            }
+            print_success "Rust Android libs ready in jniLibs/"
+        else
+            # Build release so at least the crate compiles; app will fail at runtime if jniLibs missing
+            print_warning "cargo-ndk not found. Building Rust for host only; Android needs: cargo install cargo-ndk, rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android, then re-run."
+            (cd "$crate_dir" && cargo build --release 2>&1) || exit 1
+        fi
+    elif [ "$platform" = "linux" ]; then
+        print_info "Building Rust for Linux..."
+        if (cd "$crate_dir" && cargo build --release 2>&1); then
+            :
+        else
+            (cd "$crate_dir" && cargo build 2>&1) || exit 1
+            if [ -f "$crate_dir/target/debug/libdebitum_client_core.so" ]; then
+                mkdir -p "$crate_dir/target/release"
+                cp -f "$crate_dir/target/debug/libdebitum_client_core.so" "$crate_dir/target/release/" 2>/dev/null || true
+            fi
+        fi
+        print_success "Rust Linux lib ready"
+    fi
+    # web: no native lib, codegen already done
+}
+
 cmd_run_flutter_app() {
     validate_flags "run-flutter-app"
     
@@ -901,6 +999,11 @@ cmd_run_flutter_app() {
     esac
     
     print_step "Running Flutter app ($platform, mode: $mode)..."
+    
+    # Build and prepare Rust bridge so Dart hash and native lib match (all-in-one)
+    if [ "$platform" = "android" ] || [ "$platform" = "linux" ]; then
+        prepare_rust_bridge_for_flutter "$platform"
+    fi
     
     # Build flutter run command with mode flag
     local flutter_cmd="flutter run"
@@ -969,6 +1072,13 @@ cmd_run_flutter_app() {
             (cd "$ROOT_DIR/mobile" && $flutter_cmd -d chrome)
         fi
     elif [ "$platform" = "linux" ]; then
+        # Rust FFI: loader looks for libdebitum_client_core.so in target/release
+        local rust_lib_dir="$ROOT_DIR/crates/debitum_client_core/target/release"
+        if [ -f "$rust_lib_dir/libdebitum_client_core.so" ]; then
+            export LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        else
+            echo -e "${YELLOW}⚠ Rust lib not found at $rust_lib_dir - run: cd crates/debitum_client_core && cargo build --release (or: cp target/debug/libdebitum_client_core.so target/release/)${NC}" >&2
+        fi
         # Clean app data if --clear-app-data flag is set
         if [ "$CLEAR_APP_DATA" = true ]; then
             print_info "Clearing app data for Linux..."
@@ -1014,7 +1124,7 @@ cmd_run_flutter_app() {
         
         # Launch Flutter app and configure window for Hyprland
         if [ -n "$device_id" ]; then
-            (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$device_id")
+            (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd -d "$device_id")
         else
             # Check if running on Hyprland
             if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || command -v hyprctl &> /dev/null; then
@@ -1116,13 +1226,13 @@ cmd_run_flutter_app() {
                 local config_pid=$!
                 
                 # Launch Flutter (foreground)
-                (cd "$ROOT_DIR/mobile" && $flutter_cmd -d linux)
+                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd -d linux)
                 
                 # Clean up background process if still running
                 kill $config_pid 2>/dev/null || true
             else
                 # Not on Hyprland, just run normally
-                (cd "$ROOT_DIR/mobile" && $flutter_cmd -d linux)
+                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd -d linux)
             fi
         fi
     else
@@ -2106,12 +2216,17 @@ Flags:
                                   Default: 390x844 (phone size)
 
 Database Commands:
-  reset-database-complete [backup.zip]
+  reset-database-complete [backup.zip [username] [wallet]]
                                   Complete reset + rebuild + optional import (recommended)
+                                  If backup.zip is given, username and wallet are required.
+                                  Wallet is created if it does not exist.
                                   Use --skip-server-build to skip server build (faster if binary exists)
-  reset-database-only [backup.zip]
+  reset-database-only [backup.zip [username] [wallet]]
                                   Reset PostgreSQL database only, optionally import data
-  import-backup <backup.zip>       Import data from Debitum backup (creates events)
+                                  If backup.zip is given, username and wallet are required.
+  import-backup <backup.zip> <username> <wallet>
+                                  Import data from Debitum backup (creates events).
+                                  Username must exist; wallet is created if it does not exist.
   rebuild-database-projections      Rebuild projections from events (via API)
 
 Docker Services Commands:
@@ -2172,10 +2287,11 @@ System Commands:
 
 Examples:
   $0 reset-database-complete                      # Complete reset + rebuild (clean system)
-  $0 reset-database-complete backup.zip           # Complete reset + import + rebuild (recommended)
+  $0 reset-database-complete backup.zip max MyWallet   # Complete reset + import + rebuild (recommended)
   $0 --skip-server-build reset-database-complete  # Fast reset (skip server build)
   $0 reset-database-only                          # Clean reset (no data)
-  $0 import-backup backup.zip                     # Import data (keeps existing data)
+  $0 reset-database-only backup.zip max MyWallet # Reset and import into user max, wallet MyWallet
+  $0 import-backup backup.zip max MyWallet       # Import data (wallet created if needed)
   $0 set-admin-password admin mypass              # Set admin panel login password
   $0 start-all-docker-production                  # Start production (all in Docker)
   $0 start-server-direct                          # Start development (Rust directly, faster, auto-reload)
@@ -2213,18 +2329,18 @@ COMMAND="${1:-help}"
 
 case "$COMMAND" in
     reset-database-complete)
-        cmd_reset_database_complete "${2:-}"
+        cmd_reset_database_complete "${2:-}" "${3:-}" "${4:-}"
         ;;
     reset-database-only)
-        cmd_reset_database_only "${2:-}"
+        cmd_reset_database_only "${2:-}" "${3:-}" "${4:-}"
         ;;
     import-backup)
         if [ -z "$2" ]; then
-            print_error "Import requires a backup file"
-            echo "Usage: $0 import-backup <backup.zip>"
+            print_error "Import requires a backup file, username, and wallet"
+            echo "Usage: $0 import-backup <backup.zip> <username> <wallet>"
             exit 1
         fi
-        cmd_import_backup "$2"
+        cmd_import_backup "$2" "${3:-}" "${4:-}"
         ;;
     rebuild-database-projections)
         cmd_rebuild_database_projections

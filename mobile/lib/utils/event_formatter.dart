@@ -1,8 +1,9 @@
 // ignore_for_file: unused_import
 
+import 'dart:convert';
+import '../api.dart';
+import '../models/contact.dart';
 import '../models/event.dart';
-import '../services/event_store_service.dart';
-import '../services/local_database_service_v2.dart';
 
 /// Helper class to format events for display, matching admin page format
 class EventFormatter {
@@ -118,8 +119,9 @@ class EventFormatter {
               String? contactName = contactNameCache[contactId];
               if (contactName == null) {
                 try {
-                  final contact = await LocalDatabaseServiceV2.getContact(contactId);
-                  if (contact != null) {
+                  final jsonStr = await Api.getContact(contactId);
+                  if (jsonStr != null) {
+                    final contact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
                     contactName = contact.name;
                     contactNameCache[contactId] = contactName;
                   }
@@ -168,8 +170,9 @@ class EventFormatter {
             String? contactName = contactNameCache[contactId];
             if (contactName == null) {
               try {
-                final contact = await LocalDatabaseServiceV2.getContact(contactId);
-                if (contact != null) {
+                final jsonStr = await Api.getContact(contactId);
+                if (jsonStr != null) {
+                  final contact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
                   contactName = contact.name;
                   contactNameCache[contactId] = contactName;
                 }
@@ -193,8 +196,9 @@ class EventFormatter {
             String? contactName = contactNameCache[contactId];
             if (contactName == null) {
               try {
-                final contact = await LocalDatabaseServiceV2.getContact(contactId);
-                if (contact != null) {
+                final jsonStr = await Api.getContact(contactId);
+                if (jsonStr != null) {
+                  final contact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
                   contactName = contact.name;
                   contactNameCache[contactId] = contactName;
                 }
@@ -223,8 +227,9 @@ class EventFormatter {
         String? contactName = contactNameCache[contactId];
         if (contactName == null) {
           try {
-            final contact = await LocalDatabaseServiceV2.getContact(contactId);
-            if (contact != null) {
+            final jsonStr = await Api.getContact(contactId);
+            if (jsonStr != null) {
+              final contact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
               contactName = contact.name;
               contactNameCache[contactId] = contactName;
             }

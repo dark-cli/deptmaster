@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import '../services/backend_config_service.dart';
+import '../api.dart';
 import '../widgets/gradient_background.dart';
 import 'login_screen.dart';
 
@@ -52,8 +52,8 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
   }
 
   Future<void> _loadCurrentConfig() async {
-    final ip = await BackendConfigService.getBackendIp();
-    final port = await BackendConfigService.getBackendPort();
+    final ip = await Api.getBackendIp();
+    final port = await Api.getBackendPort();
     setState(() {
       _ipController.text = ip;
       _portController.text = port.toString();
@@ -146,7 +146,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
       final ip = _ipController.text.trim();
       final port = int.parse(_portController.text.trim());
       
-      await BackendConfigService.setBackendConfig(ip, port);
+      await Api.setBackendConfig(ip, port);
 
       if (mounted) {
         // Navigate to login screen

@@ -1,15 +1,15 @@
 // ignore_for_file: unused_import
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/local_database_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -83,8 +83,9 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
 
   Future<void> _loadContacts() async {
     try {
-      // Always use local database - never call API from UI
-      final contacts = await LocalDatabaseServiceV2.getContacts();
+      final jsonStr = await Api.getContacts();
+      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
+      final contacts = list.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
       if (mounted) {
         setState(() {
           _contacts = contacts;
@@ -174,16 +175,24 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
         updatedAt: DateTime.now(),
         isSynced: false, // Mark as unsynced since we're updating locally
       );
-      await LocalDatabaseServiceV2.updateTransaction(updatedTransaction);
+      await Api.updateTransaction(
+        id: updatedTransaction.id,
+        contactId: updatedTransaction.contactId,
+        type: updatedTransaction.type == TransactionType.money ? 'money' : 'item',
+        direction: updatedTransaction.direction == TransactionDirection.owed ? 'owed' : 'lent',
+        amount: updatedTransaction.amount,
+        currency: updatedTransaction.currency,
+        description: updatedTransaction.description,
+        transactionDate: updatedTransaction.transactionDate.toIso8601String().split('T')[0],
+        dueDate: updatedTransaction.dueDate?.toIso8601String().split('T')[0],
+      );
 
       if (mounted) {
-        Navigator.of(context).pop(true); // Return true to indicate success
-        
-        // Show undo toast
+        Navigator.of(context).pop(true);
         ToastService.showUndoWithErrorHandlingFromContext(
           context: context,
           message: '✅ Transaction updated!',
-          onUndo: () => LocalDatabaseServiceV2.undoTransactionAction(updatedTransaction.id),
+          onUndo: () => Api.undoTransactionAction(updatedTransaction.id),
           successMessage: 'Transaction update undone',
         );
       }
@@ -480,7 +489,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                 });
                 if (value && _dueDate == null) {
                   // Set default due date when switch is turned on
-                  final defaultDays = await SettingsService.getDefaultDueDateDays();
+                  final defaultDays = await Api.getDefaultDueDateDays();
                   if (mounted) {
                     setState(() {
                       _dueDate = DateTime.now().add(Duration(days: defaultDays));

@@ -1,17 +1,16 @@
 // ignore_for_file: unused_import
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/wallet_service.dart';
-import '../services/dummy_data_service.dart';
+import '../models/wallet.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -83,16 +82,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _requireWallet());
   }
 
-  /// If user has no wallet, tell them to create one first and navigate to create-wallet.
   Future<void> _requireWallet() async {
-    if (WalletService.getCurrentWalletId() != null) return;
-    final wallets = await WalletService.getUserWallets();
+    if (await Api.getCurrentWalletId() != null) return;
+    final list = await Api.getWallets();
+    final wallets = list.map((m) => Wallet.fromJson(m)).toList();
     if (wallets.isEmpty && mounted) {
       ToastService.showInfoFromContext(context, 'Create a wallet first to add transactions.');
       Navigator.of(context).pop();
       Navigator.of(context).pushNamed('/create-wallet');
     } else if (wallets.isNotEmpty && mounted) {
-      await WalletService.setCurrentWalletId(wallets.first.id);
+      await Api.setCurrentWalletId(wallets.first.id);
     }
   }
 
@@ -179,9 +178,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final defaultDir = await SettingsService.getDefaultDirection();
-    final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
-    final defaultDays = await SettingsService.getDefaultDueDateDays();
+    final defaultDir = await Api.getDefaultDirection();
+    final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
+    final defaultDays = await Api.getDefaultDueDateDays();
     
     if (mounted) {
       setState(() {
@@ -205,10 +204,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     setState(() {
       _loadingContacts = true;
     });
-    
     try {
-      // Always use local database - never call API from UI
-      final contacts = await LocalDatabaseServiceV2.getContacts();
+      final jsonStr = await Api.getContacts();
+      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
+      final contacts = list.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
       if (mounted) {
         setState(() {
           _contacts = contacts;
@@ -288,37 +287,24 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
       final amountText = _amountController.text.trim();
       final amount = _parseNumber(amountText);
 
-      // Generate UUID for local ID (server expects UUID format)
-      final transactionId = DummyDataService.uuid.v4();
-
-      final transaction = Transaction(
-        id: transactionId,
+      final jsonStr = await Api.createTransaction(
         contactId: _selectedContact!.id,
-        type: TransactionType.money, // Always money (items removed)
-        direction: _direction,
+        type: 'money',
+        direction: _direction == TransactionDirection.owed ? 'owed' : 'lent',
         amount: amount,
         currency: 'IQD',
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        transactionDate: _selectedDate,
-        dueDate: _dueDateSwitchEnabled ? _dueDate : null,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
+        description: _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
+        transactionDate: _selectedDate.toIso8601String().split('T')[0],
+        dueDate: _dueDateSwitchEnabled && _dueDate != null ? _dueDate!.toIso8601String().split('T')[0] : null,
       );
-
-      // Save to local database (creates event, rebuilds state)
-      // Background sync service will handle server communication
-      await LocalDatabaseServiceV2.createTransaction(transaction);
+      final created = Transaction.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
 
       if (mounted) {
-        Navigator.of(context).pop(true); // Return true to indicate success
-        
-        // Show undo toast
+        Navigator.of(context).pop(true);
         ToastService.showUndoWithErrorHandlingFromContext(
           context: context,
           message: '✅ Transaction created!',
-          onUndo: () => LocalDatabaseServiceV2.undoTransactionAction(transactionId),
+          onUndo: () => Api.undoTransactionAction(created.id),
           successMessage: 'Transaction undone',
         );
       }
@@ -711,7 +697,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                       });
                       if (value && _dueDate == null) {
                         // Set default due date when switch is turned on
-                        final defaultDays = await SettingsService.getDefaultDueDateDays();
+                        final defaultDays = await Api.getDefaultDueDateDays();
                         if (mounted) {
                           setState(() {
                             _dueDate = DateTime.now().add(Duration(days: defaultDays));

@@ -1,15 +1,14 @@
 // ignore_for_file: unused_import, unused_local_variable
 
-import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -45,11 +44,8 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
     super.initState();
     _loadTransactions();
     
-    // Listen for real-time updates
-    RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Connect WebSocket if not connected
-    RealtimeService.connect();
+    Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.connectRealtime();
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -62,7 +58,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
 
   @override
   void dispose() {
-    RealtimeService.removeListener(_onRealtimeUpdate);
+    Api.removeRealtimeListener(_onRealtimeUpdate);
     super.dispose();
   }
 
@@ -71,14 +67,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
       _loading = true;
       _error = null;
     });
-    
     try {
-      // Always use local database - never call API from UI
-      final allTransactions = await LocalDatabaseServiceV2.getTransactions();
-      // Filter transactions for this contact
-      final contactTransactions = allTransactions
-          .where((t) => t.contactId == widget.contact.id)
-          .toList();
+      final jsonStr = await Api.getTransactions();
+      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
+      final allTransactions = list.map((e) => Transaction.fromJson(e as Map<String, dynamic>)).toList();
+      final contactTransactions = allTransactions.where((t) => t.contactId == widget.contact.id).toList();
       
       if (mounted) {
         setState(() {
@@ -172,7 +165,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             final deletedIds = _selectedTransactions.toList();
                             
                             // Delete from local database (creates events, rebuilds state)
-                            await LocalDatabaseServiceV2.bulkDeleteTransactions(deletedIds);
+                            await Api.bulkDeleteTransactions(deletedIds);
                             
                             if (!mounted) return;
                             setState(() {
@@ -187,10 +180,8 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                               context: context,
                               message: '✅ $deletedCount transaction(s) deleted',
                               onUndo: () async {
-                                if (deletedIds.length == 1) {
-                                  await LocalDatabaseServiceV2.undoTransactionAction(deletedIds.first);
-                                } else {
-                                  await LocalDatabaseServiceV2.undoBulkTransactionActions(deletedIds);
+                                for (final id in deletedIds) {
+                                  await Api.undoTransactionAction(id);
                                 }
                                 _loadTransactions();
                               },
@@ -401,7 +392,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             if (confirm == true && mounted) {
                               try {
                                 // Delete from local database (creates event, rebuilds state)
-                                await LocalDatabaseServiceV2.deleteTransaction(transaction.id);
+                                await Api.deleteTransaction(transaction.id);
                                 
                                 if (!mounted) return;
                                 _loadTransactions();
@@ -412,7 +403,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                   context: context,
                                   message: '✅ Transaction deleted!',
                                   onUndo: () async {
-                                    await LocalDatabaseServiceV2.undoTransactionAction(transaction.id);
+                                    await Api.undoTransactionAction(transaction.id);
                                     _loadTransactions();
                                   },
                                   successMessage: 'Transaction deletion undone',

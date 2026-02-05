@@ -79,7 +79,11 @@ async fn main() -> anyhow::Result<()> {
         config.rate_limit_requests,
         config.rate_limit_window,
     );
-    info!("Rate limiter initialized: {} requests per {} seconds", config.rate_limit_requests, config.rate_limit_window);
+    if config.rate_limit_requests == 0 {
+        info!("Rate limiter disabled (RATE_LIMIT_REQUESTS=0)");
+    } else {
+        info!("Rate limiter initialized: {} requests per {} seconds", config.rate_limit_requests, config.rate_limit_window);
+    }
 
     // Build application state
     let app_state = AppState {

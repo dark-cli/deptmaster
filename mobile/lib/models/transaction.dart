@@ -68,7 +68,7 @@ class Transaction extends HiveObject {
     required this.type,
     required this.direction,
     required this.amount,
-    this.currency = 'USD',
+    this.currency = 'IQD',
     this.description,
     required this.transactionDate,
     this.dueDate,
@@ -151,7 +151,7 @@ class Transaction extends HiveObject {
         type: (json['type']?.toString() ?? 'money') == 'money' ? TransactionType.money : TransactionType.item,
         direction: (json['direction']?.toString() ?? 'owed') == 'owed' ? TransactionDirection.owed : TransactionDirection.lent,
         amount: (json['amount'] as num?)?.toInt() ?? 0,
-        currency: json['currency']?.toString() ?? 'USD',
+        currency: json['currency']?.toString() ?? 'IQD',
         description: json['description']?.toString(),
         transactionDate: transactionDate,
         dueDate: json['due_date'] != null 

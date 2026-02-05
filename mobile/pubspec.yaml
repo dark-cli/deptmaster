@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.5.0 <4.0.0'  # 3.5 required for extension types in flutter_rust_bridge web
 
 dependencies:
   flutter:
@@ -45,6 +45,8 @@ dependencies:
 
   # Charts
   syncfusion_flutter_charts: ^27.1.48
+  flutter_rust_bridge: 2.11.1
+  ffi: ^2.1.2
 
 dev_dependencies:
   flutter_test:

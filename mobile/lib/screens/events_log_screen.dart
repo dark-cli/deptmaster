@@ -1,24 +1,18 @@
 // ignore_for_file: unused_element
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
+import '../api.dart';
+import '../models/contact.dart';
 import '../models/event.dart';
 import '../models/wallet.dart';
-import '../services/event_store_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/state_builder.dart';
-import '../services/realtime_service.dart';
-import '../services/wallet_service.dart';
-import '../services/auth_service.dart';
-import '../services/sync_service_v2.dart';
-import '../services/dummy_data_service.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
+import '../utils/state_builder.dart';
 
 class EventsLogScreen extends ConsumerStatefulWidget {
   final DateTime? initialDateFrom;
@@ -58,11 +52,9 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     super.initState();
     _dateFrom = widget.initialDateFrom;
     _dateTo = widget.initialDateTo;
-    _selectedWalletId = WalletService.getCurrentWalletId();
     _loadWalletsThenEvents();
-    RealtimeService.addListener(_onRealtimeUpdate);
-    RealtimeService.connect();
-    _setupLocalListeners();
+    Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.connectRealtime();
   }
 
   Future<void> _loadWalletsThenEvents() async {
@@ -70,29 +62,21 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       _walletsLoading = true;
     });
     try {
-      final wallets = await WalletService.getUserWallets();
+      final list = await Api.getWallets();
+      final wallets = list.map((m) => Wallet.fromJson(m)).toList();
+      final currentId = await Api.getCurrentWalletId();
+      final validId = currentId != null && wallets.any((w) => w.id == currentId);
+      final newSelected = wallets.isNotEmpty ? (validId ? currentId : wallets.first.id) : null;
+      if (!validId && newSelected != null) {
+        await Api.setCurrentWalletId(newSelected);
+      }
       if (mounted) {
-        final currentId = WalletService.getCurrentWalletId();
-        final validId = currentId != null &&
-            wallets.any((w) => w.id == currentId);
-        String? newSelected = wallets.isNotEmpty
-            ? (validId ? currentId : wallets.first.id)
-            : null;
-        if (!validId && newSelected != null) {
-          await WalletService.setCurrentWalletId(newSelected);
-          final userId = await AuthService.getUserId();
-          if (userId != null && !kIsWeb) {
-            await DummyDataService.initializeForUserAndWallet(userId, newSelected);
-          }
-        }
-        if (mounted) {
-          setState(() {
-            _wallets = wallets;
-            _walletsLoading = false;
-            _selectedWalletId = newSelected;
-          });
-          await _loadEvents();
-        }
+        setState(() {
+          _wallets = wallets;
+          _walletsLoading = false;
+          _selectedWalletId = newSelected;
+        });
+        await _loadEvents();
       }
     } catch (e) {
       if (mounted) {
@@ -101,28 +85,6 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
         });
         await _loadEvents();
       }
-    }
-  }
-
-  void _setupLocalListeners() {
-    if (kIsWeb) return;
-    
-    // Listen to local event store changes (for sync state updates)
-    // When events are marked as synced locally, this will trigger a reload
-    try {
-      final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-      eventsBox.listenable().addListener(_onLocalEventsChanged);
-    } catch (e) {
-      // Box might not be initialized yet, will be set up when events are loaded
-      print('Note: Events box not yet initialized, will listen after first load');
-    }
-  }
-
-  void _onLocalEventsChanged() {
-    // Reload events when local event store changes (e.g., when events are marked as synced)
-    // This ensures sync state updates are reflected immediately
-    if (mounted && !_isReloading) {
-      _loadEvents();
     }
   }
   
@@ -155,15 +117,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
 
   @override
   void dispose() {
-    RealtimeService.removeListener(_onRealtimeUpdate);
-    if (!kIsWeb) {
-      try {
-        final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-        eventsBox.listenable().removeListener(_onLocalEventsChanged);
-      } catch (e) {
-        // Box might not be initialized, ignore
-      }
-    }
+    Api.removeRealtimeListener(_onRealtimeUpdate);
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -174,50 +128,36 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     setState(() {
       _selectedWalletId = walletId;
     });
-    await WalletService.setCurrentWalletId(walletId);
-    final userId = await AuthService.getUserId();
-    if (userId != null && !kIsWeb) {
-      await DummyDataService.initializeForUserAndWallet(userId, walletId);
-    }
+    await Api.setCurrentWalletId(walletId);
     if (mounted) await _loadEvents();
     if (!kIsWeb) {
-      SyncServiceV2.manualSync();
+      Api.manualSync().catchError((_) {});
     }
   }
 
   Future<void> _loadEvents() async {
     if (!mounted || _isReloading) return;
-    
     _isReloading = true;
     setState(() {
       _loading = true;
     });
-
     try {
-      await EventStoreService.initialize();
-      
-      if (!kIsWeb) {
-        try {
-          final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-          eventsBox.listenable().addListener(_onLocalEventsChanged);
-        } catch (e) {
-          // Ignore if box not available
-        }
-      }
-      
-      // Load events for the selected wallet only (none if no wallet selected)
       final walletId = _selectedWalletId;
       if (walletId == null || walletId.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _allEvents = [];
-          _loading = false;
-          _isReloading = false;
-        });
-        _applyFilters();
+        if (mounted) {
+          setState(() {
+            _allEvents = [];
+            _loading = false;
+            _isReloading = false;
+          });
+          _applyFilters();
+        }
         return;
       }
-      final events = await EventStoreService.getEventsForWallet(walletId);
+      await Api.setCurrentWalletId(walletId);
+      final jsonStr = await Api.getEvents();
+      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
+      final events = list.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
       
       if (!mounted) return;
       
@@ -272,12 +212,12 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       }
     }
     
-    // Load contact names and usernames from database
     for (final contactId in contactIds) {
       if (!mounted) return;
       try {
-        final contact = await LocalDatabaseServiceV2.getContact(contactId);
-        if (contact != null && mounted) {
+        final jsonStr = await Api.getContact(contactId);
+        if (jsonStr != null && mounted) {
+          final contact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
           _contactNameCache[contactId] = contact.name;
           if (contact.username != null && contact.username!.isNotEmpty) {
             _contactUsernameCache[contactId] = contact.username!;
@@ -1444,13 +1384,12 @@ class _EventTableRowState extends State<EventTableRow> {
     if (totalDebtFromEvent != null) {
       totalDebt = (totalDebtFromEvent as num?)?.toInt();
     } else {
-      // Fallback: Calculate total debt at the time of this event
       try {
-        totalDebt = await StateBuilder.calculateTotalDebtAtTime(widget.event.timestamp);
-    } catch (e) {
-      print('Error calculating total debt: $e');
+        totalDebt = StateBuilder.calculateTotalDebtFromEvents(widget.allEvents, widget.event.timestamp);
+      } catch (e) {
+        print('Error calculating total debt: $e');
         totalDebt = 0;
-        }
+      }
     }
     
         if (mounted) {

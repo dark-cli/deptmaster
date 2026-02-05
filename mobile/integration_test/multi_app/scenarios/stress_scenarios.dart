@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'package:debt_tracker_mobile/models/contact.dart';
 import 'package:debt_tracker_mobile/models/transaction.dart';
 import 'package:debt_tracker_mobile/models/event.dart';
-import 'package:debt_tracker_mobile/services/backend_config_service.dart';
 import '../app_instance.dart';
 import '../sync_monitor.dart';
 import '../event_validator.dart';

@@ -94,12 +94,9 @@ impl Config {
             tracing::warn!("⚠️  Database connection is using sslmode=disable. This is insecure for production!");
         }
 
-        // Validate rate limiting settings
-        if self.rate_limit_requests == 0 {
-            return Err(anyhow::anyhow!("RATE_LIMIT_REQUESTS cannot be 0"));
-        }
-        if self.rate_limit_window == 0 {
-            return Err(anyhow::anyhow!("RATE_LIMIT_WINDOW cannot be 0"));
+        // Validate rate limiting settings (0 = disabled, for local dev/testing)
+        if self.rate_limit_requests > 0 && self.rate_limit_window == 0 {
+            return Err(anyhow::anyhow!("RATE_LIMIT_WINDOW must be > 0 when rate limiting is enabled"));
         }
 
         // Validate CORS settings

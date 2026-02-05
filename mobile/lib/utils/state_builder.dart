@@ -1,7 +1,6 @@
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../models/event.dart';
-import 'event_store_service.dart';
 
 /// Application state containing all contacts and transactions
 class AppState {
@@ -28,40 +27,26 @@ class AppState {
   }
 }
 
-/// StateBuilder - Simple, pure functions to build state from events
-/// KISS principle: No side effects, easy to test, incremental updates
+/// Pure functions to build state from events (no service deps)
 class StateBuilder {
   /// Build full state from all events
   static AppState buildState(List<Event> events) {
-    // Sort events by timestamp to ensure correct order
     final sortedEvents = List<Event>.from(events)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-    // First pass: collect UNDO events to know which events to skip
     final undoneEventIds = <String>{};
     for (final event in sortedEvents) {
       if (event.eventType == 'UNDO') {
         final undoneEventId = event.eventData['undone_event_id'] as String?;
-        if (undoneEventId != null) {
-          undoneEventIds.add(undoneEventId);
-        }
+        if (undoneEventId != null) undoneEventIds.add(undoneEventId);
       }
     }
 
     final contacts = <String, Contact>{};
     final transactions = <String, Transaction>{};
 
-    // Apply events in order - when contact is deleted, its transactions are also removed
     for (final event in sortedEvents) {
-      // Skip UNDO events (they don't modify state directly)
-      if (event.eventType == 'UNDO') {
-        continue;
-      }
-      // Skip events that have been undone
-      if (undoneEventIds.contains(event.id)) {
-        continue;
-      }
-
+      if (event.eventType == 'UNDO' || undoneEventIds.contains(event.id)) continue;
       if (event.aggregateType == 'contact') {
         _applyContactEvent(contacts, event, transactions);
       } else if (event.aggregateType == 'transaction') {
@@ -69,7 +54,6 @@ class StateBuilder {
       }
     }
 
-    // Calculate balances for all contacts
     _calculateBalances(contacts, transactions.values.toList());
 
     return AppState(
@@ -79,65 +63,17 @@ class StateBuilder {
     );
   }
 
-  /// Apply new events to existing state (incremental update)
-  static AppState applyEvents(AppState currentState, List<Event> newEvents) {
-    if (newEvents.isEmpty) return currentState;
-
-    // Sort new events by timestamp
-    final sortedNewEvents = List<Event>.from(newEvents)
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-    // First pass: collect UNDO events to know which events to skip
-    final undoneEventIds = <String>{};
-    for (final event in sortedNewEvents) {
-      if (event.eventType == 'UNDO') {
-        final undoneEventId = event.eventData['undone_event_id'] as String?;
-        if (undoneEventId != null) {
-          undoneEventIds.add(undoneEventId);
-        }
-      }
-    }
-
-    // Convert current state to maps for easier manipulation
-    final contacts = Map<String, Contact>.fromEntries(
-      currentState.contacts.map((c) => MapEntry(c.id, c)),
-    );
-    final transactions = Map<String, Transaction>.fromEntries(
-      currentState.transactions.map((t) => MapEntry(t.id, t)),
-    );
-
-    // Apply new events (skipping undone events and UNDO events themselves)
-    // Process contacts and transactions together - when contact is deleted, transactions are removed
-    for (final event in sortedNewEvents) {
-      // Skip UNDO events (they don't modify state directly)
-      if (event.eventType == 'UNDO') {
-        continue;
-      }
-      // Skip events that have been undone
-      if (undoneEventIds.contains(event.id)) {
-        continue;
-      }
-
-      if (event.aggregateType == 'contact') {
-        _applyContactEvent(contacts, event, transactions);
-      } else if (event.aggregateType == 'transaction') {
-        _applyTransactionEvent(transactions, event, contacts);
-      }
-    }
-
-    // Recalculate balances (only affected contacts need recalculation)
-    _calculateBalances(contacts, transactions.values.toList());
-
-    return AppState(
-      contacts: contacts.values.toList(),
-      transactions: transactions.values.toList(),
-      lastBuiltAt: DateTime.now(),
-    );
+  /// Total debt at a given time (sum of contact balances) from provided events
+  static int calculateTotalDebtFromEvents(List<Event> allEvents, DateTime timestamp) {
+    final eventsUpToTime = allEvents
+        .where((e) => e.timestamp.isBefore(timestamp) || e.timestamp.isAtSameMomentAs(timestamp))
+        .toList();
+    final state = buildState(eventsUpToTime);
+    return state.contacts.fold<int>(0, (sum, contact) => sum + contact.balance);
   }
 
-  /// Apply a contact event to the contacts map
   static void _applyContactEvent(
-    Map<String, Contact> contacts, 
+    Map<String, Contact> contacts,
     Event event,
     Map<String, Transaction> transactions,
   ) {
@@ -155,8 +91,8 @@ class StateBuilder {
         createdAt: _parseTimestamp(eventData['timestamp']),
         updatedAt: _parseTimestamp(eventData['timestamp']),
         isSynced: event.synced,
-        balance: 0, // Will be calculated later
-        walletId: eventData['wallet_id'] as String?, // Include wallet_id from event
+        balance: 0,
+        walletId: eventData['wallet_id'] as String?,
       );
     } else if (event.eventType == 'UPDATED' && contacts.containsKey(contactId)) {
       final existing = contacts[contactId]!;
@@ -170,31 +106,17 @@ class StateBuilder {
         createdAt: existing.createdAt,
         updatedAt: _parseTimestamp(eventData['timestamp']),
         isSynced: event.synced,
-        balance: existing.balance, // Will be recalculated
-        walletId: eventData['wallet_id'] as String? ?? existing.walletId, // Preserve or update wallet_id
+        balance: existing.balance,
+        walletId: eventData['wallet_id'] as String? ?? existing.walletId,
       );
     } else if (event.eventType == 'DELETED' && contacts.containsKey(contactId)) {
-      // Remove deleted contact
       contacts.remove(contactId);
-      
-      // Also remove all transactions that reference this deleted contact
-      // This ensures data consistency: deleted contacts don't leave orphaned transactions
-      final transactionsToRemove = transactions.values
-          .where((t) => t.contactId == contactId)
-          .map((t) => t.id)
-          .toList();
-      
-      for (final transactionId in transactionsToRemove) {
-        transactions.remove(transactionId);
-      }
-      
-      if (transactionsToRemove.isNotEmpty) {
-        print('✅ Deleted contact $contactId and removed ${transactionsToRemove.length} associated transactions');
+      for (final t in transactions.values.where((t) => t.contactId == contactId).toList()) {
+        transactions.remove(t.id);
       }
     }
   }
 
-  /// Apply a transaction event to the transactions map
   static void _applyTransactionEvent(
     Map<String, Transaction> transactions,
     Event event,
@@ -205,18 +127,12 @@ class StateBuilder {
 
     if (event.eventType == 'CREATED') {
       final contactId = eventData['contact_id'] as String? ?? '';
-      // Only create transaction if contact exists
-      // If contact was deleted, its transactions should also be ignored/deleted
       if (contactId.isNotEmpty && contacts.containsKey(contactId)) {
         transactions[transactionId] = Transaction(
           id: transactionId,
           contactId: contactId,
-          type: eventData['type'] == 'item'
-              ? TransactionType.item
-              : TransactionType.money,
-          direction: eventData['direction'] == 'owed'
-              ? TransactionDirection.owed
-              : TransactionDirection.lent,
+          type: eventData['type'] == 'item' ? TransactionType.item : TransactionType.money,
+          direction: eventData['direction'] == 'owed' ? TransactionDirection.owed : TransactionDirection.lent,
           amount: (eventData['amount'] as num?)?.toInt() ?? 0,
           currency: eventData['currency'] as String? ?? 'IQD',
           description: eventData['description'] as String?,
@@ -225,23 +141,16 @@ class StateBuilder {
           createdAt: _parseTimestamp(eventData['timestamp']),
           updatedAt: _parseTimestamp(eventData['timestamp']),
           isSynced: event.synced,
-          walletId: eventData['wallet_id'] as String?, // Include wallet_id from event
+          walletId: eventData['wallet_id'] as String?,
         );
       }
-      // If contact doesn't exist, don't create transaction (contact was deleted)
     } else if (event.eventType == 'UPDATED' && transactions.containsKey(transactionId)) {
       final existing = transactions[transactionId]!;
       transactions[transactionId] = Transaction(
         id: existing.id,
         contactId: eventData['contact_id'] as String? ?? existing.contactId,
-        type: eventData['type'] == 'item'
-            ? TransactionType.item
-            : (eventData['type'] == 'money' ? TransactionType.money : existing.type),
-        direction: eventData['direction'] == 'owed'
-            ? TransactionDirection.owed
-            : (eventData['direction'] == 'lent'
-                ? TransactionDirection.lent
-                : existing.direction),
+        type: eventData['type'] == 'item' ? TransactionType.item : (eventData['type'] == 'money' ? TransactionType.money : existing.type),
+        direction: eventData['direction'] == 'owed' ? TransactionDirection.owed : (eventData['direction'] == 'lent' ? TransactionDirection.lent : existing.direction),
         amount: (eventData['amount'] as num?)?.toInt() ?? existing.amount,
         currency: eventData['currency'] as String? ?? existing.currency,
         description: eventData['description'] as String? ?? existing.description,
@@ -251,20 +160,14 @@ class StateBuilder {
         createdAt: existing.createdAt,
         updatedAt: _parseTimestamp(eventData['timestamp']),
         isSynced: event.synced,
-        walletId: eventData['wallet_id'] as String? ?? existing.walletId, // Preserve or update wallet_id
+        walletId: eventData['wallet_id'] as String? ?? existing.walletId,
       );
     } else if (event.eventType == 'DELETED' && transactions.containsKey(transactionId)) {
-      // Remove transaction (hard delete for simplicity)
       transactions.remove(transactionId);
     }
   }
 
-  /// Calculate balances for all contacts based on transactions
-  static void _calculateBalances(
-    Map<String, Contact> contacts,
-    List<Transaction> transactions,
-  ) {
-    // Reset all balances
+  static void _calculateBalances(Map<String, Contact> contacts, List<Transaction> transactions) {
     for (final contact in contacts.values) {
       contacts[contact.id] = Contact(
         id: contact.id,
@@ -277,17 +180,13 @@ class StateBuilder {
         updatedAt: contact.updatedAt,
         isSynced: contact.isSynced,
         balance: 0,
-        walletId: contact.walletId, // Preserve wallet_id
+        walletId: contact.walletId,
       );
     }
-
-    // Calculate balance from transactions
     for (final transaction in transactions) {
       final contact = contacts[transaction.contactId];
       if (contact != null) {
-        final amount = transaction.direction == TransactionDirection.lent
-            ? transaction.amount
-            : -transaction.amount;
+        final amount = transaction.direction == TransactionDirection.lent ? transaction.amount : -transaction.amount;
         contacts[transaction.contactId] = Contact(
           id: contact.id,
           name: contact.name,
@@ -299,13 +198,12 @@ class StateBuilder {
           updatedAt: contact.updatedAt,
           isSynced: contact.isSynced,
           balance: contact.balance + amount,
-          walletId: contact.walletId, // Preserve wallet_id
+          walletId: contact.walletId,
         );
       }
     }
   }
 
-  /// Parse timestamp from event data
   static DateTime _parseTimestamp(dynamic timestamp) {
     if (timestamp == null) return DateTime.now();
     if (timestamp is String) {
@@ -318,7 +216,6 @@ class StateBuilder {
     return DateTime.now();
   }
 
-  /// Parse date from event data (YYYY-MM-DD format)
   static DateTime? _parseDate(dynamic date) {
     if (date == null) return null;
     if (date is String) {
@@ -329,21 +226,5 @@ class StateBuilder {
       }
     }
     return null;
-  }
-
-  /// Calculate total debt at a specific timestamp
-  /// Returns the sum of all contact balances up to that point in time
-  static Future<int> calculateTotalDebtAtTime(DateTime timestamp) async {
-    // Get all events up to the timestamp
-    final allEvents = await EventStoreService.getAllEvents();
-    final eventsUpToTime = allEvents
-        .where((e) => e.timestamp.isBefore(timestamp) || e.timestamp.isAtSameMomentAs(timestamp))
-        .toList();
-
-    // Build state from events up to that time
-    final state = buildState(eventsUpToTime);
-
-    // Calculate total debt (sum of all contact balances)
-    return state.contacts.fold<int>(0, (sum, contact) => sum + contact.balance);
   }
 }

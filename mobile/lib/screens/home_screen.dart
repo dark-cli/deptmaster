@@ -12,17 +12,12 @@ import 'add_transaction_screen.dart';
 import 'backend_setup_screen.dart';
 import 'login_screen.dart';
 import 'events_log_screen.dart';
-import '../services/auth_service.dart';
-import '../services/settings_service.dart';
-import '../services/backend_config_service.dart';
+import '../api.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/gradient_background.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
-import '../services/wallet_service.dart';
-import '../services/event_store_service.dart';
-import '../services/sync_service_v2.dart';
 import '../models/wallet.dart';
 import 'wallet_selection_screen.dart';
 
@@ -76,7 +71,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _checkBiometricAvailability() async {
     if (!kIsWeb) {
-      final available = await AuthService.isBiometricAvailable();
+      final available = await Api.isBiometricAvailable();
       if (mounted) {
         setState(() {
           _biometricEnabled = available;
@@ -88,7 +83,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _handleBiometricAuth() async {
     if (!_biometricEnabled) return;
     
-    final authenticated = await AuthService.authenticateWithBiometrics();
+    final authenticated = await Api.authenticateWithBiometrics();
     if (authenticated && mounted) {
       // User authenticated, app is already unlocked
       ToastService.showSuccessFromContext(context, '✅ Authenticated');
@@ -300,43 +295,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _showAddTransactionDialog() async {
-    final walletId = WalletService.getCurrentWalletId();
+    final walletId = await Api.getCurrentWalletId();
     if (walletId == null) {
-      final wallets = await WalletService.getUserWallets();
+      final list = await Api.getWallets();
+      final wallets = list.map((m) => Wallet.fromJson(m)).toList();
       if (wallets.isEmpty) {
         if (!mounted) return;
         ToastService.showInfoFromContext(context, 'Create a wallet first to add transactions.');
         Navigator.pushNamed(context, '/create-wallet');
         return;
       }
-      await WalletService.setCurrentWalletId(wallets.first.id);
+      await Api.setCurrentWalletId(wallets.first.id);
       if (mounted) setState(() => _walletChangeKey++);
     }
     if (!mounted) return;
-    showScreenAsBottomSheet(
+    final result = await showScreenAsBottomSheet<dynamic>(
       context: context,
       screen: const AddTransactionScreen(),
     );
+    // Refresh dashboard/chart when returning (user may have added a transaction)
+    if (result != null && mounted) setState(() => _walletChangeKey++);
   }
 
   Future<void> _showAddContactDialog() async {
-    final walletId = WalletService.getCurrentWalletId();
+    final walletId = await Api.getCurrentWalletId();
     if (walletId == null) {
-      final wallets = await WalletService.getUserWallets();
+      final list = await Api.getWallets();
+      final wallets = list.map((m) => Wallet.fromJson(m)).toList();
       if (wallets.isEmpty) {
         if (!mounted) return;
         ToastService.showInfoFromContext(context, 'Create a wallet first to add contacts.');
         Navigator.pushNamed(context, '/create-wallet');
         return;
       }
-      await WalletService.setCurrentWalletId(wallets.first.id);
+      await Api.setCurrentWalletId(wallets.first.id);
       if (mounted) setState(() => _walletChangeKey++);
     }
     if (!mounted) return;
-    showScreenAsBottomSheet(
+    final result = await showScreenAsBottomSheet<dynamic>(
       context: context,
       screen: const AddContactScreen(),
     );
+    // Refresh dashboard/chart when returning (user may have added a contact)
+    if (result != null && mounted) setState(() => _walletChangeKey++);
   }
 }
 
@@ -361,12 +362,16 @@ class _WalletSelectionTileState extends ConsumerState<_WalletSelectionTile> {
   }
 
   Future<void> _loadCurrentWallet() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
     });
     try {
-            final walletId = WalletService.getCurrentWalletId();
-            final wallet = walletId != null ? await WalletService.getWallet(walletId) : null;
+      final walletId = await Api.getCurrentWalletId();
+      if (!mounted) return;
+      final walletMap = walletId != null ? await Api.getWallet(walletId) : null;
+      if (!mounted) return;
+      final wallet = walletMap != null ? Wallet.fromJson(walletMap) : null;
       if (mounted) {
         setState(() {
           _currentWallet = wallet;
@@ -399,16 +404,17 @@ class _WalletSelectionTileState extends ConsumerState<_WalletSelectionTile> {
             ),
       trailing: const Icon(Icons.chevron_right),
       onTap: () async {
-        Navigator.pop(context);
+        // Show sheet first so we stay mounted when it returns (don't pop drawer yet)
         final result = await showWalletSelectionSheet(context);
-        // Reload current wallet if selection changed
-        if (result == true) {
-          _loadCurrentWallet();
+        // Notify parent to refresh tabs/chart while still mounted, then close drawer
+        if (mounted && result == true) {
           widget.onWalletChanged?.call();
-          // Fetch server events for the new wallet and rebuild its state
-          EventStoreService.clearLastSyncTimestamp();
-          SyncServiceV2.manualSync();
+          _loadCurrentWallet();
+          try {
+            await Api.manualSync();
+          } catch (_) {}
         }
+        if (mounted) Navigator.pop(context);
       },
     );
   }
@@ -437,12 +443,12 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   }
 
   Future<void> _loadSettings() async {
-    final darkMode = await SettingsService.getDarkMode();
-    final defaultDir = await SettingsService.getDefaultDirection();
-    final defaultDays = await SettingsService.getDefaultDueDateDays();
-    final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
-    final backendIp = await BackendConfigService.getBackendIp();
-    final backendPort = await BackendConfigService.getBackendPort();
+    final darkMode = await Api.getDarkMode();
+    final defaultDir = await Api.getDefaultDirection();
+    final defaultDays = await Api.getDefaultDueDateDays();
+    final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
+    final backendIp = await Api.getBackendIp();
+    final backendPort = await Api.getBackendPort();
     
     if (mounted) {
       setState(() {
@@ -467,7 +473,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           title: const Text('Dark Mode'),
           value: _darkMode,
           onChanged: (value) async {
-            await SettingsService.setDarkMode(value);
+            await Api.setDarkMode(value);
             setState(() {
               _darkMode = value;
             });
@@ -490,7 +496,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             ],
             onChanged: (value) async {
               if (value != null) {
-                await SettingsService.setDefaultDirection(value);
+                await Api.setDefaultDirection(value);
                 setState(() {
                   _defaultDirection = value;
                 });
@@ -569,7 +575,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                     subtitle: const Text('Due date switch default state in transaction form'),
                     value: _defaultDueDateSwitch,
                     onChanged: (value) async {
-                      await SettingsService.setDefaultDueDateSwitch(value);
+                      await Api.setDefaultDueDateSwitch(value);
                       setState(() {
                         _defaultDueDateSwitch = value;
                       });
@@ -589,7 +595,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                         controller: TextEditingController(text: _defaultDueDateDays.toString()),
                         onSubmitted: (value) async {
                           final days = int.tryParse(value) ?? 30;
-                          await SettingsService.setDefaultDueDateDays(days);
+                          await Api.setDefaultDueDateDays(days);
                           setState(() {
                             _defaultDueDateDays = days;
                           });
@@ -619,14 +625,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           },
         ),
         FutureBuilder<String>(
-          future: SettingsService.getDashboardDefaultPeriod(),
+          future: Api.getDashboardDefaultPeriod(),
           builder: (context, snapshot) {
             final period = snapshot.data ?? 'month';
             // If period is 'day', reset to 'month'
             final safePeriod = period == 'day' ? 'month' : period;
             if (period == 'day') {
-              // Reset to month if day was selected
-              SettingsService.setDashboardDefaultPeriod('month');
+              Api.setDashboardDefaultPeriod('month');
             }
             return ListTile(
               title: const Text('Dashboard Default Period'),
@@ -650,14 +655,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           },
         ),
         FutureBuilder<String>(
-          future: SettingsService.getGraphDefaultPeriod(),
+          future: Api.getGraphDefaultPeriod(),
           builder: (context, snapshot) {
             final period = snapshot.data ?? 'month';
             // If period is 'day', reset to 'month'
             final safePeriod = period == 'day' ? 'month' : period;
             if (period == 'day') {
-              // Reset to month if day was selected
-              SettingsService.setGraphDefaultPeriod('month');
+              Api.setGraphDefaultPeriod('month');
             }
             return ListTile(
               title: const Text('Graph Page Default Period'),
@@ -671,7 +675,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                 ],
                 onChanged: (value) async {
                   if (value != null) {
-                    await SettingsService.setGraphDefaultPeriod(value);
+                    await Api.setGraphDefaultPeriod(value);
                     setState(() {});
                   }
                 },
@@ -786,7 +790,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     );
 
     if (confirm == true) {
-      await AuthService.logout();
+      await Api.logout();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -843,7 +847,7 @@ class _BackendConfigDialogState extends State<_BackendConfigDialog> {
       final ip = _ipController.text.trim();
       final port = int.parse(_portController.text.trim());
       
-      await BackendConfigService.setBackendConfig(ip, port);
+      await Api.setBackendConfig(ip, port);
       
       if (mounted) {
         widget.onSaved();

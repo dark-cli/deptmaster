@@ -35,8 +35,13 @@ impl RateLimiter {
             max_requests,
             window_seconds,
             auth_limits: Arc::new(RwLock::new(HashMap::new())),
-            auth_max_requests: max_requests * 5, // Authenticated users get 5x the limit
+            auth_max_requests: max_requests.saturating_mul(5), // Authenticated users get 5x the limit; 0 when disabled
         }
+    }
+
+    /// When 0, rate limiting is disabled (useful for local dev/testing).
+    pub fn is_disabled(&self) -> bool {
+        self.max_requests == 0
     }
     
     pub async fn check_limit_auth(&self, key: &str) -> Result<(), StatusCode> {
@@ -149,6 +154,9 @@ pub async fn rate_limit_middleware(
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    if rate_limiter.is_disabled() {
+        return Ok(next.run(req).await);
+    }
     let path = req.uri().path();
     
     // Skip rate limiting for health checks, WebSocket upgrades, and static admin page

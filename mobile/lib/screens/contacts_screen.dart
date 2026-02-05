@@ -1,24 +1,17 @@
 // ignore_for_file: unused_import, unused_field
 
-import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/dummy_data_service.dart';
-import '../services/auth_service.dart';
-import '../services/wallet_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/sync_service_v2.dart';
-import '../services/settings_service.dart';
 import '../widgets/contact_list_item.dart';
 import '../widgets/sync_status_icon.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
-import '../services/realtime_service.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
@@ -54,8 +47,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   Color? _defaultDirectionColor; // Color for default direction (for swipe background)
-  Box<Contact>? _contactsBox;
-  Box<Transaction>? _transactionsBox;
 
   @override
   void initState() {
@@ -63,50 +54,12 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     _loadContacts();
     _loadSettings();
     _searchController.addListener(_onSearchChanged);
-    
-    // Listen for real-time updates
-    RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Connect WebSocket if not connected
-    RealtimeService.connect();
-    
-    // Listen to local Hive box changes for offline updates
-    _setupLocalListeners();
-  }
-
-  void _setupLocalListeners() {
-    if (kIsWeb) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final userId = await AuthService.getUserId();
-      final walletId = WalletService.getCurrentWalletId();
-      if (userId == null || walletId == null || !mounted) return;
-      final contactsBoxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
-      final transactionsBoxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
-      await Hive.openBox<Contact>(contactsBoxName);
-      await Hive.openBox<Transaction>(transactionsBoxName);
-      if (!mounted) return;
-      final contactsBox = Hive.box<Contact>(contactsBoxName);
-      final transactionsBox = Hive.box<Transaction>(transactionsBoxName);
-      contactsBox.listenable().addListener(_onLocalDataChanged);
-      transactionsBox.listenable().addListener(_onLocalDataChanged);
-      setState(() {
-        _contactsBox = contactsBox;
-        _transactionsBox = transactionsBox;
-      });
-    });
-  }
-
-  void _onLocalDataChanged() {
-    // Reload contacts when local database changes (works offline)
-    // Transactions affect contact balances, so reload when either changes
-    if (mounted) {
-      _loadContacts();
-    }
+    Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.connectRealtime();
   }
 
   Future<void> _loadSettings() async {
-    // Load default direction to set swipe background color
-    final defaultDir = await SettingsService.getDefaultDirection();
+    final defaultDir = await Api.getDefaultDirection();
     _updateSwipeColor(defaultDir);
   }
 
@@ -194,11 +147,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   @override
   void dispose() {
     _searchController.dispose();
-    if (!kIsWeb && _contactsBox != null && _transactionsBox != null) {
-      _contactsBox!.listenable().removeListener(_onLocalDataChanged);
-      _transactionsBox!.listenable().removeListener(_onLocalDataChanged);
-    }
-    RealtimeService.removeListener(_onRealtimeUpdate);
+    Api.removeRealtimeListener(_onRealtimeUpdate);
     super.dispose();
   }
 
@@ -207,20 +156,13 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
       _loading = true;
       _error = null;
     });
-    
     try {
-      // Local-first: read from local database (instant, snappy)
-      List<Contact> contacts;
-      
-      // Always use local database - never call API from UI
-      contacts = await LocalDatabaseServiceV2.getContacts();
-      
-      // If sync requested, do full sync in background
+      final jsonStr = await Api.getContacts();
+      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
+      final contacts = list.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
       if (sync && !kIsWeb) {
-        SyncServiceV2.onPullToRefresh(); // Reset backoff and start sync
+        Api.manualSync().catchError((_) {});
       }
-      
-      // Update state
       if (mounted) {
         setState(() {
           _contacts = contacts;
@@ -349,7 +291,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           final deletedIds = _selectedContacts.toList();
                           
                           // Always delete from local database first
-                          await LocalDatabaseServiceV2.bulkDeleteContacts(deletedIds);
+                          await Api.bulkDeleteContacts(deletedIds);
                           
                           // Check mounted before any UI operations
                           if (!mounted) return;
@@ -374,10 +316,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                               message: '✅ $deletedCount contact(s) deleted',
                               onUndo: () async {
                                 try {
-                                  if (deletedIds.length == 1) {
-                                    await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
-                                  } else {
-                                    await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
+                                  for (final id in deletedIds) {
+                                    await Api.undoContactAction(id);
                                   }
                                 } catch (e) {
                                   // Error handled by ToastService
@@ -394,10 +334,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             onUndo: () async {
                               if (!mounted) return;
                               try {
-                                if (deletedIds.length == 1) {
-                                  await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
-                                } else {
-                                  await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
+                                for (final id in deletedIds) {
+                                  await Api.undoContactAction(id);
                                 }
                                 if (mounted) {
                                   _loadContacts();
@@ -574,7 +512,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                               final flipColors = ref.watch(flipColorsProvider);
                               final isDark = Theme.of(context).brightness == Brightness.dark;
                               return FutureBuilder<String>(
-                                future: SettingsService.getDefaultDirection(),
+                                future: Api.getDefaultDirection(),
                                 builder: (context, snapshot) {
                                   final defaultDir = snapshot.data ?? 'received';
                                   // Set color based on default direction: received = red, give = green (respects flipColors)
@@ -604,7 +542,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           ),
                           confirmDismiss: (direction) async {
                             // Open new transaction screen with this contact (swipe right) using default direction
-                            final defaultDir = await SettingsService.getDefaultDirection();
+                            final defaultDir = await Api.getDefaultDirection();
                             final defaultDirection = defaultDir == 'received' 
                                 ? TransactionDirection.owed 
                                 : TransactionDirection.lent;

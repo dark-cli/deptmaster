@@ -1,13 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:hive_flutter/hive_flutter.dart';
+import '../api.dart';
 import '../models/event.dart';
-import '../services/event_store_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 
@@ -61,6 +59,7 @@ class DebtChartWidget extends ConsumerStatefulWidget {
 class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   List<Event>? _events;
   bool _loading = true;
+  bool _hasCurrentWallet = false; // Set when loading so empty state can show the right message
   Map<String, String> _contactNameCache = {}; // Cache for contact names
   bool _isDisposed = false; // Flag to prevent operations after disposal
   bool _isLoading = false; // Guard to prevent concurrent loads
@@ -70,44 +69,9 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   void initState() {
     super.initState();
     _loadChartData();
-    
-    // Listen for real-time updates
-    RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Listen to Hive events box changes for offline updates
-    if (!kIsWeb) {
-      _setupEventBoxListener();
-    }
+    Api.addRealtimeListener(_onRealtimeUpdate);
   }
-  
-  void _setupEventBoxListener() {
-    try {
-      final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-      eventsBox.listenable().addListener(_onEventsChanged);
-    } catch (e) {
-      // Box might not be open yet, will retry in _loadChartData
-    }
-  }
-  
-  void _onEventsChanged() {
-    // Reload chart when events box changes, but only if not already loading
-    // and if the event count actually changed (to prevent infinite loops)
-    if (!_isDisposed && mounted && !_isLoading) {
-      // Check if event count changed before reloading
-      EventStoreService.getEventCount().then((count) {
-        if (!_isDisposed && mounted && count != _lastEventCount) {
-          _lastEventCount = count;
-          _loadChartData();
-        }
-      }).catchError((e) {
-        // If we can't get count, reload anyway (better safe than sorry)
-        if (!_isDisposed && mounted && !_isLoading) {
-          _loadChartData();
-        }
-      });
-    }
-  }
-  
+
   void _onRealtimeUpdate(Map<String, dynamic> data) {
     final type = data['type'] as String?;
     // Reload chart on any event-related updates
@@ -120,25 +84,22 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   
   @override
   void dispose() {
-    _isDisposed = true; // Set flag before disposal
-    if (!kIsWeb) {
-      try {
-        final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-        eventsBox.listenable().removeListener(_onEventsChanged);
-      } catch (e) {
-        // Box might not be open, ignore
-      }
-    }
-    RealtimeService.removeListener(_onRealtimeUpdate);
+    _isDisposed = true;
+    Api.removeRealtimeListener(_onRealtimeUpdate);
     super.dispose();
   }
 
   Future<void> _loadChartData() async {
     if (_isDisposed || !mounted || _isLoading) return;
-    
     _isLoading = true;
     try {
-      final events = await EventStoreService.getAllEvents();
+      final hasWallet = (await Api.getCurrentWalletId() ?? '').isNotEmpty;
+      if (!_isDisposed && mounted) {
+        setState(() => _hasCurrentWallet = hasWallet);
+      }
+      final jsonStr = await Api.getEvents();
+      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
+      final events = list.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
       
       if (_isDisposed || !mounted) return;
       
@@ -208,9 +169,11 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     
     for (final contactId in contactIds) {
       try {
-        final contact = await LocalDatabaseServiceV2.getContact(contactId);
-        if (contact != null) {
-          _contactNameCache[contactId] = contact.name;
+        final jsonStr = await Api.getContact(contactId);
+        if (jsonStr != null) {
+          final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+          final name = map['name'] as String?;
+          if (name != null) _contactNameCache[contactId] = name;
         }
       } catch (e) {
         // Contact might not exist, continue
@@ -452,6 +415,9 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     
     if (chartData.isEmpty) {
       print('⚠️ Chart data is empty, showing empty state');
+      final message = _hasCurrentWallet
+          ? 'No chart data yet. Add contacts and transactions to see debt over time.'
+          : 'Select or create a wallet to see chart data.';
       return Container(
         height: 200,
         padding: const EdgeInsets.all(8),
@@ -463,10 +429,14 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
           ),
         ),
         child: Center(
-          child: Text(
-            'No chart data available',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              ),
             ),
           ),
         ),

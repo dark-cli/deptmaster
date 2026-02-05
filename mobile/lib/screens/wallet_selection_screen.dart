@@ -1,7 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api.dart';
 import '../models/wallet.dart';
-import '../services/wallet_service.dart';
 import '../utils/toast_service.dart';
 import '../utils/theme_colors.dart';
 
@@ -44,8 +45,9 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
       _loadError = null;
     });
     try {
-      final wallets = await WalletService.getUserWallets();
-      final currentWalletId = WalletService.getCurrentWalletId();
+      final list = await Api.getWallets();
+      final wallets = list.map((m) => Wallet.fromJson(m)).toList();
+      final currentWalletId = await Api.getCurrentWalletId();
       if (mounted) {
         setState(() {
           _wallets = wallets;
@@ -73,7 +75,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
     });
 
     try {
-      await WalletService.setCurrentWalletId(wallet.id);
+      await Api.setCurrentWalletId(wallet.id);
       if (mounted) {
         setState(() {
           _currentWalletId = wallet.id;

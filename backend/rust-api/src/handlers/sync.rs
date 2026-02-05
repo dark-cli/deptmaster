@@ -30,7 +30,10 @@ async fn calculate_total_debt(state: &AppState, wallet_id: uuid::Uuid) -> i64 {
     .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
-    .unwrap_or(0)
+    .unwrap_or_else(|e| {
+        tracing::error!("calculate_total_debt failed for wallet {}: {:?}", wallet_id, e);
+        0
+    })
 }
 
 #[derive(Serialize)]

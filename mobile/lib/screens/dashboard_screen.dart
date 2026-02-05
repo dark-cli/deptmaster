@@ -1,17 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/realtime_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/sync_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:hive_flutter/hive_flutter.dart';
-import '../services/dummy_data_service.dart';
-import '../services/auth_service.dart';
-import '../services/wallet_service.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
@@ -36,45 +31,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   List<Contact>? _contacts;
   List<Transaction>? _transactions;
   bool _loading = true;
-  Box<Contact>? _contactsBox;
-  Box<Transaction>? _transactionsBox;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    RealtimeService.addListener(_onRealtimeUpdate);
-    RealtimeService.connect();
-    _setupLocalListeners();
-  }
-
-  void _setupLocalListeners() {
-    if (kIsWeb) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final userId = await AuthService.getUserId();
-      final walletId = WalletService.getCurrentWalletId();
-      if (userId == null || walletId == null || !mounted) return;
-      final contactsBoxName = DummyDataService.getContactsBoxName(userId: userId, walletId: walletId);
-      final transactionsBoxName = DummyDataService.getTransactionsBoxName(userId: userId, walletId: walletId);
-      await Hive.openBox<Contact>(contactsBoxName);
-      await Hive.openBox<Transaction>(transactionsBoxName);
-      if (!mounted) return;
-      final contactsBox = Hive.box<Contact>(contactsBoxName);
-      final transactionsBox = Hive.box<Transaction>(transactionsBoxName);
-      contactsBox.listenable().addListener(_onLocalDataChanged);
-      transactionsBox.listenable().addListener(_onLocalDataChanged);
-      setState(() {
-        _contactsBox = contactsBox;
-        _transactionsBox = transactionsBox;
-      });
-    });
-  }
-
-  void _onLocalDataChanged() {
-    // Reload data when local database changes (works offline)
-    if (mounted) {
-      _loadData();
-    }
+    Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.connectRealtime();
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -88,11 +51,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   void dispose() {
-    if (!kIsWeb && _contactsBox != null && _transactionsBox != null) {
-      _contactsBox!.listenable().removeListener(_onLocalDataChanged);
-      _transactionsBox!.listenable().removeListener(_onLocalDataChanged);
-    }
-    RealtimeService.removeListener(_onRealtimeUpdate);
+    Api.removeRealtimeListener(_onRealtimeUpdate);
     super.dispose();
   }
 
@@ -100,21 +59,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     setState(() {
       _loading = true;
     });
-
     try {
-      // Local-first: read from local database (instant, snappy)
-      List<Contact> contacts;
-      List<Transaction> transactions;
-      
-      // Always use local database - never call API from UI
-      contacts = await LocalDatabaseServiceV2.getContacts();
-      transactions = await LocalDatabaseServiceV2.getTransactions();
-      
-      // If sync requested, do full sync in background
-      if (sync && !kIsWeb) {
-        SyncServiceV2.onPullToRefresh(); // Reset backoff and start sync
+      // Ensure we have a current wallet when we have wallets (e.g. ensureCurrentWallet failed at startup)
+      if (!kIsWeb && await Api.getCurrentWalletId() == null) {
+        final list = await Api.getWallets();
+        if (list.isNotEmpty && list.first['id'] != null) {
+          await Api.setCurrentWalletId(list.first['id'] as String);
+          if (sync) Api.manualSync().catchError((_) {});
+        }
       }
-      
+      final contactJson = await Api.getContacts();
+      final txJson = await Api.getTransactions();
+      final contactList = jsonDecode(contactJson) as List<dynamic>? ?? [];
+      final txList = jsonDecode(txJson) as List<dynamic>? ?? [];
+      final contacts = contactList.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
+      final transactions = txList.map((e) => Transaction.fromJson(e as Map<String, dynamic>)).toList();
+      if (sync && !kIsWeb) {
+        Api.manualSync().catchError((_) {});
+      }
       if (mounted) {
         setState(() {
           _contacts = contacts;

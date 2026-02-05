@@ -147,7 +147,9 @@ Future<Map<String, String>> createUniqueTestUserAndWallet({
     password: testUserPassword,
     serverUrl: serverUrl,
   );
+  await Future.delayed(const Duration(milliseconds: 800));
   final wallet = await TestUserWalletHelpers.createTestWallet(serverUrl: serverUrl);
+  await Future.delayed(const Duration(milliseconds: 800));
   await TestUserWalletHelpers.addUserToWallet(
     walletId: wallet['id']!,
     userId: user['id']!,

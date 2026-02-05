@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/settings_service.dart';
+import '../api.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 
@@ -26,12 +26,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final darkMode = await SettingsService.getDarkMode();
-    final defaultDir = await SettingsService.getDefaultDirection();
-    await SettingsService.getFlipColors();
-    final dueDateEnabled = await SettingsService.getDueDateEnabled();
-    final defaultDays = await SettingsService.getDefaultDueDateDays();
-    final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
+    final darkMode = await Api.getDarkMode();
+    final defaultDir = await Api.getDefaultDirection();
+    await Api.getFlipColors();
+    final dueDateEnabled = await Api.getDueDateEnabled();
+    final defaultDays = await Api.getDefaultDueDateDays();
+    final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
     
     if (mounted) {
       setState(() {
