@@ -37,7 +37,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     super.initState();
     _loadData();
     Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.addDataChangedListener(_onDataChanged);
     Api.connectRealtime();
+  }
+
+  void _onDataChanged() {
+    if (mounted) _loadData();
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -52,6 +57,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   void dispose() {
     Api.removeRealtimeListener(_onRealtimeUpdate);
+    Api.removeDataChangedListener(_onDataChanged);
     super.dispose();
   }
 

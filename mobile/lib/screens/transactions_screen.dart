@@ -56,12 +56,18 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
     _loadData();
     _searchController.addListener(_onSearchChanged);
     Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.addDataChangedListener(_onDataChanged);
     Api.connectRealtime();
+  }
+
+  void _onDataChanged() {
+    if (mounted) _loadData();
   }
 
   @override
   void dispose() {
     Api.removeRealtimeListener(_onRealtimeUpdate);
+    Api.removeDataChangedListener(_onDataChanged);
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();

@@ -70,6 +70,11 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     super.initState();
     _loadChartData();
     Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.addDataChangedListener(_onDataChanged);
+  }
+
+  void _onDataChanged() {
+    if (!_isDisposed && mounted) _loadChartData();
   }
 
   void _onRealtimeUpdate(Map<String, dynamic> data) {
@@ -86,6 +91,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
   void dispose() {
     _isDisposed = true;
     Api.removeRealtimeListener(_onRealtimeUpdate);
+    Api.removeDataChangedListener(_onDataChanged);
     super.dispose();
   }
 

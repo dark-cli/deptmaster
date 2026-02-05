@@ -942,19 +942,54 @@ prepare_rust_bridge_for_flutter() {
     
     # 2. Build Rust for the target platform
     if [ "$platform" = "android" ]; then
-        if command -v cargo-ndk &>/dev/null; then
-            print_info "Building Rust for Android (cargo-ndk)..."
-            mkdir -p "$jni_libs_dir"
-            (cd "$crate_dir" && cargo ndk -o "$jni_libs_dir" build 2>&1) || {
-                print_error "cargo ndk build failed. Ensure Android NDK is set (e.g. ANDROID_NDK in gradle.properties or env)."
-                exit 1
-            }
-            print_success "Rust Android libs ready in jniLibs/"
-        else
-            # Build release so at least the crate compiles; app will fail at runtime if jniLibs missing
-            print_warning "cargo-ndk not found. Building Rust for host only; Android needs: cargo install cargo-ndk, rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android, then re-run."
-            (cd "$crate_dir" && cargo build --release 2>&1) || exit 1
+        if ! command -v cargo-ndk &>/dev/null; then
+            print_error "cargo-ndk is required for Android but is not installed."
+            echo "Install with: cargo install cargo-ndk"
+            echo "Then add Android targets: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android"
+            echo "Ensure Android NDK is installed (e.g. Android Studio SDK Manager) and ANDROID_NDK_HOME is set."
+            exit 1
         fi
+        # Try to find NDK if ANDROID_NDK_HOME not set (cargo-ndk uses ANDROID_NDK_HOME)
+        if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+            _sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+            # Prefer NDK installed by scripts/install-android-ndk.sh (r27d LTS)
+            if [ -d "$_sdk/ndk/android-ndk-r27d" ] && { [ -f "$_sdk/ndk/android-ndk-r27d/ndk-build" ] || [ -f "$_sdk/ndk/android-ndk-r27d/source.properties" ]; }; then
+                export ANDROID_NDK_HOME="$_sdk/ndk/android-ndk-r27d"
+                print_info "Using NDK: $ANDROID_NDK_HOME"
+            else
+                for sdk in "$HOME/Android/Sdk" "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+                    [ -z "$sdk" ] || [ ! -d "$sdk/ndk" ] && continue
+                    _ndk=$(find "$sdk/ndk" -maxdepth 1 -type d -name "[0-9]*" 2>/dev/null | sort -V | tail -1)
+                    if [ -n "$_ndk" ] && [ -f "$_ndk/ndk-build" ] || [ -f "$_ndk/source.properties" ]; then
+                        export ANDROID_NDK_HOME="$_ndk"
+                        print_info "Using NDK: $ANDROID_NDK_HOME"
+                        break
+                    fi
+                done
+            fi
+        fi
+        if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+            print_error "Android NDK not found. Set ANDROID_NDK_HOME to your NDK root, or install NDK via Android Studio (SDK Manager → SDK Tools → NDK)."
+            exit 1
+        fi
+        print_info "Building Rust for Android (cargo-ndk)..."
+        mkdir -p "$jni_libs_dir"
+        (cd "$crate_dir" && cargo ndk -o "$jni_libs_dir" build 2>&1) || {
+            print_error "cargo ndk build failed."
+            echo "  ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-<not set>}"
+            echo "  Check: the path must exist and be the NDK root (contains source.properties, toolchains/, etc.)."
+            echo "  List installed NDKs: ls \$HOME/Android/Sdk/ndk"
+            echo "  If empty, install NDK: Android Studio → Settings → Android SDK → SDK Tools → NDK (Side by side) → Apply."
+            exit 1
+        }
+        # Verify at least one ABI has the .so (cargo-ndk puts them in arm64-v8a, armeabi-v7a, etc.)
+        local so_count
+        so_count=$(find "$jni_libs_dir" -name "libdebitum_client_core.so" 2>/dev/null | wc -l)
+        if [ "${so_count:-0}" -eq 0 ]; then
+            print_error "No libdebitum_client_core.so found under $jni_libs_dir. cargo ndk may have written to a different path."
+            exit 1
+        fi
+        print_success "Rust Android libs ready in jniLibs/ ($so_count ABI(s))"
     elif [ "$platform" = "linux" ]; then
         print_info "Building Rust for Linux..."
         if (cd "$crate_dir" && cargo build --release 2>&1); then

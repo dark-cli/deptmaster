@@ -54,7 +54,12 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     _dateTo = widget.initialDateTo;
     _loadWalletsThenEvents();
     Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.addDataChangedListener(_onDataChanged);
     Api.connectRealtime();
+  }
+
+  void _onDataChanged() {
+    if (mounted) _loadEvents();
   }
 
   Future<void> _loadWalletsThenEvents() async {
@@ -118,6 +123,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   @override
   void dispose() {
     Api.removeRealtimeListener(_onRealtimeUpdate);
+    Api.removeDataChangedListener(_onDataChanged);
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();

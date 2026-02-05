@@ -19,6 +19,7 @@ class Api {
   static bool _wsConnected = false;
   static bool _wsConnecting = false;
   static final List<void Function(Map<String, dynamic>)> _realtimeListeners = [];
+  static final List<void Function()> _dataChangedListeners = [];
   static void Function(String)? _realtimeErrorCallback;
 
   static const _keyBackendIp = 'backend_ip';
@@ -38,10 +39,15 @@ class Api {
 
   static void Function()? onLogout;
 
+  /// Last init error (e.g. native library not found). Cleared on success.
+  static String? initError;
+
   // ---------- Init ----------
-  static Future<void> init() async {
-    if (_initialized) return;
-    if (kIsWeb) return;
+  /// Returns true if Rust bridge is ready, false if load failed (e.g. .so not found on Android).
+  static Future<bool> init() async {
+    if (_initialized) return true;
+    if (kIsWeb) return true;
+    initError = null;
     try {
       await RustLib.init();
       _initialized = true;
@@ -51,8 +57,11 @@ class Api {
         final wsUrl = await getWebSocketUrl();
         await rust.setBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
       }
+      return true;
     } catch (e) {
       debugPrint('Api.init: $e');
+      initError = e.toString();
+      return false;
     }
   }
 
@@ -125,7 +134,9 @@ class Api {
 
   // ---------- Auth (Rust) ----------
   static Future<void> login(String username, String password) async {
-    if (!_initialized) await init();
+    if (!_initialized && !(await init())) {
+      throw StateError(initError ?? 'Rust library not loaded. Did you forget to call init?');
+    }
     if (kIsWeb) throw UnsupportedError('Login not supported on web');
     await rust.login(username: username, password: password);
   }
@@ -294,13 +305,15 @@ class Api {
     String? notes,
   }) async {
     if (kIsWeb) throw UnsupportedError('Not on web');
-    return rust.createContact(
+    final result = await rust.createContact(
       name: name,
       username: username,
       phone: phone,
       email: email,
       notes: notes,
     );
+    _notifyDataChanged();
+    return result;
   }
 
   static Future<void> updateContact({
@@ -320,11 +333,13 @@ class Api {
       email: email,
       notes: notes,
     );
+    _notifyDataChanged();
   }
 
   static Future<void> deleteContact(String contactId) async {
     if (kIsWeb) return;
     await rust.deleteContact(contactId: contactId);
+    _notifyDataChanged();
   }
 
   static Future<String> createTransaction({
@@ -338,7 +353,7 @@ class Api {
     String? dueDate,
   }) async {
     if (kIsWeb) throw UnsupportedError('Not on web');
-    return rust.createTransaction(
+    final result = await rust.createTransaction(
       contactId: contactId,
       type: type,
       direction: direction,
@@ -348,6 +363,8 @@ class Api {
       transactionDate: transactionDate,
       dueDate: dueDate,
     );
+    _notifyDataChanged();
+    return result;
   }
 
   static Future<void> updateTransaction({
@@ -373,31 +390,37 @@ class Api {
       transactionDate: transactionDate,
       dueDate: dueDate,
     );
+    _notifyDataChanged();
   }
 
   static Future<void> deleteTransaction(String transactionId) async {
     if (kIsWeb) return;
     await rust.deleteTransaction(transactionId: transactionId);
+    _notifyDataChanged();
   }
 
   static Future<void> undoContactAction(String contactId) async {
     if (kIsWeb) return;
     await rust.undoContactAction(contactId: contactId);
+    _notifyDataChanged();
   }
 
   static Future<void> undoTransactionAction(String transactionId) async {
     if (kIsWeb) return;
     await rust.undoTransactionAction(transactionId: transactionId);
+    _notifyDataChanged();
   }
 
   static Future<void> bulkDeleteContacts(List<String> ids) async {
     if (kIsWeb) return;
     await rust.bulkDeleteContacts(contactIds: ids);
+    _notifyDataChanged();
   }
 
   static Future<void> bulkDeleteTransactions(List<String> ids) async {
     if (kIsWeb) return;
     await rust.bulkDeleteTransactions(transactionIds: ids);
+    _notifyDataChanged();
   }
 
   static Future<String> getEvents() async {
@@ -421,12 +444,30 @@ class Api {
     }
   }
 
+  // ---------- Data changed (notify UI to refresh) ----------
+  static void addDataChangedListener(void Function() listener) {
+    _dataChangedListeners.add(listener);
+  }
+
+  static void removeDataChangedListener(void Function() listener) {
+    _dataChangedListeners.remove(listener);
+  }
+
+  static void _notifyDataChanged() {
+    for (final fn in List<void Function()>.from(_dataChangedListeners)) {
+      try {
+        fn();
+      } catch (_) {}
+    }
+  }
+
   // ---------- Sync (Rust) ----------
   static Future<void> manualSync() async {
     if (kIsWeb) return;
     try {
       await rust.manualSync();
       _hasSyncError = false;
+      _notifyDataChanged();
     } catch (e) {
       _hasSyncError = true;
       debugPrint('Api.manualSync failed: $e');

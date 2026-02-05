@@ -55,7 +55,12 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     _loadSettings();
     _searchController.addListener(_onSearchChanged);
     Api.addRealtimeListener(_onRealtimeUpdate);
+    Api.addDataChangedListener(_onDataChanged);
     Api.connectRealtime();
+  }
+
+  void _onDataChanged() {
+    if (mounted) _loadContacts();
   }
 
   Future<void> _loadSettings() async {
@@ -85,9 +90,17 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         type == 'transaction_created' || 
         type == 'transaction_updated' || 
         type == 'transaction_deleted') {
-      // Reload contacts when real-time update received (transactions affect balance)
       _loadContacts();
     }
+  }
+
+  @override
+  void dispose() {
+    Api.removeRealtimeListener(_onRealtimeUpdate);
+    Api.removeDataChangedListener(_onDataChanged);
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _onSearchChanged() {
@@ -142,13 +155,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
 
   List<Contact> _getContacts() {
     return _filteredContacts ?? [];
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    Api.removeRealtimeListener(_onRealtimeUpdate);
-    super.dispose();
   }
 
   Future<void> _loadContacts({bool sync = false}) async {
