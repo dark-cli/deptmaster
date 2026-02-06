@@ -10,11 +10,13 @@ import 'package:local_auth/local_auth.dart';
 
 import 'src/frb_generated.dart';
 import 'src/lib.dart' as rust;
+import 'providers/data_bus.dart';
 import 'utils/toast_service.dart';
 
 class Api {
   static bool _initialized = false;
   static bool _hasSyncError = false;
+  static String? _cachedWalletId;
   static WebSocketChannel? _wsChannel;
   static StreamSubscription? _wsSubscription;
   static bool _wsConnected = false;
@@ -223,7 +225,9 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return null;
     try {
-      return await rust.getCurrentWalletId();
+      final id = await rust.getCurrentWalletId();
+      _cachedWalletId = (id == null || id.isEmpty) ? null : id;
+      return _cachedWalletId;
     } catch (_) {
       return null;
     }
@@ -233,6 +237,8 @@ class Api {
     if (kIsWeb) return;
     try {
       await rust.setCurrentWalletId(walletId: walletId);
+      _cachedWalletId = walletId;
+      DataBus.instance.emit(DataChangeType.wallet, walletId: _cachedWalletId);
       // Stage 2 realtime: reconnect websocket to subscribe to the active wallet only.
       await _wsDisconnect();
       connectRealtime().catchError((_) {});
@@ -334,13 +340,13 @@ class Api {
         email: email,
         notes: notes,
       );
-      _notifyDataChanged();
+      _notifyDataChanged(DataChangeType.contacts);
       return result;
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(); // reflect rollback
+        _notifyDataChanged(DataChangeType.contacts); // reflect rollback
       }
       rethrow;
     }
@@ -364,12 +370,12 @@ class Api {
         email: email,
         notes: notes,
       );
-      _notifyDataChanged();
+      _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged();
+        _notifyDataChanged(DataChangeType.contacts);
       }
       rethrow;
     }
@@ -379,12 +385,12 @@ class Api {
     if (kIsWeb) return;
     try {
       await rust.deleteContact(contactId: contactId);
-      _notifyDataChanged();
+      _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged();
+        _notifyDataChanged(DataChangeType.contacts);
       }
       rethrow;
     }
@@ -412,13 +418,13 @@ class Api {
         transactionDate: transactionDate,
         dueDate: dueDate,
       );
-      _notifyDataChanged();
+      _notifyDataChanged(DataChangeType.transactions);
       return result;
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged();
+        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -448,12 +454,12 @@ class Api {
         transactionDate: transactionDate,
         dueDate: dueDate,
       );
-      _notifyDataChanged();
+      _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged();
+        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -463,12 +469,12 @@ class Api {
     if (kIsWeb) return;
     try {
       await rust.deleteTransaction(transactionId: transactionId);
-      _notifyDataChanged();
+      _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged();
+        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -477,25 +483,25 @@ class Api {
   static Future<void> undoContactAction(String contactId) async {
     if (kIsWeb) return;
     await rust.undoContactAction(contactId: contactId);
-    _notifyDataChanged();
+    _notifyDataChanged(DataChangeType.contacts);
   }
 
   static Future<void> undoTransactionAction(String transactionId) async {
     if (kIsWeb) return;
     await rust.undoTransactionAction(transactionId: transactionId);
-    _notifyDataChanged();
+    _notifyDataChanged(DataChangeType.transactions);
   }
 
   static Future<void> bulkDeleteContacts(List<String> ids) async {
     if (kIsWeb) return;
     await rust.bulkDeleteContacts(contactIds: ids);
-    _notifyDataChanged();
+    _notifyDataChanged(DataChangeType.contacts);
   }
 
   static Future<void> bulkDeleteTransactions(List<String> ids) async {
     if (kIsWeb) return;
     await rust.bulkDeleteTransactions(transactionIds: ids);
-    _notifyDataChanged();
+    _notifyDataChanged(DataChangeType.transactions);
   }
 
   static Future<String> getEvents() async {
@@ -528,7 +534,8 @@ class Api {
     _dataChangedListeners.remove(listener);
   }
 
-  static void _notifyDataChanged() {
+  static void _notifyDataChanged([DataChangeType type = DataChangeType.all]) {
+    DataBus.instance.emit(type, walletId: _cachedWalletId);
     for (final fn in List<void Function()>.from(_dataChangedListeners)) {
       try {
         fn();

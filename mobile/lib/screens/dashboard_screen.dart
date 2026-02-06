@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../utils/text_utils.dart';
@@ -8,6 +7,7 @@ import '../models/contact.dart';
 import '../models/transaction.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../widgets/gradient_card.dart';
@@ -28,89 +28,36 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
-  List<Contact>? _contacts;
-  List<Transaction>? _transactions;
-  bool _loading = true;
-
   @override
   void initState() {
     super.initState();
-    _loadData();
-    Api.addRealtimeListener(_onRealtimeUpdate);
-    Api.addDataChangedListener(_onDataChanged);
+    _ensureWallet();
     Api.connectRealtime();
   }
 
-  void _onDataChanged() {
-    if (mounted) _loadData();
-  }
-
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    if (type == 'contact_created' || type == 'contact_updated' ||
-        type == 'transaction_created' || type == 'transaction_updated' ||
-        type == 'transaction_deleted') {
-      _loadData();
-    }
-  }
-
-  @override
-  void dispose() {
-    Api.removeRealtimeListener(_onRealtimeUpdate);
-    Api.removeDataChangedListener(_onDataChanged);
-    super.dispose();
-  }
-
-  Future<void> _loadData({bool sync = false}) async {
-    setState(() {
-      _loading = true;
-    });
+  Future<void> _ensureWallet() async {
+    if (kIsWeb) return;
     try {
       // Ensure we have a current wallet when we have wallets (e.g. ensureCurrentWallet failed at startup)
-      if (!kIsWeb && await Api.getCurrentWalletId() == null) {
+      if (await Api.getCurrentWalletId() == null) {
         final list = await Api.getWallets();
         if (list.isNotEmpty && list.first['id'] != null) {
           await Api.setCurrentWalletId(list.first['id'] as String);
-          if (sync) Api.manualSync().catchError((_) {});
         }
       }
-      final contactJson = await Api.getContacts();
-      final txJson = await Api.getTransactions();
-      final contactList = jsonDecode(contactJson) as List<dynamic>? ?? [];
-      final txList = jsonDecode(txJson) as List<dynamic>? ?? [];
-      final contacts = contactList.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
-      final transactions = txList.map((e) => Transaction.fromJson(e as Map<String, dynamic>)).toList();
-      if (sync && !kIsWeb) {
-        Api.manualSync().catchError((_) {});
-      }
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          _transactions = transactions;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
+    } catch (_) {}
   }
 
-  int _calculateTotalBalance() {
-    if (_contacts == null) return 0;
-    return _contacts!.fold<int>(0, (sum, contact) => sum + contact.balance);
+  int _calculateTotalBalance(List<Contact> contacts) {
+    return contacts.fold<int>(0, (sum, contact) => sum + contact.balance);
   }
 
-  List<Transaction> _getUpcomingDueDates() {
-    if (_transactions == null) return [];
+  List<Transaction> _getUpcomingDueDates(List<Transaction> transactions) {
     // Don't check _dueDateEnabled here - let the UI decide whether to show
     
     final now = DateTime.now();
     // Get all due dates: overdue or within next 30 days
-    final upcoming = _transactions!
+    final upcoming = transactions
         .where((t) => t.dueDate != null && 
                       (t.dueDate!.isBefore(now) || // Include overdue
                        (t.dueDate!.isAfter(now) && t.dueDate!.difference(now).inDays <= 30))) // Or within 30 days
@@ -132,20 +79,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final contactsAsync = ref.watch(contactsProvider);
+    final transactionsAsync = ref.watch(transactionsProvider);
+    final contacts = contactsAsync.valueOrNull ?? const <Contact>[];
+    final transactions = transactionsAsync.valueOrNull ?? const <Transaction>[];
+
     // Watch due date enabled setting
     final dueDateEnabled = ref.watch(dueDateEnabledProvider);
     
-    if (_loading) {
+    final loading = (contactsAsync.isLoading || transactionsAsync.isLoading) &&
+        (contactsAsync.valueOrNull == null || transactionsAsync.valueOrNull == null);
+    if (loading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
-    final totalBalance = _calculateTotalBalance();
-    final upcomingDueDates = _getUpcomingDueDates();
-    final contactMap = _contacts != null
-        ? Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c)))
-        : <String, Contact>{};
+    final totalBalance = _calculateTotalBalance(contacts);
+    final upcomingDueDates = _getUpcomingDueDates(transactions);
+    final contactMap = contacts.isNotEmpty ? Map.fromEntries(contacts.map((c) => MapEntry(c.id, c))) : <String, Contact>{};
 
     return Scaffold(
       appBar: AppBar(
@@ -164,12 +116,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => _loadData(sync: true),
+        onRefresh: () async {
+          if (!kIsWeb) {
+            await Api.manualSync().catchError((_) {});
+          }
+          ref.invalidate(contactsProvider);
+          ref.invalidate(transactionsProvider);
+        },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
             // Stats Cards
-            _buildStatsCard(context, totalBalance),
+            _buildStatsCard(
+              context,
+              totalBalance,
+              contactCount: contacts.length,
+              transactionCount: transactions.length,
+            ),
             const SizedBox(height: 16),
             
             // Debt Over Time Chart (Simple) - only show if enabled
@@ -198,8 +161,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
             
             // Balance Chart
-            if (_contacts != null && _contacts!.isNotEmpty) ...[
-              _buildBalanceChart(context),
+            if (contacts.isNotEmpty) ...[
+              _buildBalanceChart(context, contacts),
               const SizedBox(height: 16),
             ],
             
@@ -239,7 +202,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildStatsCard(BuildContext context, int totalBalance) {
+  Widget _buildStatsCard(
+    BuildContext context,
+    int totalBalance, {
+    required int contactCount,
+    required int transactionCount,
+  }) {
     return Consumer(
       builder: (context, ref, child) {
         final flipColors = ref.watch(flipColorsProvider);
@@ -275,8 +243,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildStatItem(context, 'Contacts', _contacts?.length ?? 0),
-                  _buildStatItem(context, 'Transactions', _transactions?.length ?? 0),
+                  _buildStatItem(context, 'Contacts', contactCount),
+                  _buildStatItem(context, 'Transactions', transactionCount),
                 ],
               ),
             ],
@@ -303,14 +271,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildBalanceChart(BuildContext context) {
-    if (_contacts == null || _contacts!.isEmpty) return const SizedBox.shrink();
+  Widget _buildBalanceChart(BuildContext context, List<Contact> contacts) {
+    if (contacts.isEmpty) return const SizedBox.shrink();
     
     return Consumer(
       builder: (context, ref, child) {
         final flipColors = ref.watch(flipColorsProvider);
-        final positiveBalances = _contacts!.where((c) => c.balance > 0).toList();
-        final negativeBalances = _contacts!.where((c) => c.balance < 0).toList();
+        final positiveBalances = contacts.where((c) => c.balance > 0).toList();
+        final negativeBalances = contacts.where((c) => c.balance < 0).toList();
         
         positiveBalances.sort((a, b) => b.balance.compareTo(a.balance));
         negativeBalances.sort((a, b) => a.balance.compareTo(b.balance));

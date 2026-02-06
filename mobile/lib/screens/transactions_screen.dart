@@ -13,10 +13,12 @@ import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import 'edit_transaction_screen.dart';
 import 'add_transaction_screen.dart';
 import '../widgets/sync_status_icon.dart';
 import '../utils/bottom_sheet_helper.dart';
+import '../widgets/diff_animated_list.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -38,11 +40,7 @@ enum TransactionSortOption {
 }
 
 class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
-  List<Transaction>? _transactions;
-  List<Transaction>? _filteredTransactions; // Filtered by search
-  List<Contact>? _contacts;
-  bool _loading = true;
-  String? _error;
+  bool _loading = false; // Local busy state for UI actions (not initial data load)
   TransactionSortOption _sortOption = TransactionSortOption.mostRecent;
   Set<String> _selectedTransactions = {}; // For multi-select
   bool _selectionMode = false;
@@ -53,78 +51,42 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
     _searchController.addListener(_onSearchChanged);
-    Api.addRealtimeListener(_onRealtimeUpdate);
-    Api.addDataChangedListener(_onDataChanged);
     Api.connectRealtime();
-  }
-
-  void _onDataChanged() {
-    if (mounted) _loadData();
   }
 
   @override
   void dispose() {
-    Api.removeRealtimeListener(_onRealtimeUpdate);
-    Api.removeDataChangedListener(_onDataChanged);
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
   }
 
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    // Reload when transactions OR contacts change (contacts affect transaction display)
-    if (type == 'transaction_created' || 
-        type == 'transaction_updated' || 
-        type == 'transaction_deleted' ||
-        type == 'contact_created' ||
-        type == 'contact_updated' ||
-        type == 'contact_deleted') {
-      // Reload transactions and contacts when real-time update received
-      _loadData();
-    }
-  }
-
   void _onSearchChanged() {
-    _applySearchAndSort();
+    if (mounted) setState(() {});
   }
 
-  void _applySearchAndSort() {
-    if (_transactions == null) return;
-    
+  List<Transaction> _filterAndSortTransactions({
+    required List<Transaction> transactions,
+    required Map<String, Contact> contactsById,
+  }) {
     final query = _searchController.text.toLowerCase().trim();
-    List<Transaction> filtered = _transactions!;
-    
-    // Apply search filter
+    var filtered = transactions;
+
     if (query.isNotEmpty) {
       filtered = filtered.where((transaction) {
-        final contact = _contacts?.firstWhere(
-          (c) => c.id == transaction.contactId,
-          orElse: () => Contact(
-            id: '',
-            name: 'Unknown',
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-            balance: 0,
-          ),
-        );
+        final contact = contactsById[transaction.contactId];
         final contactName = contact?.name ?? 'Unknown';
         final contactUsername = contact?.username ?? '';
         return contactName.toLowerCase().contains(query) ||
-               (contactUsername.isNotEmpty && contactUsername.toLowerCase().contains(query)) ||
-               (transaction.description?.toLowerCase().contains(query) ?? false) ||
-               transaction.amount.toString().contains(query);
+            (contactUsername.isNotEmpty && contactUsername.toLowerCase().contains(query)) ||
+            (transaction.description?.toLowerCase().contains(query) ?? false) ||
+            transaction.amount.toString().contains(query);
       }).toList();
+    } else {
+      filtered = List<Transaction>.from(filtered);
     }
-    
-    // Build contact map for name sorting
-    final contactMap = _contacts != null 
-        ? Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)))
-        : <String, String>{};
-    
-    // Apply sort
+
     switch (_sortOption) {
       case TransactionSortOption.mostRecent:
         filtered.sort((a, b) => b.transactionDate.compareTo(a.transactionDate));
@@ -140,65 +102,33 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
         break;
       case TransactionSortOption.nameAZ:
         filtered.sort((a, b) {
-          final nameA = contactMap[a.contactId] ?? 'Unknown';
-          final nameB = contactMap[b.contactId] ?? 'Unknown';
+          final nameA = contactsById[a.contactId]?.name ?? 'Unknown';
+          final nameB = contactsById[b.contactId]?.name ?? 'Unknown';
           return nameA.compareTo(nameB);
         });
         break;
       case TransactionSortOption.nameZA:
         filtered.sort((a, b) {
-          final nameA = contactMap[a.contactId] ?? 'Unknown';
-          final nameB = contactMap[b.contactId] ?? 'Unknown';
+          final nameA = contactsById[a.contactId]?.name ?? 'Unknown';
+          final nameB = contactsById[b.contactId]?.name ?? 'Unknown';
           return nameB.compareTo(nameA);
         });
         break;
     }
-    
-    if (mounted) {
-      setState(() {
-        _filteredTransactions = filtered;
-      });
-    }
+
+    return filtered;
   }
 
-  List<Transaction> _getTransactions() {
-    return _filteredTransactions ?? [];
-  }
-
-  Future<void> _loadData({bool sync = false}) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _refreshData({bool sync = false}) async {
+    setState(() => _loading = true);
     try {
-      final txJson = await Api.getTransactions();
-      final contactJson = await Api.getContacts();
-      final txList = jsonDecode(txJson) as List<dynamic>? ?? [];
-      final contactList = jsonDecode(contactJson) as List<dynamic>? ?? [];
-      final transactions = txList.map((e) => Transaction.fromJson(e as Map<String, dynamic>)).toList();
-      final contacts = contactList.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
       if (sync && !kIsWeb) {
-        Api.manualSync().catchError((_) {});
+        await Api.manualSync().catchError((_) {});
       }
-      if (mounted) {
-        setState(() {
-          _transactions = transactions;
-          _filteredTransactions = transactions;
-          _contacts = contacts;
-          _loading = false;
-        });
-        _applySearchAndSort();
-      }
-    } catch (e, stackTrace) {
-      print('❌ Error loading transactions: $e');
-      print('Stack trace: $stackTrace');
-      
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
+      ref.invalidate(transactionsProvider);
+      ref.invalidate(contactsProvider); // names affect transaction display
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -317,8 +247,10 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                               setState(() {
                                 _selectedTransactions.clear();
                                 _selectionMode = false;
+                                _loading = false;
                               });
-                              _loadData();
+                              ref.invalidate(transactionsProvider);
+                              ref.invalidate(contactsProvider);
                               if (!mounted) return;
                               
                               // Show undo toast for all deletes (single or bulk)
@@ -329,7 +261,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                                   for (final id in deletedIds) {
                                     await Api.undoTransactionAction(id);
                                   }
-                                  _loadData();
+                                  ref.invalidate(transactionsProvider);
+                                  ref.invalidate(contactsProvider);
                                 },
                                 successMessage: '${deletedIds.length} transaction(s) deletion undone',
                               );
@@ -352,7 +285,6 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
               setState(() {
                 _sortOption = option;
               });
-              _applySearchAndSort();
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
@@ -391,192 +323,198 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
       ),
       body: Builder(
         builder: (context) {
-          // Show loading state
           if (_loading) {
             return const Center(child: CircularProgressIndicator());
           }
-          
-          // Show error state
-          if (_error != null) {
-            return Center(
+          final transactionsAsync = ref.watch(transactionsProvider);
+          final contactsAsync = ref.watch(contactsProvider);
+
+          return transactionsAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('Error: $_error'),
+                  Text('Error: $e'),
+                  const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: _loadData,
+                    onPressed: () => _refreshData(),
                     child: const Text('Retry'),
                   ),
                 ],
               ),
-            );
-          }
-    
-          // Use filtered and sorted transactions
-          final transactions = _getTransactions();
-          
-          if (transactions.isEmpty && _searchController.text.isNotEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.search_off, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No transactions found for "${_searchController.text}"',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
-          }
-          
-          if (transactions.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No transactions yet',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add your first transaction to get started',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
-          }
+            ),
+            data: (baseTransactions) {
+              final contacts = contactsAsync.valueOrNull ?? const <Contact>[];
+              final contactsById = {for (final c in contacts) c.id: c};
+              final contactNameMap = {for (final c in contacts) c.id: c.name};
 
-          final contactMap = _contacts != null && _contacts!.isNotEmpty
-              ? Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)))
-              : <String, String>{};
+              final transactions = _filterAndSortTransactions(
+                transactions: baseTransactions,
+                contactsById: contactsById,
+              );
 
-          return RefreshIndicator(
-            onRefresh: () => _loadData(sync: true),
-            child: ListView.builder(
-              itemCount: transactions.length,
-              cacheExtent: 200, // Cache more items for smoother scrolling
-              itemBuilder: (context, index) {
-                final transaction = transactions[index];
-                final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
-                
-                // Handle missing contacts gracefully - missing contacts are already detected in _loadData()
-                // No need to log here to avoid spam during widget rebuilds
-                final contactId = transaction.contactId;
-                final contactNameFromMap = contactMap[contactId];
-                
-                Contact? contactForItem;
-                try {
-                  if (_contacts != null) {
-                    contactForItem = _contacts!.firstWhere((c) => c.id == transaction.contactId);
-                  }
-                } catch (_) {
-                  contactForItem = null;
-                }
-                Widget transactionItem = Container(
-                  color: isSelected ? Colors.blue.withOpacity(0.1) : null,
-                  child: TransactionListItem(
-                    transaction: transaction,
-                    contactName: contactNameFromMap,
-                    contact: contactForItem,
+              if (transactions.isEmpty && _searchController.text.isNotEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.search_off, size: 64, color: Colors.grey),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No transactions found for "${_searchController.text}"',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
+                      ),
+                    ],
                   ),
                 );
-                
-                // Wrap with Dismissible for swipe actions (only when not in selection mode)
-                if (!_selectionMode) {
-                  return Dismissible(
-                    key: Key(transaction.id),
-                    direction: DismissDirection.startToEnd, // Only swipe right (LTR)
-                    dismissThresholds: const {
-                      DismissDirection.startToEnd: 0.7, // Require 70% swipe for close
-                    },
-                    movementDuration: const Duration(milliseconds: 300), // Slower animation
-                    background: Container(
-                      alignment: Alignment.centerLeft,
-                      padding: const EdgeInsets.only(left: 20),
-                      color: Colors.green,
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          Icon(Icons.check_circle, color: Colors.white),
-                          SizedBox(width: 8),
-                          Text(
-                            'Close',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
+              }
+
+              if (transactions.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No transactions yet',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.grey),
                       ),
-                    ),
-                    confirmDismiss: (direction) async {
-                      // Open reverse transaction - opposite direction, same amount, same contact (swipe right)
-                        final contact = _contacts?.firstWhere(
-                          (c) => c.id == transaction.contactId,
-                          orElse: () => Contact(
-                            id: transaction.contactId,
-                            name: 'Unknown',
-                            createdAt: DateTime.now(),
-                            updatedAt: DateTime.now(),
-                            balance: 0,
+                      const SizedBox(height: 8),
+                      Text(
+                        'Add your first transaction to get started',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return RefreshIndicator(
+                onRefresh: () => _refreshData(sync: true),
+                child: DiffAnimatedList<Transaction>(
+                  items: transactions,
+                  itemId: (t) => t.id,
+                  padding: const EdgeInsets.only(bottom: 32),
+                  itemBuilder: (context, transaction, animation) {
+                    final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
+
+                    final contactId = transaction.contactId;
+                    final contactNameFromMap = contactNameMap[contactId];
+                    final contactForItem = contactsById[contactId];
+
+                    Widget transactionItem = Container(
+                      color: isSelected ? Colors.blue.withOpacity(0.1) : null,
+                      child: TransactionListItem(
+                        transaction: transaction,
+                        contactName: contactNameFromMap,
+                        contact: contactForItem,
+                      ),
+                    );
+
+                    // Wrap with Dismissible for swipe actions (only when not in selection mode)
+                    if (!_selectionMode) {
+                      final inner = Dismissible(
+                        key: Key(transaction.id),
+                        direction: DismissDirection.startToEnd, // Only swipe right (LTR)
+                        dismissThresholds: const {
+                          DismissDirection.startToEnd: 0.7, // Require 70% swipe for close
+                        },
+                        movementDuration: const Duration(milliseconds: 300), // Slower animation
+                        background: Container(
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 20),
+                          color: Colors.green,
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: [
+                              Icon(Icons.check_circle, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Close',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
                           ),
-                        );
-                        // Create a reverse transaction screen with pre-filled data to close/settle the transaction
-                        final reverseDirection = transaction.direction == TransactionDirection.owed
-                            ? TransactionDirection.lent
-                            : TransactionDirection.owed;
-                      final result = await showScreenAsBottomSheet(
-                        context: context,
-                        screen: AddTransactionScreenWithData(
+                        ),
+                        confirmDismiss: (direction) async {
+                          final contact = contactForItem ??
+                              Contact(
+                                id: transaction.contactId,
+                                name: 'Unknown',
+                                createdAt: DateTime.now(),
+                                updatedAt: DateTime.now(),
+                                balance: 0,
+                              );
+
+                          // Create a reverse transaction screen with pre-filled data to close/settle the transaction
+                          final reverseDirection = transaction.direction == TransactionDirection.owed
+                              ? TransactionDirection.lent
+                              : TransactionDirection.owed;
+                          final result = await showScreenAsBottomSheet(
+                            context: context,
+                            screen: AddTransactionScreenWithData(
                               contact: contact,
                               amount: transaction.amount,
                               direction: reverseDirection,
-                              description: transaction.description != null
-                                  ? 'Close: ${transaction.description}'
-                                  : 'Close transaction',
-                          ),
-                        );
-                        if (result == true && mounted) {
-                          _loadData();
-                        }
-                        return false; // Don't dismiss
-                    },
-                    child: GestureDetector(
-                      onTap: () async {
-                        Contact? contact;
-                        if (_contacts != null) {
-                          try {
-                            contact = _contacts!.firstWhere(
-                              (c) => c.id == transaction.contactId,
+                              description: transaction.description != null ? 'Close: ${transaction.description}' : 'Close transaction',
+                            ),
+                          );
+                          if (result == true && mounted) {
+                            ref.invalidate(transactionsProvider);
+                            ref.invalidate(contactsProvider);
+                          }
+                          return false; // Don't dismiss
+                        },
+                        child: GestureDetector(
+                          onTap: () async {
+                            final contact = contactForItem ??
+                                Contact(
+                                  id: transaction.contactId,
+                                  name: 'Unknown',
+                                  createdAt: DateTime.now(),
+                                  updatedAt: DateTime.now(),
+                                  balance: 0,
+                                );
+
+                            final result = await showScreenAsBottomSheet(
+                              context: context,
+                              screen: EditTransactionScreen(
+                                transaction: transaction,
+                                contact: contact,
+                              ),
                             );
-                          } catch (_) {}
-                        }
-                        contact ??= Contact(
-                          id: transaction.contactId,
-                          name: 'Unknown',
-                          createdAt: DateTime.now(),
-                          updatedAt: DateTime.now(),
-                          balance: 0,
-                        );
-                        
-                        final result = await showScreenAsBottomSheet(
-                          context: context,
-                          screen: EditTransactionScreen(
-                              transaction: transaction,
-                              contact: contact,
-                          ),
-                        );
-                        if (result == true && mounted) {
-                          _loadData();
-                        }
-                      },
+                            if (result == true && mounted) {
+                              ref.invalidate(transactionsProvider);
+                              ref.invalidate(contactsProvider);
+                            }
+                          },
+                          onLongPress: () {
+                            setState(() {
+                              _selectionMode = true;
+                              if (_selectedTransactions.contains(transaction.id)) {
+                                _selectedTransactions.remove(transaction.id);
+                              } else {
+                                _selectedTransactions.add(transaction.id);
+                              }
+                            });
+                          },
+                          child: transactionItem,
+                        ),
+                      );
+                      return SizeTransition(
+                        key: ValueKey(transaction.id),
+                        sizeFactor: animation,
+                        child: FadeTransition(opacity: animation, child: inner),
+                      );
+                    }
+
+                    final inner = GestureDetector(
                       onLongPress: () {
                         setState(() {
                           _selectionMode = true;
@@ -588,25 +526,16 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                         });
                       },
                       child: transactionItem,
-                    ),
-                  );
-                }
-                
-                return GestureDetector(
-                  onLongPress: () {
-                    setState(() {
-                      _selectionMode = true;
-                      if (_selectedTransactions.contains(transaction.id)) {
-                        _selectedTransactions.remove(transaction.id);
-                      } else {
-                        _selectedTransactions.add(transaction.id);
-                      }
-                    });
+                    );
+                    return SizeTransition(
+                      key: ValueKey(transaction.id),
+                      sizeFactor: animation,
+                      child: FadeTransition(opacity: animation, child: inner),
+                    );
                   },
-                  child: transactionItem,
-                );
-              },
-            ),
+                ),
+              );
+            },
           );
         },
       ),

@@ -8,12 +8,14 @@ import '../api.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../widgets/contact_list_item.dart';
+import '../widgets/diff_animated_list.dart';
 import '../widgets/sync_status_icon.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/toast_service.dart';
 
@@ -37,10 +39,7 @@ enum ContactSortOption {
 }
 
 class _ContactsScreenState extends ConsumerState<ContactsScreen> {
-  List<Contact>? _contacts;
-  List<Contact>? _filteredContacts; // Filtered by search
-  bool _loading = true;
-  String? _error;
+  bool _loading = false; // Local busy state for UI actions (not initial data load)
   ContactSortOption _sortOption = ContactSortOption.alphabetical;
   Set<String> _selectedContacts = {}; // For multi-select
   bool _selectionMode = false;
@@ -51,17 +50,11 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadContacts();
     _loadSettings();
     _searchController.addListener(_onSearchChanged);
-    Api.addRealtimeListener(_onRealtimeUpdate);
-    Api.addDataChangedListener(_onDataChanged);
     Api.connectRealtime();
   }
 
-  void _onDataChanged() {
-    if (mounted) _loadContacts();
-  }
 
   Future<void> _loadSettings() async {
     final defaultDir = await Api.getDefaultDirection();
@@ -82,49 +75,34 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     }
   }
 
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    // Reload contacts for any change - contacts, transactions (affect balance), etc.
-    if (type == 'contact_created' || 
-        type == 'contact_updated' || 
-        type == 'transaction_created' || 
-        type == 'transaction_updated' || 
-        type == 'transaction_deleted') {
-      _loadContacts();
-    }
-  }
-
   @override
   void dispose() {
-    Api.removeRealtimeListener(_onRealtimeUpdate);
-    Api.removeDataChangedListener(_onDataChanged);
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
   }
 
   void _onSearchChanged() {
-    _applySearchAndSort();
+    if (mounted) setState(() {});
   }
 
-  void _applySearchAndSort() {
-    if (_contacts == null) return;
-    
+  List<Contact> _filterAndSortContacts(List<Contact> contacts) {
     final query = _searchController.text.toLowerCase().trim();
-    List<Contact> filtered = _contacts!;
-    
-    // Apply search filter
+    var filtered = contacts;
+
     if (query.isNotEmpty) {
       filtered = filtered.where((contact) {
         return contact.name.toLowerCase().contains(query) ||
-               (contact.username?.toLowerCase().contains(query) ?? false) ||
-               (contact.phone?.toLowerCase().contains(query) ?? false) ||
-               (contact.email?.toLowerCase().contains(query) ?? false) ||
-               (contact.notes?.toLowerCase().contains(query) ?? false);
+            (contact.username?.toLowerCase().contains(query) ?? false) ||
+            (contact.phone?.toLowerCase().contains(query) ?? false) ||
+            (contact.email?.toLowerCase().contains(query) ?? false) ||
+            (contact.notes?.toLowerCase().contains(query) ?? false);
       }).toList();
+    } else {
+      // Avoid copying when no filtering is required.
+      filtered = List<Contact>.from(filtered);
     }
-    
-    // Apply sort
+
     switch (_sortOption) {
       case ContactSortOption.alphabetical:
         filtered.sort((a, b) => a.name.compareTo(b.name));
@@ -145,45 +123,19 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         filtered.sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
         break;
     }
-    
-    if (mounted) {
-      setState(() {
-        _filteredContacts = filtered;
-      });
-    }
+    return filtered;
   }
 
-  List<Contact> _getContacts() {
-    return _filteredContacts ?? [];
-  }
-
-  Future<void> _loadContacts({bool sync = false}) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _refreshContacts({bool sync = false}) async {
+    setState(() => _loading = true);
     try {
-      final jsonStr = await Api.getContacts();
-      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
-      final contacts = list.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
       if (sync && !kIsWeb) {
-        Api.manualSync().catchError((_) {});
+        await Api.manualSync().catchError((_) {});
       }
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          _filteredContacts = contacts;
-          _loading = false;
-        });
-        _applySearchAndSort();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
+      // Providers will refetch from Rust. This keeps refresh work scoped to mounted screens.
+      ref.invalidate(contactsProvider);
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -308,8 +260,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             _loading = false;
                           });
                           
-                          // Reload contacts
-                          _loadContacts();
+                          // ContactsProvider will refresh via DataBus; ensure UI picks it up.
+                          ref.invalidate(contactsProvider);
                           
                           // Show undo toast for all deletes (single or bulk) - always show, even in offline mode
                           // Use a small delay to ensure context is stable
@@ -343,9 +295,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                                 for (final id in deletedIds) {
                                   await Api.undoContactAction(id);
                                 }
-                                if (mounted) {
-                                  _loadContacts();
-                                }
+                                if (mounted) ref.invalidate(contactsProvider);
                               } catch (e) {
                                 // Error handled by ToastService
                               }
@@ -376,7 +326,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
               setState(() {
                 _sortOption = option;
               });
-              _applySearchAndSort();
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
@@ -414,53 +363,53 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => _loadContacts(sync: true),
+        onRefresh: () => _refreshContacts(sync: true),
         child: Builder(
           builder: (context) {
             if (_loading) {
               return const Center(child: CircularProgressIndicator());
             }
-            
-            if (_error != null) {
-              return Center(
+
+            final contactsAsync = ref.watch(contactsProvider);
+            return contactsAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+                    Text('Error: $e', style: const TextStyle(color: Colors.red)),
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      onPressed: _loadContacts,
+                      onPressed: () => _refreshContacts(),
                       child: const Text('Retry'),
                     ),
                   ],
                 ),
-              );
-            }
+              ),
+              data: (baseContacts) {
+                final contacts = _filterAndSortContacts(baseContacts);
 
-            final contacts = _getContacts();
-
-            if (contacts.isEmpty && _searchController.text.isNotEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.search_off, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No contacts found for "${_searchController.text}"',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
+                if (contacts.isEmpty && _searchController.text.isNotEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.search_off, size: 64, color: Colors.grey),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No contacts found for "${_searchController.text}"',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              );
-            }
-            
+                  );
+                }
 
-          return ListView.builder(
-            itemCount: contacts.length,
-            cacheExtent: 200, // Cache more items for smoother scrolling
-            itemBuilder: (context, index) {
-              final contact = contacts[index];
+                return DiffAnimatedList<Contact>(
+                  items: contacts,
+                  itemId: (c) => c.id,
+                  padding: const EdgeInsets.only(bottom: 32),
+                  itemBuilder: (context, contact, animation) {
               final isSelected = _selectionMode && _selectedContacts.contains(contact.id);
               
               Widget contactItem = ContactListItem(
@@ -560,7 +509,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                               ),
                             );
                             if (result == true && mounted) {
-                              _loadContacts();
+                              ref.invalidate(contactsProvider);
                             }
                             return false; // Don't dismiss the contact item
                           },
@@ -568,9 +517,15 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                         );
               }
               
-              return contactItem;
-            },
-          );
+              return SizeTransition(
+                key: ValueKey(contact.id),
+                sizeFactor: animation,
+                child: FadeTransition(opacity: animation, child: contactItem),
+              );
+                  },
+                );
+              },
+            );
           },
         ),
         ),
