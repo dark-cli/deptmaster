@@ -99,18 +99,23 @@ class ContactListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (balance != 0)
-                      AnimatedPixelatedText(
-                        '${_formatAmount(balance)} IQD',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: avatarColor,
+                    SizedBox(
+                      height: 22, // Reserve space when balance is 0
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: AnimatedPixelatedText(
+                          balance == 0 ? '' : '${_formatAmount(balance)} IQD',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: avatarColor,
+                          ),
+                          textAlign: TextAlign.right,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
-                        textAlign: TextAlign.right,
-                      )
-                    else
-                      const SizedBox(height: 18), // Reserve space when balance is 0
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       status,

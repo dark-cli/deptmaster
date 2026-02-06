@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 
@@ -5,13 +6,19 @@ import 'package:flutter/material.dart';
 /// 
 /// It simulates a digital signal failure by separating color channels (Red/Blue)
 /// and shaking them independently during the transition.
-class AnimatedPixelatedText extends StatelessWidget {
+class AnimatedPixelatedText extends StatefulWidget {
   final String text;
   final TextStyle? style;
   final Duration duration;
   final TextAlign? textAlign;
   final TextOverflow? overflow;
   final int? maxLines;
+  final bool animateFromEmpty;
+  final String emptyTransitionText;
+  final Duration emptyTransitionDelay;
+  final String scrambleChars;
+  final int scrambleMinLength;
+  final int scrambleMaxLength;
 
   const AnimatedPixelatedText(
     this.text, {
@@ -21,12 +28,78 @@ class AnimatedPixelatedText extends StatelessWidget {
     this.textAlign,
     this.overflow,
     this.maxLines,
+    this.animateFromEmpty = true,
+    this.emptyTransitionText = '',
+    this.emptyTransitionDelay = const Duration(milliseconds: 400),
+    this.scrambleChars = '@#\$%^&*',
+    this.scrambleMinLength = 6,
+    this.scrambleMaxLength = 10,
   });
+
+  @override
+  State<AnimatedPixelatedText> createState() => _AnimatedPixelatedTextState();
+}
+
+class _AnimatedPixelatedTextState extends State<AnimatedPixelatedText> {
+  late String _displayText;
+  Timer? _pending;
+  final Random _random = Random();
+  bool _showingScramble = false;
+  Color? _scrambleColor;
+  List<Color> _scrambleColors = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _displayText = widget.text;
+  }
+
+  @override
+  void didUpdateWidget(covariant AnimatedPixelatedText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final textChanged = oldWidget.text != widget.text;
+    final isEmpty = widget.text.trim().isEmpty;
+
+    _pending?.cancel();
+    _pending = null;
+
+    if (textChanged && !isEmpty && widget.animateFromEmpty) {
+      final scrambleText = _buildScrambleForLength(widget.text.length);
+      _scrambleColors = _buildScrambleColors(context, scrambleText.length);
+      setState(() {
+        _showingScramble = true;
+        _scrambleColor = null;
+        _displayText = scrambleText;
+      });
+      _pending = Timer(widget.emptyTransitionDelay, () {
+        if (!mounted) return;
+        setState(() {
+          _showingScramble = false;
+          _displayText = widget.text;
+        });
+      });
+      return;
+    }
+
+    if (_displayText != widget.text) {
+      setState(() {
+        _showingScramble = false;
+        _displayText = widget.text;
+        _scrambleColors = const [];
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _pending?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: duration,
+      duration: widget.duration,
       switchInCurve: Curves.easeInOut,
       switchOutCurve: Curves.easeInOut,
       transitionBuilder: (Widget child, Animation<double> animation) {
@@ -35,16 +108,69 @@ class AnimatedPixelatedText extends StatelessWidget {
           child: child,
         );
       },
-      child: Text(
-        text,
-        // Key includes style (color) to trigger animation when direction/style changes
-        key: ValueKey<String>('${text}_${style?.color?.value ?? ''}_${style?.fontWeight ?? ''}'),
-        style: style,
-        textAlign: textAlign,
-        overflow: overflow,
-        maxLines: maxLines,
-      ),
+      child: _buildDisplayText(),
     );
+  }
+
+  Widget _buildDisplayText() {
+    final key = ValueKey<String>(
+      '${_displayText}_${widget.style?.color?.value ?? ''}_${widget.style?.fontWeight ?? ''}_${_showingScramble ? 'scramble' : 'value'}',
+    );
+
+    if (_showingScramble) {
+      final baseStyle = widget.style ?? const TextStyle();
+      final defaultColor =
+          widget.style?.color ?? DefaultTextStyle.of(context).style.color;
+      final spans = <TextSpan>[];
+      for (var i = 0; i < _displayText.length; i++) {
+        final color = i < _scrambleColors.length
+            ? _scrambleColors[i]
+            : defaultColor;
+        spans.add(TextSpan(
+          text: _displayText[i],
+          style: baseStyle.copyWith(color: color),
+        ));
+      }
+
+      return RichText(
+        key: key,
+        textAlign: widget.textAlign ?? TextAlign.start,
+        maxLines: widget.maxLines,
+        overflow: widget.overflow ?? TextOverflow.clip,
+        text: TextSpan(style: baseStyle, children: spans),
+      );
+    }
+
+    return Text(
+      _displayText,
+      key: key,
+      style: widget.style,
+      textAlign: widget.textAlign,
+      overflow: widget.overflow,
+      maxLines: widget.maxLines,
+    );
+  }
+
+  String _buildScrambleForLength(int length) {
+    final minLen = widget.scrambleMinLength.clamp(1, 64);
+    final maxLen = widget.scrambleMaxLength.clamp(minLen, 64);
+    final len = length.clamp(minLen, maxLen);
+    final chars = widget.scrambleChars.isEmpty ? '@#\$%^&*' : widget.scrambleChars;
+    final buf = StringBuffer();
+    for (var i = 0; i < len; i++) {
+      buf.write(chars[_random.nextInt(chars.length)]);
+    }
+    return buf.toString();
+  }
+
+  List<Color> _buildScrambleColors(BuildContext context, int length) {
+    final baseColor =
+        widget.style?.color ?? DefaultTextStyle.of(context).style.color ?? Colors.white;
+    final colors = <Color>[];
+    for (var i = 0; i < length; i++) {
+      colors.add(baseColor);
+    }
+    return colors;
   }
 }
 
