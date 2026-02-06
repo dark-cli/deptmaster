@@ -7,6 +7,7 @@ import '../utils/theme_colors.dart';
 import '../utils/text_utils.dart';
 import 'animated_pixelated_text.dart';
 import 'avatar_with_selection.dart';
+import 'glitch_transition.dart';
 
 class ContactListItem extends StatelessWidget {
   final Contact contact;
@@ -14,6 +15,8 @@ class ContactListItem extends StatelessWidget {
   final bool? isSelected;
   final VoidCallback? onSelectionChanged;
   final bool flipColors;
+  final Animation<double>? glitchAnimation;
+  final bool isRemoving;
 
   const ContactListItem({
     super.key,
@@ -22,6 +25,8 @@ class ContactListItem extends StatelessWidget {
     this.isSelected,
     this.onSelectionChanged,
     this.flipColors = false,
+    this.glitchAnimation,
+    this.isRemoving = false,
   });
 
   String _getStatus(int balance, bool flipColors) {
@@ -54,6 +59,34 @@ class ContactListItem extends StatelessWidget {
     return amount.abs().toString().replaceAllMapped(
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
       (Match m) => '${m[1]},',
+    );
+  }
+
+  Widget _glitchText(
+    String text,
+    TextStyle style, {
+    TextAlign? textAlign,
+    TextOverflow? overflow,
+    int? maxLines,
+  }) {
+    final shouldScramble = isRemoving && text.trim().isNotEmpty;
+    final base = AnimatedPixelatedText(
+      text,
+      style: style,
+      textAlign: textAlign,
+      overflow: overflow,
+      maxLines: maxLines,
+      forceScramble: shouldScramble,
+    );
+    final animation = glitchAnimation;
+    if (animation == null) return base;
+    return GlitchTransition(
+      animation: animation,
+      child: base,
+      showScramble: true,
+      maxX: 10,
+      maxY: 5,
+      flickerChance: 0.35,
     );
   }
 
@@ -103,9 +136,9 @@ class ContactListItem extends StatelessWidget {
                       height: 22, // Reserve space when balance is 0
                       child: Align(
                         alignment: Alignment.centerRight,
-                        child: AnimatedPixelatedText(
+                        child: _glitchText(
                           balance == 0 ? '' : '${_formatAmount(balance)} IQD',
-                          style: TextStyle(
+                          TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                             color: avatarColor,
@@ -117,9 +150,9 @@ class ContactListItem extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text(
+                    _glitchText(
                       status,
-                      style: TextStyle(
+                      TextStyle(
                         fontSize: 11,
                         color: ThemeColors.gray(context, shade: 600),
                       ),
@@ -136,20 +169,19 @@ class ContactListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
-                      style: const TextStyle(
+                    _glitchText(
+                      TextUtils.forceLtr(contact.name),
+                      const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.right,
-                      semanticsLabel: 'Contact ${contact.name}',
                     ),
                     if (contact.username != null && contact.username!.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Text(
+                      _glitchText(
                         '@${contact.username}',
-                        style: TextStyle(
+                        TextStyle(
                           color: ThemeColors.gray(context, shade: 500),
                           fontSize: 12,
                         ),

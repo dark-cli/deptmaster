@@ -22,7 +22,7 @@ class DiffAnimatedList<T> extends StatefulWidget {
     required this.items,
     required this.itemId,
     required this.itemBuilder,
-    this.duration = const Duration(milliseconds: 400),
+    this.duration = const Duration(milliseconds: 800),
     this.padding,
     this.animateReorder = false,
   });

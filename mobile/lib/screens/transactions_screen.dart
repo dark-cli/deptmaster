@@ -22,6 +22,7 @@ import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
 import '../widgets/flash_on_change.dart';
 import '../widgets/animated_pixelated_text.dart';
+import '../widgets/glitch_transition.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -419,6 +420,19 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     padding: const EdgeInsets.only(bottom: 32),
                     itemBuilder: (context, transaction, animation) {
                     final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
+                    final isRemoving = animation.status == AnimationStatus.reverse;
+                    final moveAnimation = CurvedAnimation(
+                      parent: animation,
+                      curve: isRemoving
+                          ? const Interval(0.0, 0.5, curve: Curves.easeIn)
+                          : const Interval(0.5, 1.0, curve: Curves.easeOut),
+                    );
+                    final glitchAnimation = CurvedAnimation(
+                      parent: animation,
+                      curve: isRemoving
+                          ? const Interval(0.0, 1.0, curve: Curves.easeOut)
+                          : const Interval(0.0, 0.5, curve: Curves.easeOut),
+                    );
 
                     final contactId = transaction.contactId;
                     final contactNameFromMap = contactNameMap[contactId];
@@ -429,6 +443,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                       contactName: contactNameFromMap,
                       contact: contactForItem,
                       isSelected: _selectionMode ? isSelected : null,
+                      isRemoving: isRemoving,
+                      glitchAnimation: glitchAnimation,
                     );
 
                     if (!_selectionMode) transactionItem = FlashOnChange(
@@ -532,8 +548,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                       );
                       return SizeTransition(
                         key: ValueKey(transaction.id),
-                        sizeFactor: animation,
-                        child: FadeTransition(opacity: animation, child: inner),
+                        sizeFactor: moveAnimation,
+                        child: FadeTransition(opacity: moveAnimation, child: inner),
                       );
                     }
 
@@ -563,8 +579,8 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     );
                     return SizeTransition(
                       key: ValueKey(transaction.id),
-                      sizeFactor: animation,
-                      child: FadeTransition(opacity: animation, child: inner),
+                      sizeFactor: moveAnimation,
+                      child: FadeTransition(opacity: moveAnimation, child: inner),
                     );
                     },
                   ),
@@ -584,6 +600,8 @@ class TransactionListItem extends StatelessWidget {
   final String? contactName;
   final Contact? contact;
   final bool? isSelected;
+  final bool isRemoving;
+  final Animation<double>? glitchAnimation;
 
   const TransactionListItem({
     super.key,
@@ -591,6 +609,8 @@ class TransactionListItem extends StatelessWidget {
     this.contactName,
     this.contact,
     this.isSelected,
+    this.isRemoving = false,
+    this.glitchAnimation,
   });
 
   String _getContactName() {
@@ -635,6 +655,34 @@ class TransactionListItem extends StatelessWidget {
     }
   }
 
+  Widget _glitchText(
+    String text,
+    TextStyle style, {
+    TextAlign? textAlign,
+    TextOverflow? overflow,
+    int? maxLines,
+  }) {
+    final shouldScramble = isRemoving && text.trim().isNotEmpty;
+    final base = AnimatedPixelatedText(
+      text,
+      style: style,
+      textAlign: textAlign,
+      overflow: overflow,
+      maxLines: maxLines,
+      forceScramble: shouldScramble,
+    );
+    final animation = glitchAnimation;
+    if (animation == null) return base;
+    return GlitchTransition(
+      animation: animation,
+      child: base,
+      showScramble: true,
+      maxX: 10,
+      maxY: 5,
+      flickerChance: 0.35,
+    );
+  }
+
   Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color) {
     const double amountSectionWidth = 120.0;
     final contact = this.contact;
@@ -672,9 +720,9 @@ class TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-                    Text(
-                      TextUtils.forceLtr(contactName), // Force LTR for mixed Arabic/English text
-                      style: const TextStyle(
+                    _glitchText(
+                      TextUtils.forceLtr(contactName),
+                      const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
@@ -682,9 +730,9 @@ class TransactionListItem extends StatelessWidget {
                     // Always reserve space for username to maintain consistent card height
                     if (contact?.username != null && contact!.username!.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Text(
+                      _glitchText(
                         '@${contact.username}',
-                        style: TextStyle(
+                        TextStyle(
                           color: ThemeColors.gray(context, shade: 500),
                           fontSize: 12,
                         ),
@@ -696,14 +744,14 @@ class TransactionListItem extends StatelessWidget {
                     if (transaction.description != null || transaction.dueDate != null) ...[
                       const SizedBox(height: 4),
             if (transaction.description != null) 
-            Text(
-                          transaction.description!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: ThemeColors.gray(context, shade: 600),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+            _glitchText(
+              transaction.description!,
+              TextStyle(
+                fontSize: 12,
+                color: ThemeColors.gray(context, shade: 600),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             if (transaction.dueDate != null) ...[
                         const SizedBox(height: 2),
@@ -717,21 +765,21 @@ class TransactionListItem extends StatelessWidget {
                                   : ThemeColors.warning(context),
                             ),
                   const SizedBox(width: 4),
-                  Text(
-                              dateFormat.format(transaction.dueDate!),
-                    style: TextStyle(
-                                fontSize: 11,
+                  _glitchText(
+                    dateFormat.format(transaction.dueDate!),
+                    TextStyle(
+                      fontSize: 11,
                       color: transaction.dueDate!.isBefore(DateTime.now())
-                                    ? ThemeColors.error(context)
-                                    : ThemeColors.warning(context),
+                          ? ThemeColors.error(context)
+                          : ThemeColors.warning(context),
                     ),
                   ),
                 ],
                         ),
                       ] else if (transaction.description == null) ...[
-                        Text(
+                        _glitchText(
                           dateFormat.format(transaction.transactionDate),
-                          style: TextStyle(
+                          TextStyle(
                             fontSize: 11,
                             color: ThemeColors.gray(context, shade: 500),
                           ),
@@ -739,13 +787,13 @@ class TransactionListItem extends StatelessWidget {
                       ],
                     ] else ...[
                       const SizedBox(height: 2),
-                      Text(
+                      _glitchText(
                         dateFormat.format(transaction.transactionDate),
-                        style: TextStyle(
+                        TextStyle(
                           fontSize: 11,
                           color: ThemeColors.gray(context, shade: 500),
                         ),
-              ),
+                      ),
             ],
           ],
         ),
@@ -759,20 +807,20 @@ class TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    AnimatedPixelatedText(
+                    _glitchText(
                       '${_formatAmount(amount)} IQD',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
+                      TextStyle(
+                        fontWeight: FontWeight.bold,
                         fontSize: 16,
-            color: color,
+                        color: color,
                       ),
                       textAlign: TextAlign.right,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    Text(
+                    _glitchText(
                       status,
-                      style: TextStyle(
+                      TextStyle(
                         fontSize: 11,
                         color: ThemeColors.gray(context, shade: 600),
                       ),

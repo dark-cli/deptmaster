@@ -19,6 +19,7 @@ class AnimatedPixelatedText extends StatefulWidget {
   final String scrambleChars;
   final int scrambleMinLength;
   final int scrambleMaxLength;
+  final bool forceScramble;
 
   const AnimatedPixelatedText(
     this.text, {
@@ -34,6 +35,7 @@ class AnimatedPixelatedText extends StatefulWidget {
     this.scrambleChars = '@#\$%^&*',
     this.scrambleMinLength = 6,
     this.scrambleMaxLength = 10,
+    this.forceScramble = false,
   });
 
   @override
@@ -51,7 +53,9 @@ class _AnimatedPixelatedTextState extends State<AnimatedPixelatedText> {
   @override
   void initState() {
     super.initState();
-    _displayText = widget.text;
+    _displayText = widget.forceScramble
+        ? _buildScrambleForLength(widget.text.length)
+        : widget.text;
   }
 
   @override
@@ -62,6 +66,17 @@ class _AnimatedPixelatedTextState extends State<AnimatedPixelatedText> {
 
     _pending?.cancel();
     _pending = null;
+
+    if (widget.forceScramble) {
+      final scrambleText = _buildScrambleForLength(widget.text.length);
+      _scrambleColors = _buildScrambleColors(context, scrambleText.length);
+      setState(() {
+        _showingScramble = true;
+        _scrambleColor = null;
+        _displayText = scrambleText;
+      });
+      return;
+    }
 
     if (textChanged && !isEmpty && widget.animateFromEmpty) {
       final scrambleText = _buildScrambleForLength(widget.text.length);

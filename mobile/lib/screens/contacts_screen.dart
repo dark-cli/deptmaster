@@ -11,6 +11,7 @@ import '../widgets/contact_list_item.dart';
 import '../widgets/diff_animated_list.dart';
 import '../widgets/flash_on_change.dart';
 import '../widgets/sync_status_icon.dart';
+import '../widgets/glitch_transition.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
@@ -430,10 +431,25 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                     padding: const EdgeInsets.only(bottom: 32),
                     itemBuilder: (context, contact, animation) {
               final isSelected = _selectionMode && _selectedContacts.contains(contact.id);
+              final isRemoving = animation.status == AnimationStatus.reverse;
+              final moveAnimation = CurvedAnimation(
+                parent: animation,
+                curve: isRemoving
+                    ? const Interval(0.0, 0.5, curve: Curves.easeIn)
+                    : const Interval(0.5, 1.0, curve: Curves.easeOut),
+              );
+              final glitchAnimation = CurvedAnimation(
+                parent: animation,
+                curve: isRemoving
+                    ? const Interval(0.0, 1.0, curve: Curves.easeOut)
+                    : const Interval(0.0, 0.5, curve: Curves.easeOut),
+              );
               
               Widget contactItem = ContactListItem(
                         contact: contact,
                         isSelected: _selectionMode ? isSelected : null,
+                        isRemoving: isRemoving,
+                        glitchAnimation: glitchAnimation,
                         onSelectionChanged: _selectionMode
                             ? () {
                                 setState(() {
@@ -550,8 +566,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
 
                       return SizeTransition(
                         key: ValueKey(contact.id),
-                        sizeFactor: animation,
-                        child: FadeTransition(opacity: animation, child: currentItem),
+                        sizeFactor: moveAnimation,
+                        child: FadeTransition(opacity: moveAnimation, child: currentItem),
                       );
                     },
                   ),

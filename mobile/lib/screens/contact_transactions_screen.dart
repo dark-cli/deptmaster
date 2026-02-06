@@ -22,6 +22,7 @@ import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
 import '../widgets/flash_on_change.dart';
 import '../widgets/animated_pixelated_text.dart';
+import '../widgets/glitch_transition.dart';
 import '../utils/bottom_sheet_helper.dart';
 
 class ContactTransactionsScreen extends ConsumerStatefulWidget {
@@ -328,11 +329,26 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                               padding: const EdgeInsets.only(bottom: 24),
                               itemBuilder: (context, transaction, animation) {
                             final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
+                            final isRemoving = animation.status == AnimationStatus.reverse;
+                            final moveAnimation = CurvedAnimation(
+                              parent: animation,
+                              curve: isRemoving
+                                  ? const Interval(0.0, 0.5, curve: Curves.easeIn)
+                                  : const Interval(0.5, 1.0, curve: Curves.easeOut),
+                            );
+                            final glitchAnimation = CurvedAnimation(
+                              parent: animation,
+                              curve: isRemoving
+                                  ? const Interval(0.0, 1.0, curve: Curves.easeOut)
+                                  : const Interval(0.0, 0.5, curve: Curves.easeOut),
+                            );
 
                             Widget transactionItem = _TransactionListItem(
                               transaction: transaction,
                               isSelected: _selectionMode ? isSelected : null,
                               selectionMode: _selectionMode,
+                              isRemoving: isRemoving,
+                              glitchAnimation: glitchAnimation,
                               onSelectionChanged: _selectionMode
                                   ? () {
                                       setState(() {
@@ -468,15 +484,15 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                               );
                               return SizeTransition(
                                 key: ValueKey(transaction.id),
-                                sizeFactor: animation,
-                                child: FadeTransition(opacity: animation, child: inner),
+                                sizeFactor: moveAnimation,
+                                child: FadeTransition(opacity: moveAnimation, child: inner),
                               );
                             }
 
                             return SizeTransition(
                               key: ValueKey(transaction.id),
-                              sizeFactor: animation,
-                              child: FadeTransition(opacity: animation, child: transactionItem),
+                              sizeFactor: moveAnimation,
+                              child: FadeTransition(opacity: moveAnimation, child: transactionItem),
                             );
                               },
                             ),
@@ -522,6 +538,8 @@ class _TransactionListItem extends StatelessWidget {
   final bool? isSelected;
   final VoidCallback? onSelectionChanged;
   final bool selectionMode; // Track if we're in selection mode
+  final Animation<double>? glitchAnimation;
+  final bool isRemoving;
 
   const _TransactionListItem({
     required this.transaction,
@@ -530,6 +548,8 @@ class _TransactionListItem extends StatelessWidget {
     this.isSelected,
     this.onSelectionChanged,
     this.selectionMode = false,
+    this.glitchAnimation,
+    this.isRemoving = false,
   });
 
   @override
@@ -566,6 +586,34 @@ class _TransactionListItem extends StatelessWidget {
     } else {
       return 'GAVE'; // Gave = positive
     }
+  }
+
+  Widget _glitchText(
+    String text,
+    TextStyle style, {
+    TextAlign? textAlign,
+    TextOverflow? overflow,
+    int? maxLines,
+  }) {
+    final shouldScramble = isRemoving && text.trim().isNotEmpty;
+    final base = AnimatedPixelatedText(
+      text,
+      style: style,
+      textAlign: textAlign,
+      overflow: overflow,
+      maxLines: maxLines,
+      forceScramble: shouldScramble,
+    );
+    final animation = glitchAnimation;
+    if (animation == null) return base;
+    return GlitchTransition(
+      animation: animation,
+      child: base,
+      showScramble: true,
+      maxX: 10,
+      maxY: 5,
+      flickerChance: 0.35,
+    );
   }
 
   Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color) {
@@ -607,14 +655,14 @@ class _TransactionListItem extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (transaction.description != null && transaction.description!.isNotEmpty) ...[
-                      Text(
+                      _glitchText(
                         transaction.description!,
-                        style: const TextStyle(
+                        const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
                         ),
-                        overflow: TextOverflow.ellipsis,
                         maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 16),
                     ] else ...[
@@ -633,29 +681,29 @@ class _TransactionListItem extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Flexible(
-                            child: Text(
+                            child: _glitchText(
                               dateFormat.format(transaction.dueDate!),
-                              style: TextStyle(
+                              TextStyle(
                                 fontSize: 11,
                                 color: transaction.dueDate!.isBefore(DateTime.now())
                                     ? ThemeColors.error(context)
                                     : ThemeColors.warning(context),
                               ),
-                              overflow: TextOverflow.ellipsis,
                               maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
                       ),
                     ] else ...[
-                      Text(
+                      _glitchText(
                         dateFormat.format(transaction.transactionDate),
-                        style: TextStyle(
+                        TextStyle(
                           fontSize: 11,
                           color: ThemeColors.gray(context, shade: 500),
                         ),
-                        overflow: TextOverflow.ellipsis,
                         maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],
@@ -669,9 +717,9 @@ class _TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    AnimatedPixelatedText(
+                    _glitchText(
                       '${_formatAmount(amount)} IQD',
-                      style: TextStyle(
+                      TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                         color: color,
@@ -681,9 +729,9 @@ class _TransactionListItem extends StatelessWidget {
                       maxLines: 1,
                     ),
                     const SizedBox(height: 2),
-                    Text(
+                    _glitchText(
                       status,
-                      style: TextStyle(
+                      TextStyle(
                         fontSize: 10,
                         color: ThemeColors.gray(context, shade: 600),
                       ),
