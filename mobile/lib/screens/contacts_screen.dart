@@ -472,9 +472,18 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                               },
                       );
                       
-                      // Wrap with Dismissible for swipe actions (only when not in selection mode)
+                      // Wrap with FlashOnChange if not in selection mode
                       if (!_selectionMode) {
-                        return Dismissible(
+                        contactItem = FlashOnChange(
+                          signature: '${contact.id}|${contact.name}|${contact.username}|${contact.balance}|${contact.updatedAt.millisecondsSinceEpoch}',
+                          child: contactItem,
+                        );
+                      }
+
+                      // Wrap with Dismissible for swipe actions (only when not in selection mode)
+                      Widget currentItem;
+                      if (!_selectionMode) {
+                        currentItem = Dismissible(
                           key: Key(contact.id),
                           direction: DismissDirection.startToEnd, // Only swipe right (LTR)
                           dismissThresholds: const {
@@ -534,20 +543,16 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           },
                           child: contactItem,
                         );
-              }
-              
-              if (!_selectionMode) {
-                contactItem = FlashOnChange(
-                  signature: '${contact.id}|${contact.name}|${contact.username}|${contact.balance}|${contact.updatedAt.millisecondsSinceEpoch}',
-                  child: contactItem,
-                );
-              }
+                      } else {
+                         // In selection mode, we just return the item (it has its own tap handlers)
+                         currentItem = contactItem;
+                      }
 
-              return SizeTransition(
-                key: ValueKey(contact.id),
-                sizeFactor: animation,
-                child: FadeTransition(opacity: animation, child: contactItem),
-              );
+                      return SizeTransition(
+                        key: ValueKey(contact.id),
+                        sizeFactor: animation,
+                        child: FadeTransition(opacity: animation, child: currentItem),
+                      );
                     },
                   ),
                 ),

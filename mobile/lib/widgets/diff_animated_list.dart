@@ -21,7 +21,7 @@ class DiffAnimatedList<T> extends StatefulWidget {
     required this.items,
     required this.itemId,
     required this.itemBuilder,
-    this.duration = const Duration(milliseconds: 250),
+    this.duration = const Duration(milliseconds: 400),
     this.padding,
   });
 
@@ -78,6 +78,8 @@ class _DiffAnimatedListState<T> extends State<DiffAnimatedList<T>> {
     }
 
     final oldIdSetAfterRemovals = _items.map(widget.itemId).toSet();
+    
+    bool changed = false;
 
     // Insertions + updates (iterate new list order)
     for (var i = 0; i < widget.items.length; i++) {
@@ -87,10 +89,14 @@ class _DiffAnimatedListState<T> extends State<DiffAnimatedList<T>> {
       if (!oldIdSetAfterRemovals.contains(id)) {
         _items.insert(i, nextItem);
         _listKey.currentState?.insertItem(i, duration: widget.duration);
+        changed = true;
       } else {
         // Update in place if id exists at the same index.
         if (i < _items.length && widget.itemId(_items[i]) == id) {
-          _items[i] = nextItem;
+          if (_items[i] != nextItem) {
+             _items[i] = nextItem;
+             changed = true;
+          }
         }
       }
     }
@@ -101,6 +107,9 @@ class _DiffAnimatedListState<T> extends State<DiffAnimatedList<T>> {
         _items = List<T>.from(widget.items);
         _listKey = GlobalKey<AnimatedListState>();
       });
+    } else if (changed) {
+      // Force rebuild to reflect updated data in items
+      setState(() {});
     }
   }
 
@@ -125,4 +134,3 @@ class _DiffAnimatedListState<T> extends State<DiffAnimatedList<T>> {
     );
   }
 }
-
