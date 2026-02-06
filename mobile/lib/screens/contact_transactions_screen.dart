@@ -239,39 +239,33 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
             );
           }
 
-          if (txAsync.isLoading && baseTx.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
           final transactions = baseTx.where((t) => t.contactId == widget.contact.id).toList()
             ..sort((a, b) {
-              final c = b.transactionDate.compareTo(a.transactionDate);
+              final c = b.createdAt.compareTo(a.createdAt);
               if (c != 0) return c;
               return b.id.compareTo(a.id);
             });
 
-          if (transactions.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.receipt_long, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No transactions with ${widget.contact.name}',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.grey,
-                    ),
+          final emptyState = Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.receipt_long, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                Text(
+                  'No transactions with ${widget.contact.name}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: Colors.grey,
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Tap + to add a transaction',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
-          }
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Tap + to add a transaction',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+          );
 
           // Calculate total balance for this contact
           final totalBalance = transactions.fold<int>(
@@ -326,11 +320,13 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                     children: [
                       if (txAsync.isLoading) const LinearProgressIndicator(minHeight: 2),
                       Expanded(
-                        child: DiffAnimatedList<Transaction>(
-                          items: transactions,
-                          itemId: (t) => t.id,
-                          padding: const EdgeInsets.only(bottom: 24),
-                          itemBuilder: (context, transaction, animation) {
+                        child: Stack(
+                          children: [
+                            DiffAnimatedList<Transaction>(
+                              items: transactions,
+                              itemId: (t) => t.id,
+                              padding: const EdgeInsets.only(bottom: 24),
+                              itemBuilder: (context, transaction, animation) {
                             final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
 
                             Widget transactionItem = _TransactionListItem(
@@ -482,7 +478,16 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                               sizeFactor: animation,
                               child: FadeTransition(opacity: animation, child: transactionItem),
                             );
-                          },
+                              },
+                            ),
+                            if (transactions.isEmpty)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  ignoring: true,
+                                  child: emptyState,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ],

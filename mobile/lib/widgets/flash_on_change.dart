@@ -14,7 +14,7 @@ class FlashOnChange extends StatefulWidget {
     required this.signature,
     required this.child,
     this.duration = const Duration(milliseconds: 250),
-    this.color = const Color(0xFF4FC3F7), // light blue-ish
+    this.color = Colors.transparent, // Disable color flash since we have glitch text
   });
 
   @override

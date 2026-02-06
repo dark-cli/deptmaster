@@ -17,7 +17,7 @@ class AnimatedPixelatedText extends StatelessWidget {
     this.text, {
     super.key,
     this.style,
-    this.duration = const Duration(milliseconds: 500), // Fast, punchy glitch
+    this.duration = const Duration(milliseconds: 400), // Fast, punchy glitch
     this.textAlign,
     this.overflow,
     this.maxLines,
@@ -37,7 +37,8 @@ class AnimatedPixelatedText extends StatelessWidget {
       },
       child: Text(
         text,
-        key: ValueKey<String>(text),
+        // Key includes style (color) to trigger animation when direction/style changes
+        key: ValueKey<String>('${text}_${style?.color?.value ?? ''}_${style?.fontWeight ?? ''}'),
         style: style,
         textAlign: textAlign,
         overflow: overflow,
