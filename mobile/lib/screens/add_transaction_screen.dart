@@ -12,6 +12,7 @@ import '../models/contact.dart';
 import '../models/wallet.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
@@ -67,11 +68,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   List<Contact> _filteredContacts = [];
   bool _showContactSuggestions = false;
   bool _loadingContacts = true; // Track loading state
+  ProviderSubscription<AsyncValue<List<Contact>>>? _contactsSub;
+  String? _contactsLoadError;
 
   @override
   void initState() {
     super.initState();
-    _loadContacts();
     _loadSettings();
     _prefillData();
     _contactSearchController.addListener(_onContactSearchChanged);
@@ -80,6 +82,40 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     _amountHasText = _amountController.text.isNotEmpty;
     _isClosingTransaction = _descriptionController.text.startsWith('Close:');
     WidgetsBinding.instance.addPostFrameCallback((_) => _requireWallet());
+
+    // Keep local suggestion lists in sync with provider (no direct refetch loops).
+    _contactsSub = ref.listenManual<AsyncValue<List<Contact>>>(contactsProvider, (previous, next) {
+      if (!mounted) return;
+      if (next.hasError) {
+        setState(() {
+          _contactsLoadError = next.error.toString();
+          _loadingContacts = false;
+        });
+        return;
+      }
+      final contacts = next.valueOrNull;
+      if (contacts == null) return;
+
+      setState(() {
+        _contacts = contacts;
+        _loadingContacts = next.isLoading && contacts.isEmpty;
+        _contactsLoadError = null;
+
+        // If contact is provided, keep it selected (but update instance from latest list if possible).
+        if (widget.contact != null && _contacts.isNotEmpty) {
+          _selectedContact = _contacts.firstWhere(
+            (c) => c.id == widget.contact!.id,
+            orElse: () => widget.contact!,
+          );
+          _contactSearchController.text = _selectedContact?.name ?? '';
+          _showContactSuggestions = false;
+          _filteredContacts = [];
+        }
+      });
+
+      // Update suggestions if user is searching.
+      _onContactSearchChanged();
+    }, fireImmediately: true);
   }
 
   Future<void> _requireWallet() async {
@@ -200,37 +236,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     }
   }
 
-  Future<void> _loadContacts() async {
-    setState(() {
-      _loadingContacts = true;
-    });
-    try {
-      final jsonStr = await Api.getContacts();
-      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
-      final contacts = list.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          _loadingContacts = false;
-          // If contact is provided, find it in the loaded list by ID
-          if (widget.contact != null && _contacts.isNotEmpty) {
-            _selectedContact = _contacts.firstWhere(
-              (c) => c.id == widget.contact!.id,
-              orElse: () => _contacts.first,
-            );
-            _contactSearchController.text = _selectedContact?.name ?? '';
-          }
-        });
-      }
-    } catch (e) {
-      print('Error loading contacts: $e');
-      if (mounted) {
-        setState(() {
-          _loadingContacts = false;
-        });
-        ToastService.showErrorFromContext(context, 'Error loading contacts: $e');
-      }
-    }
+  void _requestContactsRefresh() {
+    ref.invalidate(contactsProvider);
   }
 
   Future<void> _selectDate() async {
@@ -333,6 +340,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
   @override
   void dispose() {
+    _contactsSub?.close();
     _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     _descriptionController.removeListener(_onDescriptionChanged);
@@ -379,7 +387,19 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
             // Contact search field
             _loadingContacts
                 ? const Center(child: CircularProgressIndicator())
-                : Column(
+                : _contactsLoadError != null
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text('Error loading contacts: $_contactsLoadError', style: const TextStyle(color: Colors.red)),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: _requestContactsRefresh,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       TextFormField(
@@ -453,19 +473,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                       ),
                                     );
                                     if (result != null && result is Contact && mounted) {
-                                      // Reload contacts to get the new one
-                                      await _loadContacts();
-                                      // Find and select the new contact
-                                      final newContact = _contacts.firstWhere(
-                                        (c) => c.id == result.id,
-                                        orElse: () => result,
-                                      );
                                       setState(() {
-                                        _selectedContact = newContact;
-                                        _contactSearchController.text = newContact.name;
+                                        _selectedContact = result;
+                                        _contactSearchController.text = result.name;
                                         _filteredContacts = [];
                                         _showContactSuggestions = false;
                                       });
+                                      _requestContactsRefresh();
                                     }
                                   },
                                 );

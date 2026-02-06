@@ -9,6 +9,7 @@ import '../api.dart';
 import '../models/contact.dart';
 import '../models/event.dart';
 import '../models/wallet.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
@@ -53,13 +54,54 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     _dateFrom = widget.initialDateFrom;
     _dateTo = widget.initialDateTo;
     _loadWalletsThenEvents();
-    Api.addRealtimeListener(_onRealtimeUpdate);
-    Api.addDataChangedListener(_onDataChanged);
     Api.connectRealtime();
-  }
 
-  void _onDataChanged() {
-    if (mounted) _loadEvents();
+    // Keep the existing filtering/pagination logic, but source events reactively.
+    _eventsSub = ref.listenManual<AsyncValue<List<Event>>>(eventsProvider, (previous, next) async {
+      if (!mounted) return;
+
+      // Keep showing existing list while loading.
+      if (next.isLoading && (next.valueOrNull == null || next.valueOrNull!.isEmpty)) {
+        setState(() => _loading = true);
+        return;
+      }
+
+      final events = next.valueOrNull;
+      if (events == null) return;
+
+      // Sort newest first for consistent ordering
+      final sorted = List<Event>.from(events)..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+      // Build caches
+      await _preloadUndoneEvents(sorted);
+      // Contact caches can be built from provider data (fast), plus fallback to CREATED events.
+      final contacts = ref.read(contactsProvider).valueOrNull ?? const <Contact>[];
+      _contactNameCache = {for (final c in contacts) c.id: c.name};
+      _contactUsernameCache = {
+        for (final c in contacts)
+          if (c.username != null && c.username!.isNotEmpty) c.id: c.username!,
+      };
+      for (final event in sorted) {
+        if (event.aggregateType == 'contact' &&
+            (event.eventType == 'CREATED' || event.eventType.contains('CREATE'))) {
+          final name = event.eventData['name']?.toString();
+          final username = event.eventData['username']?.toString();
+          if (name != null && name.isNotEmpty) {
+            _contactNameCache[event.aggregateId] = name;
+          }
+          if (username != null && username.isNotEmpty) {
+            _contactUsernameCache[event.aggregateId] = username;
+          }
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _allEvents = sorted;
+        _loading = false;
+      });
+      _applyFilters();
+    }, fireImmediately: true);
   }
 
   Future<void> _loadWalletsThenEvents() async {
@@ -103,27 +145,12 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   Map<String, String> _contactNameCache = {};
   Map<String, String> _contactUsernameCache = {}; // Cache for contact usernames
   Map<String, Event> _undoneEventsCache = {};
+  ProviderSubscription<AsyncValue<List<Event>>>? _eventsSub;
 
-
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    // Reload events when any data changes (contacts, transactions, etc.)
-    // This ensures the event log stays up-to-date with all changes
-    if (type == 'contact_created' || 
-        type == 'contact_updated' || 
-        type == 'contact_deleted' ||
-        type == 'transaction_created' || 
-        type == 'transaction_updated' || 
-        type == 'transaction_deleted') {
-      // Reload events when real-time update received
-      _loadEvents();
-    }
-  }
 
   @override
   void dispose() {
-    Api.removeRealtimeListener(_onRealtimeUpdate);
-    Api.removeDataChangedListener(_onDataChanged);
+    _eventsSub?.close();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -142,60 +169,10 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   }
 
   Future<void> _loadEvents() async {
-    if (!mounted || _isReloading) return;
-    _isReloading = true;
-    setState(() {
-      _loading = true;
-    });
-    try {
-      final walletId = _selectedWalletId;
-      if (walletId == null || walletId.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _allEvents = [];
-            _loading = false;
-            _isReloading = false;
-          });
-          _applyFilters();
-        }
-        return;
-      }
-      await Api.setCurrentWalletId(walletId);
-      final jsonStr = await Api.getEvents();
-      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
-      final events = list.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
-      
-      if (!mounted) return;
-      
-      // Sort by timestamp (newest first) for consistent ordering
-      events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      
-      // Pre-load undone events cache
-      await _preloadUndoneEvents(events);
-      
-      if (!mounted) return;
-      
-      // Pre-load contact names cache
-      await _preloadContactNames(events);
-      
-      if (!mounted) return;
-      
-      setState(() {
-        _allEvents = events;
-        _loading = false;
-        _isReloading = false;
-      });
-      // Apply filters (including initial date filters if provided)
-      _applyFilters();
-    } catch (e) {
-      print('Error loading events: $e');
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _isReloading = false;
-        });
-      }
-    }
+    if (!mounted) return;
+    setState(() => _loading = true);
+    // Trigger reactive reload.
+    ref.invalidate(eventsProvider);
   }
   
   Future<void> _preloadContactNames(List<Event> events) async {

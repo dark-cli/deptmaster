@@ -9,6 +9,7 @@ import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../widgets/contact_list_item.dart';
 import '../widgets/diff_animated_list.dart';
+import '../widgets/flash_on_change.dart';
 import '../widgets/sync_status_icon.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
@@ -371,9 +372,11 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
             }
 
             final contactsAsync = ref.watch(contactsProvider);
-            return contactsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
+            final baseContacts = contactsAsync.valueOrNull ?? const <Contact>[];
+
+            if (contactsAsync.hasError && baseContacts.isEmpty) {
+              final e = contactsAsync.error;
+              return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -385,9 +388,14 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                     ),
                   ],
                 ),
-              ),
-              data: (baseContacts) {
-                final contacts = _filterAndSortContacts(baseContacts);
+              );
+            }
+
+            if (contactsAsync.isLoading && baseContacts.isEmpty) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final contacts = _filterAndSortContacts(baseContacts);
 
                 if (contacts.isEmpty && _searchController.text.isNotEmpty) {
                   return Center(
@@ -405,11 +413,15 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                   );
                 }
 
-                return DiffAnimatedList<Contact>(
-                  items: contacts,
-                  itemId: (c) => c.id,
-                  padding: const EdgeInsets.only(bottom: 32),
-                  itemBuilder: (context, contact, animation) {
+            return Column(
+              children: [
+                if (contactsAsync.isLoading) const LinearProgressIndicator(minHeight: 2),
+                Expanded(
+                  child: DiffAnimatedList<Contact>(
+                    items: contacts,
+                    itemId: (c) => c.id,
+                    padding: const EdgeInsets.only(bottom: 32),
+                    itemBuilder: (context, contact, animation) {
               final isSelected = _selectionMode && _selectedContacts.contains(contact.id);
               
               Widget contactItem = ContactListItem(
@@ -517,14 +529,20 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                         );
               }
               
+              contactItem = FlashOnChange(
+                signature: '${contact.id}|${contact.name}|${contact.username}|${contact.balance}|${contact.updatedAt.millisecondsSinceEpoch}',
+                child: contactItem,
+              );
+
               return SizeTransition(
                 key: ValueKey(contact.id),
                 sizeFactor: animation,
                 child: FadeTransition(opacity: animation, child: contactItem),
               );
-                  },
-                );
-              },
+                    },
+                  ),
+                ),
+              ],
             );
           },
         ),

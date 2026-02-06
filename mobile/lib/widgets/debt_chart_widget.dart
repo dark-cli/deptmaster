@@ -4,9 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../api.dart';
 import '../models/event.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 
 class ChartDataPoint {
@@ -57,135 +57,7 @@ class DebtChartWidget extends ConsumerStatefulWidget {
 }
 
 class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
-  List<Event>? _events;
-  bool _loading = true;
-  bool _hasCurrentWallet = false; // Set when loading so empty state can show the right message
-  Map<String, String> _contactNameCache = {}; // Cache for contact names
-  bool _isDisposed = false; // Flag to prevent operations after disposal
-  bool _isLoading = false; // Guard to prevent concurrent loads
-  int _lastEventCount = 0; // Track event count to avoid unnecessary reloads
-
-  @override
-  void initState() {
-    super.initState();
-    _loadChartData();
-    Api.addRealtimeListener(_onRealtimeUpdate);
-    Api.addDataChangedListener(_onDataChanged);
-  }
-
-  void _onDataChanged() {
-    if (!_isDisposed && mounted) _loadChartData();
-  }
-
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    // Reload chart on any event-related updates
-    if (type != null && (type.contains('transaction') || type.contains('contact'))) {
-      if (!_isDisposed && mounted) {
-        _loadChartData();
-      }
-    }
-  }
-  
-  @override
-  void dispose() {
-    _isDisposed = true;
-    Api.removeRealtimeListener(_onRealtimeUpdate);
-    Api.removeDataChangedListener(_onDataChanged);
-    super.dispose();
-  }
-
-  Future<void> _loadChartData() async {
-    if (_isDisposed || !mounted || _isLoading) return;
-    _isLoading = true;
-    try {
-      final hasWallet = (await Api.getCurrentWalletId() ?? '').isNotEmpty;
-      if (!_isDisposed && mounted) {
-        setState(() => _hasCurrentWallet = hasWallet);
-      }
-      final jsonStr = await Api.getEvents();
-      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
-      final events = list.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
-      
-      if (_isDisposed || !mounted) return;
-      
-      // Update last event count to prevent unnecessary reloads
-      _lastEventCount = events.length;
-      
-      print('📊 Loaded ${events.length} total events from EventStoreService');
-      
-      // Filter events that have total_debt in eventData
-      final eventsWithDebt = events.where((e) {
-        final totalDebt = e.eventData['total_debt'];
-        final hasDebt = totalDebt != null && totalDebt is num;
-        if (!hasDebt && events.indexOf(e) < 5) {
-          // Log first 5 events without total_debt for debugging
-          print('⚠️ Event ${e.id} (${e.eventType}) missing total_debt. eventData keys: ${e.eventData.keys.toList()}');
-        }
-        return hasDebt;
-      }).toList();
-      
-      print('📊 Found ${eventsWithDebt.length} events with total_debt out of ${events.length} total events');
-      
-      if (eventsWithDebt.isEmpty && events.isNotEmpty) {
-        print('⚠️ WARNING: No events have total_debt! This may indicate a data issue.');
-        // Show sample of event types
-        final eventTypes = events.take(10).map((e) => e.eventType).toSet();
-        print('📊 Sample event types: ${eventTypes.join(", ")}');
-      }
-      
-      // Sort by timestamp (oldest first for chart)
-      eventsWithDebt.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      
-      if (_isDisposed || !mounted) return;
-      
-      // Pre-load contact names for tooltip
-      await _preloadContactNames(eventsWithDebt);
-      
-      if (_isDisposed || !mounted) return;
-      
-      setState(() {
-        if (!_isDisposed) {
-          _events = eventsWithDebt;
-          _loading = false;
-        }
-      });
-    } catch (e) {
-      print('❌ Error loading chart data: $e');
-      if (!_isDisposed && mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    } finally {
-      _isLoading = false;
-    }
-  }
-  
-  Future<void> _preloadContactNames(List<Event> events) async {
-    if (_isDisposed || !mounted) return;
-    
-    final contactIds = <String>{};
-    for (final event in events) {
-      final contactId = event.eventData['contact_id'] as String?;
-      if (contactId != null) {
-        contactIds.add(contactId);
-      }
-    }
-    
-    for (final contactId in contactIds) {
-      try {
-        final jsonStr = await Api.getContact(contactId);
-        if (jsonStr != null) {
-          final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-          final name = map['name'] as String?;
-          if (name != null) _contactNameCache[contactId] = name;
-        }
-      } catch (e) {
-        // Contact might not exist, continue
-      }
-    }
-  }
+  // Note: data is now provided by Riverpod (`eventsProvider`) to avoid refetch loops.
 
   // Helper functions to align dates to calendar boundaries
   DateTime _alignToDayStart(DateTime date) {
@@ -207,8 +79,8 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     return DateTime(date.year, 1, 1);
   }
 
-  List<ChartDataPoint> _buildChartData(String period, bool invertY) {
-    if (_events == null || _events!.isEmpty) {
+  List<ChartDataPoint> _buildChartData(List<Event> events, String period, bool invertY) {
+    if (events.isEmpty) {
       print('⚠️ No events available for chart');
       return [];
     }
@@ -217,7 +89,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       return [];
     }
     
-    print('📊 Building chart from ${_events!.length} events');
+    print('📊 Building chart from ${events.length} events');
     final now = DateTime.now();
     DateTime periodStart;
     int intervalMs;
@@ -255,7 +127,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     }
     
     // Get all events (not just recent ones) for fallback
-    final allEvents = _events!;
+    final allEvents = events;
     
     // Get events in period
     final eventsInPeriod = allEvents.where((e) => 
@@ -394,34 +266,36 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isDisposed || !mounted) {
-      return const SizedBox.shrink();
-    }
-    
     // Watch settings providers in build method to ensure widget rebuilds when settings change
     final period = ref.watch(dashboardDefaultPeriodProvider);
     final invertY = ref.watch(invertYAxisProvider);
+    final activeWalletId = ref.watch(activeWalletIdProvider).valueOrNull;
+    final hasCurrentWallet = activeWalletId != null && activeWalletId.isNotEmpty;
+    final eventsAsync = ref.watch(eventsProvider);
+    final baseEvents = eventsAsync.valueOrNull ?? const <Event>[];
     
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
     
-    if (_loading) {
+    if (eventsAsync.isLoading && baseEvents.isEmpty) {
       return const SizedBox(
         height: 200,
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    
-    // Don't build chart if disposed
-    if (_isDisposed || !mounted) {
-      return const SizedBox.shrink();
-    }
-    
-    final chartData = _buildChartData(period, invertY);
+
+    // Filter events that have total_debt in eventData and sort by timestamp (oldest first for chart).
+    final eventsWithDebt = baseEvents.where((e) {
+      final totalDebt = e.eventData['total_debt'];
+      return totalDebt != null && totalDebt is num;
+    }).toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    final chartData = _buildChartData(eventsWithDebt, period, invertY);
     
     if (chartData.isEmpty) {
       print('⚠️ Chart data is empty, showing empty state');
-      final message = _hasCurrentWallet
+      final message = hasCurrentWallet
           ? 'No chart data yet. Add contacts and transactions to see debt over time.'
           : 'Select or create a wallet to see chart data.';
       return Container(
@@ -453,7 +327,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     
     // Build chart key separately to avoid string interpolation issues
     final chartKeySuffix = invertY ? 'inverted' : 'normal';
-    final chartKeyState = _isDisposed ? 'disposed' : 'active';
+    final chartKeyState = 'active';
     final chartKey = 'chart_${period}_${chartKeySuffix}_${chartKeyState}';
     
     // Calculate min/max for proper boundaries with padding
@@ -602,18 +476,16 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: (_isDisposed || !mounted)
-                  ? const SizedBox.shrink()
-                  : RepaintBoundary(
-                      child: SfCartesianChart(
-                        key: ValueKey(chartKey),
-                        backgroundColor: Colors.transparent,
-                        plotAreaBorderWidth: 0,
-                        plotAreaBorderColor: Colors.transparent,
-                        plotAreaBackgroundColor: Colors.transparent,
-                        margin: EdgeInsets.zero,
-                        enableAxisAnimation: false,
-                        primaryXAxis: DateTimeAxis(
+              child: RepaintBoundary(
+                child: SfCartesianChart(
+                  key: ValueKey(chartKey),
+                  backgroundColor: Colors.transparent,
+                  plotAreaBorderWidth: 0,
+                  plotAreaBorderColor: Colors.transparent,
+                  plotAreaBackgroundColor: Colors.transparent,
+                  margin: EdgeInsets.zero,
+                  enableAxisAnimation: false,
+                  primaryXAxis: DateTimeAxis(
                     minimum: DateTime.fromMillisecondsSinceEpoch(minX.toInt()),
                     maximum: DateTime.fromMillisecondsSinceEpoch(maxX.toInt()),
                     intervalType: xIntervalType,

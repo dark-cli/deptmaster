@@ -19,6 +19,7 @@ import 'add_transaction_screen.dart';
 import '../widgets/sync_status_icon.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../widgets/diff_animated_list.dart';
+import '../widgets/flash_on_change.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -329,9 +330,11 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
           final transactionsAsync = ref.watch(transactionsProvider);
           final contactsAsync = ref.watch(contactsProvider);
 
-          return transactionsAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Center(
+          final baseTransactions = transactionsAsync.valueOrNull ?? const <Transaction>[];
+
+          if (transactionsAsync.hasError && baseTransactions.isEmpty) {
+            final e = transactionsAsync.error;
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -343,11 +346,16 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                   ),
                 ],
               ),
-            ),
-            data: (baseTransactions) {
-              final contacts = contactsAsync.valueOrNull ?? const <Contact>[];
-              final contactsById = {for (final c in contacts) c.id: c};
-              final contactNameMap = {for (final c in contacts) c.id: c.name};
+            );
+          }
+
+          if (transactionsAsync.isLoading && baseTransactions.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final contacts = contactsAsync.valueOrNull ?? const <Contact>[];
+          final contactsById = {for (final c in contacts) c.id: c};
+          final contactNameMap = {for (final c in contacts) c.id: c.name};
 
               final transactions = _filterAndSortTransactions(
                 transactions: baseTransactions,
@@ -391,13 +399,17 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                 );
               }
 
-              return RefreshIndicator(
-                onRefresh: () => _refreshData(sync: true),
-                child: DiffAnimatedList<Transaction>(
-                  items: transactions,
-                  itemId: (t) => t.id,
-                  padding: const EdgeInsets.only(bottom: 32),
-                  itemBuilder: (context, transaction, animation) {
+          return Column(
+            children: [
+              if (transactionsAsync.isLoading) const LinearProgressIndicator(minHeight: 2),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () => _refreshData(sync: true),
+                  child: DiffAnimatedList<Transaction>(
+                    items: transactions,
+                    itemId: (t) => t.id,
+                    padding: const EdgeInsets.only(bottom: 32),
+                    itemBuilder: (context, transaction, animation) {
                     final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
 
                     final contactId = transaction.contactId;
@@ -411,6 +423,11 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                         contactName: contactNameFromMap,
                         contact: contactForItem,
                       ),
+                    );
+
+                    transactionItem = FlashOnChange(
+                      signature: '${transaction.id}|${transaction.amount}|${transaction.direction}|${transaction.type}|${transaction.updatedAt.millisecondsSinceEpoch}|${transaction.description}|${transaction.dueDate?.millisecondsSinceEpoch}',
+                      child: transactionItem,
                     );
 
                     // Wrap with Dismissible for swipe actions (only when not in selection mode)
@@ -532,10 +549,11 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                       sizeFactor: animation,
                       child: FadeTransition(opacity: animation, child: inner),
                     );
-                  },
+                    },
+                  ),
                 ),
-              );
-            },
+              ),
+            ],
           );
         },
       ),

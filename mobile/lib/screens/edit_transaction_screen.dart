@@ -11,6 +11,7 @@ import '../models/transaction.dart';
 import '../models/contact.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
@@ -43,6 +44,8 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
   bool _dueDateSwitchEnabled = false; // Switch state for due date
   bool _saving = false;
   List<Contact> _contacts = [];
+  bool _contactsReady = false;
+  ProviderSubscription<AsyncValue<List<Contact>>>? _contactsSub;
 
   // Parse number to integer (removes commas)
   static int _parseNumber(String value) {
@@ -67,8 +70,44 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
     _dueDateSwitchEnabled = widget.transaction.dueDate != null;
     _amountHasText = _amountController.text.isNotEmpty;
     _amountController.addListener(_onAmountChanged);
-    _loadContacts();
     _loadSettings();
+
+    _contactsSub = ref.listenManual<AsyncValue<List<Contact>>>(contactsProvider, (previous, next) {
+      if (!mounted) return;
+      final contacts = next.valueOrNull;
+      if (contacts == null) return;
+
+      setState(() {
+        _contacts = contacts;
+        _contactsReady = true;
+
+        if (_contacts.isNotEmpty) {
+          if (widget.contact != null) {
+            _selectedContact = _contacts.firstWhere(
+              (c) => c.id == widget.contact!.id,
+              orElse: () => _contacts.firstWhere(
+                (c) => c.id == widget.transaction.contactId,
+                orElse: () => widget.contact!,
+              ),
+            );
+          } else {
+            _selectedContact = _contacts.firstWhere(
+              (c) => c.id == widget.transaction.contactId,
+              orElse: () => _contacts.first,
+            );
+          }
+        }
+      });
+    }, fireImmediately: true);
+  }
+
+  @override
+  void dispose() {
+    _contactsSub?.close();
+    _amountController.removeListener(_onAmountChanged);
+    _amountController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
   }
 
   void _onAmountChanged() {
@@ -81,36 +120,8 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
     // Settings loaded, but due date switch state comes from transaction data
   }
 
-  Future<void> _loadContacts() async {
-    try {
-      final jsonStr = await Api.getContacts();
-      final list = jsonDecode(jsonStr) as List<dynamic>? ?? [];
-      final contacts = list.map((e) => Contact.fromJson(e as Map<String, dynamic>)).toList();
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          // Set selected contact - find by ID from loaded list
-          if (widget.contact != null && contacts.isNotEmpty) {
-            _selectedContact = contacts.firstWhere(
-              (c) => c.id == widget.contact!.id,
-              orElse: () => contacts.firstWhere(
-                (c) => c.id == widget.transaction.contactId,
-                orElse: () => contacts.first,
-              ),
-            );
-          } else if (contacts.isNotEmpty) {
-            _selectedContact = contacts.firstWhere(
-              (c) => c.id == widget.transaction.contactId,
-              orElse: () => contacts.first,
-            );
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ToastService.showErrorFromContext(context, 'Error loading contacts: $e');
-      }
-    }
+  void _requestContactsRefresh() {
+    ref.invalidate(contactsProvider);
   }
 
   Future<void> _selectDate() async {
@@ -210,14 +221,6 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
   }
 
   @override
-  void dispose() {
-    _amountController.removeListener(_onAmountChanged);
-    _amountController.dispose();
-    _descriptionController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return GradientBackground(
       child: Scaffold(
@@ -252,9 +255,21 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
             // Contact selector (disabled if contact is fixed)
-            _contacts.isEmpty
+            !_contactsReady
                 ? const Center(child: CircularProgressIndicator())
-                : DropdownButtonFormField<Contact>(
+                : _contacts.isEmpty
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('No contacts available.'),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: _requestContactsRefresh,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : DropdownButtonFormField<Contact>(
                     value: _selectedContact,
                     decoration: const InputDecoration(
                       labelText: 'Contact *',
