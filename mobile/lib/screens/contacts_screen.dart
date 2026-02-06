@@ -47,6 +47,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   Color? _defaultDirectionColor; // Color for default direction (for swipe background)
+  List<Contact> _lastValidContacts = []; // Cache to prevent flash on refresh
 
   @override
   void initState() {
@@ -367,12 +368,18 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         onRefresh: () => _refreshContacts(sync: true),
         child: Builder(
           builder: (context) {
-            if (_loading) {
-              return const Center(child: CircularProgressIndicator());
-            }
+            // if (_loading) {
+            //   return const Center(child: CircularProgressIndicator());
+            // }
 
             final contactsAsync = ref.watch(contactsProvider);
-            final baseContacts = contactsAsync.valueOrNull ?? const <Contact>[];
+            
+            // Update cache if we have a value
+            if (contactsAsync.hasValue) {
+              _lastValidContacts = contactsAsync.value!;
+            }
+            
+            final baseContacts = contactsAsync.valueOrNull ?? _lastValidContacts;
 
             if (contactsAsync.hasError && baseContacts.isEmpty) {
               final e = contactsAsync.error;
@@ -529,10 +536,12 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                         );
               }
               
-              contactItem = FlashOnChange(
-                signature: '${contact.id}|${contact.name}|${contact.username}|${contact.balance}|${contact.updatedAt.millisecondsSinceEpoch}',
-                child: contactItem,
-              );
+              if (!_selectionMode) {
+                contactItem = FlashOnChange(
+                  signature: '${contact.id}|${contact.name}|${contact.username}|${contact.balance}|${contact.updatedAt.millisecondsSinceEpoch}',
+                  child: contactItem,
+                );
+              }
 
               return SizeTransition(
                 key: ValueKey(contact.id),

@@ -62,7 +62,9 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
 
       // Keep showing existing list while loading.
       if (next.isLoading && (next.valueOrNull == null || next.valueOrNull!.isEmpty)) {
-        setState(() => _loading = true);
+        if (_allEvents.isEmpty) {
+          setState(() => _loading = true);
+        }
         return;
       }
 

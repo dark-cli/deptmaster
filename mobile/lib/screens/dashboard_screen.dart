@@ -28,6 +28,9 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  List<Contact> _lastValidContacts = [];
+  List<Transaction> _lastValidTransactions = [];
+
   @override
   void initState() {
     super.initState();
@@ -81,14 +84,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final contactsAsync = ref.watch(contactsProvider);
     final transactionsAsync = ref.watch(transactionsProvider);
-    final contacts = contactsAsync.valueOrNull ?? const <Contact>[];
-    final transactions = transactionsAsync.valueOrNull ?? const <Transaction>[];
+    
+    if (contactsAsync.hasValue) {
+      _lastValidContacts = contactsAsync.value!;
+    }
+    if (transactionsAsync.hasValue) {
+      _lastValidTransactions = transactionsAsync.value!;
+    }
+    
+    final contacts = contactsAsync.valueOrNull ?? _lastValidContacts;
+    final transactions = transactionsAsync.valueOrNull ?? _lastValidTransactions;
 
     // Watch due date enabled setting
     final dueDateEnabled = ref.watch(dueDateEnabledProvider);
     
     final loading = (contactsAsync.isLoading || transactionsAsync.isLoading) &&
-        (contactsAsync.valueOrNull == null || transactionsAsync.valueOrNull == null);
+        (contacts.isEmpty && transactions.isEmpty); // Only show loader if we have NO data at all
     if (loading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),

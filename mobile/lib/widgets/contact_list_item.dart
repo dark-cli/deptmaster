@@ -5,6 +5,7 @@ import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/text_utils.dart';
+import 'avatar_with_selection.dart';
 
 class ContactListItem extends StatelessWidget {
   final Contact contact;
@@ -154,24 +155,23 @@ class ContactListItem extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 16),
-              // Left side: Avatar (or Checkbox in selection mode)
-              isSelected
-                  ? Checkbox(
-                      value: true,
-                      onChanged: (value) => onSelectionChanged?.call(),
-                    )
-                  : CircleAvatar(
-                      backgroundColor: avatarColor.withOpacity(0.2),
-                      radius: 24,
-                      child: Text(
-                        contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
-                        style: TextStyle(
-                          color: avatarColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
+              // Left side: Avatar with optional selection checkmark
+              AvatarWithSelection(
+                avatar: CircleAvatar(
+                  backgroundColor: avatarColor.withOpacity(0.2),
+                  radius: 24,
+                  child: Text(
+                    contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
+                    style: TextStyle(
+                      color: avatarColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
                     ),
+                  ),
+                ),
+                radius: 24,
+                isSelected: isSelected,
+              ),
             ],
           ),
         ),

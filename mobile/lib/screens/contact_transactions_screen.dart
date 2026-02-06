@@ -18,6 +18,7 @@ import 'edit_transaction_screen.dart';
 import 'edit_contact_screen.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
+import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
 import '../widgets/flash_on_change.dart';
 import '../utils/bottom_sheet_helper.dart';
@@ -38,6 +39,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
   bool _loading = false; // local busy state for UI actions (delete/bulk delete)
   Set<String> _selectedTransactions = {}; // For multi-select
   bool _selectionMode = false;
+  List<Transaction> _lastValidTransactions = []; // Cache to prevent flash on refresh
 
   @override
   void initState() {
@@ -208,12 +210,16 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
       ),
       body: Builder(
         builder: (context) {
-          if (_loading) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          // if (_loading) {
+          //   return const Center(child: CircularProgressIndicator());
+          // }
 
           final txAsync = ref.watch(transactionsProvider);
-          final baseTx = txAsync.valueOrNull ?? const <Transaction>[];
+          // Update cache if we have a value
+          if (txAsync.hasValue) {
+            _lastValidTransactions = txAsync.value!;
+          }
+          final baseTx = txAsync.valueOrNull ?? _lastValidTransactions;
 
           if (txAsync.hasError && baseTx.isEmpty) {
             final e = txAsync.error;
@@ -326,30 +332,28 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                           itemBuilder: (context, transaction, animation) {
                             final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
 
-                            Widget transactionItem = Container(
-                              color: isSelected ? Colors.blue.withOpacity(0.1) : null,
-                              child: _TransactionListItem(
-                                transaction: transaction,
-                                isSelected: _selectionMode ? isSelected : null,
-                                selectionMode: _selectionMode,
-                                onSelectionChanged: _selectionMode
-                                    ? () {
-                                        setState(() {
-                                          if (_selectedTransactions.contains(transaction.id)) {
-                                            _selectedTransactions.remove(transaction.id);
-                                          } else {
-                                            _selectedTransactions.add(transaction.id);
-                                          }
-                                        });
-                                      }
-                                    : () {
-                                        // Long press starts selection mode
-                                        setState(() {
-                                          _selectionMode = true;
+                            Widget transactionItem = _TransactionListItem(
+                              transaction: transaction,
+                              isSelected: _selectionMode ? isSelected : null,
+                              selectionMode: _selectionMode,
+                              onSelectionChanged: _selectionMode
+                                  ? () {
+                                      setState(() {
+                                        if (_selectedTransactions.contains(transaction.id)) {
+                                          _selectedTransactions.remove(transaction.id);
+                                        } else {
                                           _selectedTransactions.add(transaction.id);
-                                        });
-                                      },
-                                onEdit: () async {
+                                        }
+                                      });
+                                    }
+                                  : () {
+                                      // Long press starts selection mode
+                                      setState(() {
+                                        _selectionMode = true;
+                                        _selectedTransactions.add(transaction.id);
+                                      });
+                                    },
+                              onEdit: () async {
                                   final result = await showScreenAsBottomSheet(
                                     context: context,
                                     screen: EditTransactionScreen(
@@ -406,14 +410,15 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                     }
                                   }
                                 },
-                              ),
-                            );
+                              );
 
-                            transactionItem = FlashOnChange(
-                              signature:
-                                  '${transaction.id}|${transaction.amount}|${transaction.direction}|${transaction.type}|${transaction.updatedAt.millisecondsSinceEpoch}|${transaction.description}|${transaction.dueDate?.millisecondsSinceEpoch}',
-                              child: transactionItem,
-                            );
+                            if (!_selectionMode) {
+                              transactionItem = FlashOnChange(
+                                signature:
+                                    '${transaction.id}|${transaction.amount}|${transaction.direction}|${transaction.type}|${transaction.updatedAt.millisecondsSinceEpoch}|${transaction.description}|${transaction.dueDate?.millisecondsSinceEpoch}',
+                                child: transactionItem,
+                              );
+                            }
 
                             if (!_selectionMode) {
                               final inner = Dismissible(
@@ -573,21 +578,20 @@ class _TransactionListItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
-              // Left side: Avatar (or Checkbox in selection mode)
-              isSelected != null && isSelected == true
-                  ? Checkbox(
-                      value: true,
-                      onChanged: (value) => onSelectionChanged?.call(),
-                    )
-                  : CircleAvatar(
-                      backgroundColor: color.withOpacity(0.2),
-                      radius: 20,
-                      child: Icon(
-                        Icons.attach_money,
-                        color: color,
-                        size: 16,
-                      ),
-                    ),
+              // Left side: Avatar with optional selection checkmark (same as transaction card)
+              AvatarWithSelection(
+                radius: 20,
+                isSelected: isSelected == true,
+                avatar: CircleAvatar(
+                  backgroundColor: color.withOpacity(0.2),
+                  radius: 20,
+                  child: Icon(
+                    Icons.attach_money,
+                    color: color,
+                    size: 16,
+                  ),
+                ),
+              ),
               const SizedBox(width: 12),
               // Description and Date
               Expanded(

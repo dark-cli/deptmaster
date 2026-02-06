@@ -13,7 +13,7 @@ class FlashOnChange extends StatefulWidget {
     super.key,
     required this.signature,
     required this.child,
-    this.duration = const Duration(milliseconds: 900),
+    this.duration = const Duration(milliseconds: 250),
     this.color = const Color(0xFF4FC3F7), // light blue-ish
   });
 
@@ -22,6 +22,7 @@ class FlashOnChange extends StatefulWidget {
 }
 
 class _FlashOnChangeState extends State<FlashOnChange> {
+  /// Only show overlay after a real signature change (not on first build or selection toggles).
   int _token = 0;
 
   @override
@@ -34,6 +35,10 @@ class _FlashOnChangeState extends State<FlashOnChange> {
 
   @override
   Widget build(BuildContext context) {
+    // Skip overlay on first build so we don't cover the screen when list appears or selection mode changes.
+    if (_token == 0) {
+      return widget.child;
+    }
     return Stack(
       children: [
         widget.child,

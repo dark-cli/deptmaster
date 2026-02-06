@@ -18,6 +18,7 @@ import 'edit_transaction_screen.dart';
 import 'add_transaction_screen.dart';
 import '../widgets/sync_status_icon.dart';
 import '../utils/bottom_sheet_helper.dart';
+import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
 import '../widgets/flash_on_change.dart';
 
@@ -48,6 +49,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   String? _lastMissingContactsHash; // Track missing contacts to avoid repeated warnings
+  List<Transaction> _lastValidTransactions = []; // Cache to prevent flash on refresh
 
   @override
   void initState() {
@@ -324,13 +326,18 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
       ),
       body: Builder(
         builder: (context) {
-          if (_loading) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          // if (_loading) {
+          //   return const Center(child: CircularProgressIndicator());
+          // }
           final transactionsAsync = ref.watch(transactionsProvider);
           final contactsAsync = ref.watch(contactsProvider);
 
-          final baseTransactions = transactionsAsync.valueOrNull ?? const <Transaction>[];
+          // Update cache if we have a value
+          if (transactionsAsync.hasValue) {
+            _lastValidTransactions = transactionsAsync.value!;
+          }
+
+          final baseTransactions = transactionsAsync.valueOrNull ?? _lastValidTransactions;
 
           if (transactionsAsync.hasError && baseTransactions.isEmpty) {
             final e = transactionsAsync.error;
@@ -416,16 +423,14 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     final contactNameFromMap = contactNameMap[contactId];
                     final contactForItem = contactsById[contactId];
 
-                    Widget transactionItem = Container(
-                      color: isSelected ? Colors.blue.withOpacity(0.1) : null,
-                      child: TransactionListItem(
-                        transaction: transaction,
-                        contactName: contactNameFromMap,
-                        contact: contactForItem,
-                      ),
+                    Widget transactionItem = TransactionListItem(
+                      transaction: transaction,
+                      contactName: contactNameFromMap,
+                      contact: contactForItem,
+                      isSelected: _selectionMode ? isSelected : null,
                     );
 
-                    transactionItem = FlashOnChange(
+                    if (!_selectionMode) transactionItem = FlashOnChange(
                       signature: '${transaction.id}|${transaction.amount}|${transaction.direction}|${transaction.type}|${transaction.updatedAt.millisecondsSinceEpoch}|${transaction.description}|${transaction.dueDate?.millisecondsSinceEpoch}',
                       child: transactionItem,
                     );
@@ -532,6 +537,17 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     }
 
                     final inner = GestureDetector(
+                      onTap: () {
+                        if (_selectionMode) {
+                          setState(() {
+                            if (_selectedTransactions.contains(transaction.id)) {
+                              _selectedTransactions.remove(transaction.id);
+                            } else {
+                              _selectedTransactions.add(transaction.id);
+                            }
+                          });
+                        }
+                      },
                       onLongPress: () {
                         setState(() {
                           _selectionMode = true;
@@ -566,12 +582,14 @@ class TransactionListItem extends StatelessWidget {
   final Transaction transaction;
   final String? contactName;
   final Contact? contact;
+  final bool? isSelected;
 
   const TransactionListItem({
     super.key,
     required this.transaction,
     this.contactName,
     this.contact,
+    this.isSelected,
   });
 
   String _getContactName() {
@@ -631,16 +649,20 @@ class TransactionListItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
-              // Left side: Avatar
-              CircleAvatar(
-          backgroundColor: color.withOpacity(0.2),
+              // Left side: Avatar with optional selection checkmark
+              AvatarWithSelection(
                 radius: 24,
-          child: Icon(
-            Icons.attach_money,
-            color: color,
-                  size: 18,
-          ),
-        ),
+                isSelected: isSelected ?? false,
+                avatar: CircleAvatar(
+                  backgroundColor: color.withOpacity(0.2),
+                  radius: 24,
+                  child: Icon(
+                    Icons.attach_money,
+                    color: color,
+                    size: 18,
+                  ),
+                ),
+              ),
               const SizedBox(width: 16),
               // Name, Username, and Description/Date
               Expanded(
