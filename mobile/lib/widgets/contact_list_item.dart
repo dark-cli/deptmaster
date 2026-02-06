@@ -5,6 +5,7 @@ import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/text_utils.dart';
+import 'animated_pixelated_text.dart';
 import 'avatar_with_selection.dart';
 
 class ContactListItem extends StatelessWidget {
@@ -99,7 +100,7 @@ class ContactListItem extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (balance != 0)
-                      Text(
+                      AnimatedPixelatedText(
                         '${_formatAmount(balance)} IQD',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
@@ -107,7 +108,6 @@ class ContactListItem extends StatelessWidget {
                           color: avatarColor,
                         ),
                         textAlign: TextAlign.right,
-                        overflow: TextOverflow.ellipsis,
                       )
                     else
                       const SizedBox(height: 18), // Reserve space when balance is 0

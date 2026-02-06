@@ -21,6 +21,7 @@ import '../utils/bottom_sheet_helper.dart';
 import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
 import '../widgets/flash_on_change.dart';
+import '../widgets/animated_pixelated_text.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -758,7 +759,7 @@ class TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
+                    AnimatedPixelatedText(
                       '${_formatAmount(amount)} IQD',
           style: TextStyle(
             fontWeight: FontWeight.bold,

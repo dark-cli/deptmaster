@@ -13,6 +13,7 @@ import '../utils/theme_colors.dart';
 import '../widgets/gradient_card.dart';
 import '../widgets/sync_status_icon.dart';
 import '../widgets/debt_chart_widget.dart';
+import '../widgets/animated_pixelated_text.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
 import 'debt_chart_detail_screen.dart';
@@ -243,7 +244,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 style: Theme.of(context).textTheme.labelMedium,
               ),
               const SizedBox(height: 8),
-              Text(
+              AnimatedPixelatedText(
                 '$balanceText IQD',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
@@ -428,17 +429,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      '$formatted IQD',
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        color: debtColor,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                    ),
-                                  ),
+                          Flexible(
+                            child: AnimatedPixelatedText(
+                              '$formatted IQD',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: debtColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
                                 ],
                               ),
                             ),
@@ -518,17 +519,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      '$formatted IQD',
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        color: creditColor,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                    ),
-                                  ),
+                          Flexible(
+                            child: AnimatedPixelatedText(
+                              '$formatted IQD',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: creditColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
                                 ],
                               ),
                             ),
@@ -621,7 +622,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                   ),
                                 ],
                                 const SizedBox(height: 2),
-                                Text(
+                                AnimatedPixelatedText(
                                   '$formattedAmount • $formattedDate',
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: ThemeColors.gray(context, shade: 600),
