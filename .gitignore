@@ -39,3 +39,6 @@ Thumbs.db
 # Backups
 backups/
 *.backup
+
+# Native / build artifacts (Flutter–Rust bridge, Android)
+mobile/android/app/src/main/jniLibs/
