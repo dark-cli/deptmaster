@@ -741,7 +741,8 @@ class Api {
       _wsConnecting = false;
       _wsConnected = true;
       _notifyConnectionStateChanged();
-      manualSync().catchError((_) {});
+      // Check login when we get online: if server declines (401), validateAuth logs out and cleans up. It also runs manualSync.
+      validateAuth().catchError((_) {});
     } catch (_) {
       _wsConnecting = false;
       _reconnectWs();

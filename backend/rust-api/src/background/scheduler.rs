@@ -20,13 +20,14 @@ impl BackgroundScheduler {
     ) -> anyhow::Result<Self> {
         let scheduler = JobScheduler::new().await?;
 
-        // Example: Daily cleanup at 2 AM
+        // Example: Daily cleanup at 2 AM (e.g. old projection_snapshots, expired data).
+        // Not related to app login/logout; app-side logout is in Flutter/Rust client (token + config clear).
         scheduler
             .add(
                 Job::new_async("0 0 2 * * *", |_uuid, _l| {
                     Box::pin(async move {
                         info!("Running daily cleanup job");
-                        // TODO: Implement cleanup logic
+                        // Optional: prune old projection_snapshots, etc. Leave no-op for now.
                     })
                 })?
             )
