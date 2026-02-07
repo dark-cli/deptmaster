@@ -20,14 +20,14 @@ impl BackgroundScheduler {
     ) -> anyhow::Result<Self> {
         let scheduler = JobScheduler::new().await?;
 
-        // Example: Daily cleanup at 2 AM (e.g. old projection_snapshots, expired data).
-        // Not related to app login/logout; app-side logout is in Flutter/Rust client (token + config clear).
+        // projection_snapshots are wallet-scoped and already capped on save: we keep only
+        // MAX_SNAPSHOTS (5) per wallet and prune when saving a new one (cleanup_old_snapshots).
+        // No daily cleanup job needed for snapshots. Placeholder for any future global maintenance.
         scheduler
             .add(
                 Job::new_async("0 0 2 * * *", |_uuid, _l| {
                     Box::pin(async move {
-                        info!("Running daily cleanup job");
-                        // Optional: prune old projection_snapshots, etc. Leave no-op for now.
+                        info!("Daily maintenance job (no-op; projection_snapshots are pruned per-wallet on save)");
                     })
                 })?
             )

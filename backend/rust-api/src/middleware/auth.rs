@@ -37,15 +37,23 @@ pub async fn auth_middleware(
         return Ok(next.run(req).await);
     }
 
+    /// 401 with clear code so client only logs out when server explicitly says auth declined (not on network errors).
+    fn auth_declined_response() -> Response {
+        let body = serde_json::json!({
+            "code": "DEBITUM_AUTH_DECLINED",
+            "message": "Authentication required or session invalid"
+        });
+        (StatusCode::UNAUTHORIZED, Json(body)).into_response()
+    }
+
     // Extract token from Authorization header
-    let auth_header = req
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let auth_header = match req.headers().get(AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+        Some(h) => h,
+        None => return Ok(auth_declined_response()),
+    };
 
     if !auth_header.starts_with("Bearer ") {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Ok(auth_declined_response());
     }
 
     let token = &auth_header[7..]; // Skip "Bearer "
@@ -54,14 +62,18 @@ pub async fn auth_middleware(
     let decoding_key = DecodingKey::from_secret(state.config.jwt_secret.as_ref());
     let validation = Validation::new(Algorithm::HS256);
 
-    let token_data = decode::<Claims>(token, &decoding_key, &validation)
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let token_data = match decode::<Claims>(token, &decoding_key, &validation) {
+        Ok(d) => d,
+        Err(_) => return Ok(auth_declined_response()),
+    };
 
     let claims = token_data.claims;
 
     // Parse user_id
-    let user_id = Uuid::parse_str(&claims.user_id)
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let user_id = match Uuid::parse_str(&claims.user_id) {
+        Ok(u) => u,
+        Err(_) => return Ok(auth_declined_response()),
+    };
 
     // Determine if this token belongs to an active admin.
     let is_admin = sqlx::query_scalar::<_, bool>(
@@ -82,7 +94,7 @@ pub async fn auth_middleware(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         if !user_exists {
-            return Err(StatusCode::UNAUTHORIZED);
+            return Ok(auth_declined_response());
         }
     }
 

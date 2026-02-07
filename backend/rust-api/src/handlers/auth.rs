@@ -138,7 +138,10 @@ pub async fn login(
             
             return Err((
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "Invalid username or password"})),
+                Json(serde_json::json!({
+                    "code": "DEBITUM_AUTH_DECLINED",
+                    "message": "Invalid username or password"
+                })),
             ));
         }
     };
@@ -171,7 +174,10 @@ pub async fn login(
         
         return Err((
             StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "Invalid username or password"})),
+            Json(serde_json::json!({
+                "code": "DEBITUM_AUTH_DECLINED",
+                "message": "Invalid username or password"
+            })),
         ));
     }
 

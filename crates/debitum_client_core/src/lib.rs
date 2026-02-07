@@ -237,11 +237,18 @@ pub fn get_events() -> Result<String, String> {
 }
 
 // --- Sync ---
+/// Sync with server. If server responds with DEBITUM_AUTH_DECLINED, Rust clears session (logout) and returns that error; Dart only needs to react (e.g. show login).
 pub fn manual_sync() -> Result<(), String> {
-    sync::full_sync().map_err(|e| {
-        rust_log!("[debitum_rs] manual_sync failed: {}", e);
-        e
-    })
+    match sync::full_sync() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            if e.contains("DEBITUM_AUTH_DECLINED") {
+                let _ = crud::logout();
+            }
+            rust_log!("[debitum_rs] manual_sync failed: {}", e);
+            Err(e)
+        }
+    }
 }
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).

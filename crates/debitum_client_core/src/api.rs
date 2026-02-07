@@ -43,6 +43,9 @@ pub fn login(username: String, password: String) -> Result<(), String> {
         let resp = CLIENT.post(&url).json(&body).send().await.map_err(|e| e.to_string())?;
         let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
+        if status.as_u16() == 401 && text.contains("DEBITUM_AUTH_DECLINED") {
+            return Err::<(), String>("DEBITUM_AUTH_DECLINED".to_string());
+        }
         if !status.is_success() {
             return Err(format!("Login failed: {} - {}", status, text));
         }
@@ -73,7 +76,14 @@ pub(crate) fn get_sync_events(since: Option<String>) -> Result<Vec<serde_json::V
             q.push(("since", s));
         }
         let resp = CLIENT.get(&url).query(&q).headers(headers).send().await.map_err(|e| e.to_string())?;
+        let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
+        if status.as_u16() == 401 && text.contains("DEBITUM_AUTH_DECLINED") {
+            return Err::<Vec<serde_json::Value>, String>("DEBITUM_AUTH_DECLINED".to_string());
+        }
+        if !status.is_success() {
+            return Err(format!("{} {}", status, text));
+        }
         let arr: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| e.to_string())?;
         Ok(arr)
     })
@@ -101,6 +111,9 @@ pub(crate) fn post_sync_events(events_json: Vec<String>) -> Result<Vec<String>, 
         // Only treat as "permission denied" when the server body contains our unique code (never in network errors).
         if status.as_u16() == 403 && text.contains("DEBITUM_INSUFFICIENT_WALLET_PERMISSION") {
             return Err::<Vec<String>, String>("DEBITUM_INSUFFICIENT_WALLET_PERMISSION".to_string());
+        }
+        if status.as_u16() == 401 && text.contains("DEBITUM_AUTH_DECLINED") {
+            return Err::<Vec<String>, String>("DEBITUM_AUTH_DECLINED".to_string());
         }
         if status.as_u16() == 401 {
             return Err::<Vec<String>, String>(format!("401 Unauthorized {}", text));

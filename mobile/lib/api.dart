@@ -252,6 +252,7 @@ class Api {
     }
   }
 
+  /// Call when coming online or to revalidate. Rust does sync and, if server sends DEBITUM_AUTH_DECLINED, Rust logs out and cleans up; Dart only reacts by calling onLogout for UI.
   static Future<bool> validateAuth() async {
     if (kIsWeb) return false;
     try {
@@ -260,11 +261,8 @@ class Api {
       _notifyConnectionStateChanged();
       return true;
     } catch (e) {
-      final s = e.toString().toLowerCase();
-      if (s.contains('401') || s.contains('authentication') || s.contains('expired')) {
-        try {
-          await rust.logout();
-        } catch (_) {}
+      final s = e.toString();
+      if (s.contains('DEBITUM_AUTH_DECLINED')) {
         onLogout?.call();
         return false;
       }
