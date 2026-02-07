@@ -1,5 +1,6 @@
 // ignore_for_file: unused_import, unused_local_variable
 
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../utils/text_utils.dart';
@@ -20,7 +21,6 @@ import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
 import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
-import '../widgets/flash_on_change.dart';
 import '../widgets/animated_pixelated_text.dart';
 import '../widgets/glitch_transition.dart';
 import '../utils/bottom_sheet_helper.dart';
@@ -319,7 +319,6 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                   onRefresh: () => _refresh(sync: true),
                   child: Column(
                     children: [
-                      if (txAsync.isLoading) const LinearProgressIndicator(minHeight: 2),
                       Expanded(
                         child: Stack(
                           children: [
@@ -330,20 +329,26 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                               itemBuilder: (context, transaction, animation) {
                             final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
                             final isRemoving = animation.status == AnimationStatus.reverse;
+                            // Add: 1) card scrambled + move (expand) 0-300ms, 2) delay 300ms, 3) glitch to real 600-800ms.
+                            // Remove: 1) glitch to scrambles 0-300ms, 2) delay 300ms, 3) move (shrink) 600-800ms.
                             final moveAnimation = CurvedAnimation(
                               parent: animation,
                               curve: isRemoving
-                                  ? const Interval(0.0, 0.5, curve: Curves.easeIn)
-                                  : const Interval(0.5, 1.0, curve: Curves.easeOut),
+                                  ? const Interval(0.0, 0.25, curve: Curves.easeIn)  // Remove: shrink in last 300ms
+                                  : const Interval(0.0, 0.375, curve: Curves.easeOut), // Add: expand in first 300ms
                             );
                             final glitchAnimation = CurvedAnimation(
                               parent: animation,
                               curve: isRemoving
-                                  ? const Interval(0.0, 1.0, curve: Curves.easeOut)
-                                  : const Interval(0.0, 0.5, curve: Curves.easeOut),
+                                  ? const Interval(0.625, 1.0, curve: Curves.easeOut) // Remove: glitch to scramble first 300ms
+                                  : const Interval(0.75, 1.0, curve: Curves.easeOut),   // Add: glitch to real last 200ms
                             );
 
-                            Widget transactionItem = _TransactionListItem(
+                            Widget transactionItem = AnimatedBuilder(
+                              animation: animation,
+                              builder: (context, _) {
+                                final showScrambleForInsert = !isRemoving && animation.value < 0.75;
+                                return _TransactionListItem(
                               transaction: transaction,
                               isSelected: _selectionMode ? isSelected : null,
                               selectionMode: _selectionMode,
@@ -423,15 +428,10 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                                     }
                                   }
                                 },
+                                showScrambleForInsert: showScrambleForInsert,
                               );
-
-                            if (!_selectionMode) {
-                              transactionItem = FlashOnChange(
-                                signature:
-                                    '${transaction.id}|${transaction.amount}|${transaction.direction}|${transaction.type}|${transaction.updatedAt.millisecondsSinceEpoch}|${transaction.description}|${transaction.dueDate?.millisecondsSinceEpoch}',
-                                child: transactionItem,
-                              );
-                            }
+                              },
+                            );
 
                             if (!_selectionMode) {
                               final inner = Dismissible(
@@ -540,6 +540,7 @@ class _TransactionListItem extends StatelessWidget {
   final bool selectionMode; // Track if we're in selection mode
   final Animation<double>? glitchAnimation;
   final bool isRemoving;
+  final bool showScrambleForInsert;
 
   const _TransactionListItem({
     required this.transaction,
@@ -550,6 +551,7 @@ class _TransactionListItem extends StatelessWidget {
     this.selectionMode = false,
     this.glitchAnimation,
     this.isRemoving = false,
+    this.showScrambleForInsert = false,
   });
 
   @override
@@ -595,11 +597,13 @@ class _TransactionListItem extends StatelessWidget {
     TextOverflow? overflow,
     int? maxLines,
   }) {
-    final shouldScramble = isRemoving && text.trim().isNotEmpty;
+    final shouldScramble = (isRemoving || showScrambleForInsert) && text.trim().isNotEmpty;
+    final hasArabic = TextUtils.hasArabic(text);
     final base = AnimatedPixelatedText(
       text,
       style: style,
       textAlign: textAlign,
+      textDirection: hasArabic ? ui.TextDirection.rtl : ui.TextDirection.ltr,
       overflow: overflow,
       maxLines: maxLines,
       forceScramble: shouldScramble,

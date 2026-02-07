@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
@@ -17,6 +18,7 @@ class ContactListItem extends StatelessWidget {
   final bool flipColors;
   final Animation<double>? glitchAnimation;
   final bool isRemoving;
+  final bool showScrambleForInsert;
 
   const ContactListItem({
     super.key,
@@ -27,6 +29,7 @@ class ContactListItem extends StatelessWidget {
     this.flipColors = false,
     this.glitchAnimation,
     this.isRemoving = false,
+    this.showScrambleForInsert = false,
   });
 
   String _getStatus(int balance, bool flipColors) {
@@ -69,11 +72,13 @@ class ContactListItem extends StatelessWidget {
     TextOverflow? overflow,
     int? maxLines,
   }) {
-    final shouldScramble = isRemoving && text.trim().isNotEmpty;
+    final shouldScramble = (isRemoving || showScrambleForInsert) && text.trim().isNotEmpty;
+    final hasArabic = TextUtils.hasArabic(text);
     final base = AnimatedPixelatedText(
       text,
       style: style,
       textAlign: textAlign,
+      textDirection: hasArabic ? ui.TextDirection.rtl : ui.TextDirection.ltr,
       overflow: overflow,
       maxLines: maxLines,
       forceScramble: shouldScramble,
@@ -122,7 +127,7 @@ class ContactListItem extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
-            textDirection: TextDirection.rtl, // RTL layout: start from right
+            textDirection: ui.TextDirection.rtl, // RTL layout: start from right
             children: [
               // Right side: Amount and Status (fixed width)
               SizedBox(
@@ -157,6 +162,8 @@ class ContactListItem extends StatelessWidget {
                         color: ThemeColors.gray(context, shade: 600),
                       ),
                       textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -170,12 +177,16 @@ class ContactListItem extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _glitchText(
-                      TextUtils.forceLtr(contact.name),
+                      TextUtils.hasArabic(contact.name)
+                          ? contact.name
+                          : TextUtils.forceLtr(contact.name),
                       const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.right,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (contact.username != null && contact.username!.isNotEmpty) ...[
                       const SizedBox(height: 2),
@@ -186,6 +197,8 @@ class ContactListItem extends StatelessWidget {
                           fontSize: 12,
                         ),
                         textAlign: TextAlign.right,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],

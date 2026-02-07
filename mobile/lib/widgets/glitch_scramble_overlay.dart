@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 /// Paints a random-character scramble overlay across available space.
@@ -61,7 +62,7 @@ class _GlitchScramblePainter extends CustomPainter {
       height: 1.0,
     );
     final textPainter = TextPainter(
-      textDirection: TextDirection.ltr,
+      textDirection: ui.TextDirection.ltr,
     );
 
     final stepX = fontSize * 0.9;

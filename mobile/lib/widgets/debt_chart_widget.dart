@@ -328,7 +328,10 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     // Build chart key separately to avoid string interpolation issues
     final chartKeySuffix = invertY ? 'inverted' : 'normal';
     final chartKeyState = 'active';
-    final chartKey = 'chart_${period}_${chartKeySuffix}_${chartKeyState}';
+    // Include wallet ID in key to force fresh chart instance on wallet switch
+    // This prevents "disposed RenderObject" errors when animating between unrelated datasets
+    final walletId = activeWalletId ?? 'no_wallet';
+    final chartKey = 'chart_${walletId}_${period}_${chartKeySuffix}_${chartKeyState}';
     
     // Calculate min/max for proper boundaries with padding
     final allYValues = chartData.map((d) => d.y).toList();

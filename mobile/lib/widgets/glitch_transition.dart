@@ -16,9 +16,9 @@ class GlitchTransition extends StatelessWidget {
     super.key,
     required this.animation,
     required this.child,
-    this.maxX = 12,
-    this.maxY = 6,
-    this.flickerChance = 0.4,
+    this.maxX = 4, // Reduced from 12
+    this.maxY = 2, // Reduced from 6
+    this.flickerChance = 0.2, // Reduced from 0.4
     this.showScramble = true,
   });
 

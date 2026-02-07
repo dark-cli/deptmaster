@@ -1,6 +1,7 @@
 // ignore_for_file: unused_field, unused_local_variable
 
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../utils/text_utils.dart';
@@ -20,7 +21,6 @@ import '../widgets/sync_status_icon.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
-import '../widgets/flash_on_change.dart';
 import '../widgets/animated_pixelated_text.dart';
 import '../widgets/glitch_transition.dart';
 
@@ -410,7 +410,6 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
 
           return Column(
             children: [
-              if (transactionsAsync.isLoading) const LinearProgressIndicator(minHeight: 2),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () => _refreshData(sync: true),
@@ -421,36 +420,42 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     itemBuilder: (context, transaction, animation) {
                     final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
                     final isRemoving = animation.status == AnimationStatus.reverse;
-                    final moveAnimation = CurvedAnimation(
-                      parent: animation,
-                      curve: isRemoving
-                          ? const Interval(0.0, 0.5, curve: Curves.easeIn)
-                          : const Interval(0.5, 1.0, curve: Curves.easeOut),
-                    );
-                    final glitchAnimation = CurvedAnimation(
-                      parent: animation,
-                      curve: isRemoving
-                          ? const Interval(0.0, 1.0, curve: Curves.easeOut)
-                          : const Interval(0.0, 0.5, curve: Curves.easeOut),
-                    );
+                            // Add: 1) card scrambled + move (expand) 0-300ms, 2) delay 300ms, 3) glitch to real 600-800ms.
+                            // Remove: 1) glitch to scrambles 0-300ms, 2) delay 300ms, 3) move (shrink) 600-800ms.
+                            final moveAnimation = CurvedAnimation(
+                              parent: animation,
+                              curve: isRemoving
+                                  ? const Interval(0.0, 0.25, curve: Curves.easeIn)  // Remove: shrink in last 300ms (parent 0.25→0)
+                                  : const Interval(0.0, 0.375, curve: Curves.easeOut), // Add: expand in first 300ms
+                            );
+                            final glitchAnimation = CurvedAnimation(
+                              parent: animation,
+                              curve: isRemoving
+                                  ? const Interval(0.625, 1.0, curve: Curves.easeOut) // Remove: glitch to scramble in first 300ms (parent 1→0.625)
+                                  : const Interval(0.75, 1.0, curve: Curves.easeOut),   // Add: glitch to real in last 200ms (parent 0.75→1)
+                            );
 
                     final contactId = transaction.contactId;
                     final contactNameFromMap = contactNameMap[contactId];
                     final contactForItem = contactsById[contactId];
 
-                    Widget transactionItem = TransactionListItem(
-                      transaction: transaction,
-                      contactName: contactNameFromMap,
-                      contact: contactForItem,
-                      isSelected: _selectionMode ? isSelected : null,
-                      isRemoving: isRemoving,
-                      glitchAnimation: glitchAnimation,
+                    Widget transactionItem = AnimatedBuilder(
+                      animation: animation,
+                      builder: (context, _) {
+                        // Add: show scramble until glitch phase starts (after move + 300ms delay)
+                        final showScrambleForInsert = !isRemoving && animation.value < 0.75;
+                        return TransactionListItem(
+                          transaction: transaction,
+                          contactName: contactNameFromMap,
+                          contact: contactForItem,
+                          isSelected: _selectionMode ? isSelected : null,
+                          isRemoving: isRemoving,
+                          glitchAnimation: glitchAnimation,
+                          showScrambleForInsert: showScrambleForInsert,
+                        );
+                      },
                     );
 
-                    if (!_selectionMode) transactionItem = FlashOnChange(
-                      signature: '${transaction.id}|${transaction.amount}|${transaction.direction}|${transaction.type}|${transaction.updatedAt.millisecondsSinceEpoch}|${transaction.description}|${transaction.dueDate?.millisecondsSinceEpoch}',
-                      child: transactionItem,
-                    );
 
                     // Wrap with Dismissible for swipe actions (only when not in selection mode)
                     if (!_selectionMode) {
@@ -602,6 +607,7 @@ class TransactionListItem extends StatelessWidget {
   final bool? isSelected;
   final bool isRemoving;
   final Animation<double>? glitchAnimation;
+  final bool showScrambleForInsert;
 
   const TransactionListItem({
     super.key,
@@ -611,6 +617,7 @@ class TransactionListItem extends StatelessWidget {
     this.isSelected,
     this.isRemoving = false,
     this.glitchAnimation,
+    this.showScrambleForInsert = false,
   });
 
   String _getContactName() {
@@ -662,11 +669,13 @@ class TransactionListItem extends StatelessWidget {
     TextOverflow? overflow,
     int? maxLines,
   }) {
-    final shouldScramble = isRemoving && text.trim().isNotEmpty;
+    final shouldScramble = (isRemoving || showScrambleForInsert) && text.trim().isNotEmpty;
+    final hasArabic = TextUtils.hasArabic(text);
     final base = AnimatedPixelatedText(
       text,
       style: style,
       textAlign: textAlign,
+      textDirection: hasArabic ? ui.TextDirection.rtl : ui.TextDirection.ltr,
       overflow: overflow,
       maxLines: maxLines,
       forceScramble: shouldScramble,
@@ -721,11 +730,15 @@ class TransactionListItem extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
                     _glitchText(
-                      TextUtils.forceLtr(contactName),
+                      TextUtils.hasArabic(contactName)
+                          ? contactName
+                          : TextUtils.forceLtr(contactName),
                       const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     // Always reserve space for username to maintain consistent card height
                     if (contact?.username != null && contact!.username!.isNotEmpty) ...[
@@ -736,6 +749,8 @@ class TransactionListItem extends StatelessWidget {
                           color: ThemeColors.gray(context, shade: 500),
                           fontSize: 12,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ] else ...[
                       // Reserve same space when username is missing (2px spacing + 14px text height)
@@ -825,6 +840,8 @@ class TransactionListItem extends StatelessWidget {
                         color: ThemeColors.gray(context, shade: 600),
                       ),
                       textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),

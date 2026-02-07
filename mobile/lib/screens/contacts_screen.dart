@@ -9,7 +9,6 @@ import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../widgets/contact_list_item.dart';
 import '../widgets/diff_animated_list.dart';
-import '../widgets/flash_on_change.dart';
 import '../widgets/sync_status_icon.dart';
 import '../widgets/glitch_transition.dart';
 import 'add_contact_screen.dart';
@@ -423,7 +422,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
 
             return Column(
               children: [
-                if (contactsAsync.isLoading) const LinearProgressIndicator(minHeight: 2),
                 Expanded(
                   child: DiffAnimatedList<Contact>(
                     items: contacts,
@@ -432,20 +430,26 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                     itemBuilder: (context, contact, animation) {
               final isSelected = _selectionMode && _selectedContacts.contains(contact.id);
               final isRemoving = animation.status == AnimationStatus.reverse;
+              // Add: 1) card scrambled + move (expand) 0-300ms, 2) delay 300ms, 3) glitch to real 600-800ms.
+              // Remove: 1) glitch to scrambles 0-300ms, 2) delay 300ms, 3) move (shrink) 600-800ms.
               final moveAnimation = CurvedAnimation(
                 parent: animation,
                 curve: isRemoving
-                    ? const Interval(0.0, 0.5, curve: Curves.easeIn)
-                    : const Interval(0.5, 1.0, curve: Curves.easeOut),
+                    ? const Interval(0.0, 0.25, curve: Curves.easeIn)  // Remove: shrink in last 300ms
+                    : const Interval(0.0, 0.375, curve: Curves.easeOut), // Add: expand in first 300ms
               );
               final glitchAnimation = CurvedAnimation(
                 parent: animation,
                 curve: isRemoving
-                    ? const Interval(0.0, 1.0, curve: Curves.easeOut)
-                    : const Interval(0.0, 0.5, curve: Curves.easeOut),
+                    ? const Interval(0.625, 1.0, curve: Curves.easeOut) // Remove: glitch to scramble first 300ms
+                    : const Interval(0.75, 1.0, curve: Curves.easeOut),   // Add: glitch to real last 200ms
               );
-              
-              Widget contactItem = ContactListItem(
+
+              Widget contactItem = AnimatedBuilder(
+                animation: animation,
+                builder: (context, _) {
+                  final showScrambleForInsert = !isRemoving && animation.value < 0.75;
+                  return ContactListItem(
                         contact: contact,
                         isSelected: _selectionMode ? isSelected : null,
                         isRemoving: isRemoving,
@@ -486,15 +490,10 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                                   ),
                                 );
                               },
+                    showScrambleForInsert: showScrambleForInsert,
                       );
-                      
-                      // Wrap with FlashOnChange if not in selection mode
-                      if (!_selectionMode) {
-                        contactItem = FlashOnChange(
-                          signature: '${contact.id}|${contact.name}|${contact.username}|${contact.balance}|${contact.updatedAt.millisecondsSinceEpoch}',
-                          child: contactItem,
-                        );
-                      }
+                },
+              );
 
                       // Wrap with Dismissible for swipe actions (only when not in selection mode)
                       Widget currentItem;

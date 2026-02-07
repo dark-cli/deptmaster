@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 /// A widget that transitions text changes with a "Glitch" / "Chromatic Aberration" effect.
@@ -11,6 +12,7 @@ class AnimatedPixelatedText extends StatefulWidget {
   final TextStyle? style;
   final Duration duration;
   final TextAlign? textAlign;
+  final TextDirection? textDirection;
   final TextOverflow? overflow;
   final int? maxLines;
   final bool animateFromEmpty;
@@ -27,6 +29,7 @@ class AnimatedPixelatedText extends StatefulWidget {
     this.style,
     this.duration = const Duration(milliseconds: 400), // Fast, punchy glitch
     this.textAlign,
+    this.textDirection,
     this.overflow,
     this.maxLines,
     this.animateFromEmpty = true,
@@ -147,12 +150,41 @@ class _AnimatedPixelatedTextState extends State<AnimatedPixelatedText> {
         ));
       }
 
-      return RichText(
-        key: key,
-        textAlign: widget.textAlign ?? TextAlign.start,
-        maxLines: widget.maxLines,
-        overflow: widget.overflow ?? TextOverflow.clip,
-        text: TextSpan(style: baseStyle, children: spans),
+      // Use a Stack to stabilize the layout size.
+      // We render the original text (invisible) to reserve space,
+      // and overlay the scramble text.
+      return Stack(
+        alignment: widget.textAlign == TextAlign.center
+            ? Alignment.center
+            : widget.textAlign == TextAlign.right
+                ? Alignment.centerRight
+                : Alignment.centerLeft,
+        clipBehavior: Clip.none,
+        children: [
+          // 1. Invisible target text to reserve layout space
+          Text(
+            widget.text,
+            key: ValueKey('reserved_space_${widget.text}'),
+            style: baseStyle.copyWith(color: Colors.transparent),
+            textAlign: widget.textAlign,
+            textDirection: widget.textDirection,
+            overflow: widget.overflow,
+            maxLines: widget.maxLines,
+          ),
+          // 2. Visible scramble text positioned over it
+          Positioned(
+            left: 0,
+            right: 0, // Constrain width to match parent
+            child: RichText(
+              key: key,
+              textAlign: widget.textAlign ?? TextAlign.start,
+              textDirection: widget.textDirection,
+              maxLines: widget.maxLines,
+              overflow: widget.overflow ?? TextOverflow.clip,
+              text: TextSpan(style: baseStyle, children: spans),
+            ),
+          ),
+        ],
       );
     }
 
@@ -161,6 +193,7 @@ class _AnimatedPixelatedTextState extends State<AnimatedPixelatedText> {
       key: key,
       style: widget.style,
       textAlign: widget.textAlign,
+      textDirection: widget.textDirection,
       overflow: widget.overflow,
       maxLines: widget.maxLines,
     );
@@ -217,13 +250,13 @@ class _GlitchTransition extends StatelessWidget {
           return Opacity(opacity: t, child: child!);
         }
 
-        // Random jitter based on intensity
-        final double offsetX = (_random.nextDouble() - 0.5) * 10 * distortionIntensity;
-        final double offsetY = (_random.nextDouble() - 0.5) * 5 * distortionIntensity;
+        // Random jitter based on intensity (reduced for stability)
+        final double offsetX = (_random.nextDouble() - 0.5) * 4 * distortionIntensity;
+        final double offsetY = (_random.nextDouble() - 0.5) * 2 * distortionIntensity;
         
-        // Chromatic offsets (Red/Blue split)
-        final double rX = offsetX + (_random.nextDouble() * 4 * distortionIntensity);
-        final double bX = offsetX - (_random.nextDouble() * 4 * distortionIntensity);
+        // Chromatic offsets (Red/Blue split) (reduced)
+        final double rX = offsetX + (_random.nextDouble() * 2 * distortionIntensity);
+        final double bX = offsetX - (_random.nextDouble() * 2 * distortionIntensity);
 
         return Stack(
           alignment: Alignment.topLeft,
