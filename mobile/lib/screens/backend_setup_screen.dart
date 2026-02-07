@@ -14,14 +14,14 @@ class BackendSetupScreen extends StatefulWidget {
 
 class _BackendSetupScreenState extends State<BackendSetupScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _ipController = TextEditingController();
+  final _hostController = TextEditingController();
   final _portController = TextEditingController();
   bool _loading = false;
   String? _error;
   String? _successMessage;
   bool _testingConnection = false;
   bool _connectionTestPassed = false;
-  String? _testedIp;
+  String? _testedHost;
   int? _testedPort;
 
   @override
@@ -29,20 +29,20 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
     super.initState();
     _loadCurrentConfig();
     // Listen to text field changes to reset test status
-    _ipController.addListener(_onFieldChanged);
+    _hostController.addListener(_onFieldChanged);
     _portController.addListener(_onFieldChanged);
   }
 
   void _onFieldChanged() {
     if (_connectionTestPassed) {
-      final currentIp = _ipController.text.trim();
+      final currentHost = _hostController.text.trim();
       final currentPort = int.tryParse(_portController.text.trim());
       
-      // Reset test status if IP or port changed
-      if (currentIp != _testedIp || currentPort != _testedPort) {
+      // Reset test status if Host or port changed
+      if (currentHost != _testedHost || currentPort != _testedPort) {
         setState(() {
           _connectionTestPassed = false;
-          _testedIp = null;
+          _testedHost = null;
           _testedPort = null;
           _error = null;
           _successMessage = null;
@@ -52,19 +52,19 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
   }
 
   Future<void> _loadCurrentConfig() async {
-    final ip = await Api.getBackendIp();
+    final host = await Api.getBackendHost();
     final port = await Api.getBackendPort();
     setState(() {
-      _ipController.text = ip;
+      _hostController.text = host;
       _portController.text = port.toString();
     });
   }
 
   @override
   void dispose() {
-    _ipController.removeListener(_onFieldChanged);
+    _hostController.removeListener(_onFieldChanged);
     _portController.removeListener(_onFieldChanged);
-    _ipController.dispose();
+    _hostController.dispose();
     _portController.dispose();
     super.dispose();
   }
@@ -79,11 +79,11 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
     });
 
     try {
-      final ip = _ipController.text.trim();
+      final host = _hostController.text.trim();
       final port = int.parse(_portController.text.trim());
       
       // Test connection by trying to reach the health endpoint
-      final testUrl = 'http://$ip:$port/health';
+      final testUrl = 'http://$host:$port/health';
       
       final response = await http.get(
         Uri.parse(testUrl),
@@ -102,7 +102,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
         if (response.statusCode == 200) {
           setState(() {
             _connectionTestPassed = true;
-            _testedIp = ip;
+            _testedHost = host;
             _testedPort = port;
             _error = null;
             _successMessage = 'Connection successful!';
@@ -110,7 +110,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
         } else {
           setState(() {
             _connectionTestPassed = false;
-            _testedIp = null;
+            _testedHost = null;
             _testedPort = null;
             _error = 'Server responded with status ${response.statusCode}';
             _successMessage = null;
@@ -124,7 +124,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
         setState(() {
           _testingConnection = false;
           _connectionTestPassed = false;
-          _testedIp = null;
+          _testedHost = null;
           _testedPort = null;
           _error = errorMessage;
           _successMessage = null;
@@ -143,10 +143,10 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
     });
 
     try {
-      final ip = _ipController.text.trim();
+      final host = _hostController.text.trim();
       final port = int.parse(_portController.text.trim());
       
-      await Api.setBackendConfig(ip, port);
+      await Api.setBackendConfig(host, port);
 
       if (mounted) {
         // Navigate to login screen
@@ -202,7 +202,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Enter your backend server IP address and port',
+                          'Enter your backend server address and port',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
                           ),
@@ -210,10 +210,10 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                         ),
                         const SizedBox(height: 32),
                         TextFormField(
-                          controller: _ipController,
+                          controller: _hostController,
                           decoration: InputDecoration(
-                            labelText: 'Server IP',
-                            hintText: 'e.g., 192.168.1.100 or localhost',
+                            labelText: 'Server Address',
+                            hintText: 'e.g., 10.95.12.45 or example.com',
                             prefixIcon: const Icon(Icons.dns),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -223,7 +223,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                           textInputAction: TextInputAction.next,
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {
-                              return 'Please enter server IP';
+                              return 'Please enter server address';
                             }
                             return null;
                           },
@@ -391,7 +391,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Note: For Android devices, use your computer\'s IP address instead of localhost',
+                          'Note: For Android devices, use your computer\'s IP address (like 10.0.2.2 for emulator) or domain instead of localhost',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                           ),

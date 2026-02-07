@@ -433,7 +433,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   String _defaultDirection = 'give';
   int _defaultDueDateDays = 30;
   bool _defaultDueDateSwitch = false;
-  String _backendIp = '';
+  String _backendHost = '';
   int _backendPort = 8000;
 
   @override
@@ -447,7 +447,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     final defaultDir = await Api.getDefaultDirection();
     final defaultDays = await Api.getDefaultDueDateDays();
     final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
-    final backendIp = await Api.getBackendIp();
+    final backendHost = await Api.getBackendHost();
     final backendPort = await Api.getBackendPort();
     
     if (mounted) {
@@ -456,7 +456,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         _defaultDirection = defaultDir;
         _defaultDueDateDays = defaultDays;
         _defaultDueDateSwitch = defaultDueDateSwitch;
-        _backendIp = backendIp;
+        _backendHost = backendHost;
         _backendPort = backendPort;
       });
     }
@@ -701,7 +701,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         _buildSectionHeader('Backend Configuration'),
         ListTile(
           title: const Text('Change Backend Settings'),
-          subtitle: const Text('Update server IP and port'),
+          subtitle: const Text('Update server address and port'),
           leading: const Icon(Icons.settings_ethernet),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _navigateToBackendSetup(),
@@ -748,7 +748,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     showDialog(
       context: context,
       builder: (context) => _BackendConfigDialog(
-        currentIp: _backendIp,
+        currentHost: _backendHost,
         currentPort: _backendPort,
         onSaved: () async {
           await _loadSettings();
@@ -802,12 +802,12 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
 
 // Dialog for quick backend config edit
 class _BackendConfigDialog extends StatefulWidget {
-  final String currentIp;
+  final String currentHost;
   final int currentPort;
   final VoidCallback onSaved;
 
   const _BackendConfigDialog({
-    required this.currentIp,
+    required this.currentHost,
     required this.currentPort,
     required this.onSaved,
   });
@@ -818,20 +818,20 @@ class _BackendConfigDialog extends StatefulWidget {
 
 class _BackendConfigDialogState extends State<_BackendConfigDialog> {
   final _formKey = GlobalKey<FormState>();
-  late TextEditingController _ipController;
+  late TextEditingController _hostController;
   late TextEditingController _portController;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _ipController = TextEditingController(text: widget.currentIp);
+    _hostController = TextEditingController(text: widget.currentHost);
     _portController = TextEditingController(text: widget.currentPort.toString());
   }
 
   @override
   void dispose() {
-    _ipController.dispose();
+    _hostController.dispose();
     _portController.dispose();
     super.dispose();
   }
@@ -844,10 +844,10 @@ class _BackendConfigDialogState extends State<_BackendConfigDialog> {
     });
 
     try {
-      final ip = _ipController.text.trim();
+      final host = _hostController.text.trim();
       final port = int.parse(_portController.text.trim());
       
-      await Api.setBackendConfig(ip, port);
+      await Api.setBackendConfig(host, port);
       
       if (mounted) {
         widget.onSaved();
@@ -875,15 +875,15 @@ class _BackendConfigDialogState extends State<_BackendConfigDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextFormField(
-              controller: _ipController,
+              controller: _hostController,
               decoration: const InputDecoration(
-                labelText: 'Server IP',
-                hintText: 'e.g., 192.168.1.100 or localhost',
+                labelText: 'Server Address',
+                hintText: 'e.g., 10.95.12.45 or example.com',
                 border: OutlineInputBorder(),
               ),
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
-                  return 'Please enter server IP';
+                  return 'Please enter server address';
                 }
                 return null;
               },
