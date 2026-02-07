@@ -96,7 +96,18 @@ pub(crate) fn post_sync_events(events_json: Vec<String>) -> Result<Vec<String>, 
     let url = format!("{}/api/sync/events", base);
     let accepted: Vec<String> = RUNTIME.block_on(async {
         let resp = CLIENT.post(&url).query(&[("wallet_id", wallet_id.as_str())]).headers(headers).json(&events).send().await.map_err(|e| e.to_string())?;
+        let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
+        // Only treat as "permission denied" when the server body contains our unique code (never in network errors).
+        if status.as_u16() == 403 && text.contains("DEBITUM_INSUFFICIENT_WALLET_PERMISSION") {
+            return Err::<Vec<String>, String>("DEBITUM_INSUFFICIENT_WALLET_PERMISSION".to_string());
+        }
+        if status.as_u16() == 401 {
+            return Err::<Vec<String>, String>(format!("401 Unauthorized {}", text));
+        }
+        if status.as_u16() == 403 || !status.is_success() {
+            return Err(format!("{} {}", status, text));
+        }
         let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
         let acc = json.get("accepted").and_then(|v| v.as_array()).map(|a| {
             a.iter().filter_map(|v| v.as_str().map(String::from)).collect()

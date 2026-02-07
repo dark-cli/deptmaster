@@ -38,23 +38,23 @@ pub fn push_unsynced() -> Result<(), String> {
             Ok(())
         }
         Err(e) => {
-            let s = e.to_lowercase();
-            let is_unauthorized = s.contains("401") || s.contains("403") || s.contains("forbidden") || s.contains("unauthorized");
-            if is_unauthorized {
-                // Server rejected our pending writes. Drop local pending events so we don't keep retrying
-                // and rollback local projection state to last known-good (synced) data.
+            // Only drop local events when the server explicitly sent our permission-denied code (in response body).
+            // Network/offline errors never contain this string, so we never drop events for connection/timeout/etc.
+            if e.contains("DEBITUM_INSUFFICIENT_WALLET_PERMISSION") {
                 let dropped = storage::events_delete_unsynced(&wallet_id)?;
                 rust_log!(
-                    "[debitum_rs] push_unsynced: unauthorized/forbidden -> dropped {} local pending events (wallet_id={})",
+                    "[debitum_rs] push_unsynced: server returned DEBITUM_INSUFFICIENT_WALLET_PERMISSION -> dropped {} local pending events (wallet_id={})",
                     dropped,
                     wallet_id
                 );
                 let events = storage::events_get_all(&wallet_id)?;
                 let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
                 storage::state_save(&wallet_id, &contacts, &transactions)?;
-                return Err(format!("FORBIDDEN_WRITE: {} (dropped {} local pending events)", e, dropped));
+                return Err(format!("DEBITUM_INSUFFICIENT_WALLET_PERMISSION (dropped {} local pending events)", dropped));
             }
-            Err(e)
+            // Network/offline or other error: do NOT fail the write. Events stay unsynced and will sync later.
+            rust_log!("[debitum_rs] push_unsynced: sync failed (e.g. offline), keeping {} local events for later sync: {}", unsynced.len(), e);
+            Ok(())
         }
     }
 }

@@ -2,7 +2,8 @@ use axum::{
     extract::{Request, State},
     http::{header::AUTHORIZATION, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
+    Json,
 };
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
@@ -90,7 +91,11 @@ pub async fn auth_middleware(
     // - admin tokens must NOT be used to create events / sync / realtime
     if path.starts_with("/api/admin/") {
         if !is_admin {
-            return Err(StatusCode::FORBIDDEN);
+            let body = serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "Insufficient permissions"
+            });
+            return Ok((StatusCode::FORBIDDEN, Json(body)).into_response());
         }
     } else if is_admin {
         // Disallow admin tokens from using user-facing event/sync/realtime endpoints.
@@ -99,7 +104,11 @@ pub async fn auth_middleware(
             || path.starts_with("/api/transactions")
             || path.starts_with("/api/sync/")
         {
-            return Err(StatusCode::FORBIDDEN);
+            let body = serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "Insufficient permissions"
+            });
+            return Ok((StatusCode::FORBIDDEN, Json(body)).into_response());
         }
     }
 

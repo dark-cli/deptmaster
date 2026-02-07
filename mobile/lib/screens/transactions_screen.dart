@@ -412,7 +412,10 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
             children: [
               Expanded(
                 child: RefreshIndicator(
-                  onRefresh: () => _refreshData(sync: true),
+                  onRefresh: () async {
+                    await Api.refreshConnectionAndSync();
+                    await _refreshData(sync: true);
+                  },
                   child: DiffAnimatedList<Transaction>(
                     items: transactions,
                     itemId: (t) => t.id,

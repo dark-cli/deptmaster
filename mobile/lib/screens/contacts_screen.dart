@@ -365,7 +365,10 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => _refreshContacts(sync: true),
+        onRefresh: () async {
+          await Api.refreshConnectionAndSync();
+          await _refreshContacts(sync: true);
+        },
         child: Builder(
           builder: (context) {
             // if (_loading) {

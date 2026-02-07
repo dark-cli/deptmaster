@@ -316,7 +316,10 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
               // Transactions List with pull-to-refresh
               Expanded(
                 child: RefreshIndicator(
-                  onRefresh: () => _refresh(sync: true),
+                  onRefresh: () async {
+                    await Api.refreshConnectionAndSync();
+                    await _refresh(sync: true);
+                  },
                   child: Column(
                     children: [
                       Expanded(

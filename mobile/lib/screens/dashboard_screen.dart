@@ -129,9 +129,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          if (!kIsWeb) {
-            await Api.manualSync().catchError((_) {});
-          }
+          await Api.refreshConnectionAndSync();
           ref.invalidate(contactsProvider);
           ref.invalidate(transactionsProvider);
         },

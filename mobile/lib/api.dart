@@ -1,9 +1,14 @@
 // Single API to Rust. UI calls only this. No other service layers.
 // Initialize: Api.init() then Api.initStorage(documentsPath).
+//
+// Connection state (online/offline) is determined entirely in Flutter by the WebSocket:
+// - Connected => online. Not connected => offline.
+// - When offline, we retry connecting every [Api.reconnectInterval].
+// - State is exposed via [Api.connectionState] like any other app data.
 
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint, ValueNotifier;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:local_auth/local_auth.dart';
@@ -12,6 +17,22 @@ import 'src/frb_generated.dart';
 import 'src/lib.dart' as rust;
 import 'providers/data_bus.dart';
 import 'utils/toast_service.dart';
+
+/// Connection state provided by the API (Flutter WebSocket only; Rust is not involved).
+/// Use [Api.connectionState] to read; listen to [Api.connectionStateRevision] to react to changes.
+class ConnectionState {
+  const ConnectionState({
+    required this.isOnline,
+    required this.hasSyncError,
+  });
+
+  final bool isOnline;
+  final bool hasSyncError;
+
+  /// 'Offline' when not connected, 'Error' when connected but sync failed, 'Synced' when connected and no error.
+  String get status =>
+      !isOnline ? 'Offline' : (hasSyncError ? 'Error' : 'Synced');
+}
 
 class Api {
   static bool _initialized = false;
@@ -25,7 +46,34 @@ class Api {
   static final List<void Function()> _dataChangedListeners = [];
   static void Function(String)? _realtimeErrorCallback;
 
-  static const _keyBackendIp = 'backend_ip';
+  /// When offline, we try to reconnect the WebSocket every this interval.
+  static const Duration reconnectInterval = Duration(seconds: 5);
+
+  /// Connection check + sync. Call this on pull-to-refresh or when tapping the sync icon.
+  /// Ensures WebSocket is connected then runs sync; updates connection state and notifies data.
+  static Future<void> refreshConnectionAndSync() async {
+    if (kIsWeb) return;
+    try {
+      await connectRealtime();
+      await manualSync();
+    } catch (_) {}
+  }
+
+  /// Notifier for connection/sync state changes. Incremented when [connectionState] changes.
+  /// Widgets (e.g. [SyncStatusIcon]) should listen and rebuild so the UI updates immediately.
+  static final ValueNotifier<int> connectionStateRevision = ValueNotifier(0);
+  static void _notifyConnectionStateChanged() {
+    connectionStateRevision.value = connectionStateRevision.value + 1;
+  }
+
+  /// Connection state from the Flutter WebSocket only (Rust does not provide this).
+  /// If we are connected => online; if not => offline. In offline mode we keep trying to reconnect every [reconnectInterval].
+  static ConnectionState get connectionState => ConnectionState(
+        isOnline: _wsConnected,
+        hasSyncError: _hasSyncError,
+      );
+
+  static const _keyBackendHost = 'backend_host';
   static const _keyBackendPort = 'backend_port';
   static const _keyBackendUseHttps = 'backend_use_https';
   static const _keyBackendConfigured = 'backend_configured';
@@ -39,6 +87,9 @@ class Api {
   static const _keyDashboardDefaultPeriod = 'dashboard_default_period';
   static const _keyGraphDefaultPeriod = 'graph_default_period';
   static const _keyInvertYAxis = 'invert_y_axis';
+
+  /// Server-sent code for insufficient wallet permission. Only show "permission denied" toast when this is in the error (never for network errors).
+  static const _permissionDeniedCode = 'DEBITUM_INSUFFICIENT_WALLET_PERMISSION';
 
   static void Function()? onLogout;
 
@@ -79,12 +130,12 @@ class Api {
   }
 
   // ---------- Backend config (prefs + Rust) ----------
-  static String get defaultBackendIp => 'localhost';
+  static String get defaultBackendHost => '10.95.12.45';
   static int get defaultBackendPort => 8000;
 
-  static Future<String> getBackendIp() async {
+  static Future<String> getBackendHost() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyBackendIp) ?? defaultBackendIp;
+    return prefs.getString(_keyBackendHost) ?? defaultBackendHost;
   }
 
   static Future<int> getBackendPort() async {
@@ -108,22 +159,22 @@ class Api {
   }
 
   static Future<String> getBaseUrl() async {
-    final ip = await getBackendIp();
+    final host = await getBackendHost();
     final port = await getBackendPort();
     final https = await getUseHttps();
-    return '${https ? 'https' : 'http'}://$ip:$port';
+    return '${https ? 'https' : 'http'}://$host:$port';
   }
 
   static Future<String> getWebSocketUrl() async {
-    final ip = await getBackendIp();
+    final host = await getBackendHost();
     final port = await getBackendPort();
     final https = await getUseHttps();
-    return '${https ? 'wss' : 'ws'}://$ip:$port/ws';
+    return '${https ? 'wss' : 'ws'}://$host:$port/ws';
   }
 
-  static Future<void> setBackendConfig(String ip, int port) async {
+  static Future<void> setBackendConfig(String host, int port) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyBackendIp, ip);
+    await prefs.setString(_keyBackendHost, host);
     await prefs.setInt(_keyBackendPort, port);
     await prefs.setBool(_keyBackendConfigured, true);
     final baseUrl = await getBaseUrl();
@@ -206,6 +257,7 @@ class Api {
     try {
       await rust.manualSync();
       _hasSyncError = false;
+      _notifyConnectionStateChanged();
       return true;
     } catch (e) {
       final s = e.toString().toLowerCase();
@@ -344,7 +396,7 @@ class Api {
       return result;
     } catch (e) {
       final s = e.toString().toLowerCase();
-      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+      if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
         _notifyDataChanged(DataChangeType.contacts); // reflect rollback
       }
@@ -373,7 +425,7 @@ class Api {
       _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
-      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+      if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
         _notifyDataChanged(DataChangeType.contacts);
       }
@@ -388,7 +440,7 @@ class Api {
       _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
-      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+      if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
         _notifyDataChanged(DataChangeType.contacts);
       }
@@ -422,7 +474,7 @@ class Api {
       return result;
     } catch (e) {
       final s = e.toString().toLowerCase();
-      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+      if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
         _notifyDataChanged(DataChangeType.transactions);
       }
@@ -457,7 +509,7 @@ class Api {
       _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
-      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+      if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
         _notifyDataChanged(DataChangeType.transactions);
       }
@@ -472,7 +524,7 @@ class Api {
       _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
-      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+      if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
         _notifyDataChanged(DataChangeType.transactions);
       }
@@ -482,26 +534,62 @@ class Api {
 
   static Future<void> undoContactAction(String contactId) async {
     if (kIsWeb) return;
-    await rust.undoContactAction(contactId: contactId);
-    _notifyDataChanged(DataChangeType.contacts);
+    try {
+      await rust.undoContactAction(contactId: contactId);
+      _notifyDataChanged(DataChangeType.contacts);
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains(_permissionDeniedCode)) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged(DataChangeType.contacts);
+      }
+      rethrow;
+    }
   }
 
   static Future<void> undoTransactionAction(String transactionId) async {
     if (kIsWeb) return;
-    await rust.undoTransactionAction(transactionId: transactionId);
-    _notifyDataChanged(DataChangeType.transactions);
+    try {
+      await rust.undoTransactionAction(transactionId: transactionId);
+      _notifyDataChanged(DataChangeType.transactions);
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains(_permissionDeniedCode)) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
+        _notifyDataChanged(DataChangeType.transactions);
+      }
+      rethrow;
+    }
   }
 
   static Future<void> bulkDeleteContacts(List<String> ids) async {
     if (kIsWeb) return;
-    await rust.bulkDeleteContacts(contactIds: ids);
-    _notifyDataChanged(DataChangeType.contacts);
+    try {
+      await rust.bulkDeleteContacts(contactIds: ids);
+      _notifyDataChanged(DataChangeType.contacts);
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains(_permissionDeniedCode)) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
+        _notifyDataChanged(DataChangeType.contacts);
+      }
+      rethrow;
+    }
   }
 
   static Future<void> bulkDeleteTransactions(List<String> ids) async {
     if (kIsWeb) return;
-    await rust.bulkDeleteTransactions(transactionIds: ids);
-    _notifyDataChanged(DataChangeType.transactions);
+    try {
+      await rust.bulkDeleteTransactions(transactionIds: ids);
+      _notifyDataChanged(DataChangeType.transactions);
+    } catch (e) {
+      final s = e.toString().toLowerCase();
+      if (s.contains(_permissionDeniedCode)) {
+        ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
+        _notifyDataChanged(DataChangeType.transactions);
+      }
+      rethrow;
+    }
   }
 
   static Future<String> getEvents() async {
@@ -549,12 +637,14 @@ class Api {
     try {
       await rust.manualSync();
       _hasSyncError = false;
+      _notifyConnectionStateChanged();
       _notifyDataChanged();
     } catch (e) {
       _hasSyncError = true;
+      _notifyConnectionStateChanged();
       debugPrint('Api.manualSync failed: $e');
       final s = e.toString().toLowerCase();
-      if (s.contains('forbidden_write') || s.contains('403') || s.contains('insufficient wallet permissions')) {
+      if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
         _notifyDataChanged(); // reflect rollback done in Rust
       }
@@ -577,11 +667,13 @@ class Api {
 
   static bool get hasSyncError => _hasSyncError;
 
-  static Future<String> getSyncStatusForUI() async {
-    return _hasSyncError ? 'Error' : 'Synced';
-  }
+  static Future<String> getSyncStatusForUI() async =>
+      connectionState.status;
 
-  // ---------- WebSocket ----------
+  /// Synchronous status for UI: Offline, Error, or Synced. Prefer [connectionState] for full state.
+  static String get syncStatusForUI => connectionState.status;
+
+  // ---------- WebSocket (Flutter only; online = connected, offline = not connected; reconnect every [reconnectInterval]) ----------
   static bool get isRealtimeConnected => _wsConnected;
 
   static void setRealtimeErrorCallback(void Function(String)? cb) {
@@ -616,12 +708,6 @@ class Api {
 
       _wsSubscription = channel.stream.listen(
         (message) {
-          if (!_wsConnected) {
-            _wsConnecting = false;
-            _wsConnected = true;
-            _wsChannel = channel;
-            manualSync().catchError((_) {});
-          }
           try {
             final data = json.decode(message as String) as Map<String, dynamic>;
             // Stage 2 safety: ignore messages for other wallets (shouldn't happen if server filters correctly).
@@ -637,6 +723,7 @@ class Api {
           _wsConnected = false;
           _wsChannel = null;
           _wsSubscription = null;
+          _notifyConnectionStateChanged();
           _reconnectWs();
         },
         onDone: () {
@@ -644,11 +731,17 @@ class Api {
           _wsConnecting = false;
           _wsChannel = null;
           _wsSubscription = null;
+          _notifyConnectionStateChanged();
           _reconnectWs();
         },
         cancelOnError: false,
       );
       _wsChannel = channel;
+      // Consider connected as soon as the socket is opened (don't wait for first message, or we show offline until server sends).
+      _wsConnecting = false;
+      _wsConnected = true;
+      _notifyConnectionStateChanged();
+      manualSync().catchError((_) {});
     } catch (_) {
       _wsConnecting = false;
       _reconnectWs();
@@ -659,7 +752,7 @@ class Api {
     getToken().then((token) {
       if (token == null || token.isEmpty) return;
       if (_isTokenExpired(token)) return;
-      Future.delayed(const Duration(seconds: 5), () {
+      Future.delayed(reconnectInterval, () {
         if (!_wsConnected) connectRealtime().catchError((_) => _reconnectWs());
       });
     });
@@ -675,6 +768,7 @@ class Api {
     _wsChannel = null;
     _wsSubscription = null;
     _wsConnected = false;
+    _notifyConnectionStateChanged();
   }
 
   static Future<void> disconnectRealtime() async {

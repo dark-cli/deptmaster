@@ -1,13 +1,11 @@
-// ignore_for_file: unused_local_variable
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../api.dart';
 import '../utils/theme_colors.dart';
 
-/// Simple sync status icon widget
-/// Shows: synced (cloud done), unsynced/syncing (sync icon), offline (cloud-off), error (warning)
+/// Sync/connection status icon. Updates immediately when connection or sync error state changes.
+/// Shows: synced (cloud done), offline (cloud-off), error (warning), or syncing (sync icon).
 class SyncStatusIcon extends StatefulWidget {
   const SyncStatusIcon({super.key});
 
@@ -16,49 +14,43 @@ class SyncStatusIcon extends StatefulWidget {
 }
 
 class _SyncStatusIconState extends State<SyncStatusIcon> {
-  String _status = 'Synced';
-  bool _hasError = false;
-  Timer? _updateTimer;
+  Timer? _periodicTimer;
 
   @override
   void initState() {
     super.initState();
     if (!kIsWeb) {
-      _updateStatus();
-      _startPeriodicUpdate();
+      Api.connectionStateRevision.addListener(_onConnectionStateChanged);
+      _scheduleNextCheck();
     }
+  }
+
+  void _scheduleNextCheck() {
+    _periodicTimer?.cancel();
+    if (!mounted) return;
+    const interval = Duration(seconds: 3);
+    _periodicTimer = Timer(interval, () {
+      if (mounted) _refresh();
+    });
   }
 
   @override
   void dispose() {
-    _updateTimer?.cancel();
+    if (!kIsWeb) {
+      Api.connectionStateRevision.removeListener(_onConnectionStateChanged);
+    }
+    _periodicTimer?.cancel();
     super.dispose();
   }
 
-  void _startPeriodicUpdate() {
-    _updateTimer?.cancel();
-    _updateTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        _updateStatus();
-        _startPeriodicUpdate();
-      }
-    });
+  void _onConnectionStateChanged() {
+    if (mounted) setState(() {});
   }
 
-  Future<void> _updateStatus() async {
-    if (kIsWeb) return;
-    try {
-      final status = await Api.getSyncStatusForUI();
-      final hasError = Api.hasSyncError;
-      if (mounted && (_status != status || _hasError != hasError)) {
-        setState(() {
-          _status = status;
-          _hasError = hasError;
-        });
-      }
-    } catch (e) {
-      // Ignore errors
-    }
+  void _refresh() {
+    if (!mounted) return;
+    setState(() {});
+    _scheduleNextCheck();
   }
 
   @override
@@ -66,11 +58,17 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
     if (kIsWeb) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-    final isSynced = _status == 'Synced';
+    final state = Api.connectionState;
+    final isOffline = !state.isOnline;
+    final hasError = state.hasSyncError;
+    final isSynced = state.isOnline && !state.hasSyncError;
 
     IconData icon;
     Color color;
-    if (_hasError && !isSynced) {
+    if (isOffline) {
+      icon = Icons.cloud_off_outlined;
+      color = ThemeColors.gray(context, shade: 600);
+    } else if (hasError) {
       icon = Icons.error_outline;
       color = ThemeColors.warning(context);
     } else if (isSynced) {
@@ -81,16 +79,29 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
       color = theme.colorScheme.primary;
     }
 
-    final String tooltipText = isSynced
-        ? 'Synced'
-        : (_hasError ? 'Sync error - tap to retry' : 'Syncing...');
+    final String tooltipText = isOffline
+        ? 'Offline - tap to check'
+        : (isSynced
+            ? 'Synced - tap to refresh'
+            : (hasError ? 'Sync error - tap to retry' : 'Syncing...'));
 
     return Tooltip(
       message: tooltipText,
-      child: Icon(
-        icon,
-        size: 20,
-        color: color,
+      child: InkWell(
+        onTap: () async {
+          if (kIsWeb) return;
+          await Api.refreshConnectionAndSync();
+          _refresh();
+        },
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            icon,
+            size: 20,
+            color: color,
+          ),
+        ),
       ),
     );
   }

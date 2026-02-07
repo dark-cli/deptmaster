@@ -2,7 +2,8 @@ use axum::{
     extract::{Query, Request, State},
     http::StatusCode,
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
+    Json,
     async_trait,
 };
 use axum::extract::FromRequestParts;
@@ -119,10 +120,18 @@ pub async fn wallet_context_middleware(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let user_role = wallet_user.ok_or_else(|| {
-        tracing::warn!("User {} does not have access to wallet {}", auth_user.user_id, wallet_id);
-        StatusCode::FORBIDDEN
-    })?;
+    let user_role = match wallet_user {
+        Some(role) => role,
+        None => {
+            tracing::warn!("User {} does not have access to wallet {}", auth_user.user_id, wallet_id);
+            // Unique code so clients only drop local events when server explicitly says permission denied (not network errors).
+            let body = serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have access to this wallet"
+            });
+            return Ok((StatusCode::FORBIDDEN, Json(body)).into_response());
+        }
+    };
 
     // Attach wallet context to request
     let wallet_context = WalletContext {
