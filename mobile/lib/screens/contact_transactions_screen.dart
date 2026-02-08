@@ -21,6 +21,7 @@ import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
 import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/animated_pixelated_text.dart';
 import '../widgets/glitch_transition.dart';
 import '../utils/bottom_sheet_helper.dart';
@@ -247,25 +248,10 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
               return b.id.compareTo(a.id);
             });
 
-          final emptyState = Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.receipt_long, size: 64, color: Colors.grey),
-                const SizedBox(height: 16),
-                Text(
-                  'No transactions with ${widget.contact.name}',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Colors.grey,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Tap + to add a transaction',
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ],
-            ),
+          final emptyState = EmptyState(
+            icon: Icons.receipt_long_outlined,
+            title: 'No transactions with ${widget.contact.name}',
+            subtitle: 'Tap + to add a transaction',
           );
 
           // Calculate total balance for this contact
@@ -276,40 +262,41 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
 
           return Column(
             children: [
-              // Balance Summary
+              // Balance Summary (same style as dashboard Total balance, full width like transaction cards)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                child: GradientCard(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'BALANCE',
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: Colors.grey,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Consumer(
-                        builder: (context, ref, child) {
-                          final flipColors = ref.watch(flipColorsProvider);
-                          final isDark = Theme.of(context).brightness == Brightness.dark;
-                          // Standardized: Positive balance = Gave (green), Negative balance = Received (red)
-                          final balanceColor = totalBalance >= 0
-                              ? AppColors.getGiveColor(flipColors, isDark) // Positive = Gave = green
-                              : AppColors.getReceivedColor(flipColors, isDark); // Negative = Received = red
-                          return Text(
-                            _formatBalance(totalBalance),
-                            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: balanceColor,
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Consumer(
+                    builder: (context, ref, child) {
+                      final flipColors = ref.watch(flipColorsProvider);
+                      final isDark = Theme.of(context).brightness == Brightness.dark;
+                      // Standardized: Positive balance = Gave (green), Negative balance = Received (red)
+                      final balanceColor = totalBalance >= 0
+                          ? AppColors.getGiveColor(flipColors, isDark)
+                          : AppColors.getReceivedColor(flipColors, isDark);
+                      return GradientCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'BALANCE',
+                              style: Theme.of(context).textTheme.labelMedium,
                             ),
-                          );
-                        },
-                      ),
-                    ],
+                            const SizedBox(height: 8),
+                            AnimatedPixelatedText(
+                              _formatBalance(totalBalance),
+                              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: balanceColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),

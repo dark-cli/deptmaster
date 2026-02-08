@@ -294,10 +294,10 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     final chartData = _buildChartData(eventsWithDebt, period, invertY);
     
     if (chartData.isEmpty) {
-      print('⚠️ Chart data is empty, showing empty state');
       final message = hasCurrentWallet
           ? 'No chart data yet. Add contacts and transactions to see debt over time.'
           : 'Select or create a wallet to see chart data.';
+      final muted = Theme.of(context).colorScheme.onSurface.withOpacity(0.6);
       return Container(
         height: 200,
         padding: const EdgeInsets.all(8),
@@ -311,12 +311,19 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
         child: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.show_chart, size: 48, color: muted),
+                const SizedBox(height: 12),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: muted,
+                  ),
+                ),
+              ],
             ),
           ),
         ),

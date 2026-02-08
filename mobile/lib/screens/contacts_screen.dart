@@ -9,6 +9,7 @@ import '../models/contact.dart';
 import '../models/transaction.dart';
 import '../widgets/contact_list_item.dart';
 import '../widgets/diff_animated_list.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/sync_status_icon.dart';
 import '../widgets/glitch_transition.dart';
 import 'add_contact_screen.dart';
@@ -157,6 +158,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         // If didPop is true, normal navigation happened (not in selection mode)
       },
       child: Scaffold(
+        backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -408,18 +410,17 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
             final contacts = _filterAndSortContacts(baseContacts);
 
                 if (contacts.isEmpty && _searchController.text.isNotEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.search_off, size: 64, color: Colors.grey),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No contacts found for "${_searchController.text}"',
-                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
-                        ),
-                      ],
-                    ),
+                  return EmptyState(
+                    icon: Icons.search_off,
+                    title: 'No contacts found for "${_searchController.text}"',
+                  );
+                }
+
+                if (contacts.isEmpty) {
+                  return EmptyState(
+                    icon: Icons.person_add_outlined,
+                    title: 'No contacts yet',
+                    subtitle: 'Add your first contact to get started',
                   );
                 }
 

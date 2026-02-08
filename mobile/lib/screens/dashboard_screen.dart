@@ -10,6 +10,7 @@ import '../providers/settings_provider.dart';
 import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/gradient_card.dart';
 import '../widgets/sync_status_icon.dart';
 import '../widgets/debt_chart_widget.dart';
@@ -102,8 +103,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final loading = (contactsAsync.isLoading || transactionsAsync.isLoading) &&
         (contacts.isEmpty && transactions.isEmpty); // Only show loader if we have NO data at all
     if (loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -111,7 +113,47 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final upcomingDueDates = _getUpcomingDueDates(transactions);
     final contactMap = contacts.isNotEmpty ? Map.fromEntries(contacts.map((c) => MapEntry(c.id, c))) : <String, Contact>{};
 
+    if (contacts.isEmpty && transactions.isEmpty) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Dashboard'),
+          leading: widget.onOpenDrawer != null
+              ? IconButton(
+                  icon: const Icon(Icons.menu),
+                  onPressed: widget.onOpenDrawer,
+                )
+              : null,
+          actions: const [
+            Padding(
+              padding: EdgeInsets.only(left: 24.0, right: 20.0),
+              child: SyncStatusIcon(),
+            ),
+          ],
+        ),
+        body: RefreshIndicator(
+          onRefresh: () async {
+            await Api.refreshConnectionAndSync();
+            ref.invalidate(contactsProvider);
+            ref.invalidate(transactionsProvider);
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.75,
+              child: const EmptyState(
+                icon: Icons.dashboard_outlined,
+                title: 'Nothing here yet',
+                subtitle: 'Add contacts and transactions to see your dashboard.',
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('Dashboard'),
         leading: widget.onOpenDrawer != null

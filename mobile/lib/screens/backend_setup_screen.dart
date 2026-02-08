@@ -184,9 +184,10 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                     child: Form(
                       key: _formKey,
                       child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisAlignment: MainAxisAlignment.start,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                        const SizedBox(height: 48),
                         Icon(
                           Icons.settings_ethernet,
                           size: 64,
@@ -257,7 +258,7 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                         // Always reserve space for error/success message to prevent layout shifts
                         const SizedBox(height: 16),
                         SizedBox(
-                          height: 56, // Fixed height to reserve space (12px padding * 2 + icon height + text height)
+                          height: 56,
                           child: _error != null
                               ? Container(
                                   padding: const EdgeInsets.all(12),
@@ -266,9 +267,11 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Icon(
                                         Icons.error_outline,
+                                        size: 20,
                                         color: Theme.of(context).colorScheme.onErrorContainer,
                                       ),
                                       const SizedBox(width: 8),
@@ -277,7 +280,10 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                                           _error!,
                                           style: TextStyle(
                                             color: Theme.of(context).colorScheme.onErrorContainer,
+                                            fontSize: 13,
                                           ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                     ],
@@ -295,9 +301,11 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                                         ),
                                       ),
                                       child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           const Icon(
                                             Icons.check_circle_outline,
+                                            size: 20,
                                             color: Colors.green,
                                           ),
                                           const SizedBox(width: 8),
@@ -307,13 +315,16 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                                               style: const TextStyle(
                                                 color: Colors.green,
                                                 fontWeight: FontWeight.w500,
+                                                fontSize: 13,
                                               ),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
                                         ],
                                       ),
                                     )
-                                  : const SizedBox.shrink(), // Empty space when no message
+                                  : const SizedBox.shrink(),
                         ),
                         const SizedBox(height: 24),
                         // Stack buttons vertically on mobile
@@ -377,16 +388,22 @@ class _BackendSetupScreenState extends State<BackendSetupScreen> {
                                       ),
                                     ),
                             ),
-                            if (!_connectionTestPassed && !_testingConnection) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                'Please test connection first',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                                ),
-                                textAlign: TextAlign.center,
+                            // Reserved space so "Please test connection first" doesn't shift buttons
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              height: 20,
+                              child: Center(
+                                child: !_connectionTestPassed && !_testingConnection
+                                    ? Text(
+                                        'Please test connection first',
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      )
+                                    : const SizedBox.shrink(),
                               ),
-                            ],
+                            ),
                           ],
                         ),
                         const SizedBox(height: 16),

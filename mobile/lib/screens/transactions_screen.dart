@@ -21,6 +21,7 @@ import '../widgets/sync_status_icon.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../widgets/avatar_with_selection.dart';
 import '../widgets/diff_animated_list.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/animated_pixelated_text.dart';
 import '../widgets/glitch_transition.dart';
 
@@ -152,6 +153,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
         // If didPop is true, normal navigation happened (not in selection mode)
       },
       child: Scaffold(
+        backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -372,39 +374,17 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
               );
 
               if (transactions.isEmpty && _searchController.text.isNotEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.search_off, size: 64, color: Colors.grey),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No transactions found for "${_searchController.text}"',
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
-                      ),
-                    ],
-                  ),
+                return EmptyState(
+                  icon: Icons.search_off,
+                  title: 'No transactions found for "${_searchController.text}"',
                 );
               }
 
               if (transactions.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No transactions yet',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.grey),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Add your first transaction to get started',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                      ),
-                    ],
-                  ),
+                return const EmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'No transactions yet',
+                  subtitle: 'Add your first transaction to get started',
                 );
               }
 

@@ -6,6 +6,7 @@ import '../api.dart';
 import '../models/contact.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/toast_service.dart';
+import '../widgets/gradient_background.dart';
 
 class EditContactScreen extends ConsumerStatefulWidget {
   final Contact contact;
@@ -81,9 +82,11 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Edit Contact'),
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Edit Contact'),
         actions: [
           IconButton(
             icon: _saving
@@ -153,6 +156,7 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

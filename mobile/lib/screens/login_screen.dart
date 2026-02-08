@@ -3,11 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
-import 'home_screen.dart';
 import 'backend_setup_screen.dart';
+import 'sign_up_screen.dart';
 import '../widgets/gradient_background.dart';
-import '../widgets/gradient_card.dart';
-import 'dart:async';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -78,9 +76,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: Form(
                       key: _formKey,
                       child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisAlignment: MainAxisAlignment.start,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                  const SizedBox(height: 48),
                   Icon(
                     Icons.account_balance_wallet,
                     size: 64,
@@ -88,7 +87,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Login',
+                    'Sign in',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -174,7 +173,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         : const SizedBox.shrink(), // Empty space when no error
                   ),
                   const SizedBox(height: 24),
-                  // Stack buttons vertically on mobile (matching backend setup page)
+                  // Stack buttons vertically (matching backend setup page): primary, then back, then switch account
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -198,7 +197,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 ),
                               )
                             : const Text(
-                                'Login',
+                                'Sign in',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -226,6 +225,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.primary,
                             fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: _loading
+                            ? null
+                            : () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(builder: (context) => const SignUpScreen()),
+                                );
+                              },
+                        child: Text(
+                          'Don\'t have an account? Sign up',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),

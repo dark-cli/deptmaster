@@ -14,6 +14,8 @@ import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
 import '../utils/state_builder.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/gradient_background.dart';
 
 class EventsLogScreen extends ConsumerStatefulWidget {
   final DateTime? initialDateFrom;
@@ -432,9 +434,11 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Events Log'),
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Events Log'),
         actions: [
           IconButton(
             icon: const Icon(Icons.filter_list),
@@ -1250,22 +1254,10 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _paginatedEvents.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.event_note,
-                              size: 64,
-                              color: ThemeColors.gray(context),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No events found',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ],
-                        ),
+                    ? const EmptyState(
+                        icon: Icons.event_note_outlined,
+                        title: 'No events found',
+                        subtitle: 'Events will appear here as you add and edit transactions.',
                       )
                     : ListView.builder(
                         controller: _scrollController,
@@ -1286,6 +1278,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       ),
           ),
         ],
+      ),
       ),
     );
   }

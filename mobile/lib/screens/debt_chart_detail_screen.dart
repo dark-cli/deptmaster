@@ -15,6 +15,7 @@ import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 // ignore: unused_import
 import '../utils/event_formatter.dart';
+import '../widgets/gradient_background.dart';
 import 'events_log_screen.dart';
 
 // Data model for Syncfusion charts
@@ -440,11 +441,13 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     final primaryColor = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
     final chartData = _buildChartData();
     
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Debt Over Time'),
-      ),
-      body: _loading
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Debt Over Time'),
+        ),
+        body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               child: Column(
@@ -1283,6 +1286,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 

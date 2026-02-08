@@ -8,6 +8,7 @@ import '../models/contact.dart';
 import '../models/wallet.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/toast_service.dart';
+import '../widgets/gradient_background.dart';
 
 class AddContactScreen extends ConsumerStatefulWidget {
   final String? initialName;
@@ -94,9 +95,11 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Add Contact'),
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Add Contact'),
         actions: [
           IconButton(
             icon: _saving
@@ -177,6 +180,7 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

@@ -5,6 +5,9 @@ import '../api.dart';
 import '../models/wallet.dart';
 import '../utils/toast_service.dart';
 import '../utils/theme_colors.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/gradient_background.dart';
+import 'manage_wallet_screen.dart';
 
 /// Shows wallet selection as a small, light modal bottom sheet that follows app theme.
 /// Use [showWalletSelectionSheet] to present it.
@@ -31,12 +34,58 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
   String? _currentWalletId;
   bool _loading = true;
   bool _selecting = false;
+  bool _joining = false;
   String? _loadError;
+  final _inviteCodeController = TextEditingController();
+  static const _inviteCodeLength = 4;
 
   @override
   void initState() {
     super.initState();
     _loadWallets();
+  }
+
+  @override
+  void dispose() {
+    _inviteCodeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _joinByCode() async {
+    final code = _inviteCodeController.text.trim().replaceAll(RegExp(r'\s'), '');
+    if (code.length != _inviteCodeLength) {
+      ToastService.showErrorFromContext(
+        context,
+        'Enter a $_inviteCodeLength-digit invite code',
+      );
+      return;
+    }
+    if (_joining) return;
+    setState(() => _joining = true);
+    try {
+      final walletId = await Api.joinWalletByCode(code);
+      if (!mounted) return;
+      ToastService.showSuccessFromContext(context, 'Joined wallet');
+      _inviteCodeController.clear();
+      await _loadWallets();
+      if (!mounted) return;
+      await Api.setCurrentWalletId(walletId);
+      if (mounted) {
+        setState(() {
+          _currentWalletId = walletId;
+          _joining = false;
+        });
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _joining = false);
+        ToastService.showErrorFromContext(
+          context,
+          e.toString().replaceFirst('Exception: ', ''),
+        );
+      }
+    }
   }
 
   Future<void> _loadWallets() async {
@@ -132,7 +181,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
           ),
           // Title
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Row(
               children: [
                 Icon(Icons.account_balance_wallet_outlined, color: colorScheme.primary, size: 24),
@@ -143,6 +192,42 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                     color: colorScheme.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
+                ),
+              ],
+            ),
+          ),
+          // Join with invite code
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _inviteCodeController,
+                    decoration: const InputDecoration(
+                      hintText: 'Invite code',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    keyboardType: TextInputType.number,
+                    maxLength: _inviteCodeLength,
+                    onSubmitted: (_) => _joinByCode(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _joining ? null : _joinByCode,
+                  child: _joining
+                      ? SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colorScheme.onPrimary,
+                          ),
+                        )
+                      : const Text('Join'),
                 ),
               ],
             ),
@@ -209,45 +294,21 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                         ),
                       )
                     : _wallets.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.account_balance_wallet_outlined,
-                                  size: 48,
-                                  color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No wallets yet',
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: colorScheme.onSurface,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Create your first wallet to track contacts and transactions.',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 20),
-                                FilledButton.icon(
-                                  onPressed: () {
-                                    Navigator.pop(context, false);
-                                    Navigator.pushNamed(context, '/create-wallet');
-                                  },
-                                  icon: const Icon(Icons.add, size: 20),
-                                  label: const Text('Create your first wallet'),
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: colorScheme.primary,
-                                    foregroundColor: colorScheme.onPrimary,
-                                  ),
-                                ),
-                              ],
+                        ? EmptyState(
+                            icon: Icons.account_balance_wallet_outlined,
+                            title: 'No wallets yet',
+                            subtitle: 'Create your first wallet to track contacts and transactions.',
+                            action: FilledButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context, false);
+                                Navigator.pushNamed(context, '/create-wallet');
+                              },
+                              icon: const Icon(Icons.add, size: 20),
+                              label: const Text('Create your first wallet'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: colorScheme.primary,
+                                foregroundColor: colorScheme.onPrimary,
+                              ),
                             ),
                           )
                         : ListView.builder(
@@ -294,13 +355,32 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                                           overflow: TextOverflow.ellipsis,
                                         )
                                       : null,
-                                  trailing: isSelected
-                                      ? Icon(
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.settings_outlined),
+                                        tooltip: 'Manage wallet',
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute<void>(
+                                              builder: (_) => ManageWalletScreen(
+                                                walletId: wallet.id,
+                                                walletName: wallet.name,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      if (isSelected)
+                                        Icon(
                                           Icons.check_circle,
                                           color: colorScheme.primary,
                                           size: 24,
-                                        )
-                                      : null,
+                                        ),
+                                    ],
+                                  ),
                                   enabled: isActive && !_selecting,
                                   onTap: isActive ? () => _selectWallet(wallet) : null,
                                   shape: RoundedRectangleBorder(
@@ -328,11 +408,14 @@ class WalletSelectionScreen extends ConsumerStatefulWidget {
 class _WalletSelectionScreenState extends ConsumerState<WalletSelectionScreen> {
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Select Wallet'),
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Select Wallet'),
+        ),
+        body: const _WalletSelectionSheet(),
       ),
-      body: const _WalletSelectionSheet(),
     );
   }
 }

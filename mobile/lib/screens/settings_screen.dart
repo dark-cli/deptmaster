@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/gradient_background.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../providers/settings_provider.dart';
@@ -46,11 +47,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: ListView(
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Settings'),
+        ),
+        body: ListView(
         children: [
           // Appearance
           _buildSectionHeader('Appearance'),
@@ -295,6 +298,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
         ],
+      ),
       ),
     );
   }
