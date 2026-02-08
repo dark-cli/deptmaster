@@ -171,16 +171,17 @@ class _AnimatedPixelatedTextState extends State<AnimatedPixelatedText> {
             overflow: widget.overflow,
             maxLines: widget.maxLines,
           ),
-          // 2. Visible scramble text positioned over it
+          // 2. Visible scramble text positioned over it (same length as text;
+          // clip so it never wraps to more than one line)
           Positioned(
             left: 0,
-            right: 0, // Constrain width to match parent
+            right: 0,
             child: RichText(
               key: key,
               textAlign: widget.textAlign ?? TextAlign.start,
               textDirection: widget.textDirection,
-              maxLines: widget.maxLines,
-              overflow: widget.overflow ?? TextOverflow.clip,
+              maxLines: widget.maxLines ?? 1,
+              overflow: TextOverflow.clip,
               text: TextSpan(style: baseStyle, children: spans),
             ),
           ),
@@ -199,10 +200,11 @@ class _AnimatedPixelatedTextState extends State<AnimatedPixelatedText> {
     );
   }
 
+  /// Builds a scramble string with exactly the same length as the target text
+  /// so it doesn't overflow to an extra line. Capped at 512 chars for safety.
   String _buildScrambleForLength(int length) {
-    final minLen = widget.scrambleMinLength.clamp(1, 64);
-    final maxLen = widget.scrambleMaxLength.clamp(minLen, 64);
-    final len = length.clamp(minLen, maxLen);
+    final len = length.clamp(0, 512);
+    if (len == 0) return '';
     final chars = widget.scrambleChars.isEmpty ? '@#\$%^&*' : widget.scrambleChars;
     final buf = StringBuffer();
     for (var i = 0; i < len; i++) {
