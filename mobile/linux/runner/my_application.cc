@@ -1,5 +1,7 @@
 #include "my_application.h"
 
+#include <stdlib.h>
+#include <string.h>
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
@@ -42,15 +44,23 @@ static void my_application_activate(GApplication* application) {
     }
   }
 #endif
+  const char* window_title = "debt_tracker_mobile";
+  char* allocated_title = NULL;
+  const char* instance_env = g_getenv("DEBITUM_INSTANCE_ID");
+  if (instance_env && instance_env[0] != '\0') {
+    allocated_title = g_strdup_printf("Instance %s", instance_env);
+    window_title = allocated_title;
+  }
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "debt_tracker_mobile");
+    gtk_header_bar_set_title(header_bar, window_title);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "debt_tracker_mobile");
+    gtk_window_set_title(window, window_title);
   }
+  g_free(allocated_title);
 
   // Set fixed window size to phone dimensions (390x844 is iPhone 12/13/14 size)
   // This can be overridden by window manager or command-line flags

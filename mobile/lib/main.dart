@@ -183,10 +183,12 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
 
   @override
   Widget build(BuildContext context) {
+    final instanceId = const String.fromEnvironment('INSTANCE_ID', defaultValue: '');
+    final appTitle = instanceId.isEmpty ? 'Debt Tracker' : 'Instance $instanceId';
     return MaterialApp(
       navigatorKey: navigatorKey,
       scaffoldMessengerKey: scaffoldMessengerKey,
-      title: 'Debt Tracker',
+      title: appTitle,
       builder: (context, child) => Directionality(textDirection: TextDirection.ltr, child: child!),
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,

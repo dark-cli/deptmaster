@@ -31,6 +31,7 @@ SKIP_SERVER_BUILD=false
 CLEAR_APP_DATA=false
 WINDOW_SIZE=""  # Format: "WIDTHxHEIGHT" or "WIDTH HEIGHT"
 SEPARATE_INSTANCE=false  # Linux: run with isolated XDG data (no shared data with other instances)
+INSTANCES=""  # When set with --instances N (and Linux + separate-instance), spawn N instances and show unified log viewer
 
 # Define valid flags for each command
 # Format: "command:flag1,flag2,flag3"
@@ -47,7 +48,7 @@ declare -A VALID_FLAGS=(
     ["stop-server"]="verbose"
     ["restart-server"]="verbose,skip-server-build"
     ["build-server"]="verbose"
-    ["run-flutter-app"]="verbose,clear-app-data,window-size,separate-instance"
+    ["run-flutter-app"]="verbose,clear-app-data,window-size,separate-instance,instances"
     ["run-flutter-web"]="verbose"
     ["test-flutter-app"]="verbose"
     ["test-api-server"]="verbose"
@@ -95,6 +96,14 @@ while [[ $# -gt 0 ]]; do
         --separate-instance|--sandbox)
             SEPARATE_INSTANCE=true
             shift
+            ;;
+        --instances)
+            if [ -z "$2" ] || ! [[ "$2" =~ ^[0-9]+$ ]] || [ "$2" -lt 1 ] || [ "$2" -gt 9 ]; then
+                echo -e "${RED}❌ --instances requires a number from 1 to 9${NC}" >&2
+                exit 1
+            fi
+            INSTANCES="$2"
+            shift 2
             ;;
         --*)
             UNKNOWN_FLAGS+=("$1")
@@ -166,6 +175,9 @@ validate_flags() {
                     "separate-instance")
                         echo "  --separate-instance, --sandbox"
                         ;;
+                    "instances")
+                        echo "  --instances N (N=1..9, spawn N instances; requires --separate-instance on Linux)"
+                        ;;
                 esac
             done
         fi
@@ -219,7 +231,14 @@ validate_flags() {
         echo "This flag is only valid for 'run-flutter-app' command."
         exit 1
     fi
-    
+
+    if [ -n "$INSTANCES" ] && [[ ! " ${FLAGS[@]} " =~ " instances " ]]; then
+        print_error "Flag --instances is not valid for command '$command'"
+        echo ""
+        echo "This flag is only valid for 'run-flutter-app' command (Linux + --separate-instance)."
+        exit 1
+    fi
+
 }
 
 check_docker() {
@@ -1131,6 +1150,10 @@ cmd_run_flutter_app() {
             (cd "$ROOT_DIR/mobile" && $flutter_cmd -d chrome)
         fi
     elif [ "$platform" = "linux" ]; then
+        if [ -n "$INSTANCES" ] && [ "$INSTANCES" -ge 2 ] && [ "$SEPARATE_INSTANCE" != true ]; then
+            print_error "--instances N (N>=2) requires --separate-instance on Linux."
+            exit 1
+        fi
         # Rust FFI: loader looks for libdebitum_client_core.so in target/release
         local rust_lib_dir="$ROOT_DIR/crates/debitum_client_core/target/release"
         if [ -f "$rust_lib_dir/libdebitum_client_core.so" ]; then
@@ -1181,6 +1204,39 @@ cmd_run_flutter_app() {
             fi
         fi
         
+        # Multi-instance: spawn N separate instances, unified log viewer, instance window titles
+        if [ "$SEPARATE_INSTANCE" = true ] && [ -n "$INSTANCES" ] && [ "$INSTANCES" -ge 2 ] && [ -z "$device_id" ]; then
+            local real_home="$HOME"
+            [ -z "$real_home" ] && real_home="$(getent passwd "$(whoami)" 2>/dev/null | cut -d: -f6)"
+            local log_dir="${TMPDIR:-/tmp}/debitum-multi-logs-$$"
+            local pids_file="${TMPDIR:-/tmp}/debitum-multi-pids-$$"
+            mkdir -p "$log_dir"
+            : > "$pids_file"
+            print_step "Spawning $INSTANCES instances (logs in $log_dir); press 1-$INSTANCES to switch, q to quit viewer"
+            local i=1
+            while [ $i -le "$INSTANCES" ]; do
+                local instance_base="${TMPDIR:-/tmp}/debitum-instance-$$-$i"
+                mkdir -p "$instance_base/Documents" "$instance_base/.local/share" "$instance_base/.config"
+                (
+                    export PUB_CACHE="${real_home}/.pub-cache"
+                    export HOME="$instance_base"
+                    export XDG_DATA_HOME="$instance_base/.local/share"
+                    export XDG_CONFIG_HOME="$instance_base/.config"
+                    export DEBITUM_INSTANCE_ID="$i"
+                    cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                        $flutter_cmd -d linux \
+                        > "$log_dir/instance_$i.log" 2>&1
+                ) &
+                echo $! >> "$pids_file"
+                i=$((i + 1))
+                [ $i -le "$INSTANCES" ] && sleep 4
+            done
+            sleep 2
+            python3 "$SCRIPT_DIR/multi_instance_log_viewer.py" --log-dir "$log_dir" --count "$INSTANCES" --pids-file "$pids_file" || true
+            print_info "Log viewer exited. App windows keep running; close them to stop instances."
+            return 0
+        fi
+        
         # Separate instance: use isolated HOME so Documents + XDG paths do not share data with other instances
         if [ "$SEPARATE_INSTANCE" = true ]; then
             local real_home="$HOME"
@@ -1191,12 +1247,14 @@ cmd_run_flutter_app() {
             export HOME="$instance_base"
             export XDG_DATA_HOME="$instance_base/.local/share"
             export XDG_CONFIG_HOME="$instance_base/.config"
+            export DEBITUM_INSTANCE_ID="1"
             print_info "Using separate instance data: $instance_base (no shared data with other runs)"
         fi
         
         # Launch Flutter app and configure window for Hyprland
+        local linux_extra=""
         if [ -n "$device_id" ]; then
-            (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd -d "$device_id")
+            (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd $linux_extra -d "$device_id")
         else
             # Check if running on Hyprland
             if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || command -v hyprctl &> /dev/null; then
@@ -1293,18 +1351,14 @@ cmd_run_flutter_app() {
                 configure_hyprland_window $window_width $window_height &
                 local config_pid=$!
                 
-                # Start window configuration in background
-                configure_hyprland_window &
-                local config_pid=$!
-                
                 # Launch Flutter (foreground)
-                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd -d linux)
+                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd $linux_extra -d linux)
                 
                 # Clean up background process if still running
                 kill $config_pid 2>/dev/null || true
             else
                 # Not on Hyprland, just run normally
-                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd -d linux)
+                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd $linux_extra -d linux)
             fi
         fi
     else
@@ -2287,6 +2341,9 @@ Flags:
                                   Format: WIDTHxHEIGHT (e.g., 800x600) or WIDTH HEIGHT
                                   Default: 390x844 (phone size)
   --separate-instance, --sandbox   Run Linux app with isolated data (no shared data with other instances)
+  --instances N (1-9)              Spawn N instances at once (Linux + --separate-instance only).
+                                  Single terminal shows one instance's logs; press 1-9 to switch, q to quit.
+                                  Window titles become "Instance 1", "Instance 2", etc.
 
 Database Commands:
   reset-database-complete [backup.zip [username] [wallet]]
@@ -2323,6 +2380,7 @@ Flutter App Commands:
                                   Use --clear-app-data to clear app data before running
                                   Use --window-size WIDTHxHEIGHT to set custom size (Linux only)
                                   Use --separate-instance to run Linux app with isolated data (no shared state)
+                                  Use --instances N to spawn N instances with unified log viewer (1-9 switch, q quit)
                                   On Hyprland: automatically floats window with fixed size
   show-android-logs                Show filtered Android logs (Flutter/Dart only)
                                   Use this in a separate terminal while Flutter app is running
@@ -2378,6 +2436,7 @@ Examples:
   $0 run-flutter-app linux dev --window-size 800x600  # Run Linux app with custom size
   $0 run-flutter-app android --clear-app-data     # Run Android app with cleared data
   $0 run-flutter-app linux --separate-instance    # Run Linux app with isolated data (no shared state)
+  $0 run-flutter-app linux --separate-instance --instances 3   # Spawn 3 instances, one terminal, switch logs with 1-3
   $0 run-flutter-app android release <device-id>  # Run Android app in release mode on specific device
   $0 show-android-logs                            # Show filtered Android logs (in separate terminal)
   $0 run-flutter-web dev                          # Run web app in dev mode
