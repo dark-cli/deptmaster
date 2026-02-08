@@ -1,5 +1,6 @@
 // ignore_for_file: unused_import
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
@@ -16,8 +17,8 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController(text: 'max');
-  final _passwordController = TextEditingController(text: '12345678');
+  final _usernameController = TextEditingController(text: kDebugMode ? 'max' : '');
+  final _passwordController = TextEditingController(text: kDebugMode ? '12345678' : '');
   bool _loading = false;
   String? _error;
 

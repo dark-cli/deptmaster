@@ -1,9 +1,20 @@
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import 'backend_setup_screen.dart';
 import 'login_screen.dart';
 import '../widgets/gradient_background.dart';
+
+/// Human-readable random username for debug sign-up prefills (e.g. swift_fox_42).
+String _debugSignUpUsername() {
+  const adjectives = ['swift', 'calm', 'brave', 'happy', 'bright', 'clever', 'gentle', 'lucky'];
+  const nouns = ['fox', 'star', 'wave', 'bear', 'leaf', 'cloud', 'river', 'bird'];
+  final r = Random();
+  return '${adjectives[r.nextInt(adjectives.length)]}_${nouns[r.nextInt(nouns.length)]}_${r.nextInt(90) + 10}';
+}
 
 class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
@@ -14,9 +25,15 @@ class SignUpScreen extends ConsumerStatefulWidget {
 
 class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
+  final _usernameController = TextEditingController(
+    text: kDebugMode ? _debugSignUpUsername() : '',
+  );
+  final _passwordController = TextEditingController(
+    text: kDebugMode ? '12345678' : '',
+  );
+  final _confirmPasswordController = TextEditingController(
+    text: kDebugMode ? '12345678' : '',
+  );
   bool _loading = false;
   String? _error;
 
