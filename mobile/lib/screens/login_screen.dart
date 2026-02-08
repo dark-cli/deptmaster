@@ -42,11 +42,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _passwordController.text,
       );
       if (!mounted) return;
+      // Ensure wallet context
       try {
         await Api.ensureCurrentWallet();
       } catch (_) {}
-      Api.manualSync().catchError((_) {});
+      
+      // Recovery: if we still have no current wallet but have wallets, set first
+      if (await Api.getCurrentWalletId() == null) {
+        try {
+          final list = await Api.getWallets();
+          if (list.isNotEmpty && list.first['id'] != null) {
+            await Api.setCurrentWalletId(list.first['id'] as String);
+          }
+        } catch (_) {}
+      }
+
+      // Perform initial sync (wait for it to ensure data is ready)
+      try {
+        if (await Api.getCurrentWalletId() != null) {
+          await Api.manualSync();
+        }
+      } catch (e) {
+        debugPrint('Login sync failed: $e');
+        // Continue anyway, dashboard will show empty/error state
+      }
+      
       Api.connectRealtime().catchError((_) {});
+      if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e, stackTrace) {
       if (mounted) {

@@ -344,6 +344,20 @@ class Api {
   static Future<void> ensureCurrentWallet() async {
     if (kIsWeb) return;
     await rust.ensureCurrentWallet();
+    // Force cache update and notification to ensure UI stays in sync
+    try {
+      final id = await rust.getCurrentWalletId();
+      if (id != null && id.isNotEmpty) {
+        if (_cachedWalletId != id) {
+          _cachedWalletId = id;
+          DataBus.instance.emit(DataChangeType.wallet, walletId: id);
+          
+          // Ensure realtime is connected for this wallet
+          await _wsDisconnect();
+          connectRealtime().catchError((_) {});
+        }
+      }
+    } catch (_) {}
   }
 
   static Future<Map<String, dynamic>?> getWallet(String id) async {

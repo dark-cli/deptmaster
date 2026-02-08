@@ -48,6 +48,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         final list = await Api.getWallets();
         if (list.isNotEmpty && list.first['id'] != null) {
           await Api.setCurrentWalletId(list.first['id'] as String);
+          // Force sync to ensure data appears immediately after recovery
+          Api.manualSync().catchError((_) {});
         }
       }
     } catch (_) {}
