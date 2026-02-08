@@ -30,6 +30,7 @@ VERBOSE=false
 SKIP_SERVER_BUILD=false
 CLEAR_APP_DATA=false
 WINDOW_SIZE=""  # Format: "WIDTHxHEIGHT" or "WIDTH HEIGHT"
+SEPARATE_INSTANCE=false  # Linux: run with isolated XDG data (no shared data with other instances)
 
 # Define valid flags for each command
 # Format: "command:flag1,flag2,flag3"
@@ -46,7 +47,7 @@ declare -A VALID_FLAGS=(
     ["stop-server"]="verbose"
     ["restart-server"]="verbose,skip-server-build"
     ["build-server"]="verbose"
-    ["run-flutter-app"]="verbose,clear-app-data,window-size"
+    ["run-flutter-app"]="verbose,clear-app-data,window-size,separate-instance"
     ["run-flutter-web"]="verbose"
     ["test-flutter-app"]="verbose"
     ["test-api-server"]="verbose"
@@ -90,6 +91,10 @@ while [[ $# -gt 0 ]]; do
                 WINDOW_SIZE="$2"
                 shift 2
             fi
+            ;;
+        --separate-instance|--sandbox)
+            SEPARATE_INSTANCE=true
+            shift
             ;;
         --*)
             UNKNOWN_FLAGS+=("$1")
@@ -155,6 +160,12 @@ validate_flags() {
                     "clear-app-data")
                         echo "  --clear-app-data, --clean-app-data"
                         ;;
+                    "window-size")
+                        echo "  --window-size, --size WIDTHxHEIGHT"
+                        ;;
+                    "separate-instance")
+                        echo "  --separate-instance, --sandbox"
+                        ;;
                 esac
             done
         fi
@@ -197,6 +208,13 @@ validate_flags() {
     
     if [ -n "$WINDOW_SIZE" ] && [[ ! " ${FLAGS[@]} " =~ " window-size " ]]; then
         print_error "Flag --window-size is not valid for command '$command'"
+        echo ""
+        echo "This flag is only valid for 'run-flutter-app' command."
+        exit 1
+    fi
+    
+    if [ "$SEPARATE_INSTANCE" = true ] && [[ ! " ${FLAGS[@]} " =~ " separate-instance " ]]; then
+        print_error "Flag --separate-instance is not valid for command '$command'"
         echo ""
         echo "This flag is only valid for 'run-flutter-app' command."
         exit 1
@@ -1047,6 +1065,9 @@ cmd_run_flutter_app() {
     fi
     
     if [ "$platform" = "android" ]; then
+        if [ "$SEPARATE_INSTANCE" = true ]; then
+            print_warning "--separate-instance is only supported for Linux; ignored for Android"
+        fi
         # Check if adb is available
         if ! command -v adb &> /dev/null; then
             print_error "adb not found. Please install Android SDK platform-tools."
@@ -1100,6 +1121,9 @@ cmd_run_flutter_app() {
     elif [ "$platform" = "web" ]; then
         if [ "$CLEAR_APP_DATA" = true ]; then
             print_warning "--clear-app-data flag is only supported for Android and Linux platforms"
+        fi
+        if [ "$SEPARATE_INSTANCE" = true ]; then
+            print_warning "--separate-instance is only supported for Linux; ignored for web"
         fi
         if [ -n "$device_id" ]; then
             (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$device_id")
@@ -1155,6 +1179,19 @@ cmd_run_flutter_app() {
             else
                 print_info "No app data found (Hive boxes don't exist yet or already clean)"
             fi
+        fi
+        
+        # Separate instance: use isolated HOME so Documents + XDG paths do not share data with other instances
+        if [ "$SEPARATE_INSTANCE" = true ]; then
+            local real_home="$HOME"
+            [ -z "$real_home" ] && real_home="$(getent passwd "$(whoami)" 2>/dev/null | cut -d: -f6)"
+            local instance_base="${TMPDIR:-/tmp}/debitum-instance-$$"
+            mkdir -p "$instance_base/Documents" "$instance_base/.local/share" "$instance_base/.config"
+            export PUB_CACHE="${real_home}/.pub-cache"
+            export HOME="$instance_base"
+            export XDG_DATA_HOME="$instance_base/.local/share"
+            export XDG_CONFIG_HOME="$instance_base/.config"
+            print_info "Using separate instance data: $instance_base (no shared data with other runs)"
         fi
         
         # Launch Flutter app and configure window for Hyprland
@@ -2249,6 +2286,7 @@ Flags:
                                   Set window size for Linux app (only for run-flutter-app linux)
                                   Format: WIDTHxHEIGHT (e.g., 800x600) or WIDTH HEIGHT
                                   Default: 390x844 (phone size)
+  --separate-instance, --sandbox   Run Linux app with isolated data (no shared data with other instances)
 
 Database Commands:
   reset-database-complete [backup.zip [username] [wallet]]
@@ -2284,6 +2322,7 @@ Flutter App Commands:
                                   Mode: dev (default), debug, release, profile
                                   Use --clear-app-data to clear app data before running
                                   Use --window-size WIDTHxHEIGHT to set custom size (Linux only)
+                                  Use --separate-instance to run Linux app with isolated data (no shared state)
                                   On Hyprland: automatically floats window with fixed size
   show-android-logs                Show filtered Android logs (Flutter/Dart only)
                                   Use this in a separate terminal while Flutter app is running
@@ -2338,6 +2377,7 @@ Examples:
   $0 run-flutter-app linux dev                    # Run Linux app in dev mode (phone size, floating on Hyprland)
   $0 run-flutter-app linux dev --window-size 800x600  # Run Linux app with custom size
   $0 run-flutter-app android --clear-app-data     # Run Android app with cleared data
+  $0 run-flutter-app linux --separate-instance    # Run Linux app with isolated data (no shared state)
   $0 run-flutter-app android release <device-id>  # Run Android app in release mode on specific device
   $0 show-android-logs                            # Show filtered Android logs (in separate terminal)
   $0 run-flutter-web dev                          # Run web app in dev mode
