@@ -195,6 +195,14 @@ class Api {
     await rust.login(username: username, password: password);
   }
 
+  static Future<void> register(String username, String password) async {
+    if (!_initialized && !(await init())) {
+      throw StateError(initError ?? 'Rust library not loaded. Did you forget to call init?');
+    }
+    if (kIsWeb) throw UnsupportedError('Sign up not supported on web');
+    await rust.register(username: username, password: password);
+  }
+
   static Future<void> logout() async {
     if (!kIsWeb) {
       try {
@@ -230,6 +238,20 @@ class Api {
     if (kIsWeb) return null;
     try {
       return await rust.getToken();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<String?> getUsername() async {
+    final token = await getToken();
+    if (token == null || token.isEmpty) return null;
+    final parts = token.split('.');
+    if (parts.length != 3) return null;
+    try {
+      final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final map = json.decode(payload) as Map<String, dynamic>;
+      return map['username'] as String?;
     } catch (_) {
       return null;
     }
@@ -331,6 +353,154 @@ class Api {
     } catch (_) {
       return null;
     }
+  }
+
+  // ---------- Wallet management (manage wallet screen) ----------
+  static Future<List<Map<String, dynamic>>> getWalletUsers(String walletId) async {
+    if (kIsWeb) return [];
+    final json = await rust.listWalletUsers(walletId: walletId);
+    final data = jsonDecode(json) as Map<String, dynamic>?;
+    final list = data?['users'] as List<dynamic>?;
+    return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  /// Search users by email (for add-member typeahead). Returns JSON array of { id, email }.
+  static Future<List<Map<String, dynamic>>> searchWalletUsers(
+      String walletId, String query) async {
+    if (kIsWeb) return [];
+    final json = await rust.searchWalletUsers(
+        walletId: walletId, query: query.trim());
+    final list = jsonDecode(json) as List<dynamic>?;
+    return list
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        [];
+  }
+
+  static Future<void> addUserToWallet(String walletId, String username) async {
+    if (kIsWeb) return;
+    await rust.addUserToWallet(walletId: walletId, username: username);
+  }
+
+  /// Create or replace 4-digit invite code for the wallet. Returns the code.
+  static Future<String> createWalletInviteCode(String walletId) async {
+    if (kIsWeb) throw UnsupportedError('Invite codes not supported on web');
+    return rust.createWalletInviteCode(walletId: walletId);
+  }
+
+  /// Join a wallet by invite code. Returns the joined wallet_id.
+  static Future<String> joinWalletByCode(String code) async {
+    if (kIsWeb) throw UnsupportedError('Join by code not supported on web');
+    return rust.joinWalletByCode(code: code);
+  }
+
+  static Future<void> updateWalletUserRole(String walletId, String userId, String role) async {
+    if (kIsWeb) return;
+    await rust.updateWalletUserRole(walletId: walletId, userId: userId, role: role);
+  }
+
+  static Future<void> removeWalletUser(String walletId, String userId) async {
+    if (kIsWeb) return;
+    await rust.removeWalletUser(walletId: walletId, userId: userId);
+  }
+
+  static Future<List<Map<String, dynamic>>> getWalletUserGroups(String walletId) async {
+    if (kIsWeb) return [];
+    final json = await rust.listWalletUserGroups(walletId: walletId);
+    final list = jsonDecode(json) as List<dynamic>?;
+    return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  static Future<Map<String, dynamic>> createWalletUserGroup(String walletId, String name) async {
+    final json = await rust.createWalletUserGroup(walletId: walletId, name: name);
+    return jsonDecode(json) as Map<String, dynamic>;
+  }
+
+  static Future<void> updateWalletUserGroup(String walletId, String groupId, String name) async {
+    await rust.updateWalletUserGroup(walletId: walletId, groupId: groupId, name: name);
+  }
+
+  static Future<void> deleteWalletUserGroup(String walletId, String groupId) async {
+    await rust.deleteWalletUserGroup(walletId: walletId, groupId: groupId);
+  }
+
+  static Future<List<Map<String, dynamic>>> getWalletUserGroupMembers(String walletId, String groupId) async {
+    if (kIsWeb) return [];
+    final json = await rust.listWalletUserGroupMembers(walletId: walletId, groupId: groupId);
+    final list = jsonDecode(json) as List<dynamic>?;
+    return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  static Future<void> addWalletUserGroupMember(String walletId, String groupId, String userId) async {
+    if (kIsWeb) return;
+    await rust.addWalletUserGroupMember(walletId: walletId, groupId: groupId, userId: userId);
+  }
+
+  static Future<void> removeWalletUserGroupMember(String walletId, String groupId, String userId) async {
+    if (kIsWeb) return;
+    await rust.removeWalletUserGroupMember(walletId: walletId, groupId: groupId, userId: userId);
+  }
+
+  static Future<List<Map<String, dynamic>>> getWalletContactGroups(String walletId) async {
+    if (kIsWeb) return [];
+    final json = await rust.listWalletContactGroups(walletId: walletId);
+    final list = jsonDecode(json) as List<dynamic>?;
+    return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  static Future<Map<String, dynamic>> createWalletContactGroup(String walletId, String name) async {
+    final json = await rust.createWalletContactGroup(walletId: walletId, name: name);
+    return jsonDecode(json) as Map<String, dynamic>;
+  }
+
+  static Future<void> updateWalletContactGroup(String walletId, String groupId, String name) async {
+    await rust.updateWalletContactGroup(walletId: walletId, groupId: groupId, name: name);
+  }
+
+  static Future<void> deleteWalletContactGroup(String walletId, String groupId) async {
+    await rust.deleteWalletContactGroup(walletId: walletId, groupId: groupId);
+  }
+
+  static Future<List<Map<String, dynamic>>> getWalletContactGroupMembers(String walletId, String groupId) async {
+    if (kIsWeb) return [];
+    final json = await rust.listWalletContactGroupMembers(walletId: walletId, groupId: groupId);
+    final list = jsonDecode(json) as List<dynamic>?;
+    return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  static Future<void> addWalletContactGroupMember(String walletId, String groupId, String contactId) async {
+    if (kIsWeb) return;
+    await rust.addWalletContactGroupMember(walletId: walletId, groupId: groupId, contactId: contactId);
+  }
+
+  static Future<void> removeWalletContactGroupMember(String walletId, String groupId, String contactId) async {
+    if (kIsWeb) return;
+    await rust.removeWalletContactGroupMember(walletId: walletId, groupId: groupId, contactId: contactId);
+  }
+
+  static Future<List<Map<String, dynamic>>> getWalletPermissionActions(String walletId) async {
+    if (kIsWeb) return [];
+    final json = await rust.listWalletPermissionActions(walletId: walletId);
+    final list = jsonDecode(json) as List<dynamic>?;
+    return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  static Future<List<Map<String, dynamic>>> getWalletPermissionMatrix(String walletId) async {
+    if (kIsWeb) return [];
+    final json = await rust.getWalletPermissionMatrix(walletId: walletId);
+    final list = jsonDecode(json) as List<dynamic>?;
+    return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  static Future<void> putWalletPermissionMatrix(String walletId, List<Map<String, dynamic>> entries) async {
+    if (kIsWeb) return;
+    final entriesJson = jsonEncode(entries);
+    await rust.putWalletPermissionMatrix(walletId: walletId, entriesJson: entriesJson);
+  }
+
+  static bool isPermissionDeniedError(dynamic e) {
+    final s = e.toString().toLowerCase();
+    return s.contains(_permissionDeniedCode);
   }
 
   // ---------- Data (Rust) ----------
@@ -740,7 +910,7 @@ class Api {
       _wsConnected = true;
       _notifyConnectionStateChanged();
       // Check login when we get online: if server declines (401), validateAuth logs out and cleans up. It also runs manualSync.
-      validateAuth().catchError((_) {});
+      validateAuth().catchError((_) => false);
     } catch (_) {
       _wsConnecting = false;
       _reconnectWs();
@@ -752,7 +922,9 @@ class Api {
       if (token == null || token.isEmpty) return;
       if (_isTokenExpired(token)) return;
       Future.delayed(reconnectInterval, () {
-        if (!_wsConnected) connectRealtime().catchError((_) => _reconnectWs());
+        if (!_wsConnected) connectRealtime().catchError((_) {
+          _reconnectWs();
+        });
       });
     });
   }

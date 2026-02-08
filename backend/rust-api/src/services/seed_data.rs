@@ -19,7 +19,7 @@ pub async fn seed_dummy_data(pool: &PgPool) -> anyhow::Result<()> {
     let user_id = Uuid::new_v4();
     sqlx::query(
         r#"
-        INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id)
+        INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id)
         VALUES ($1, $2, $3, $4, 0)
         "#
     )

@@ -48,6 +48,10 @@ pub fn login(username: String, password: String) -> Result<(), String> {
     api::login(username, password)
 }
 
+pub fn register(username: String, password: String) -> Result<(), String> {
+    api::register(username, password)
+}
+
 pub fn logout() -> Result<(), String> {
     crud::logout()
 }
@@ -203,6 +207,105 @@ pub fn bulk_delete_contacts(contact_ids: Vec<String>) -> Result<(), String> {
 
 pub fn bulk_delete_transactions(transaction_ids: Vec<String>) -> Result<(), String> {
     crud::bulk_delete_transactions(transaction_ids)
+}
+
+// --- Wallet management (manage wallet screen: users, groups, matrix) ---
+pub fn list_wallet_users(wallet_id: String) -> Result<String, String> {
+    api::list_wallet_users_api(&wallet_id)
+}
+
+pub fn search_wallet_users(wallet_id: String, query: String) -> Result<String, String> {
+    api::search_wallet_users_api(&wallet_id, &query)
+}
+
+pub fn add_user_to_wallet(wallet_id: String, username: String) -> Result<(), String> {
+    api::add_user_to_wallet_api(&wallet_id, &username)
+}
+
+/// Create or replace 4-digit invite code for the wallet. Returns the code string.
+pub fn create_wallet_invite_code(wallet_id: String) -> Result<String, String> {
+    api::create_wallet_invite_api(&wallet_id)
+}
+
+/// Join a wallet by invite code. Returns the wallet_id of the joined wallet.
+pub fn join_wallet_by_code(code: String) -> Result<String, String> {
+    api::join_wallet_by_code_api(&code)
+}
+
+pub fn update_wallet_user_role(wallet_id: String, user_id: String, role: String) -> Result<(), String> {
+    api::update_wallet_user_api(&wallet_id, &user_id, &role)
+}
+
+pub fn remove_wallet_user(wallet_id: String, user_id: String) -> Result<(), String> {
+    api::remove_wallet_user_api(&wallet_id, &user_id)
+}
+
+pub fn list_wallet_user_groups(wallet_id: String) -> Result<String, String> {
+    api::list_user_groups_api(&wallet_id)
+}
+
+pub fn create_wallet_user_group(wallet_id: String, name: String) -> Result<String, String> {
+    api::create_user_group_api(&wallet_id, &name)
+}
+
+pub fn update_wallet_user_group(wallet_id: String, group_id: String, name: String) -> Result<(), String> {
+    api::update_user_group_api(&wallet_id, &group_id, &name)
+}
+
+pub fn delete_wallet_user_group(wallet_id: String, group_id: String) -> Result<(), String> {
+    api::delete_user_group_api(&wallet_id, &group_id)
+}
+
+pub fn list_wallet_user_group_members(wallet_id: String, group_id: String) -> Result<String, String> {
+    api::list_user_group_members_api(&wallet_id, &group_id)
+}
+
+pub fn add_wallet_user_group_member(wallet_id: String, group_id: String, user_id: String) -> Result<(), String> {
+    api::add_user_group_member_api(&wallet_id, &group_id, &user_id)
+}
+
+pub fn remove_wallet_user_group_member(wallet_id: String, group_id: String, user_id: String) -> Result<(), String> {
+    api::remove_user_group_member_api(&wallet_id, &group_id, &user_id)
+}
+
+pub fn list_wallet_contact_groups(wallet_id: String) -> Result<String, String> {
+    api::list_contact_groups_api(&wallet_id)
+}
+
+pub fn create_wallet_contact_group(wallet_id: String, name: String) -> Result<String, String> {
+    api::create_contact_group_api(&wallet_id, &name)
+}
+
+pub fn update_wallet_contact_group(wallet_id: String, group_id: String, name: String) -> Result<(), String> {
+    api::update_contact_group_api(&wallet_id, &group_id, &name)
+}
+
+pub fn delete_wallet_contact_group(wallet_id: String, group_id: String) -> Result<(), String> {
+    api::delete_contact_group_api(&wallet_id, &group_id)
+}
+
+pub fn list_wallet_contact_group_members(wallet_id: String, group_id: String) -> Result<String, String> {
+    api::list_contact_group_members_api(&wallet_id, &group_id)
+}
+
+pub fn add_wallet_contact_group_member(wallet_id: String, group_id: String, contact_id: String) -> Result<(), String> {
+    api::add_contact_group_member_api(&wallet_id, &group_id, &contact_id)
+}
+
+pub fn remove_wallet_contact_group_member(wallet_id: String, group_id: String, contact_id: String) -> Result<(), String> {
+    api::remove_contact_group_member_api(&wallet_id, &group_id, &contact_id)
+}
+
+pub fn list_wallet_permission_actions(wallet_id: String) -> Result<String, String> {
+    api::list_permission_actions_api(&wallet_id)
+}
+
+pub fn get_wallet_permission_matrix(wallet_id: String) -> Result<String, String> {
+    api::get_permission_matrix_api(&wallet_id)
+}
+
+pub fn put_wallet_permission_matrix(wallet_id: String, entries_json: String) -> Result<(), String> {
+    api::put_permission_matrix_api(&wallet_id, &entries_json)
 }
 
 // --- Events (for events log / EventStoreService) ---

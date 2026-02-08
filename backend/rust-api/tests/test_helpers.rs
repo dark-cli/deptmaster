@@ -3,6 +3,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 use chrono::Utc;
+use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::middleware::wallet_context::WalletContext;
 
 pub async fn setup_test_db() -> PgPool {
@@ -13,11 +14,12 @@ pub async fn setup_test_db() -> PgPool {
         .await
         .expect("Failed to connect to test database");
     
-    // Run migrations (ignore errors if tables already exist)
-    let _ = sqlx::migrate!("./migrations")
+    // Run migrations (required for tests that use wallets, permission tables, etc.)
+    sqlx::migrate!("./migrations")
         .run(&pool)
-        .await;
-    
+        .await
+        .expect("Failed to run migrations - ensure TEST_DATABASE_URL points to a database that can be migrated");
+
     // Clear test data (in correct order due to foreign keys)
     sqlx::query("DELETE FROM projection_snapshots").execute(&pool).await.ok();
     sqlx::query("DELETE FROM transactions_projection").execute(&pool).await.ok();
@@ -26,8 +28,61 @@ pub async fn setup_test_db() -> PgPool {
     sqlx::query("DELETE FROM wallet_users").execute(&pool).await.ok();
     sqlx::query("DELETE FROM wallets").execute(&pool).await.ok();
     sqlx::query("DELETE FROM users_projection").execute(&pool).await.ok();
-    
+    // Permission tables: CASCADE from wallets, but clear if any orphaned
+    sqlx::query("DELETE FROM user_wallet_settings").execute(&pool).await.ok();
+    sqlx::query("DELETE FROM group_permission_matrix").execute(&pool).await.ok();
+    sqlx::query("DELETE FROM user_group_members").execute(&pool).await.ok();
+    sqlx::query("DELETE FROM contact_group_members").execute(&pool).await.ok();
+    sqlx::query("DELETE FROM user_groups").execute(&pool).await.ok();
+    sqlx::query("DELETE FROM contact_groups").execute(&pool).await.ok();
+
     pool
+}
+
+/// Ensure a wallet has system groups (all_users, all_contacts) and default permission matrix.
+/// Call after create_test_wallet when tests need permission resolution for members.
+pub async fn ensure_wallet_has_system_groups(pool: &PgPool, wallet_id: Uuid) {
+    sqlx::query(
+        "INSERT INTO user_groups (wallet_id, name, is_system) VALUES ($1, 'all_users', true)
+         ON CONFLICT (wallet_id, name) DO UPDATE SET is_system = true",
+    )
+    .bind(wallet_id)
+    .execute(pool)
+    .await
+    .expect("create all_users");
+
+    sqlx::query(
+        "INSERT INTO contact_groups (wallet_id, name, type, is_system) VALUES ($1, 'all_contacts', 'static', true)
+         ON CONFLICT (wallet_id, name) DO NOTHING",
+    )
+    .bind(wallet_id)
+    .execute(pool)
+    .await
+    .expect("create all_contacts");
+
+    let ug_id: Uuid = sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
+        .bind(wallet_id)
+        .fetch_one(pool)
+        .await
+        .expect("get all_users id");
+    let cg_id: Uuid = sqlx::query_scalar("SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'")
+        .bind(wallet_id)
+        .fetch_one(pool)
+        .await
+        .expect("get all_contacts id");
+
+    for act_id in 1..=10_i16 {
+        sqlx::query(
+            "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id)
+             VALUES ($1, $2, $3) ON CONFLICT (user_group_id, contact_group_id, permission_action_id) DO NOTHING",
+        )
+        .bind(ug_id)
+        .bind(cg_id)
+        .bind(act_id)
+        .execute(pool)
+        .await
+        .ok();
+    }
 }
 
 pub async fn create_test_user(pool: &PgPool) -> Uuid {
@@ -149,9 +204,18 @@ pub async fn get_contact_balance(pool: &PgPool, wallet_id: Uuid, contact_id: Uui
     .expect("Failed to get contact balance")
 }
 
-/// Create Extension<WalletContext> for calling post_sync_events in tests
+/// Create Extension<WalletContext> for calling handlers in tests
 pub fn wallet_context_extension(wallet_id: Uuid, role: &str) -> axum::extract::Extension<WalletContext> {
     axum::extract::Extension(WalletContext::new(wallet_id, role.to_string()))
+}
+
+/// Create Extension<AuthUser> for calling handlers that require auth in tests
+pub fn auth_user_extension(user_id: Uuid, email: Option<&str>) -> axum::extract::Extension<AuthUser> {
+    axum::extract::Extension(AuthUser {
+        user_id,
+        email: email.unwrap_or("test@example.com").to_string(),
+        is_admin: false,
+    })
 }
 
 /// Create AppState for tests

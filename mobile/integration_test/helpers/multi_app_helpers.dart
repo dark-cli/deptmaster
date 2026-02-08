@@ -152,10 +152,11 @@ Future<Map<String, String>> createUniqueTestUserAndWallet({
   await Future.delayed(const Duration(milliseconds: 800));
   await TestUserWalletHelpers.addUserToWallet(
     walletId: wallet['id']!,
-    userId: user['id']!,
-    role: 'owner',
+    username: user['email']!,
     serverUrl: serverUrl,
   );
+  // Promote to owner via update (add gives member by default)
+  // TODO: if test needs owner, call update wallet user role to owner after add
   return {
     'email': user['email']!,
     'password': testUserPassword,

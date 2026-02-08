@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'api.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/sign_up_screen.dart';
 import 'screens/backend_setup_screen.dart';
 import 'screens/create_wallet_screen.dart';
 import 'utils/app_theme.dart';
@@ -121,13 +122,16 @@ void main() async {
   }
 
   Api.onLogout = () {
-    final context = navigatorKey.currentContext;
-    if (context != null) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (Route<dynamic> route) => false,
-      );
-    }
+    // Defer navigation to next frame so we never run during build (avoids Navigator _history.isNotEmpty).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = navigatorKey.currentContext;
+      if (context != null && context.mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/login',
+          (Route<dynamic> route) => false,
+        );
+      }
+    });
   };
 
   runApp(ProviderScope(
@@ -192,6 +196,7 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
         '/': (context) => _Wrapper(child: const HomeScreen()),
         '/setup': (context) => const BackendSetupScreen(),
         '/login': (context) => const LoginScreen(),
+        '/signup': (context) => const SignUpScreen(),
         '/create-wallet': (context) => const CreateWalletScreen(),
         '/rust-load-error': (context) => const RustLoadErrorScreen(),
       },

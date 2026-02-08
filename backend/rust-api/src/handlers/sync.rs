@@ -8,6 +8,8 @@ use sqlx::Row;
 use crate::AppState;
 use crate::websocket;
 use crate::services::projection_snapshot_service;
+use crate::services::permission_service::{self, ResourceType};
+use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use sha2::{Sha256, Digest};
 
@@ -47,9 +49,23 @@ pub struct SyncHashResponse {
 pub async fn get_sync_hash(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<SyncHashResponse>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "events:read",
+        ResourceType::Events,
+        None,
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
     // Get all events for this wallet ordered by timestamp
     let events = sqlx::query(
         r#"
@@ -110,9 +126,23 @@ pub async fn get_sync_events(
     Query(params): Query<SyncEventsQuery>,
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<SyncEvent>>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "events:read",
+        ResourceType::Events,
+        None,
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
     let since_timestamp = params.since.and_then(|s| {
         chrono::DateTime::parse_from_rfc3339(&s)
             .ok()
@@ -185,30 +215,90 @@ pub struct SyncEventRequest {
     pub version: i32,
 }
 
+/// Insert a permission event and apply it to projections. Used by wallet management handlers.
+pub(crate) async fn insert_permission_event_and_apply(
+    state: &AppState,
+    user_id: uuid::Uuid,
+    wallet_id: uuid::Uuid,
+    aggregate_id: uuid::Uuid,
+    event_type: &str,
+    event_data: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    let event_id = uuid::Uuid::new_v4();
+    let created_at = chrono::Utc::now().naive_utc();
+    sqlx::query(
+        r#"
+        INSERT INTO events (event_id, user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ($1, $2, $3, 'permission', $4, $5, 1, $6, $7)
+        "#
+    )
+    .bind(event_id)
+    .bind(user_id)
+    .bind(wallet_id)
+    .bind(aggregate_id)
+    .bind(event_type)
+    .bind(&event_data)
+    .bind(created_at)
+    .execute(&*state.db_pool)
+    .await?;
+
+    let event_req = SyncEventRequest {
+        id: event_id.to_string(),
+        aggregate_type: "permission".to_string(),
+        aggregate_id: aggregate_id.to_string(),
+        event_type: event_type.to_string(),
+        event_data,
+        timestamp: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(created_at, chrono::Utc).to_rfc3339(),
+        version: 1,
+    };
+    apply_single_event_to_projections(state, &event_req, aggregate_id, user_id, wallet_id, created_at).await
+}
+
 #[derive(Serialize)]
 pub struct SyncEventsResponse {
     pub accepted: Vec<String>,
     pub conflicts: Vec<String>,
 }
 
+/// Permission event types (write-only; projection builds wallet_users, user_groups, etc.)
+const PERMISSION_EVENT_TYPES: &[&str] = &[
+    "WALLET_USER_ADDED", "WALLET_USER_ROLE_CHANGED", "WALLET_USER_REMOVED",
+    "USER_GROUP_CREATED", "USER_GROUP_RENAMED", "USER_GROUP_DELETED",
+    "USER_GROUP_MEMBER_ADDED", "USER_GROUP_MEMBER_REMOVED",
+    "CONTACT_GROUP_CREATED", "CONTACT_GROUP_RENAMED", "CONTACT_GROUP_DELETED",
+    "CONTACT_GROUP_MEMBER_ADDED", "CONTACT_GROUP_MEMBER_REMOVED",
+    "PERMISSION_MATRIX_SET",
+];
+
 /// Validate event structure and data
 /// Returns error message if validation fails, None if valid
 fn validate_event(event: &SyncEventRequest) -> Option<String> {
-    // Validate event_type
+    // Validate aggregate_type first (permission has different event_type set)
+    let allowed_aggregate_types = ["contact", "transaction", "permission"];
+    if !allowed_aggregate_types.contains(&event.aggregate_type.as_str()) {
+        return Some(format!(
+            "Invalid aggregate_type: '{}'. Allowed: contact, transaction, permission",
+            event.aggregate_type
+        ));
+    }
+
+    if event.aggregate_type == "permission" {
+        if !PERMISSION_EVENT_TYPES.contains(&event.event_type.as_str()) {
+            return Some(format!(
+                "Invalid permission event_type: '{}'. Allowed: {:?}",
+                event.event_type, PERMISSION_EVENT_TYPES
+            ));
+        }
+        // Minimal validation: event_data must be object; required fields checked in apply
+        return None;
+    }
+
+    // Validate event_type for contact/transaction
     let allowed_event_types = ["CREATED", "UPDATED", "DELETED", "UNDO"];
     if !allowed_event_types.contains(&event.event_type.as_str()) {
         return Some(format!(
             "Invalid event_type: '{}'. Allowed values: CREATED, UPDATED, DELETED, UNDO",
             event.event_type
-        ));
-    }
-
-    // Validate aggregate_type
-    let allowed_aggregate_types = ["contact", "transaction"];
-    if !allowed_aggregate_types.contains(&event.aggregate_type.as_str()) {
-        return Some(format!(
-            "Invalid aggregate_type: '{}'. Allowed values: contact, transaction",
-            event.aggregate_type
         ));
     }
 
@@ -280,32 +370,13 @@ fn validate_event(event: &SyncEventRequest) -> Option<String> {
 pub async fn post_sync_events(
     State(state): State<AppState>,
     axum::extract::Extension(wallet_context): axum::extract::Extension<WalletContext>,
+    axum::extract::Extension(auth_user): axum::extract::Extension<AuthUser>,
     Json(events): Json<Vec<SyncEventRequest>>,
 ) -> Result<Json<SyncEventsResponse>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
+    let user_id = auth_user.user_id;
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
-
-    // Get user ID
-    let user_id = sqlx::query_scalar::<_, uuid::Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
-
-    let user_id = user_id.ok_or_else(|| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "No user found"})),
-        )
-    })?;
 
     for event in events {
         let event_id = uuid::Uuid::parse_str(&event.id).map_err(|e| {
@@ -1434,8 +1505,9 @@ async fn apply_events_to_projections(
     Ok(())
 }
 
-/// Apply a single event to projections (for incremental updates during sync)
-async fn apply_single_event_to_projections(
+/// Apply a single event to projections (for incremental updates during sync).
+/// Also used by wallet handlers when they emit permission events.
+pub(crate) async fn apply_single_event_to_projections(
     state: &AppState,
     event: &SyncEventRequest,
     aggregate_id: uuid::Uuid,
@@ -1768,8 +1840,213 @@ async fn apply_single_event_to_projections(
                 _ => {}
             }
         }
+        "permission" => {
+            apply_permission_event(state, event, wallet_id, created_at).await?;
+        }
         _ => {}
     }
     
+    Ok(())
+}
+
+/// Apply a single permission event to projection tables (wallet_users, user_groups, etc.)
+async fn apply_permission_event(
+    state: &AppState,
+    event: &SyncEventRequest,
+    wallet_id: uuid::Uuid,
+    created_at: chrono::NaiveDateTime,
+) -> Result<(), sqlx::Error> {
+    let event_data = &event.event_data;
+    match event.event_type.as_str() {
+        "WALLET_USER_ADDED" => {
+            let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            let role = event_data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
+            sqlx::query(
+                r#"
+                INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3, subscribed_at = $4
+                "#
+            )
+            .bind(wallet_id)
+            .bind(user_id)
+            .bind(role)
+            .bind(created_at)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "WALLET_USER_ROLE_CHANGED" => {
+            let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            let role = event_data.get("role").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query(
+                "UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3"
+            )
+            .bind(role)
+            .bind(wallet_id)
+            .bind(user_id)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "WALLET_USER_REMOVED" => {
+            let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
+                .bind(wallet_id)
+                .bind(user_id)
+                .execute(&*state.db_pool)
+                .await?;
+        }
+        "USER_GROUP_CREATED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query(
+                "INSERT INTO user_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
+            )
+            .bind(group_id)
+            .bind(wallet_id)
+            .bind(name)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "USER_GROUP_RENAMED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query(
+                "UPDATE user_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
+            )
+            .bind(name)
+            .bind(group_id)
+            .bind(wallet_id)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "USER_GROUP_DELETED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            sqlx::query("DELETE FROM user_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false")
+                .bind(group_id)
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+        }
+        "USER_GROUP_MEMBER_ADDED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query(
+                "INSERT INTO user_group_members (user_id, user_group_id) VALUES ($1, $2) ON CONFLICT (user_id, user_group_id) DO NOTHING"
+            )
+            .bind(user_id)
+            .bind(group_id)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "USER_GROUP_MEMBER_REMOVED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query("DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2")
+                .bind(user_id)
+                .bind(group_id)
+                .execute(&*state.db_pool)
+                .await?;
+        }
+        "CONTACT_GROUP_CREATED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query(
+                "INSERT INTO contact_groups (id, wallet_id, name, type, is_system) VALUES ($1, $2, $3, 'static', false) ON CONFLICT (id) DO UPDATE SET name = $3"
+            )
+            .bind(group_id)
+            .bind(wallet_id)
+            .bind(name)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "CONTACT_GROUP_RENAMED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query(
+                "UPDATE contact_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
+            )
+            .bind(name)
+            .bind(group_id)
+            .bind(wallet_id)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "CONTACT_GROUP_DELETED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            sqlx::query("DELETE FROM contact_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false")
+                .bind(group_id)
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+        }
+        "CONTACT_GROUP_MEMBER_ADDED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let contact_id = event_data.get("contact_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query(
+                "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT (contact_id, contact_group_id) DO NOTHING"
+            )
+            .bind(contact_id)
+            .bind(group_id)
+            .execute(&*state.db_pool)
+            .await?;
+        }
+        "CONTACT_GROUP_MEMBER_REMOVED" => {
+            let group_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+            let contact_id = event_data.get("contact_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            sqlx::query("DELETE FROM contact_group_members WHERE contact_id = $1 AND contact_group_id = $2")
+                .bind(contact_id)
+                .bind(group_id)
+                .execute(&*state.db_pool)
+                .await?;
+        }
+        "PERMISSION_MATRIX_SET" => {
+            let user_group_id = event_data.get("user_group_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            let contact_group_id = event_data.get("contact_group_id").and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            let action_names: Vec<String> = event_data.get("action_names")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            sqlx::query("DELETE FROM group_permission_matrix WHERE user_group_id = $1 AND contact_group_id = $2")
+                .bind(user_group_id)
+                .bind(contact_group_id)
+                .execute(&*state.db_pool)
+                .await?;
+            for name in &action_names {
+                let action_id: Option<i16> = sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = $1")
+                    .bind(name)
+                    .fetch_optional(&*state.db_pool)
+                    .await?;
+                if let Some(aid) = action_id {
+                    sqlx::query(
+                        "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
+                    )
+                    .bind(user_group_id)
+                    .bind(contact_group_id)
+                    .bind(aid)
+                    .execute(&*state.db_pool)
+                    .await?;
+                }
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }

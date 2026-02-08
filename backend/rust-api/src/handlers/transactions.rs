@@ -10,7 +10,9 @@ use chrono::Utc;
 use crate::AppState;
 use crate::models::Currency;
 use crate::websocket;
+use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
+use crate::services::permission_service::{self, ResourceType};
 
 /// Calculate total debt (sum of all contact balances) at current time for a wallet
 async fn calculate_total_debt(state: &AppState, wallet_id: Uuid) -> i64 {
@@ -47,6 +49,9 @@ pub struct CreateTransactionRequest {
     #[serde(default, deserialize_with = "crate::utils::date::deserialize_opt")]
     pub due_date: Option<chrono::NaiveDate>,
     pub comment: String, // Required: explanation for why this transaction is being created
+    /// Optional transaction group IDs (for future use; transaction_groups not yet implemented).
+    #[allow(dead_code)]
+    pub group_ids: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -122,9 +127,23 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for TransactionResponse {
 pub async fn get_transactions(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<TransactionResponse>>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "transaction:read",
+        ResourceType::Transaction,
+        None,
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
     let transactions = sqlx::query_as::<_, TransactionResponse>(
         r#"
         SELECT 
@@ -161,9 +180,24 @@ pub async fn get_transactions(
 pub async fn create_transaction(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<CreateTransactionRequest>,
 ) -> Result<(StatusCode, Json<CreateTransactionResponse>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "transaction:create",
+        ResourceType::Transaction,
+        None,
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
     // Validate contact exists
     let contact_uuid = Uuid::parse_str(&payload.contact_id).map_err(|e| {
         (
@@ -204,18 +238,7 @@ pub async fn create_transaction(
 
     // Generate transaction ID
     let transaction_id = Uuid::new_v4();
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user_id = auth_user.user_id;
 
     let transaction_date = payload.transaction_date;
     let due_date = payload.due_date;
@@ -327,6 +350,7 @@ pub async fn update_transaction(
     Path(transaction_id): Path<String>,
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<UpdateTransactionRequest>,
 ) -> Result<(StatusCode, Json<UpdateTransactionResponse>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
@@ -358,19 +382,32 @@ pub async fn update_transaction(
             Json(serde_json::json!({"error": "Transaction not found"})),
         ));
     }
-
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
+    let contact_id: Uuid = sqlx::query_scalar(
+        "SELECT contact_id FROM transactions_projection WHERE id = $1 AND wallet_id = $2",
     )
+    .bind(transaction_uuid)
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
+        tracing::error!("Error fetching transaction: {:?}", e);
+        permission_service::insufficient_permission_response()
     })?;
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "transaction:update",
+        ResourceType::Contact,
+        Some(contact_id),
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
+    let user_id = auth_user.user_id;
 
     // Get current transaction data
     let current = sqlx::query(
@@ -612,6 +649,7 @@ pub async fn delete_transaction(
     Path(transaction_id): Path<String>,
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<DeleteTransactionRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
@@ -643,6 +681,31 @@ pub async fn delete_transaction(
             Json(serde_json::json!({"error": "Transaction not found"})),
         ));
     }
+    let contact_id: Uuid = sqlx::query_scalar(
+        "SELECT contact_id FROM transactions_projection WHERE id = $1 AND wallet_id = $2",
+    )
+    .bind(transaction_uuid)
+    .bind(wallet_id)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching transaction: {:?}", e);
+        permission_service::insufficient_permission_response()
+    })?;
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "transaction:delete",
+        ResourceType::Contact,
+        Some(contact_id),
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
 
     // Validate comment is required for delete operations
     if payload.comment.trim().is_empty() {
@@ -652,18 +715,7 @@ pub async fn delete_transaction(
         ));
     }
 
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user_id = auth_user.user_id;
 
     // Get transaction data before deletion for audit trail
     let transaction_data = sqlx::query(

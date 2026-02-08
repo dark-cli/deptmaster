@@ -23,6 +23,9 @@ Future<String?> getWsUrl() => RustLib.instance.api.crateGetWsUrl();
 Future<void> login({required String username, required String password}) =>
     RustLib.instance.api.crateLogin(username: username, password: password);
 
+Future<void> register({required String username, required String password}) =>
+    RustLib.instance.api.crateRegister(username: username, password: password);
+
 Future<void> logout() => RustLib.instance.api.crateLogout();
 
 Future<bool> isLoggedIn() => RustLib.instance.api.crateIsLoggedIn();
@@ -145,8 +148,131 @@ Future<void> bulkDeleteTransactions({required List<String> transactionIds}) =>
     RustLib.instance.api
         .crateBulkDeleteTransactions(transactionIds: transactionIds);
 
+Future<String> listWalletUsers({required String walletId}) =>
+    RustLib.instance.api.crateListWalletUsers(walletId: walletId);
+
+Future<String> searchWalletUsers(
+        {required String walletId, required String query}) =>
+    RustLib.instance.api
+        .crateSearchWalletUsers(walletId: walletId, query: query);
+
+Future<void> addUserToWallet(
+        {required String walletId, required String username}) =>
+    RustLib.instance.api
+        .crateAddUserToWallet(walletId: walletId, username: username);
+
+/// Create or replace 4-digit invite code for the wallet. Returns the code string.
+Future<String> createWalletInviteCode({required String walletId}) =>
+    RustLib.instance.api.crateCreateWalletInviteCode(walletId: walletId);
+
+/// Join a wallet by invite code. Returns the wallet_id of the joined wallet.
+Future<String> joinWalletByCode({required String code}) =>
+    RustLib.instance.api.crateJoinWalletByCode(code: code);
+
+Future<void> updateWalletUserRole(
+        {required String walletId,
+        required String userId,
+        required String role}) =>
+    RustLib.instance.api.crateUpdateWalletUserRole(
+        walletId: walletId, userId: userId, role: role);
+
+Future<void> removeWalletUser(
+        {required String walletId, required String userId}) =>
+    RustLib.instance.api
+        .crateRemoveWalletUser(walletId: walletId, userId: userId);
+
+Future<String> listWalletUserGroups({required String walletId}) =>
+    RustLib.instance.api.crateListWalletUserGroups(walletId: walletId);
+
+Future<String> createWalletUserGroup(
+        {required String walletId, required String name}) =>
+    RustLib.instance.api
+        .crateCreateWalletUserGroup(walletId: walletId, name: name);
+
+Future<void> updateWalletUserGroup(
+        {required String walletId,
+        required String groupId,
+        required String name}) =>
+    RustLib.instance.api.crateUpdateWalletUserGroup(
+        walletId: walletId, groupId: groupId, name: name);
+
+Future<void> deleteWalletUserGroup(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api
+        .crateDeleteWalletUserGroup(walletId: walletId, groupId: groupId);
+
+Future<String> listWalletUserGroupMembers(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api
+        .crateListWalletUserGroupMembers(walletId: walletId, groupId: groupId);
+
+Future<void> addWalletUserGroupMember(
+        {required String walletId,
+        required String groupId,
+        required String userId}) =>
+    RustLib.instance.api.crateAddWalletUserGroupMember(
+        walletId: walletId, groupId: groupId, userId: userId);
+
+Future<void> removeWalletUserGroupMember(
+        {required String walletId,
+        required String groupId,
+        required String userId}) =>
+    RustLib.instance.api.crateRemoveWalletUserGroupMember(
+        walletId: walletId, groupId: groupId, userId: userId);
+
+Future<String> listWalletContactGroups({required String walletId}) =>
+    RustLib.instance.api.crateListWalletContactGroups(walletId: walletId);
+
+Future<String> createWalletContactGroup(
+        {required String walletId, required String name}) =>
+    RustLib.instance.api
+        .crateCreateWalletContactGroup(walletId: walletId, name: name);
+
+Future<void> updateWalletContactGroup(
+        {required String walletId,
+        required String groupId,
+        required String name}) =>
+    RustLib.instance.api.crateUpdateWalletContactGroup(
+        walletId: walletId, groupId: groupId, name: name);
+
+Future<void> deleteWalletContactGroup(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api
+        .crateDeleteWalletContactGroup(walletId: walletId, groupId: groupId);
+
+Future<String> listWalletContactGroupMembers(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api.crateListWalletContactGroupMembers(
+        walletId: walletId, groupId: groupId);
+
+Future<void> addWalletContactGroupMember(
+        {required String walletId,
+        required String groupId,
+        required String contactId}) =>
+    RustLib.instance.api.crateAddWalletContactGroupMember(
+        walletId: walletId, groupId: groupId, contactId: contactId);
+
+Future<void> removeWalletContactGroupMember(
+        {required String walletId,
+        required String groupId,
+        required String contactId}) =>
+    RustLib.instance.api.crateRemoveWalletContactGroupMember(
+        walletId: walletId, groupId: groupId, contactId: contactId);
+
+Future<String> listWalletPermissionActions({required String walletId}) =>
+    RustLib.instance.api.crateListWalletPermissionActions(walletId: walletId);
+
+Future<String> getWalletPermissionMatrix({required String walletId}) =>
+    RustLib.instance.api.crateGetWalletPermissionMatrix(walletId: walletId);
+
+Future<void> putWalletPermissionMatrix(
+        {required String walletId, required String entriesJson}) =>
+    RustLib.instance.api.cratePutWalletPermissionMatrix(
+        walletId: walletId, entriesJson: entriesJson);
+
 Future<String> getEvents() => RustLib.instance.api.crateGetEvents();
 
+/// Sync with server. If server responds with DEBITUM_AUTH_DECLINED, Rust clears session (logout) and returns that error; Dart only needs to react (e.g. show login).
 Future<void> manualSync() => RustLib.instance.api.crateManualSync();
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).

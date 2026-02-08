@@ -1112,7 +1112,8 @@
                 <table id="usersTable" style="display: none; width: 100%;">
                     <thead>
                         <tr>
-                            <th>Email</th>
+                            <th>Username</th>
+                            <th>User ID</th>
                             <th>Created At</th>
                             <th>Actions</th>
                         </tr>
@@ -1159,7 +1160,7 @@
             <div style="padding: 1rem;">
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Username:</label>
-                    <input type="text" id="loginEmail" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" value="admin" placeholder="admin">
+                    <input type="text" id="loginUsername" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" value="admin" placeholder="admin">
                 </div>
                 <div style="margin-bottom: 1rem;">
                     <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Password:</label>
@@ -1593,11 +1594,11 @@
         }
 
         async function performLogin() {
-            const email = document.getElementById('loginEmail').value;
+            const username = document.getElementById('loginUsername').value;
             const password = document.getElementById('loginPassword').value;
             const errorDiv = document.getElementById('loginError');
 
-            if (!email || !password) {
+            if (!username || !password) {
                 errorDiv.textContent = 'Please enter username and password';
                 errorDiv.style.display = 'block';
                 return;
@@ -1609,7 +1610,7 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ username: email, password })
+                    body: JSON.stringify({ username: username.trim(), password })
                 });
 
                 if (!response.ok) {
@@ -2847,7 +2848,7 @@
             html += '<div class="event-modal-field"><div class="event-modal-field-label">Aggregate Type</div><div class="event-modal-field-value">' + escapeHtml(event.aggregate_type) + '</div></div>';
             html += '<div class="event-modal-field"><div class="event-modal-field-label">Aggregate ID</div><div class="event-modal-field-value" style="font-family: monospace; font-size: 0.9rem;">' + escapeHtml(event.aggregate_id) + '</div></div>';
             html += '<div class="event-modal-field"><div class="event-modal-field-label">Created At</div><div class="event-modal-field-value">' + formatDateTime(event.created_at) + '</div></div>';
-            html += '<div class="event-modal-field"><div class="event-modal-field-label">User</div><div class="event-modal-field-value">' + escapeHtml(eventData.username || event.user_email || event.user_id) + '</div></div>';
+            html += '<div class="event-modal-field"><div class="event-modal-field-label">User</div><div class="event-modal-field-value">' + escapeHtml(event.username || event.user_id) + '</div></div>';
             
             // Handle UNDO events
             if (event.event_type === 'UNDO' && eventData.undone_event_id) {
@@ -3062,6 +3063,11 @@
                         return cached || null;
                     };
                     
+                    // Wallet / permission events (no contact) - show — and skip contact resolution
+                    if (event.aggregate_type === 'permission') {
+                        contactName = '—';
+                        contactUsername = null;
+                    }
                     // For UNDO events, show what was undone (check this first)
                     if (event.event_type === 'UNDO' || event.event_type.toUpperCase() === 'UNDO') {
                         // Try to get undone event info from cache
@@ -3216,8 +3222,11 @@
                         }
                     }
                     
-                    // User display - show username only (no ID)
-                    const userDisplay = username || event.user_email || 'N/A';
+                    // User display - show event actor username (who performed the action), fallback to user id
+                    const userDisplay = event.username || event.user_id || 'N/A';
+                    
+                    // Comment: for permission events show role when available
+                    const commentDisplay = (event.aggregate_type === 'permission' && eventData.role) ? ('Role: ' + eventData.role) : (comment || '');
                     
                     // Format total debt - show the value saved in database at event execution time
                     let totalDebtDisplay = 'N/A';
@@ -3480,7 +3489,7 @@
                                 ${userDisplay}
                             </td>
                             <td style="max-width: 150px; font-size: 0.7rem; padding: 0.4rem 0.5rem;">
-                                ${comment ? `<div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${comment.replace(/"/g, '&quot;')}">${comment.substring(0, 30)}${comment.length > 30 ? '...' : ''}</div>` : '<em style="color: #938F99;">-</em>'}
+                                ${commentDisplay ? `<div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${String(commentDisplay).replace(/"/g, '&quot;')}">${String(commentDisplay).substring(0, 30)}${String(commentDisplay).length > 30 ? '...' : ''}</div>` : '<em style="color: #938F99;">-</em>'}
                             </td>
                             <td style="font-size: 0.7rem; padding: 0.4rem 0.5rem;">
                                 <span style="color: #6750A4; cursor: pointer;">View</span>
@@ -4091,7 +4100,7 @@
                     const addHelp = document.createElement('div');
                     addHelp.className = 'ui-muted ui-mini';
                     addHelp.style.marginTop = '0.5rem';
-                    addHelp.textContent = 'Tip: you can copy a user UUID from the Users tab.';
+                    addHelp.textContent = 'Tip: copy a user ID from the Users tab (click the short ID to copy full UUID).';
                     addWrap.appendChild(addHelp);
 
                     body.appendChild(addWrap);
@@ -4136,15 +4145,16 @@
                         }
 
                         const rows = walletUsers.map(u => {
-                            const email = userIndex.get(u.user_id)?.email || null;
-                            const who = email ? escapeHtml(email) : `<code title="${escapeAttr(u.user_id)}">${escapeHtml(shortId(u.user_id))}</code>`;
+                            const displayName = u.username || userIndex.get(u.user_id)?.username || null;
+                            const who = displayName ? escapeHtml(displayName) : `<span class="ui-muted">Unknown user</span>`;
                             const subscribed = u.subscribed_at ? escapeHtml(formatDateTime(u.subscribed_at)) : '-';
                             const role = escapeAttr(u.role || 'member');
                             const uid = escapeAttr(u.user_id);
+                            const whoAttr = escapeAttr(displayName || u.user_id);
 
                             return `
                                 <tr>
-                                    <td>${who}<div class="ui-muted ui-mini"><code title="${escapeAttr(u.user_id)}">${escapeHtml(u.user_id)}</code></div></td>
+                                    <td>${who}</td>
                                     <td>
                                         <select data-role-select="1" data-user-id="${uid}">
                                             <option value="owner" ${role === 'owner' ? 'selected' : ''}>owner</option>
@@ -4155,7 +4165,7 @@
                                     <td>${subscribed}</td>
                                     <td>
                                         <div class="ui-row-actions">
-                                            <button type="button" class="ui-btn ui-btn-danger ui-btn-compact" data-remove-user="1" data-user-id="${uid}">Remove</button>
+                                            <button type="button" class="ui-btn ui-btn-danger ui-btn-compact" data-remove-user="1" data-user-id="${uid}" data-display-name="${whoAttr}">Remove</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -4207,8 +4217,8 @@
                         listBody.querySelectorAll('button[data-remove-user="1"]').forEach(btn => {
                             btn.addEventListener('click', async (ev) => {
                                 const userId = ev.target.getAttribute('data-user-id');
-                                const email = userIndex.get(userId)?.email || userId;
-                                const ok = await uiConfirm(`Remove ${email} from this wallet?`, { title: 'Remove user', okText: 'Remove', cancelText: 'Cancel', danger: true });
+                                const displayName = ev.target.getAttribute('data-display-name') || userIndex.get(userId)?.username || userId;
+                                const ok = await uiConfirm(`Remove ${displayName} from this wallet?`, { title: 'Remove user', okText: 'Remove', cancelText: 'Cancel', danger: true });
                                 if (!ok) return;
 
                                 try {
@@ -4349,18 +4359,21 @@
 
                 loading.style.display = 'none';
                 table.style.display = 'table';
-                body.innerHTML = users.map(user => `
+                body.innerHTML = users.map(user => {
+                    const un = (user.username || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                    return `
                     <tr>
-                        <td>${user.email}</td>
+                        <td>${escapeHtml(user.username || '')}</td>
+                        <td style="font-size: 0.75rem;"><code title="${escapeHtml(user.id)}" style="cursor: pointer;" onclick="navigator.clipboard && navigator.clipboard.writeText('${user.id}').then(() => uiAlert('User ID copied', { title: 'Copied' }))">${(user.id || '').slice(0, 8)}…</code></td>
                         <td>${formatDateTime(user.created_at)}</td>
                         <td>
-                            <button onclick="showChangePasswordModal('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer;">Change Password</button>
-                            <button onclick="showLoginLogsModal('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">Login Logs</button>
-                            <button onclick="backupUserData('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer;">Backup</button>
-                            <button onclick="deleteUser('${user.id}', '${user.email}')" style="padding: 0.25rem 0.5rem; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">Delete</button>
+                            <button onclick="showChangePasswordModal('${user.id}', '${un}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer;">Change Password</button>
+                            <button onclick="showLoginLogsModal('${user.id}', '${un}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">Login Logs</button>
+                            <button onclick="backupUserData('${user.id}', '${un}')" style="padding: 0.25rem 0.5rem; margin-right: 0.5rem; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer;">Backup</button>
+                            <button onclick="deleteUser('${user.id}', '${un}')" style="padding: 0.25rem 0.5rem; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">Delete</button>
                         </td>
                     </tr>
-                `).join('');
+                `}).join('');
             } catch (error) {
                 loading.innerHTML = `<div class="error">Error loading users: ${error.message}</div>`;
                 console.error('Error:', error);
@@ -4372,19 +4385,20 @@
                 title: 'Create user',
                 fields: [
                     {
-                        id: 'email',
-                        label: 'Email',
-                        type: 'email',
-                        placeholder: 'user@example.com',
+                        id: 'username',
+                        label: 'Username',
+                        type: 'text',
+                        placeholder: 'username',
                         required: true,
-                        requiredMessage: 'Email is required.',
+                        requiredMessage: 'Username is required.',
                         validate: (v) => {
                             const s = (v || '').trim();
                             if (!s) return null;
-                            // Very lightweight email check
-                            return /\S+@\S+\.\S+/.test(s) ? null : 'Please enter a valid email.';
+                            if (s.length < 2) return 'Username must be at least 2 characters.';
+                            if (!/^[a-zA-Z0-9_-]+$/.test(s)) return 'Username can only contain letters, numbers, underscore and hyphen.';
+                            return null;
                         },
-                        autocomplete: 'email',
+                        autocomplete: 'username',
                     },
                     {
                         id: 'password',
@@ -4399,27 +4413,27 @@
                 ],
                 okText: 'Create',
                 cancelText: 'Cancel',
-                focusId: 'email',
+                focusId: 'username',
             });
             if (!values) return;
-            const email = (values.email || '').trim();
+            const username = (values.username || '').trim();
             const password = values.password || '';
-            if (!email) return;
+            if (!username) return;
             if (!password || password.length < 8) {
                 await uiAlert('Password must be at least 8 characters', { title: 'Validation error' });
                 return;
             }
-            createUser(email, password);
+            createUser(username, password);
         }
 
-        async function createUser(email, password) {
+        async function createUser(username, password) {
             try {
                 const response = await authenticatedFetch(`${API_URL}/admin/users`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ email, password })
+                    body: JSON.stringify({ username, password })
                 });
 
                 if (!response.ok) {
@@ -4434,8 +4448,8 @@
             }
         }
 
-        async function deleteUser(userId, email) {
-            const ok = await uiConfirm(`Are you sure you want to delete user ${email}? This action cannot be undone.`, { title: 'Delete user', okText: 'Delete', cancelText: 'Cancel', danger: true });
+        async function deleteUser(userId, username) {
+            const ok = await uiConfirm(`Are you sure you want to delete user ${username}? This action cannot be undone.`, { title: 'Delete user', okText: 'Delete', cancelText: 'Cancel', danger: true });
             if (!ok) {
                 return;
             }
@@ -4457,10 +4471,10 @@
             }
         }
 
-        async function showChangePasswordModal(userId, email) {
+        async function showChangePasswordModal(userId, username) {
             const newPassword = await uiPrompt({
                 title: 'Change password',
-                label: `New password for ${email} (min 8 characters)`,
+                label: `New password for ${username} (min 8 characters)`,
                 type: 'password',
                 required: true,
                 validate: (v) => ((v || '').length >= 8 ? null : 'Password must be at least 8 characters.'),
@@ -4497,7 +4511,7 @@
             }
         }
 
-        async function showLoginLogsModal(userId, email) {
+        async function showLoginLogsModal(userId, username) {
             try {
                 const response = await authenticatedFetch(`${API_URL}/admin/users/${userId}/login-logs`);
 
@@ -4512,7 +4526,7 @@
                 ).join('\n');
 
                 await uiTextDialog({
-                    title: `Login logs: ${email}`,
+                    title: `Login logs: ${username}`,
                     message: null,
                     text: logsText || 'No login logs found',
                     okText: 'Close',
@@ -4522,7 +4536,7 @@
             }
         }
 
-        async function backupUserData(userId, email) {
+        async function backupUserData(userId, username) {
             try {
                 const response = await authenticatedFetch(`${API_URL}/admin/users/${userId}/backup`);
 
@@ -4537,13 +4551,14 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `user_backup_${email}_${new Date().toISOString().split('T')[0]}.json`;
+                const safeName = (username || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+                a.download = `user_backup_${safeName}_${new Date().toISOString().split('T')[0]}.json`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
 
-                await uiAlert(`Backup downloaded for ${email}!`, { title: 'Backup' });
+                await uiAlert(`Backup downloaded for ${username}!`, { title: 'Backup' });
             } catch (error) {
                 await uiAlert(`Error backing up user data: ${error.message}`, { title: 'Error' });
             }

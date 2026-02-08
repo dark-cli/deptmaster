@@ -7,11 +7,16 @@ import 'frb_generated.dart';
 import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `auth_headers`, `base_url`, `get_sync_events`, `post_sync_events`
+// These functions are ignored because they are not marked as `pub`: `auth_headers`, `base_url`, `get_sync_events`, `post_sync_events`, `wallet_management_delete`, `wallet_management_get`, `wallet_management_headers`, `wallet_management_post_json`, `wallet_management_put_json`, `wallet_management_url`
 
 /// POST /api/auth/login -> { token, user_id, username }
 Future<void> login({required String username, required String password}) =>
     RustLib.instance.api.crateApiLogin(username: username, password: password);
+
+/// POST /api/auth/register -> { token, user_id, username }; stores token and user_id like login.
+Future<void> register({required String username, required String password}) =>
+    RustLib.instance.api
+        .crateApiRegister(username: username, password: password);
 
 /// GET /api/wallets
 Future<List<Wallet>> getWalletsApi() =>
@@ -22,3 +27,133 @@ Future<Wallet> createWalletApi(
         {required String name, required String description}) =>
     RustLib.instance.api
         .crateApiCreateWalletApi(name: name, description: description);
+
+/// GET /api/wallets/:wallet_id/users
+Future<String> listWalletUsersApi({required String walletId}) =>
+    RustLib.instance.api.crateApiListWalletUsersApi(walletId: walletId);
+
+/// GET /api/wallets/:wallet_id/users/search?q=...
+/// Returns JSON array of { id, email } for typeahead when adding a member.
+Future<String> searchWalletUsersApi(
+        {required String walletId, required String query}) =>
+    RustLib.instance.api
+        .crateApiSearchWalletUsersApi(walletId: walletId, query: query);
+
+/// POST /api/wallets/:wallet_id/users
+/// Adds a member by username (lookup by email). New members get role 'member'; change role later.
+Future<void> addUserToWalletApi(
+        {required String walletId, required String username}) =>
+    RustLib.instance.api
+        .crateApiAddUserToWalletApi(walletId: walletId, username: username);
+
+/// PUT /api/wallets/:wallet_id/users/:user_id
+Future<void> updateWalletUserApi(
+        {required String walletId,
+        required String userId,
+        required String role}) =>
+    RustLib.instance.api.crateApiUpdateWalletUserApi(
+        walletId: walletId, userId: userId, role: role);
+
+/// POST /api/wallets/:wallet_id/invite — create or replace 4-digit invite code. Returns the code.
+Future<String> createWalletInviteApi({required String walletId}) =>
+    RustLib.instance.api.crateApiCreateWalletInviteApi(walletId: walletId);
+
+/// POST /api/wallets/join — join a wallet by invite code (no wallet context; auth only).
+Future<String> joinWalletByCodeApi({required String code}) =>
+    RustLib.instance.api.crateApiJoinWalletByCodeApi(code: code);
+
+/// DELETE /api/wallets/:wallet_id/users/:user_id
+Future<void> removeWalletUserApi(
+        {required String walletId, required String userId}) =>
+    RustLib.instance.api
+        .crateApiRemoveWalletUserApi(walletId: walletId, userId: userId);
+
+Future<String> listUserGroupsApi({required String walletId}) =>
+    RustLib.instance.api.crateApiListUserGroupsApi(walletId: walletId);
+
+Future<String> createUserGroupApi(
+        {required String walletId, required String name}) =>
+    RustLib.instance.api
+        .crateApiCreateUserGroupApi(walletId: walletId, name: name);
+
+Future<void> updateUserGroupApi(
+        {required String walletId,
+        required String groupId,
+        required String name}) =>
+    RustLib.instance.api.crateApiUpdateUserGroupApi(
+        walletId: walletId, groupId: groupId, name: name);
+
+Future<void> deleteUserGroupApi(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api
+        .crateApiDeleteUserGroupApi(walletId: walletId, groupId: groupId);
+
+Future<String> listUserGroupMembersApi(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api
+        .crateApiListUserGroupMembersApi(walletId: walletId, groupId: groupId);
+
+Future<void> addUserGroupMemberApi(
+        {required String walletId,
+        required String groupId,
+        required String username}) =>
+    RustLib.instance.api.crateApiAddUserGroupMemberApi(
+        walletId: walletId, groupId: groupId, username: username);
+
+Future<void> removeUserGroupMemberApi(
+        {required String walletId,
+        required String groupId,
+        required String userId}) =>
+    RustLib.instance.api.crateApiRemoveUserGroupMemberApi(
+        walletId: walletId, groupId: groupId, userId: userId);
+
+Future<String> listContactGroupsApi({required String walletId}) =>
+    RustLib.instance.api.crateApiListContactGroupsApi(walletId: walletId);
+
+Future<String> createContactGroupApi(
+        {required String walletId, required String name}) =>
+    RustLib.instance.api
+        .crateApiCreateContactGroupApi(walletId: walletId, name: name);
+
+Future<void> updateContactGroupApi(
+        {required String walletId,
+        required String groupId,
+        required String name}) =>
+    RustLib.instance.api.crateApiUpdateContactGroupApi(
+        walletId: walletId, groupId: groupId, name: name);
+
+Future<void> deleteContactGroupApi(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api
+        .crateApiDeleteContactGroupApi(walletId: walletId, groupId: groupId);
+
+Future<String> listContactGroupMembersApi(
+        {required String walletId, required String groupId}) =>
+    RustLib.instance.api.crateApiListContactGroupMembersApi(
+        walletId: walletId, groupId: groupId);
+
+Future<void> addContactGroupMemberApi(
+        {required String walletId,
+        required String groupId,
+        required String contactId}) =>
+    RustLib.instance.api.crateApiAddContactGroupMemberApi(
+        walletId: walletId, groupId: groupId, contactId: contactId);
+
+Future<void> removeContactGroupMemberApi(
+        {required String walletId,
+        required String groupId,
+        required String contactId}) =>
+    RustLib.instance.api.crateApiRemoveContactGroupMemberApi(
+        walletId: walletId, groupId: groupId, contactId: contactId);
+
+Future<String> listPermissionActionsApi({required String walletId}) =>
+    RustLib.instance.api.crateApiListPermissionActionsApi(walletId: walletId);
+
+Future<String> getPermissionMatrixApi({required String walletId}) =>
+    RustLib.instance.api.crateApiGetPermissionMatrixApi(walletId: walletId);
+
+/// entries_json: JSON array of { user_group_id, contact_group_id, action_names }
+Future<void> putPermissionMatrixApi(
+        {required String walletId, required String entriesJson}) =>
+    RustLib.instance.api.crateApiPutPermissionMatrixApi(
+        walletId: walletId, entriesJson: entriesJson);

@@ -12,7 +12,7 @@ use crate::AppState;
 #[derive(Serialize)]
 pub struct UserResponse {
     pub id: String,
-    pub email: String,
+    pub username: String,
     pub created_at: chrono::NaiveDateTime,
 }
 
@@ -29,7 +29,7 @@ pub struct LoginLogResponse {
 
 #[derive(Deserialize)]
 pub struct CreateUserRequest {
-    pub email: String,
+    pub username: String,
     pub password: String,
 }
 
@@ -49,7 +49,7 @@ pub async fn get_users(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
     let users = sqlx::query(
-        "SELECT id, email, created_at FROM users_projection ORDER BY created_at DESC"
+        "SELECT id, username, created_at FROM users_projection ORDER BY created_at DESC"
     )
     .fetch_all(&*state.db_pool)
     .await
@@ -65,7 +65,7 @@ pub async fn get_users(
         .into_iter()
         .map(|row| UserResponse {
             id: row.get::<Uuid, _>("id").to_string(),
-            email: row.get::<String, _>("email"),
+            username: row.get::<String, _>("username"),
             created_at: row.get::<chrono::NaiveDateTime, _>("created_at"),
         })
         .collect();
@@ -79,10 +79,10 @@ pub async fn create_user(
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), (StatusCode, Json<serde_json::Value>)> {
     // Validate input
-    if payload.email.trim().is_empty() {
+    if payload.username.trim().is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Email is required"})),
+            Json(serde_json::json!({"error": "Username is required"})),
         ));
     }
     if payload.password.len() < 8 {
@@ -94,9 +94,9 @@ pub async fn create_user(
 
     // Check if user already exists
     let existing = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE email = $1)"
+        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE username = $1)"
     )
-    .bind(&payload.email.trim().to_lowercase())
+    .bind(&payload.username.trim())
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -110,7 +110,7 @@ pub async fn create_user(
     if existing {
         return Err((
             StatusCode::CONFLICT,
-            Json(serde_json::json!({"error": "User with this email already exists"})),
+            Json(serde_json::json!({"error": "User with this username already exists"})),
         ));
     }
 
@@ -126,15 +126,15 @@ pub async fn create_user(
 
     // Create user
     let user_id = Uuid::new_v4();
-    let email = payload.email.trim().to_lowercase();
+    let username = payload.username.trim().to_string();
     let created_at = chrono::Utc::now().naive_utc();
 
     sqlx::query(
-        "INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id) 
+        "INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id) 
          VALUES ($1, $2, $3, $4, 0)"
     )
     .bind(&user_id)
-    .bind(&email)
+    .bind(&username)
     .bind(&password_hash)
     .bind(&created_at)
     .execute(&*state.db_pool)
@@ -151,7 +151,7 @@ pub async fn create_user(
         StatusCode::CREATED,
         Json(UserResponse {
             id: user_id.to_string(),
-            email,
+            username,
             created_at,
         }),
     ))
@@ -397,7 +397,7 @@ pub async fn backup_user_data(
 
     // Get user info
     let user: Option<(String, chrono::NaiveDateTime)> = sqlx::query_as(
-        "SELECT email, created_at FROM users_projection WHERE id = $1"
+        "SELECT username, created_at FROM users_projection WHERE id = $1"
     )
     .bind(&user_uuid)
     .fetch_optional(&*state.db_pool)
@@ -410,7 +410,7 @@ pub async fn backup_user_data(
         )
     })?;
 
-    let (email, created_at) = user.ok_or_else(|| {
+    let (username, created_at) = user.ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "User not found"})),
@@ -456,7 +456,7 @@ pub async fn backup_user_data(
     let backup = serde_json::json!({
         "user": {
             "id": user_uuid.to_string(),
-            "email": email,
+            "username": username,
             "created_at": created_at,
         },
         "contacts": contacts.iter().map(|row| {

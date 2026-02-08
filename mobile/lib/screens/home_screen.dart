@@ -34,11 +34,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   DateTime? _lastBackPressTime;
   int _walletChangeKey = 0; // Incremented when wallet changes so tab content reloads
+  String _username = '';
 
   @override
   void initState() {
     super.initState();
     _checkBiometricAvailability();
+    _loadUsername();
+  }
+
+  Future<void> _loadUsername() async {
+    final username = await Api.getUsername();
+    if (mounted) {
+      setState(() {
+        _username = username ?? '';
+      });
+    }
   }
 
   Future<bool> _onWillPop() async {
@@ -210,7 +221,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget? _buildFloatingActionButton() {
     // All tabs: Click = transaction, Long press = contact
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0), // Raise the FAB position
+      padding: const EdgeInsets.only(bottom: 24.0), // Raised above bottom nav
       child: Semantics(
         button: true,
         label: 'Add transaction (tap) or contact (long press)',
@@ -248,18 +259,58 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Icon(
-                  Icons.settings,
-                  size: 48,
-                  color: Theme.of(context).colorScheme.onPrimary,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Settings',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onPrimary,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 32,
+                      backgroundColor: Theme.of(context).colorScheme.onPrimary,
+                      child: Text(
+                        _username.isNotEmpty ? _username[0].toUpperCase() : '?',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _username,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Theme.of(context).colorScheme.onPrimary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Colors.greenAccent,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Active',
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.8),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

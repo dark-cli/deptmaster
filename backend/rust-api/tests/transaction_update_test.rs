@@ -50,6 +50,7 @@ async fn test_update_transaction_updates_projection() {
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(update_request),
     )
     .await;
@@ -114,6 +115,7 @@ async fn test_update_transaction_recalculates_contact_balance() {
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(update_request),
     )
     .await;
@@ -153,6 +155,7 @@ async fn test_delete_transaction_soft_deletes() {
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(delete_request),
     )
     .await;
@@ -208,6 +211,7 @@ async fn test_delete_transaction_recalculates_contact_balance() {
         axum::extract::Path(transaction_id.to_string()),
         axum::extract::State(app_state),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(delete_request),
     )
     .await;

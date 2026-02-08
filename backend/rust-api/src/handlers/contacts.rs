@@ -9,7 +9,9 @@ use uuid::Uuid;
 use chrono::Utc;
 use crate::AppState;
 use crate::websocket;
+use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
+use crate::services::permission_service::{self, ResourceType};
 
 /// Calculate total debt (sum of all contact balances) at current time for a wallet
 async fn calculate_total_debt(state: &AppState, wallet_id: Uuid) -> i64 {
@@ -41,6 +43,8 @@ pub struct CreateContactRequest {
     pub email: Option<String>,
     pub notes: Option<String>,
     pub comment: String, // Required: explanation for why this contact is being created
+    /// Optional contact group IDs to add the new contact to. If omitted, server uses user's default_contact_group_ids from wallet settings.
+    pub group_ids: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -101,10 +105,28 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for ContactResponse {
 pub async fn create_contact(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     headers: HeaderMap,
     Json(payload): Json<CreateContactRequest>,
 ) -> Result<(StatusCode, Json<CreateContactResponse>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "contact:create",
+        ResourceType::Contact,
+        None,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Permission check error: {:?}", e);
+        permission_service::insufficient_permission_response()
+    })?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
     // Validate name
     if payload.name.trim().is_empty() {
         return Err((
@@ -121,19 +143,7 @@ pub async fn create_contact(
         ));
     }
 
-    // Get user ID
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user_id = auth_user.user_id;
 
     // Generate contact ID
     let contact_id = Uuid::new_v4();
@@ -272,6 +282,41 @@ pub async fn create_contact(
     .await
     .ok(); // Non-blocking update
 
+    // Add contact to groups: from request or user's default wallet settings
+    let group_ids: Vec<Uuid> = if let Some(ids) = &payload.group_ids {
+        ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect()
+    } else {
+        sqlx::query_scalar::<_, Vec<Uuid>>(
+            "SELECT COALESCE(default_contact_group_ids, '{}') FROM user_wallet_settings WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(auth_user.user_id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+    };
+    for cg_id in group_ids {
+        let same_wallet = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
+        )
+        .bind(cg_id)
+        .bind(wallet_id)
+        .fetch_one(&*state.db_pool)
+        .await
+        .unwrap_or(false);
+        if same_wallet {
+            let _ = sqlx::query(
+                "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            )
+            .bind(contact_id)
+            .bind(cg_id)
+            .execute(&*state.db_pool)
+            .await;
+        }
+    }
+
     let response = CreateContactResponse {
         id: contact_id.to_string(),
         name: payload.name.clone(),
@@ -296,6 +341,7 @@ pub async fn update_contact(
     Path(contact_id): Path<String>,
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<UpdateContactRequest>,
 ) -> Result<(StatusCode, Json<UpdateContactResponse>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
@@ -327,19 +373,21 @@ pub async fn update_contact(
             Json(serde_json::json!({"error": "Contact not found"})),
         ));
     }
-
-    let _user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "contact:update",
+        ResourceType::Contact,
+        Some(contact_uuid),
     )
-    .fetch_one(&*state.db_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
+    let _user_id = auth_user.user_id;
 
     // Get current contact data
     let current = sqlx::query(
@@ -519,6 +567,7 @@ pub async fn delete_contact(
     Path(contact_id): Path<String>,
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<DeleteContactRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
@@ -551,19 +600,20 @@ pub async fn delete_contact(
             Json(serde_json::json!({"error": "Contact not found"})),
         ));
     }
-
-    let _user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "contact:delete",
+        ResourceType::Contact,
+        Some(contact_uuid),
     )
-    .fetch_one(&*state.db_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
 
     // Get contact data before deletion for audit trail
     let contact_data = sqlx::query(
@@ -719,9 +769,23 @@ pub async fn delete_contact(
 pub async fn get_contacts(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<ContactResponse>>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "contact:read",
+        ResourceType::Contact,
+        None,
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
     let contacts = sqlx::query_as::<_, ContactResponse>(
         r#"
         SELECT 

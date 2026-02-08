@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
-use bcrypt::verify;
+use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
 use chrono::{Utc, Duration};
 use crate::AppState;
@@ -19,10 +19,8 @@ pub struct LoginRequest {
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 pub struct RegisterRequest {
     pub username: String,
-    pub email: String,
     pub password: String,
 }
 
@@ -33,20 +31,13 @@ pub struct AuthResponse {
     pub username: String,
 }
 
-#[derive(Serialize)]
-#[allow(dead_code)] // Reserved for future registration functionality
-pub struct RegisterResponse {
-    pub user_id: String,
-    pub username: String,
-    pub message: String,
-}
 
 // Generate JWT token
-fn generate_jwt_token(user_id: &Uuid, email: &str, secret: &str, expiration_secs: u64) -> Result<String, jsonwebtoken::errors::Error> {
+fn generate_jwt_token(user_id: &Uuid, username: &str, secret: &str, expiration_secs: u64) -> Result<String, jsonwebtoken::errors::Error> {
     let exp = (Utc::now() + Duration::seconds(expiration_secs as i64)).timestamp() as usize;
     let claims = Claims {
         user_id: user_id.to_string(),
-        email: email.to_string(),
+        username: username.to_string(),
         exp,
     };
     
@@ -105,9 +96,9 @@ pub async fn login(
         ));
     }
 
-    // Find user by email (username field is treated as email)
+    // Find user by username
     let user = sqlx::query(
-        "SELECT id, email, password_hash FROM users_projection WHERE email = $1 LIMIT 1"
+        "SELECT id, username, password_hash FROM users_projection WHERE username = $1 LIMIT 1"
     )
     .bind(&payload.username.trim())
     .fetch_optional(&*state.db_pool)
@@ -148,7 +139,7 @@ pub async fn login(
 
     let user_id: Uuid = user.get::<Uuid, _>("id");
     let password_hash: String = user.get::<String, _>("password_hash");
-    let email: String = user.get::<String, _>("email");
+    let username: String = user.get::<String, _>("username");
 
     // Verify password
     let valid = verify(&payload.password, &password_hash)
@@ -195,7 +186,7 @@ pub async fn login(
     // Generate JWT token
     let token = generate_jwt_token(
         &user_id,
-        &email,
+        &username,
         &state.config.jwt_secret,
         state.config.jwt_expiration,
     )
@@ -212,7 +203,100 @@ pub async fn login(
         Json(AuthResponse {
             token,
             user_id: user_id.to_string(),
-            username: email,
+            username: username,
+        }),
+    ))
+}
+
+/// Public registration: create account and return auth (auto sign-in).
+pub async fn register(
+    State(state): State<AppState>,
+    Json(payload): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<AuthResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let username = payload.username.trim();
+    if username.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Username is required"})),
+        ));
+    }
+    if payload.password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Password must be at least 8 characters"})),
+        ));
+    }
+
+    let existing = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE username = $1)"
+    )
+    .bind(&username)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("register: check existing: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
+
+    if existing {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "This username is already taken"})),
+        ));
+    }
+
+    let password_hash = hash(&payload.password, DEFAULT_COST)
+        .map_err(|e| {
+            tracing::error!("register: hash: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create account"})),
+            )
+        })?;
+
+    let user_id = Uuid::new_v4();
+    let created_at = chrono::Utc::now().naive_utc();
+
+    sqlx::query(
+        "INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id) VALUES ($1, $2, $3, $4, 0)"
+    )
+    .bind(&user_id)
+    .bind(&username)
+    .bind(&password_hash)
+    .bind(&created_at)
+    .execute(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("register: insert: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create account"})),
+        )
+    })?;
+
+    let token = generate_jwt_token(
+        &user_id,
+        &username,
+        &state.config.jwt_secret,
+        state.config.jwt_expiration,
+    )
+    .map_err(|e| {
+        tracing::error!("register: jwt: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create account"})),
+        )
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthResponse {
+            token,
+            user_id: user_id.to_string(),
+            username: username.to_string(),
         }),
     ))
 }

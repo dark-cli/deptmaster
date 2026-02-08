@@ -13,7 +13,7 @@ use crate::AppState;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub user_id: String,
-    pub email: String,
+    pub username: String,
     pub exp: usize,
 }
 
@@ -21,7 +21,7 @@ pub struct Claims {
 pub struct AuthUser {
     pub user_id: Uuid,
     #[allow(dead_code)] // Reserved for future use (e.g., logging, user info display)
-    pub email: String,
+    pub username: String,
     /// True if this token belongs to an active admin user.
     pub is_admin: bool,
 }
@@ -127,7 +127,7 @@ pub async fn auth_middleware(
     // Attach user info to request
     let auth_user = AuthUser {
         user_id,
-        email: claims.email,
+        username: claims.username,
         is_admin,
     };
     req.extensions_mut().insert(auth_user);

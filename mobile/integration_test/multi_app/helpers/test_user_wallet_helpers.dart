@@ -145,11 +145,10 @@ class TestUserWalletHelpers {
     };
   }
   
-  /// Add a user to a wallet via admin API
+  /// Add a user to a wallet via admin API (by username/email; new members get role member).
   static Future<void> addUserToWallet({
     required String walletId,
-    required String userId,
-    String role = 'member', // 'owner', 'admin', 'member'
+    required String username,
     String serverUrl = 'http://localhost:8000',
     String? adminUsername,
     String? adminPassword,
@@ -160,7 +159,7 @@ class TestUserWalletHelpers {
       password: adminPassword ?? adminPanelPassword,
     );
 
-    // Add user to wallet
+    // Add user to wallet (backend looks up user by email; role is always member, change later)
     final addResponse = await http.post(
       Uri.parse('$serverUrl/api/admin/wallets/$walletId/users'),
       headers: {
@@ -168,8 +167,7 @@ class TestUserWalletHelpers {
         'Authorization': 'Bearer $token',
       },
       body: json.encode({
-        'user_id': userId,
-        'role': role,
+        'username': username,
       }),
     );
     

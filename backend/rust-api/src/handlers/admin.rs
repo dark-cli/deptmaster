@@ -35,7 +35,7 @@ pub struct EventResponse {
     pub aggregate_type: String,
     pub event_type: String,
     pub user_id: String,
-    pub user_email: Option<String>, // User email for display
+    pub username: Option<String>,
     pub created_at: chrono::NaiveDateTime,
     pub event_data: serde_json::Value,
 }
@@ -48,7 +48,7 @@ impl<'r> FromRow<'r, PgRow> for EventResponse {
             aggregate_type: row.try_get("aggregate_type")?,
             event_type: row.try_get("event_type")?,
             user_id: row.try_get::<uuid::Uuid, _>("user_id")?.to_string(),
-            user_email: row.try_get("user_email").ok(),
+            username: row.try_get("username").ok(),
             created_at: row.try_get("created_at")?,
             event_data: row.try_get("event_data")?,
         })
@@ -210,9 +210,9 @@ pub async fn get_events(
     let limit = params.limit.unwrap_or(100);
     let offset = params.offset.unwrap_or(0);
 
-    // Build dynamic query with filters using QueryBuilder (join with users to get email)
+    // Build dynamic query with filters. Resolve actor username from users_projection (app users) or admin_users (admins).
     let mut query_builder: QueryBuilder<'_, sqlx::Postgres> = QueryBuilder::new(
-        "SELECT e.event_id, e.aggregate_id, e.aggregate_type, e.event_type, e.user_id, u.email as user_email, e.created_at, e.event_data FROM events e LEFT JOIN users_projection u ON e.user_id = u.id WHERE 1=1"
+        "SELECT e.event_id, e.aggregate_id, e.aggregate_type, e.event_type, e.user_id, COALESCE(u.username, a.username) AS username, e.created_at, e.event_data FROM events e LEFT JOIN users_projection u ON e.user_id = u.id LEFT JOIN admin_users a ON e.user_id = a.id AND a.is_active = true WHERE 1=1"
     );
     
     // Filter by event_type (case-insensitive, supports multiple formats)
@@ -806,7 +806,7 @@ pub async fn dev_clear_database(
         })?;
     
     // Keep admin_users and users_projection, but clear all users except test user
-    sqlx::query("DELETE FROM users_projection WHERE email != 'max'")
+    sqlx::query("DELETE FROM users_projection WHERE username != 'max'")
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -830,9 +830,9 @@ pub async fn dev_clear_database(
     // Ensure test user "max" exists with password "12345678"
     sqlx::query(
         r#"
-        INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id)
+        INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id)
         VALUES (gen_random_uuid(), 'max', $1, NOW(), 0)
-        ON CONFLICT (email) DO UPDATE SET password_hash = $1, last_event_id = 0
+        ON CONFLICT (username) DO UPDATE SET password_hash = $1, last_event_id = 0
         "#,
     )
     .bind(&max_password_hash)

@@ -30,7 +30,7 @@ fn generate_admin_jwt_token(admin_id: &Uuid, username: &str, secret: &str, expir
     let exp = (Utc::now() + Duration::seconds(expiration_secs as i64)).timestamp() as usize;
     let claims = Claims {
         user_id: admin_id.to_string(),
-        email: username.to_string(), // Use username as email in claims
+        username: username.to_string(),
         exp,
     };
     

@@ -196,7 +196,7 @@ async fn test_delete_wallet() {
 async fn test_add_user_to_wallet() {
     let pool = setup_test_db().await;
     let acting_user_id = create_test_user(&pool).await;
-    let target_user_id = create_test_user(&pool).await;
+    let target_user_id = test_helpers::create_test_user_with_email(&pool, "target@example.com").await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, acting_user_id, wallet_id, "owner").await;
     
@@ -205,8 +205,7 @@ async fn test_add_user_to_wallet() {
     let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let add_request = wallets::AddUserToWalletRequest {
-        user_id: target_user_id.to_string(),
-        role: "member".to_string(),
+        username: "target@example.com".to_string(),
     };
 
     let result = wallets::add_user_to_wallet(

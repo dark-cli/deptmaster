@@ -62,6 +62,35 @@ async fn main() -> anyhow::Result<()> {
     let db_pool = database::new_pool(&config.database_url).await?;
     info!("Database connection pool created");
 
+    // Run pending migrations (baseline 1–13 if DB was created without sqlx so only 014+ run)
+    let migrator = sqlx::migrate!("./migrations");
+    if let Err(e) = migrator.run(&*db_pool).await {
+        let msg = e.to_string();
+        if msg.contains("already exists") {
+            info!("Database has existing schema; baselining migrations 1–13 and retrying...");
+            for m in migrator.iter() {
+                if m.version <= 13 {
+                    sqlx::query(
+                        "INSERT INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) VALUES ($1, $2, now(), true, $3, 0)",
+                    )
+                    .bind(m.version)
+                    .bind(m.description.as_ref())
+                    .bind(m.checksum.as_ref())
+                    .execute(&*db_pool)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to baseline migrations: {}", e))?;
+                }
+            }
+            migrator
+                .run(&*db_pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to run migrations after baseline: {}", e))?;
+        } else {
+            return Err(anyhow::anyhow!("Failed to run migrations: {}", e));
+        }
+    }
+    info!("Migrations applied");
+
     // Seed dummy data if database is empty
     services::seed_data::seed_dummy_data(&db_pool).await?;
 
@@ -101,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
     let public_routes = Router::new()
         .route("/health", get(health_check))
         .route("/api/auth/login", post(handlers::login)) // Regular user login
+        .route("/api/auth/register", axum::routing::post(handlers::register)) // Sign up
         .route("/api/auth/admin/login", post(handlers::admin_login)) // Admin login
         .route("/admin", get(handlers::admin_panel)) // Admin page HTML is public (login form)
         .route("/config.js", get(handlers::config_js)) // Admin config.js (optional, returns empty if not exists)
@@ -120,6 +150,22 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/sync/hash", get(handlers::get_sync_hash))
         .route("/api/sync/events", get(handlers::get_sync_events))
         .route("/api/sync/events", post(handlers::post_sync_events))
+        .route("/api/wallets/:wallet_id/me/permissions", get(handlers::get_my_permissions))
+        .route("/api/wallets/:wallet_id/me/settings", get(handlers::get_my_wallet_settings).put(handlers::put_my_wallet_settings))
+        .route("/api/wallets/:wallet_id/users", get(handlers::list_wallet_users).post(handlers::add_user_to_wallet))
+        .route("/api/wallets/:wallet_id/users/search", get(handlers::search_wallet_users))
+        .route("/api/wallets/:wallet_id/invite", axum::routing::post(handlers::create_wallet_invite))
+        .route("/api/wallets/:wallet_id/users/:user_id", axum::routing::put(handlers::update_wallet_user).delete(handlers::remove_user_from_wallet))
+        .route("/api/wallets/:wallet_id/user-groups", get(handlers::list_user_groups).post(handlers::create_user_group))
+        .route("/api/wallets/:wallet_id/user-groups/:group_id", axum::routing::put(handlers::update_user_group).delete(handlers::delete_user_group))
+        .route("/api/wallets/:wallet_id/user-groups/:group_id/members", get(handlers::list_user_group_members).post(handlers::add_user_group_member))
+        .route("/api/wallets/:wallet_id/user-groups/:group_id/members/:user_id", axum::routing::delete(handlers::remove_user_group_member))
+        .route("/api/wallets/:wallet_id/contact-groups", get(handlers::list_contact_groups).post(handlers::create_contact_group))
+        .route("/api/wallets/:wallet_id/contact-groups/:group_id", axum::routing::put(handlers::update_contact_group).delete(handlers::delete_contact_group))
+        .route("/api/wallets/:wallet_id/contact-groups/:group_id/members", get(handlers::list_contact_group_members).post(handlers::add_contact_group_member))
+        .route("/api/wallets/:wallet_id/contact-groups/:group_id/members/:contact_id", axum::routing::delete(handlers::remove_contact_group_member))
+        .route("/api/wallets/:wallet_id/permission-actions", get(handlers::list_permission_actions))
+        .route("/api/wallets/:wallet_id/permission-matrix", get(handlers::get_permission_matrix).put(handlers::put_permission_matrix))
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             wallet_context_middleware,
@@ -135,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/settings/:key", axum::routing::put(handlers::update_setting))
         .route("/api/auth/change-password", axum::routing::put(handlers::change_password))
         .route("/api/wallets", get(handlers::list_user_wallets).post(handlers::create_my_wallet))
+        .route("/api/wallets/join", axum::routing::post(handlers::join_wallet_by_code))
         .route("/api/wallets/:id", get(handlers::get_wallet))
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),

@@ -34,7 +34,7 @@ pub use transactions::{
     delete_transaction,
 };
 pub use settings::{get_settings, update_setting};
-pub use auth::login;
+pub use auth::{login, register};
 pub use admin_auth::admin_login;
 pub use sync::{
     get_sync_hash,
@@ -59,7 +59,30 @@ pub use wallets::{
     delete_wallet,
     add_user_to_wallet,
     list_wallet_users,
+    search_wallet_users,
+    create_wallet_invite,
+    join_wallet_by_code,
     update_wallet_user,
     remove_user_from_wallet,
     list_user_wallets,
+    get_my_permissions,
+    get_my_wallet_settings,
+    put_my_wallet_settings,
+    list_user_groups,
+    create_user_group,
+    update_user_group,
+    delete_user_group,
+    list_user_group_members,
+    add_user_group_member,
+    remove_user_group_member,
+    list_contact_groups,
+    create_contact_group,
+    update_contact_group,
+    delete_contact_group,
+    list_contact_group_members,
+    add_contact_group_member,
+    remove_contact_group_member,
+    list_permission_actions,
+    get_permission_matrix,
+    put_permission_matrix,
 };
