@@ -17,6 +17,12 @@ class ToastService {
   /// Duration for undo snack bars (2.5 seconds)
   static const Duration undoDuration = Duration(milliseconds: 2500);
   
+  /// Ensures duration is finite so snackbars always auto-dismiss (never zero or null).
+  static Duration _effectiveDuration(Duration? duration, Duration fallback) {
+    if (duration == null || duration == Duration.zero) return fallback;
+    return duration;
+  }
+  
   /// Margin for snack bars to position them above FAB and bottom navigation
   /// This prevents snack bars from overlapping with the floating action button
   static const EdgeInsets snackBarMargin = EdgeInsets.only(
@@ -98,10 +104,10 @@ class ToastService {
     
     // Store in non-nullable variable for use in closures
     final messenger = scaffoldMessenger;
-    final actualDuration = duration ?? undoDuration;
+    final actualDuration = _effectiveDuration(duration, undoDuration);
     
     // Get theme colors
-    final textColor = context != null 
+    final textColor = context != null
         ? ThemeColors.snackBarTextColor(context)
         : Colors.white;
     final backgroundColor = context != null
@@ -112,14 +118,12 @@ class ToastService {
         : Colors.blue;
     
     try {
-      // Dismiss any existing toast before showing new one
+      // Clear entire queue so snackbars don't stack; then show only this one
       try {
-        messenger.hideCurrentSnackBar();
+        messenger.clearSnackBars();
       } catch (e) {
         // Context became deactivated, ignore
       }
-      
-      // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[messenger]?.cancel();
       _activeTimers.remove(messenger);
       
@@ -211,7 +215,7 @@ class ToastService {
     
     // Store in non-nullable variable for use in closures
     final messenger = scaffoldMessenger;
-    final actualDuration = duration ?? undoDuration;
+    final actualDuration = _effectiveDuration(duration, undoDuration);
     
     // Get context for theme colors
     final context = navigatorKey.currentContext;
@@ -226,17 +230,13 @@ class ToastService {
         : Colors.blue;
     
     try {
-      // Dismiss any existing toast before showing new one
       try {
-        messenger.hideCurrentSnackBar();
+        messenger.clearSnackBars();
       } catch (e) {
         // Context became deactivated, ignore
       }
-      
-      // Cancel any existing timer for this scaffoldMessenger
       _activeTimers[messenger]?.cancel();
       _activeTimers.remove(messenger);
-      
       messenger.showSnackBar(
       SnackBar(
         content: Text(
@@ -336,26 +336,27 @@ class ToastService {
     // Store in non-nullable variable
     final messenger = scaffoldMessenger;
     
-    // Get context for theme colors
+    // Get context for theme colors (errorContainer/onErrorContainer for light and dark)
     final context = navigatorKey.currentContext;
-    final bgColor = context != null 
+    final bgColor = context != null
         ? ThemeColors.snackBarErrorBackground(context)
         : Colors.red[800]!;
-    final textColor = context != null 
-        ? ThemeColors.snackBarTextColor(context)
+    final textColor = context != null
+        ? ThemeColors.snackBarErrorTextColor(context)
         : Colors.white;
     final actionColor = context != null
         ? ThemeColors.snackBarActionColor(context)
         : Colors.white;
     
     try {
-      // Dismiss any existing toast before showing new one
+      // Clear current so only one snackbar shows and it auto-dismisses
       try {
         messenger.hideCurrentSnackBar();
       } catch (e) {
         // Context became deactivated, ignore
       }
       
+      final effectiveDuration = _effectiveDuration(duration, errorDuration);
       try {
         messenger.showSnackBar(
           SnackBar(
@@ -366,7 +367,7 @@ class ToastService {
               ),
             ),
             backgroundColor: bgColor,
-            duration: duration,
+            duration: effectiveDuration,
             behavior: SnackBarBehavior.floating,
             margin: snackBarMargin, // Position above FAB and bottom navigation
             action: SnackBarAction(
@@ -439,13 +440,12 @@ class ToastService {
         : Colors.white;
     
     try {
-      // Dismiss any existing toast before showing new one
       try {
-        messenger.hideCurrentSnackBar();
+        messenger.clearSnackBars();
       } catch (e) {
         // Context became deactivated, ignore
       }
-      
+      final effectiveDuration = _effectiveDuration(duration, defaultDuration);
       try {
         messenger.showSnackBar(
           SnackBar(
@@ -456,7 +456,7 @@ class ToastService {
               ),
             ),
             backgroundColor: bgColor,
-            duration: duration,
+            duration: effectiveDuration,
             behavior: SnackBarBehavior.floating,
             margin: snackBarMargin, // Position above FAB and bottom navigation
           ),
@@ -503,9 +503,8 @@ class ToastService {
         return;
       }
       
-      // Dismiss any existing toast before showing new one
-      scaffoldMessenger?.hideCurrentSnackBar();
-      
+      scaffoldMessenger.clearSnackBars();
+      final effectiveDuration = _effectiveDuration(duration, defaultDuration);
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
@@ -515,7 +514,7 @@ class ToastService {
             ),
           ),
           backgroundColor: ThemeColors.snackBarBackground(context),
-          duration: duration ?? defaultDuration,
+          duration: effectiveDuration,
           behavior: SnackBarBehavior.floating,
           margin: snackBarMargin, // Position above FAB and bottom navigation
         ),
@@ -556,19 +555,18 @@ class ToastService {
         return;
       }
       
-      // Dismiss any existing toast before showing new one
-      scaffoldMessenger?.hideCurrentSnackBar();
-      
+      scaffoldMessenger.clearSnackBars();
+      final effectiveDuration = _effectiveDuration(duration, errorDuration);
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
             message,
             style: TextStyle(
-              color: ThemeColors.snackBarTextColor(context),
+              color: ThemeColors.snackBarErrorTextColor(context),
             ),
           ),
           backgroundColor: ThemeColors.snackBarErrorBackground(context),
-          duration: duration ?? errorDuration,
+          duration: effectiveDuration,
           behavior: SnackBarBehavior.floating,
           margin: snackBarMargin, // Position above FAB and bottom navigation
           action: SnackBarAction(
@@ -616,9 +614,8 @@ class ToastService {
         return;
       }
       
-      // Dismiss any existing toast before showing new one
-      scaffoldMessenger?.hideCurrentSnackBar();
-      
+      scaffoldMessenger.clearSnackBars();
+      final effectiveDuration = _effectiveDuration(duration, defaultDuration);
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
@@ -628,7 +625,7 @@ class ToastService {
             ),
           ),
           backgroundColor: ThemeColors.snackBarBackground(context),
-          duration: duration ?? defaultDuration,
+          duration: effectiveDuration,
           behavior: SnackBarBehavior.floating,
           margin: snackBarMargin, // Position above FAB and bottom navigation
         ),
@@ -673,15 +670,10 @@ class ToastService {
         showUndo(message: message, onUndo: onUndo, duration: duration);
         return;
       }
-      final actualDuration = duration ?? undoDuration;
-      
-      // Dismiss any existing toast before showing new one
-      scaffoldMessenger?.hideCurrentSnackBar();
-      
-      // Cancel any existing timer for this scaffoldMessenger
+      final actualDuration = _effectiveDuration(duration, undoDuration);
+      scaffoldMessenger.clearSnackBars();
       _activeTimers[scaffoldMessenger]?.cancel();
       _activeTimers.remove(scaffoldMessenger);
-      
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
@@ -700,15 +692,12 @@ class ToastService {
             onPressed: () {
               _activeTimers[scaffoldMessenger!]?.cancel();
               _activeTimers.remove(scaffoldMessenger);
-              scaffoldMessenger?.hideCurrentSnackBar();
+              scaffoldMessenger.hideCurrentSnackBar();
               onUndo();
             },
           ),
         ),
       );
-      
-      // Set up a backup timer to ensure dismissal even if Flutter's auto-dismiss fails
-      // This is a safety net for snack bars with actions
       _activeTimers[scaffoldMessenger] = Timer(actualDuration + const Duration(milliseconds: 500), () {
         try {
           if (scaffoldMessenger != null && _activeTimers.containsKey(scaffoldMessenger)) {
@@ -716,7 +705,6 @@ class ToastService {
             _activeTimers.remove(scaffoldMessenger);
           }
         } catch (e) {
-          // SnackBar might already be dismissed, that's fine
           if (scaffoldMessenger != null) {
             _activeTimers.remove(scaffoldMessenger);
           }
@@ -782,15 +770,10 @@ class ToastService {
         );
         return;
       }
-      final actualDuration = duration ?? undoDuration;
-      
-      // Dismiss any existing toast before showing new one
-      scaffoldMessenger?.hideCurrentSnackBar();
-      
-      // Cancel any existing timer for this scaffoldMessenger
+      final actualDuration = _effectiveDuration(duration, undoDuration);
+      scaffoldMessenger.clearSnackBars();
       _activeTimers[scaffoldMessenger]?.cancel();
       _activeTimers.remove(scaffoldMessenger);
-      
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text(
@@ -809,7 +792,7 @@ class ToastService {
             onPressed: () async {
               _activeTimers[scaffoldMessenger!]?.cancel();
               _activeTimers.remove(scaffoldMessenger);
-              scaffoldMessenger?.hideCurrentSnackBar();
+              scaffoldMessenger.hideCurrentSnackBar();
               try {
                 await onUndo();
                 // Check if context is still valid before showing toast

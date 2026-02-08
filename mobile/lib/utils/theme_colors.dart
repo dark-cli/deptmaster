@@ -97,9 +97,14 @@ class ThemeColors {
     return Theme.of(context).colorScheme.primary; // Use primary/accent color
   }
 
-  /// Get SnackBar error background color from theme
+  /// Get SnackBar error background color from theme (light and dark)
   static Color snackBarErrorBackground(BuildContext context) {
-    return Theme.of(context).colorScheme.error;
+    return Theme.of(context).colorScheme.errorContainer;
+  }
+
+  /// Get SnackBar error text color from theme (for use on errorContainer)
+  static Color snackBarErrorTextColor(BuildContext context) {
+    return Theme.of(context).colorScheme.onErrorContainer;
   }
 
   /// Get SnackBar success background color from theme
