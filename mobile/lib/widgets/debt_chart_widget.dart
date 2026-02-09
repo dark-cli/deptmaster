@@ -81,7 +81,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
 
   List<ChartDataPoint> _buildChartData(List<Event> events, String period, bool invertY) {
     if (events.isEmpty) {
-      print('⚠️ No events available for chart');
+      // print('⚠️ No events available for chart');
       return [];
     }
     
@@ -89,7 +89,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       return [];
     }
     
-    print('📊 Building chart from ${events.length} events');
+    // print('📊 Building chart from ${events.length} events');
     final now = DateTime.now();
     DateTime periodStart;
     int intervalMs;
@@ -135,7 +135,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       e.timestamp.isAtSameMomentAs(periodStart)
     ).toList();
     
-    print('📊 Events in period: ${eventsInPeriod.length}');
+    // print('📊 Events in period: ${eventsInPeriod.length}');
     
     // Find the actual first event date in the period (or use periodStart if no events)
     DateTime actualStartDate = periodStart;
@@ -158,14 +158,14 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       if (actualStartDate.isBefore(periodStart)) {
         actualStartDate = periodStart;
       }
-      print('📊 First event date: $firstEventDate, aligned start: $actualStartDate');
+      // print('📊 First event date: $firstEventDate, aligned start: $actualStartDate');
     }
     
     final minDate = actualStartDate.millisecondsSinceEpoch;
     final maxDate = now.millisecondsSinceEpoch;
     final numIntervals = ((maxDate - minDate) / intervalMs).ceil();
     
-    print('📊 Creating $numIntervals intervals from ${DateTime.fromMillisecondsSinceEpoch(minDate)} to ${DateTime.fromMillisecondsSinceEpoch(maxDate)}');
+    // print('📊 Creating $numIntervals intervals from ${DateTime.fromMillisecondsSinceEpoch(minDate)} to ${DateTime.fromMillisecondsSinceEpoch(maxDate)}');
     
     final chartData = <ChartDataPoint>[];
     
@@ -177,15 +177,15 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     if (beforePeriodEvents.isNotEmpty) {
       final lastBeforePeriod = beforePeriodEvents.last;
       fallbackDebt = (lastBeforePeriod.eventData['total_debt'] as num).toDouble();
-      print('📊 Using fallback debt: $fallbackDebt from event at ${lastBeforePeriod.timestamp}');
+      // print('📊 Using fallback debt: $fallbackDebt from event at ${lastBeforePeriod.timestamp}');
     } else if (allEvents.isNotEmpty) {
       fallbackDebt = (allEvents.first.eventData['total_debt'] as num).toDouble();
-      print('📊 Using first event debt as fallback: $fallbackDebt');
+      // print('📊 Using first event debt as fallback: $fallbackDebt');
     }
     
     // If no fallback debt, we can't build a chart
     if (fallbackDebt == null) {
-      print('⚠️ No fallback debt available, cannot build chart');
+      // print('⚠️ No fallback debt available, cannot build chart');
       return [];
     }
     
@@ -256,10 +256,10 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       ));
     }
     
-    print('📊 Built ${chartData.length} chart data points');
+    // print('📊 Built ${chartData.length} chart data points');
     if (chartData.isNotEmpty) {
-      print('📊 First point: x=${chartData.first.x}, y=${chartData.first.y}');
-      print('📊 Last point: x=${chartData.last.x}, y=${chartData.last.y}');
+      // print('📊 First point: x=${chartData.first.x}, y=${chartData.first.y}');
+      // print('📊 Last point: x=${chartData.last.x}, y=${chartData.last.y}');
     }
     return chartData;
   }
@@ -330,7 +330,7 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       );
     }
     
-    print('📊 Rendering chart with ${chartData.length} points');
+    // print('📊 Rendering chart with ${chartData.length} points');
     
     // Build chart key separately to avoid string interpolation issues
     final chartKeySuffix = invertY ? 'inverted' : 'normal';
@@ -410,12 +410,12 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       dateFormat = DateFormat('MM/dd'); // e.g., "12/28", "12/29"
     }
     
-    print('📊 Chart bounds: X=[$minX, $maxX], Y=[$finalMinY, $finalMaxY]');
-    print('📊 Data range: X=[$rawMinX, $rawMaxX], Y=[$rawMinY, $rawMaxY]');
-    print('📊 Inverted: $invertY, minY=$finalMinY, maxY=$finalMaxY');
-    print('📊 X-axis interval: $xInterval, type: $xIntervalType, minorTicks: $minorTicksPerInterval');
+    // print('📊 Chart bounds: X=[$minX, $maxX], Y=[$finalMinY, $finalMaxY]');
+    // print('📊 Data range: X=[$rawMinX, $rawMaxX], Y=[$rawMinY, $rawMaxY]');
+    // print('📊 Inverted: $invertY, minY=$finalMinY, maxY=$finalMaxY');
+    // print('📊 X-axis interval: $xInterval, type: $xIntervalType, minorTicks: $minorTicksPerInterval');
     if (minorTicksPerInterval > 0) {
-      print('📊 Minor ticks should be visible: $minorTicksPerInterval ticks per interval');
+      // print('📊 Minor ticks should be visible: $minorTicksPerInterval ticks per interval');
     }
     
     // Build chart data for Syncfusion - include ALL points for correct line progression
