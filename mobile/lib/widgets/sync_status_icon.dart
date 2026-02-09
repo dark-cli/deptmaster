@@ -61,11 +61,15 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
     final state = Api.connectionState;
     final isOffline = !state.isOnline;
     final hasError = state.hasSyncError;
+    final hasAuthIssue = state.hasAuthIssue;
     final isSynced = state.isOnline && !state.hasSyncError;
 
     IconData icon;
     Color color;
-    if (isOffline) {
+    if (hasAuthIssue) {
+      icon = Icons.warning_amber_rounded;
+      color = ThemeColors.warning(context);
+    } else if (isOffline) {
       icon = Icons.cloud_off_outlined;
       color = ThemeColors.gray(context, shade: 600);
     } else if (hasError) {
@@ -79,17 +83,47 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
       color = theme.colorScheme.primary;
     }
 
-    final String tooltipText = isOffline
-        ? 'Offline - tap to check'
-        : (isSynced
-            ? 'Synced - tap to refresh'
-            : (hasError ? 'Sync error - tap to retry' : 'Syncing...'));
+    final String tooltipText = hasAuthIssue
+        ? 'Authorization issue - tap for details'
+        : (isOffline
+            ? 'Offline - tap to check'
+            : (isSynced
+                ? 'Synced - tap to refresh'
+                : (hasError ? 'Sync error - tap to retry' : 'Syncing...')));
 
     return Tooltip(
       message: tooltipText,
       child: InkWell(
         onTap: () async {
           if (kIsWeb) return;
+          if (hasAuthIssue) {
+            if (!mounted) return;
+            await showDialog<void>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Authorization required'),
+                content: const Text(
+                  'Your session is no longer valid. The app will keep working offline, '
+                  'but syncing is paused until you log in again.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await Api.refreshConnectionAndSync();
+                      _refresh();
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
+            return;
+          }
           await Api.refreshConnectionAndSync();
           _refresh();
         },

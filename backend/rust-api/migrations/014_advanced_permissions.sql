@@ -107,7 +107,7 @@ BEGIN
         SELECT id INTO ug_id FROM user_groups WHERE wallet_id = w.id AND name = 'all_users' LIMIT 1;
         SELECT id INTO cg_id FROM contact_groups WHERE wallet_id = w.id AND name = 'all_contacts' LIMIT 1;
 
-        FOR act_id IN SELECT id FROM permission_actions WHERE resource IN ('contact', 'transaction', 'events')
+        FOR act_id IN SELECT id FROM permission_actions WHERE name IN ('contact:read', 'transaction:read', 'events:read')
         LOOP
             INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id)
             VALUES (ug_id, cg_id, act_id)

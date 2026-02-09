@@ -13,6 +13,33 @@ use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use sha2::{Sha256, Digest};
 
+fn map_event_to_permission_action(
+    event: &SyncEventRequest,
+    aggregate_id: uuid::Uuid,
+) -> Option<(String, ResourceType, Option<uuid::Uuid>)> {
+    let action = match (event.aggregate_type.as_str(), event.event_type.as_str()) {
+        ("contact", "CREATED") => "contact:create",
+        ("contact", "UPDATED") => "contact:update",
+        ("contact", "DELETED") => "contact:delete",
+        ("contact", "UNDO") => "contact:update",
+        ("transaction", "CREATED") => "transaction:create",
+        ("transaction", "UPDATED") => "transaction:update",
+        ("transaction", "DELETED") => "transaction:delete",
+        ("transaction", "UNDO") => "transaction:update",
+        // Permission events are handled separately (admin/owner only).
+        ("permission", _) => return None,
+        _ => return None,
+    };
+
+    let (resource_type, resource_id) = match event.aggregate_type.as_str() {
+        "contact" => (ResourceType::Contact, Some(aggregate_id)),
+        "transaction" => (ResourceType::Transaction, None),
+        _ => (ResourceType::Contact, None),
+    };
+
+    Some((action.to_string(), resource_type, resource_id))
+}
+
 /// Calculate total debt (sum of all contact balances) at current time for a wallet
 async fn calculate_total_debt(state: &AppState, wallet_id: uuid::Uuid) -> i64 {
     sqlx::query_scalar::<_, i64>(
@@ -377,6 +404,59 @@ pub async fn post_sync_events(
     let user_id = auth_user.user_id;
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
+
+    // Preflight permission checks to avoid partial writes in a batch.
+    for event in &events {
+        let aggregate_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid aggregate ID: {}", e)})),
+            )
+        })?;
+
+        // Permission events are admin/owner only.
+        if event.aggregate_type == "permission" {
+            if wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
+                return Err(permission_service::insufficient_permission_response());
+            }
+            continue;
+        }
+
+        if let Some((action, resource_type, resource_id)) = map_event_to_permission_action(event, aggregate_id) {
+            let can = permission_service::can_perform(
+                &*state.db_pool,
+                wallet_id,
+                auth_user.user_id,
+                &wallet_context.user_role,
+                &action,
+                resource_type,
+                resource_id,
+            )
+            .await
+            .map_err(|_| permission_service::insufficient_permission_response())?;
+            if !can {
+                return Err(permission_service::insufficient_permission_response());
+            }
+
+            // Transactions require contact read (dependency safety).
+            if event.aggregate_type == "transaction" {
+                let can_contact_read = permission_service::can_perform(
+                    &*state.db_pool,
+                    wallet_id,
+                    auth_user.user_id,
+                    &wallet_context.user_role,
+                    "contact:read",
+                    ResourceType::Contact,
+                    None,
+                )
+                .await
+                .map_err(|_| permission_service::insufficient_permission_response())?;
+                if !can_contact_read {
+                    return Err(permission_service::insufficient_permission_response());
+                }
+            }
+        }
+    }
 
     for event in events {
         let event_id = uuid::Uuid::parse_str(&event.id).map_err(|e| {

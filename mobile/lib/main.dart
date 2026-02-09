@@ -114,7 +114,12 @@ void main() async {
   } else {
     final isLoggedIn = await Api.isLoggedIn();
     if (isLoggedIn) {
-      final isValid = await Api.validateAuth();
+      bool isValid = true;
+      try {
+        isValid = await Api.validateAuth();
+      } catch (_) {
+        isValid = true; // Offline or network error: stay in app.
+      }
       initialRoute = isValid ? '/' : '/login';
     } else {
       initialRoute = '/login';

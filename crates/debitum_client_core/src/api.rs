@@ -1,6 +1,7 @@
 //! HTTP client for backend API (auth, sync, wallets).
 use crate::models::Wallet;
 use crate::storage;
+use std::future::Future;
 use once_cell::sync::Lazy;
 
 static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
@@ -13,6 +14,13 @@ static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Runtime::new().expect("tokio runtime")
 });
+
+pub(crate) fn spawn_background<F>(fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    RUNTIME.spawn(fut);
+}
 
 fn base_url() -> Result<String, String> {
     crate::get_base_url().ok_or_else(|| "Backend not configured".to_string())
@@ -317,6 +325,12 @@ pub fn join_wallet_by_code_api(code: &str) -> Result<String, String> {
         let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
         if !status.is_success() {
+            // Try to extract clean error message from JSON response
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(msg) = json.get("error").and_then(|v| v.as_str()) {
+                    return Err(msg.to_string());
+                }
+            }
             return Err(format!("{} {}", status, text));
         }
         Ok::<_, String>(text)

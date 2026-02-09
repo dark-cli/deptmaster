@@ -36,6 +36,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
   bool _selecting = false;
   bool _joining = false;
   String? _loadError;
+  String? _inviteCodeError;
   final _inviteCodeController = TextEditingController();
   static const _inviteCodeLength = 4;
 
@@ -43,25 +44,36 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
   void initState() {
     super.initState();
     _loadWallets();
+    _inviteCodeController.addListener(_onCodeChanged);
   }
 
   @override
   void dispose() {
+    _inviteCodeController.removeListener(_onCodeChanged);
     _inviteCodeController.dispose();
     super.dispose();
+  }
+
+  void _onCodeChanged() {
+    // Clear error when user types and trigger rebuild for button state
+    setState(() {
+      _inviteCodeError = null;
+    });
   }
 
   Future<void> _joinByCode() async {
     final code = _inviteCodeController.text.trim().replaceAll(RegExp(r'\s'), '');
     if (code.length != _inviteCodeLength) {
-      ToastService.showErrorFromContext(
-        context,
-        'Enter a $_inviteCodeLength-digit invite code',
-      );
+      setState(() {
+        _inviteCodeError = 'Enter a $_inviteCodeLength-digit invite code';
+      });
       return;
     }
     if (_joining) return;
-    setState(() => _joining = true);
+    setState(() {
+      _joining = true;
+      _inviteCodeError = null;
+    });
     try {
       final walletId = await Api.joinWalletByCode(code);
       if (!mounted) return;
@@ -79,11 +91,15 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _joining = false);
-        ToastService.showErrorFromContext(
-          context,
-          e.toString().replaceFirst('Exception: ', ''),
-        );
+        setState(() {
+          _joining = false;
+          // Clean up "Exception: " prefix and handle network errors
+          String error = e.toString().replaceFirst('Exception: ', '');
+          if (error.contains('Connection refused') || error.contains('Network is unreachable')) {
+            error = 'Could not connect to server. Please check your internet connection.';
+          }
+          _inviteCodeError = error;
+        });
       }
     }
   }
@@ -204,30 +220,40 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                 Expanded(
                   child: TextField(
                     controller: _inviteCodeController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Invite code',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       isDense: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      errorText: _inviteCodeError,
                     ),
                     keyboardType: TextInputType.number,
                     maxLength: _inviteCodeLength,
-                    onSubmitted: (_) => _joinByCode(),
+                    onSubmitted: (_) {
+                      if (_inviteCodeController.text.trim().length == _inviteCodeLength) {
+                        _joinByCode();
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _joining ? null : _joinByCode,
-                  child: _joining
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: colorScheme.onPrimary,
-                          ),
-                        )
-                      : const Text('Join'),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 22), // Align button with text field (ignoring error text space)
+                  child: FilledButton(
+                    onPressed: _joining || _inviteCodeController.text.trim().length != _inviteCodeLength 
+                        ? null 
+                        : _joinByCode,
+                    child: _joining
+                        ? SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: colorScheme.onPrimary,
+                            ),
+                          )
+                        : const Text('Join'),
+                  ),
                 ),
               ],
             ),

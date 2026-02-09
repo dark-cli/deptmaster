@@ -7,8 +7,30 @@ static RUST_LOG_BUFFER: Lazy<Mutex<Vec<String>>> = Lazy::new(|| Mutex::new(Vec::
 
 const MAX_BUFFER_LEN: usize = 500;
 
+fn should_log(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    // Always keep errors/warnings and auth/permission signals.
+    if lower.contains("error")
+        || lower.contains("warn")
+        || lower.contains("failed")
+        || lower.contains("debitum_auth_declined")
+        || lower.contains("debitum_insufficient_wallet_permission")
+    {
+        return true;
+    }
+
+    // Keep core sync logs; drop the rest to reduce noise.
+    lower.contains("manual_sync")
+        || lower.contains("push_unsynced")
+        || lower.contains("pull_and_merge")
+        || lower.contains("sync loop")
+}
+
 /// Push a log line (also prints to stderr). Called by rust_log! macro.
 pub fn push(s: String) {
+    if !should_log(&s) {
+        return;
+    }
     eprintln!("{}", s);
     if let Ok(mut v) = RUST_LOG_BUFFER.lock() {
         v.push(s);

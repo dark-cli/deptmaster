@@ -14,13 +14,18 @@ pub async fn setup_test_db() -> PgPool {
         .await
         .expect("Failed to connect to test database");
     
+    // Reset database schema to ensure clean state
+    sqlx::query("DROP SCHEMA public CASCADE").execute(&pool).await.expect("Failed to drop schema");
+    sqlx::query("CREATE SCHEMA public").execute(&pool).await.expect("Failed to create schema");
+
     // Run migrations (required for tests that use wallets, permission tables, etc.)
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .expect("Failed to run migrations - ensure TEST_DATABASE_URL points to a database that can be migrated");
 
-    // Clear test data (in correct order due to foreign keys)
+    // Clear test data (redundant if we dropped schema, but harmless)
+    // ...
     sqlx::query("DELETE FROM projection_snapshots").execute(&pool).await.ok();
     sqlx::query("DELETE FROM transactions_projection").execute(&pool).await.ok();
     sqlx::query("DELETE FROM contacts_projection").execute(&pool).await.ok();
@@ -91,12 +96,14 @@ pub async fn create_test_user(pool: &PgPool) -> Uuid {
 
 pub async fn create_test_user_with_email(pool: &PgPool, email: &str) -> Uuid {
     let user_id = Uuid::new_v4();
+    let username = email.split('@').next().unwrap_or("testuser");
     sqlx::query(
-        "INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id) 
-         VALUES ($1, $2, $3, NOW(), 0)"
+        "INSERT INTO users_projection (id, email, username, password_hash, created_at, last_event_id) 
+         VALUES ($1, $2, $3, $4, NOW(), 0)"
     )
     .bind(user_id)
     .bind(email)
+    .bind(username)
     .bind("$2b$12$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK") // bcrypt hash for "1234"
     .execute(pool)
     .await
@@ -210,10 +217,10 @@ pub fn wallet_context_extension(wallet_id: Uuid, role: &str) -> axum::extract::E
 }
 
 /// Create Extension<AuthUser> for calling handlers that require auth in tests
-pub fn auth_user_extension(user_id: Uuid, email: Option<&str>) -> axum::extract::Extension<AuthUser> {
+pub fn auth_user_extension(user_id: Uuid, username: Option<&str>) -> axum::extract::Extension<AuthUser> {
     axum::extract::Extension(AuthUser {
         user_id,
-        email: email.unwrap_or("test@example.com").to_string(),
+        username: username.unwrap_or("test_user").to_string(),
         is_admin: false,
     })
 }

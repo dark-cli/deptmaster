@@ -14,6 +14,13 @@ pub fn push_unsynced() -> Result<(), String> {
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
     let unsynced = storage::events_get_unsynced(&wallet_id)?;
+    if !unsynced.is_empty() {
+        rust_log!(
+            "[debitum_rs] push_unsynced wallet_id={} pending={}",
+            wallet_id,
+            unsynced.len()
+        );
+    }
     if unsynced.is_empty() {
         return Ok(());
     }
@@ -34,6 +41,10 @@ pub fn push_unsynced() -> Result<(), String> {
         .collect();
     match api::post_sync_events(payload) {
         Ok(accepted) => {
+            rust_log!(
+                "[debitum_rs] push_unsynced accepted={}",
+                accepted.len()
+            );
             storage::events_mark_synced(&accepted)?;
             Ok(())
         }
@@ -74,6 +85,7 @@ pub fn pull_and_merge() -> Result<(), String> {
     if since.as_ref().is_some() {
         rust_log!("[debitum_rs] pull_and_merge: incremental pull since={:?}", since);
     }
+    rust_log!("[debitum_rs] pull_and_merge: requesting server events");
     let server_events = api::get_sync_events(since.clone())?;
     rust_log!("[debitum_rs] pull_and_merge: server returned {} events for wallet {}", server_events.len(), wallet_id);
     for ev in &server_events {

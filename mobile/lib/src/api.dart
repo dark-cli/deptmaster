@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `auth_headers`, `base_url`, `get_sync_events`, `post_sync_events`, `wallet_management_delete`, `wallet_management_get`, `wallet_management_headers`, `wallet_management_post_json`, `wallet_management_put_json`, `wallet_management_url`
+// These functions are ignored because they are not marked as `pub`: `auth_headers`, `base_url`, `get_sync_events`, `post_sync_events`, `spawn_background`, `wallet_management_delete`, `wallet_management_get`, `wallet_management_headers`, `wallet_management_post_json`, `wallet_management_put_json`, `wallet_management_url`
 
 /// POST /api/auth/login -> { token, user_id, username }
 Future<void> login({required String username, required String password}) =>

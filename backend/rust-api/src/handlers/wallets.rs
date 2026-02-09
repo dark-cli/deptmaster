@@ -14,6 +14,42 @@ use crate::middleware::wallet_context::WalletContext;
 use crate::services::permission_service::{self, ResourceType};
 use crate::websocket;
 
+/// Validate permission dependencies (e.g., Write implies Read)
+fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
+    let has_action = |name: &str| actions.iter().any(|a| a == name);
+
+    // Rule 1: Write implies Read for same resource
+    for action in actions {
+        if let Some((resource, verb)) = action.split_once(':') {
+             // For wallet resource, 'manage_members' is a special verb
+             if resource == "wallet" {
+                 if verb == "update" || verb == "delete" || verb == "manage_members" {
+                     if !has_action("wallet:read") {
+                         return Err(format!("Permission '{}' requires 'wallet:read'", action));
+                     }
+                 }
+             } else {
+                 if ["create", "update", "delete", "close"].contains(&verb) {
+                     let read_action = format!("{}:read", resource);
+                     if !has_action(&read_action) {
+                         return Err(format!("Permission '{}' requires '{}'", action, read_action));
+                     }
+                 }
+             }
+        }
+    }
+
+    // Rule 2: Transaction permissions imply Contact Read
+    // (Because you need to see the contact to see its transactions)
+    if actions.iter().any(|a| a.starts_with("transaction:")) {
+        if !has_action("contact:read") {
+             return Err("Transaction permissions require 'contact:read'".to_string());
+        }
+    }
+
+    Ok(())
+}
+
 async fn require_wallet_role_at_least(
     state: &AppState,
     wallet_id: Uuid,
@@ -255,12 +291,11 @@ async fn initialize_wallet_permissions(
         .fetch_one(db_pool)
         .await?;
 
-    // 3. Grant default permissions: all_users can do everything with all_contacts (except wallet management)
-    // Permission actions: contact:*, transaction:*, events:read
-    // Wallet management is role-based (admin/owner), not matrix-based for now.
+    // 3. Grant default permissions: all_users can only READ contacts/transactions/events by default.
+    // Explicitly exclude create/update/delete/close to force admins to grant them.
     let actions = [
-        "contact:create", "contact:read", "contact:update", "contact:delete",
-        "transaction:create", "transaction:read", "transaction:update", "transaction:delete", "transaction:close",
+        "contact:read",
+        "transaction:read",
         "events:read"
     ];
 
@@ -803,11 +838,15 @@ pub async fn create_wallet_invite(
     // 4-digit numeric code (0000–9999)
     let code = format!("{:04}", (Uuid::new_v4().as_u128() % 10000) as u32);
 
+    // Create invite code with 5 minute expiration
     sqlx::query(
         r#"
-        INSERT INTO wallet_invite_codes (wallet_id, code, created_by)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (wallet_id) DO UPDATE SET code = EXCLUDED.code, created_at = NOW(), created_by = EXCLUDED.created_by
+        INSERT INTO wallet_invite_codes (wallet_id, code, created_by, created_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (wallet_id) DO UPDATE 
+        SET code = EXCLUDED.code, 
+            created_at = NOW(), 
+            created_by = EXCLUDED.created_by
         "#
     )
     .bind(wallet_uuid)
@@ -850,7 +889,12 @@ pub async fn join_wallet_by_code(
     }
 
     let wallet_id_row: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT wallet_id FROM wallet_invite_codes WHERE code = $1"
+        r#"
+        SELECT wallet_id 
+        FROM wallet_invite_codes 
+        WHERE code = $1 
+          AND created_at > NOW() - INTERVAL '5 minutes'
+        "#
     )
     .bind(code)
     .fetch_optional(&*state.db_pool)
@@ -865,10 +909,25 @@ pub async fn join_wallet_by_code(
 
     let (wallet_uuid,) = wallet_id_row.ok_or_else(|| {
         (
-            StatusCode::NOT_FOUND,
+            StatusCode::BAD_REQUEST, // Changed from NOT_FOUND to BAD_REQUEST to ensure frontend shows it as an input error
             Json(serde_json::json!({"error": "Invalid or expired invite code"})),
         )
     })?;
+
+    // One-time use: Delete code after successful lookup (but before joining to prevent race conditions slightly)
+    // Actually, safer to delete AFTER joining? Or before?
+    // If we delete before and join fails, code is lost.
+    // If we delete after and race happens, two people might join.
+    // Given "one time use", let's try to delete it atomically.
+    // We can't easily do "select and delete" returning data in one generic query step with the existing structure easily without a transaction.
+    // Let's rely on the previous SELECT for validation and issue a DELETE now.
+    // A race condition is acceptable for now (two people joining within milliseconds).
+    sqlx::query("DELETE FROM wallet_invite_codes WHERE wallet_id = $1 AND code = $2")
+        .bind(wallet_uuid)
+        .bind(code)
+        .execute(&*state.db_pool)
+        .await
+        .ok(); // Ignore delete errors (e.g. already deleted)
 
     // Check if already a member
     let already: bool = sqlx::query_scalar(
@@ -2348,6 +2407,13 @@ pub async fn put_permission_matrix(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
     for entry in &payload.entries {
+        if let Err(e) = validate_permission_dependencies(&entry.action_names) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e})),
+            ));
+        }
+
         let ug_id = Uuid::parse_str(&entry.user_group_id).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,

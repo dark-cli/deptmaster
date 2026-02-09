@@ -1,5 +1,8 @@
 #![allow(unexpected_cfgs)] // flutter_rust_bridge macro emits frb_expand cfg
 use std::sync::Mutex;
+use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
 
@@ -14,12 +17,95 @@ mod models;
 mod state_builder;
 mod storage;
 mod sync;
+mod backoff;
 
 struct BackendConfig {
     base_url: String,
     ws_url: String,
 }
 static BACKEND_CONFIG: Lazy<Mutex<Option<BackendConfig>>> = Lazy::new(|| Mutex::new(None));
+static SYNC_BACKOFF: Lazy<Mutex<backoff::Backoff>> = Lazy::new(|| {
+    Mutex::new(backoff::Backoff::new(vec![
+        Duration::from_millis(500),
+        Duration::from_millis(500),
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+        Duration::from_secs(3),
+    ]))
+});
+static SYNC_IN_FLIGHT: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+static STORAGE_READY: AtomicBool = AtomicBool::new(false);
+static SYNC_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
+static LAST_BACKOFF_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+static LAST_INFLIGHT_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+
+struct SyncGuard;
+
+impl SyncGuard {
+    fn try_acquire() -> Option<Self> {
+        let mut in_flight = SYNC_IN_FLIGHT.lock().unwrap();
+        if *in_flight {
+            return None;
+        }
+        *in_flight = true;
+        Some(Self)
+    }
+}
+
+impl Drop for SyncGuard {
+    fn drop(&mut self) {
+        let mut in_flight = SYNC_IN_FLIGHT.lock().unwrap();
+        *in_flight = false;
+    }
+}
+
+fn start_sync_loop_if_ready() {
+    if !STORAGE_READY.load(Ordering::Relaxed) {
+        return;
+    }
+    let backend_ready = BACKEND_CONFIG.lock().unwrap().is_some();
+    if !backend_ready {
+        return;
+    }
+    if SYNC_LOOP_STARTED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    rust_log!("[debitum_rs] sync loop: started (interval=1000ms)");
+    crate::api::spawn_background(async {
+        loop {
+            // Only attempt sync when storage and backend are ready.
+            if STORAGE_READY.load(Ordering::Relaxed)
+                && BACKEND_CONFIG.lock().unwrap().is_some()
+            {
+                let _ = manual_sync_with_source("background_loop");
+            }
+            let delay_ms = {
+                let backoff = SYNC_BACKOFF.lock().unwrap();
+                backoff
+                    .remaining()
+                    .map(|d| d.as_millis().clamp(100, 3000) as u64)
+                    .unwrap_or(1000)
+            };
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+    });
+}
+
+fn should_log_skip(last: &Lazy<Mutex<Option<Instant>>>, min_interval_ms: u64) -> bool {
+    let mut guard = last.lock().unwrap();
+    let now = Instant::now();
+    match *guard {
+        Some(t) if now.duration_since(t).as_millis() < min_interval_ms as u128 => false,
+        _ => {
+            *guard = Some(now);
+            true
+        }
+    }
+}
 
 #[frb(init)]
 pub fn init_app() {
@@ -28,11 +114,17 @@ pub fn init_app() {
 
 /// Call once at startup with the app documents directory path (e.g. from path_provider).
 pub fn init_storage(storage_path: String) -> Result<(), String> {
-    storage::init(&storage_path)
+    storage::init(&storage_path)?;
+    STORAGE_READY.store(true, Ordering::Relaxed);
+    rust_log!("[debitum_rs] sync loop: storage ready");
+    start_sync_loop_if_ready();
+    Ok(())
 }
 
 pub fn set_backend_config(base_url: String, ws_url: String) {
     *BACKEND_CONFIG.lock().unwrap() = Some(BackendConfig { base_url, ws_url });
+    rust_log!("[debitum_rs] sync loop: backend config set");
+    start_sync_loop_if_ready();
 }
 
 pub fn get_base_url() -> Option<String> {
@@ -342,16 +434,74 @@ pub fn get_events() -> Result<String, String> {
 // --- Sync ---
 /// Sync with server. If server responds with DEBITUM_AUTH_DECLINED, Rust clears session (logout) and returns that error; Dart only needs to react (e.g. show login).
 pub fn manual_sync() -> Result<(), String> {
+    manual_sync_with_source("ffi")
+}
+
+fn manual_sync_with_source(source: &str) -> Result<(), String> {
+    {
+        let backoff = SYNC_BACKOFF.lock().unwrap();
+        if !backoff.can_attempt() {
+            if let Some(wait) = backoff.remaining() {
+                if should_log_skip(&LAST_BACKOFF_SKIP_LOG, 1000) {
+                    rust_log!(
+                        "[debitum_rs] manual_sync skipped (backoff active, remaining={}ms, source={})",
+                        wait.as_millis(),
+                        source
+                    );
+                }
+            }
+            return Ok(());
+        }
+    }
+    let _guard = match SyncGuard::try_acquire() {
+        Some(g) => g,
+        None => {
+            if should_log_skip(&LAST_INFLIGHT_SKIP_LOG, 1000) {
+                rust_log!("[debitum_rs] manual_sync skipped (in-flight, source={})", source);
+            }
+            return Ok(());
+        }
+    };
+
+    rust_log!("[debitum_rs] manual_sync start (source={})", source);
     match sync::full_sync() {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            SYNC_BACKOFF.lock().unwrap().reset();
+            rust_log!("[debitum_rs] manual_sync success (source={})", source);
+            Ok(())
+        }
         Err(e) => {
             if e.contains("DEBITUM_AUTH_DECLINED") {
                 let _ = crud::logout();
+            }
+            if is_network_error(&e) || is_rate_limited(&e) {
+                let delay = SYNC_BACKOFF.lock().unwrap().on_failure();
+                rust_log!(
+                    "[debitum_rs] manual_sync backoff set={}ms (source={})",
+                    delay.as_millis(),
+                    source
+                );
             }
             rust_log!("[debitum_rs] manual_sync failed: {}", e);
             Err(e)
         }
     }
+}
+
+fn is_network_error(err: &str) -> bool {
+    let s = err.to_lowercase();
+    s.contains("error sending request")
+        || s.contains("connection refused")
+        || s.contains("network is unreachable")
+        || s.contains("timed out")
+        || s.contains("connection timed out")
+        || s.contains("connection reset")
+        || s.contains("host is down")
+}
+
+fn is_rate_limited(err: &str) -> bool {
+    let s = err.to_lowercase();
+    s.contains("429") || s.contains("too many requests")
 }
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).

@@ -24,19 +24,24 @@ class ConnectionState {
   const ConnectionState({
     required this.isOnline,
     required this.hasSyncError,
+    required this.hasAuthIssue,
   });
 
   final bool isOnline;
   final bool hasSyncError;
+  final bool hasAuthIssue;
 
   /// 'Offline' when not connected, 'Error' when connected but sync failed, 'Synced' when connected and no error.
   String get status =>
-      !isOnline ? 'Offline' : (hasSyncError ? 'Error' : 'Synced');
+      !isOnline
+          ? 'Offline'
+          : (hasAuthIssue ? 'Auth required' : (hasSyncError ? 'Error' : 'Synced'));
 }
 
 class Api {
   static bool _initialized = false;
   static bool _hasSyncError = false;
+  static bool _hasAuthIssue = false;
   static String? _cachedWalletId;
   static WebSocketChannel? _wsChannel;
   static StreamSubscription? _wsSubscription;
@@ -71,6 +76,7 @@ class Api {
   static ConnectionState get connectionState => ConnectionState(
         isOnline: _wsConnected,
         hasSyncError: _hasSyncError,
+        hasAuthIssue: _hasAuthIssue,
       );
 
   static const _keyBackendHost = 'backend_host';
@@ -90,8 +96,32 @@ class Api {
 
   /// Server-sent code for insufficient wallet permission. Only show "permission denied" toast when this is in the error (never for network errors).
   static const _permissionDeniedCode = 'DEBITUM_INSUFFICIENT_WALLET_PERMISSION';
+  static const _authDeclinedCode = 'DEBITUM_AUTH_DECLINED';
 
   static void Function()? onLogout;
+  /// Optional hook to attempt re-auth (e.g. refresh/login) when server says unauthorized.
+  /// Return true if re-auth succeeded and the caller should retry later.
+  static Future<bool> Function()? onReauth;
+
+  static bool _isAuthDeclinedError(Object e) {
+    final s = e.toString().toLowerCase();
+    return s.contains(_authDeclinedCode.toLowerCase()) || s.contains('401 unauthorized');
+  }
+
+  static Future<void> _handleAuthDeclined() async {
+    if (onReauth != null) {
+      try {
+        final ok = await onReauth!();
+        if (ok) {
+          _hasAuthIssue = false;
+          _notifyConnectionStateChanged();
+          return;
+        }
+      } catch (_) {}
+    }
+    _hasAuthIssue = true;
+    _notifyConnectionStateChanged();
+  }
 
   /// Last init error (e.g. native library not found). Cleared on success.
   static String? initError;
@@ -193,6 +223,8 @@ class Api {
     }
     if (kIsWeb) throw UnsupportedError('Login not supported on web');
     await rust.login(username: username, password: password);
+    _hasAuthIssue = false;
+    _notifyConnectionStateChanged();
   }
 
   static Future<void> register(String username, String password) async {
@@ -201,6 +233,8 @@ class Api {
     }
     if (kIsWeb) throw UnsupportedError('Sign up not supported on web');
     await rust.register(username: username, password: password);
+    _hasAuthIssue = false;
+    _notifyConnectionStateChanged();
   }
 
   static Future<void> logout() async {
@@ -210,6 +244,8 @@ class Api {
       } catch (_) {}
     }
     await _wsDisconnect();
+    _hasAuthIssue = false;
+    _notifyConnectionStateChanged();
     onLogout?.call();
   }
 
@@ -280,15 +316,19 @@ class Api {
     try {
       await rust.manualSync();
       _hasSyncError = false;
+      _hasAuthIssue = false;
       _notifyConnectionStateChanged();
       return true;
     } catch (e) {
       final s = e.toString();
-      if (s.contains('DEBITUM_AUTH_DECLINED')) {
-        onLogout?.call();
+      if (s.contains(_authDeclinedCode)) {
+        await _handleAuthDeclined();
         return false;
       }
-      rethrow;
+      _hasSyncError = true;
+      _notifyConnectionStateChanged();
+      // Network/offline errors should not block startup or force logout.
+      return true;
     }
   }
 
@@ -325,8 +365,15 @@ class Api {
     try {
       final json = await rust.getWallets();
       final list = jsonDecode(json) as List<dynamic>?;
+      if (_hasAuthIssue) {
+        _hasAuthIssue = false;
+        _notifyConnectionStateChanged();
+      }
       return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
-    } catch (_) {
+    } catch (e) {
+      if (_isAuthDeclinedError(e)) {
+        await _handleAuthDeclined();
+      }
       return [];
     }
   }
@@ -788,8 +835,16 @@ class Api {
       if (list.isEmpty) {
         debugPrint('Api.getEvents: 0 events for current wallet $currentWalletId');
       }
+      if (_hasAuthIssue) {
+        _hasAuthIssue = false;
+        _notifyConnectionStateChanged();
+      }
       return json;
     } catch (e) {
+      if (_isAuthDeclinedError(e)) {
+        await _handleAuthDeclined();
+        return '[]';
+      }
       debugPrint('Api.getEvents failed: $e');
       return '[]';
     }
@@ -819,6 +874,7 @@ class Api {
     try {
       await rust.manualSync();
       _hasSyncError = false;
+      _hasAuthIssue = false;
       _notifyConnectionStateChanged();
       _notifyDataChanged();
     } catch (e) {
@@ -826,9 +882,13 @@ class Api {
       _notifyConnectionStateChanged();
       debugPrint('Api.manualSync failed: $e');
       final s = e.toString().toLowerCase();
-      if (s.contains(_permissionDeniedCode)) {
+      if (s.contains(_permissionDeniedCode.toLowerCase())) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
         _notifyDataChanged(); // reflect rollback done in Rust
+      }
+      if (_isAuthDeclinedError(e)) {
+        await _handleAuthDeclined();
+        return;
       }
       await drainRustLogsToConsole();
       rethrow;

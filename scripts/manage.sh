@@ -841,6 +841,7 @@ cmd_start_server_direct() {
     export RUST_LOG="${RUST_LOG:-debug}"
     export JWT_SECRET="${JWT_SECRET:-your-secret-key-change-in-production}"
     export JWT_EXPIRATION="${JWT_EXPIRATION:-3600}"
+    export RATE_LIMIT_REQUESTS="${RATE_LIMIT_REQUESTS:-0}"
     
     # Run server with cargo. Use cargo-watch only if explicitly requested and the real binary exists.
     CARGO_WATCH_BIN=""

@@ -57,6 +57,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -88,6 +89,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -170,6 +172,7 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -256,6 +259,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -279,6 +283,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -360,6 +365,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -383,6 +389,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -475,6 +482,7 @@ async fn test_undo_event_finds_position_by_id() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }

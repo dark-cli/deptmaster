@@ -6,6 +6,8 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `should_log`
+
 /// Push a log line (also prints to stderr). Called by rust_log! macro.
 Future<void> push({required String s}) =>
     RustLib.instance.api.crateLogBridgePush(s: s);

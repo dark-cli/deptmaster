@@ -6,7 +6,9 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BackendConfig`
+// These functions are ignored because they are not marked as `pub`: `is_network_error`, `is_rate_limited`, `manual_sync_with_source`, `should_log_skip`, `start_sync_loop_if_ready`, `try_acquire`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BackendConfig`, `SyncGuard`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
 /// Call once at startup with the app documents directory path (e.g. from path_provider).
 Future<void> initStorage({required String storagePath}) =>

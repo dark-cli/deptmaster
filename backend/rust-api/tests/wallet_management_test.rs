@@ -139,7 +139,7 @@ async fn test_update_wallet() {
     let result = wallets::update_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: Some("testuser".to_string()), is_admin: false }),
         axum::Json(update_request),
     ).await;
 
@@ -173,7 +173,7 @@ async fn test_delete_wallet() {
     let result = wallets::delete_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: Some("testuser".to_string()), is_admin: false }),
     ).await;
 
     assert!(result.is_ok());
@@ -211,7 +211,7 @@ async fn test_add_user_to_wallet() {
     let result = wallets::add_user_to_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: Some("testuser".to_string()), is_admin: false }),
         axum::Json(add_request),
     ).await;
 
@@ -252,7 +252,7 @@ async fn test_update_wallet_user_role() {
     let result = wallets::update_wallet_user(
         axum::extract::Path((wallet_id.to_string(), target_user_id.to_string())),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: Some("testuser".to_string()), is_admin: false }),
         axum::Json(update_request),
     ).await;
 
@@ -289,7 +289,7 @@ async fn test_remove_user_from_wallet() {
     let result = wallets::remove_user_from_wallet(
         axum::extract::Path((wallet_id.to_string(), target_user_id.to_string())),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, email: "test@example.com".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: Some("testuser".to_string()), is_admin: false }),
     ).await;
 
     assert!(result.is_ok());

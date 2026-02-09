@@ -1,6 +1,7 @@
 // Manage wallet: members, user groups, contact groups, permission rules.
 // On server permission error we undo local state and show toast (no UI disabling for now).
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -619,7 +620,7 @@ class _UserGroupsTabState extends State<_UserGroupsTab> {
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ExpansionTile(
-              title: Text(g['name'] as String? ?? ''),
+              title: Text(_formatGroupName(g['name'] as String? ?? '')),
               subtitle: const Text('Static'),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline),
@@ -685,52 +686,32 @@ class _UserGroupMembersState extends State<_UserGroupMembers> {
   }
 
   Future<void> _addMember() async {
-    final userIdController = TextEditingController();
-    final ok = await showDialog<bool>(
+    showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add member'),
-        content: TextField(
-          controller: userIdController,
-          decoration: const InputDecoration(
-            labelText: 'Username',
-            hintText: 'Enter username',
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (userIdController.text.trim().isEmpty) return;
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('Add'),
-          ),
-        ],
+      builder: (context) => _AddMemberDialog(
+        walletId: widget.walletId,
+        groupId: widget.groupId,
+        onAdd: (username) async {
+          Navigator.pop(context);
+          try {
+            await Api.addWalletUserGroupMember(widget.walletId, widget.groupId, username);
+            await _load();
+            widget.onReload();
+          } catch (e) {
+            if (mounted) {
+              if (Api.isPermissionDeniedError(e)) {
+                widget.onPermissionError();
+              } else {
+                ToastService.showErrorFromContext(
+                  context,
+                  e.toString().replaceFirst('Exception: ', ''),
+                );
+              }
+            }
+          }
+        },
       ),
     );
-    if (ok != true || !mounted) return;
-    final userId = userIdController.text.trim();
-    final prev = List<Map<String, dynamic>>.from(_members);
-    try {
-      await Api.addWalletUserGroupMember(widget.walletId, widget.groupId, userId);
-      await _load();
-      widget.onReload();
-    } catch (e) {
-      if (Api.isPermissionDeniedError(e)) {
-        widget.onPermissionError();
-        setState(() => _members = prev);
-      } else if (mounted) {
-        ToastService.showErrorFromContext(
-          context,
-          e.toString().replaceFirst('Exception: ', ''),
-        );
-      }
-    }
   }
 
   Future<void> _removeMember(String userId) async {
@@ -772,7 +753,7 @@ class _UserGroupMembersState extends State<_UserGroupMembers> {
           ListTile(
             dense: true,
             leading: const Icon(Icons.add, size: 20),
-            title: const Text('Add member (enter username)'),
+            title: const Text('Add member'),
             onTap: _addMember,
           ),
           ..._members.map((m) {
@@ -917,7 +898,7 @@ class _ContactGroupsTabState extends State<_ContactGroupsTab> {
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
             child: ExpansionTile(
-              title: Text(g['name'] as String? ?? ''),
+              title: Text(_formatGroupName(g['name'] as String? ?? '')),
               subtitle: const Text('Static'),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline),
@@ -980,52 +961,32 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
   }
 
   Future<void> _addMember() async {
-    final contactIdController = TextEditingController();
-    final ok = await showDialog<bool>(
+    showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add contact'),
-        content: TextField(
-          controller: contactIdController,
-          decoration: const InputDecoration(
-            labelText: 'Contact ID (UUID)',
-            hintText: 'Paste contact UUID',
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (contactIdController.text.trim().isEmpty) return;
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('Add'),
-          ),
-        ],
+      builder: (context) => _AddContactDialog(
+        walletId: widget.walletId,
+        groupId: widget.groupId,
+        onAdd: (contactId) async {
+          Navigator.pop(context);
+          try {
+            await Api.addWalletContactGroupMember(widget.walletId, widget.groupId, contactId);
+            await _load();
+            widget.onReload();
+          } catch (e) {
+            if (mounted) {
+              if (Api.isPermissionDeniedError(e)) {
+                widget.onPermissionError();
+              } else {
+                ToastService.showErrorFromContext(
+                  context,
+                  e.toString().replaceFirst('Exception: ', ''),
+                );
+              }
+            }
+          }
+        },
       ),
     );
-    if (ok != true || !mounted) return;
-    final contactId = contactIdController.text.trim();
-    final prev = List<Map<String, dynamic>>.from(_members);
-    try {
-      await Api.addWalletContactGroupMember(widget.walletId, widget.groupId, contactId);
-      await _load();
-      widget.onReload();
-    } catch (e) {
-      if (Api.isPermissionDeniedError(e)) {
-        widget.onPermissionError();
-        setState(() => _members = prev);
-      } else if (mounted) {
-        ToastService.showErrorFromContext(
-          context,
-          e.toString().replaceFirst('Exception: ', ''),
-        );
-      }
-    }
   }
 
   Future<void> _removeMember(String contactId) async {
@@ -1067,7 +1028,7 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
           ListTile(
             dense: true,
             leading: const Icon(Icons.add, size: 20),
-            title: const Text('Add contact (paste contact ID)'),
+            title: const Text('Add contact'),
             onTap: _addMember,
           ),
           ..._members.map((m) {
@@ -1144,63 +1105,64 @@ class _RulesTabState extends State<_RulesTab> {
     }
   }
 
-  bool _hasAction(String userGroupId, String contactGroupId, String actionName) {
+  Set<String> _getActions(String userGroupId, String contactGroupId) {
     final key = '$userGroupId:$contactGroupId';
-    return _matrixMap[key]?.contains(actionName) ?? false;
+    return _matrixMap[key] ?? {};
   }
 
-  Future<void> _toggleAction(String userGroupId, String contactGroupId, String actionName, bool value) async {
+  Future<void> _savePermissions(String userGroupId, String contactGroupId, List<String> newActions) async {
     final key = '$userGroupId:$contactGroupId';
-    final current = Set<String>.from(_matrixMap[key] ?? {});
-    if (value) {
-      current.add(actionName);
-    } else {
-      current.remove(actionName);
-    }
-    final entries = _matrix.map((e) {
-      final ug = e['user_group_id'] as String? ?? '';
-      final cg = e['contact_group_id'] as String? ?? '';
-      if (ug == userGroupId && cg == contactGroupId) {
-        return {'user_group_id': ug, 'contact_group_id': cg, 'action_names': current.toList()};
-      }
-      return {'user_group_id': ug, 'contact_group_id': cg, 'action_names': (e['action_names'] as List<dynamic>?)?.cast<String>() ?? []};
-    }).toList();
-    final hasEntry = entries.any((e) => e['user_group_id'] == userGroupId && e['contact_group_id'] == contactGroupId);
-    if (!hasEntry) {
-      entries.add({'user_group_id': userGroupId, 'contact_group_id': contactGroupId, 'action_names': current.toList()});
-    }
-    final prev = List<Map<String, dynamic>>.from(_matrix);
     final prevMap = Map<String, Set<String>>.from(_matrixMap);
-    _matrixMap[key] = current;
-    setState(() {});
+    final prevMatrix = List<Map<String, dynamic>>.from(_matrix);
+
+    setState(() {
+      _matrixMap[key] = Set<String>.from(newActions);
+    });
+
+    final entry = {
+      'user_group_id': userGroupId,
+      'contact_group_id': contactGroupId,
+      'action_names': newActions
+    };
+
     try {
-      await Api.putWalletPermissionMatrix(widget.walletId, entries);
+      await Api.putWalletPermissionMatrix(widget.walletId, [entry]);
       widget.onReload();
     } catch (e) {
-      if (Api.isPermissionDeniedError(e)) {
-        widget.onPermissionError();
-        _matrixMap.clear();
-        for (final k in prevMap.keys) {
-          _matrixMap[k] = Set<String>.from(prevMap[k]!);
-        }
-        setState(() => _matrix = prev);
-      } else if (mounted) {
-        ToastService.showErrorFromContext(
-          context,
-          e.toString().replaceFirst('Exception: ', ''),
-        );
-        _matrixMap.clear();
-        for (final k in prevMap.keys) {
-          _matrixMap[k] = Set<String>.from(prevMap[k]!);
-        }
-        setState(() => _matrix = prev);
+      if (mounted) {
+         if (Api.isPermissionDeniedError(e)) {
+            widget.onPermissionError();
+         } else {
+            ToastService.showErrorFromContext(
+              context,
+              e.toString().replaceFirst('Exception: ', ''),
+            );
+         }
+         // Revert
+         setState(() {
+           _matrixMap.clear();
+           _matrixMap.addAll(prevMap);
+           _matrix = prevMatrix;
+         });
       }
     }
+  }
+
+  void _openEditor(String ugId, String ugName, String cgId, String cgName) {
+    showDialog(
+      context: context,
+      builder: (context) => _PermissionsDialog(
+        userGroupName: ugName,
+        contactGroupName: cgName,
+        availableActions: widget.permissionActions,
+        initialActions: _getActions(ugId, cgId).toList(),
+        onSave: (actions) => _savePermissions(ugId, cgId, actions),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final actions = widget.permissionActions;
     if (widget.userGroups.isEmpty || widget.contactGroups.isEmpty) {
       return const Center(
         child: Padding(
@@ -1212,61 +1174,495 @@ class _RulesTabState extends State<_RulesTab> {
         ),
       );
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      scrollDirection: Axis.horizontal,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: 24),
-        child: DataTable(
-          columns: [
-            const DataColumn(label: Text('User group \\ Contact group')),
-            ...widget.contactGroups.map((cg) => DataColumn(
-              label: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 120),
-                child: Text(
-                  cg['name'] as String? ?? '',
-                  overflow: TextOverflow.ellipsis,
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      itemCount: widget.userGroups.length,
+      itemBuilder: (context, index) {
+        final ug = widget.userGroups[index];
+        final ugId = ug['id'] as String? ?? '';
+        final rawUgName = ug['name'] as String? ?? '';
+        final ugName = _formatGroupName(rawUgName);
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: ExpansionTile(
+            title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('User Group'),
+            initiallyExpanded: index == 0,
+            children: [
+              const Divider(height: 1),
+              ...widget.contactGroups.map((cg) {
+                final cgId = cg['id'] as String? ?? '';
+                final rawCgName = cg['name'] as String? ?? '';
+                final cgName = _formatGroupName(rawCgName);
+                final activeActions = _getActions(ugId, cgId);
+                
+                return ListTile(
+                  title: Text(cgName),
+                  subtitle: activeActions.isEmpty 
+                      ? const Text('No access', style: TextStyle(color: Colors.grey))
+                      : Text('${activeActions.length} permissions active', maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: const Icon(Icons.edit, size: 20),
+                  onTap: () => _openEditor(ugId, ugName, cgId, cgName),
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PermissionsDialog extends StatefulWidget {
+  final String userGroupName;
+  final String contactGroupName;
+  final List<Map<String, dynamic>> availableActions;
+  final List<String> initialActions;
+  final ValueChanged<List<String>> onSave;
+
+  const _PermissionsDialog({
+    required this.userGroupName,
+    required this.contactGroupName,
+    required this.availableActions,
+    required this.initialActions,
+    required this.onSave,
+  });
+
+  @override
+  State<_PermissionsDialog> createState() => _PermissionsDialogState();
+}
+
+class _PermissionsDialogState extends State<_PermissionsDialog> {
+  late Set<String> _selected;
+  late Map<String, List<Map<String, dynamic>>> _groupedActions;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = Set.from(widget.initialActions);
+    _groupActions();
+  }
+
+  void _groupActions() {
+    _groupedActions = {};
+    for (final action in widget.availableActions) {
+      final name = action['name'] as String? ?? '';
+      final parts = name.split(':');
+      final category = parts.isNotEmpty ? parts[0] : 'other';
+      
+      if (!_groupedActions.containsKey(category)) {
+        _groupedActions[category] = [];
+      }
+      _groupedActions[category]!.add(action);
+    }
+  }
+
+  String _formatActionName(String name) {
+    const manualNames = {
+      'contact:create': 'Add Contact',
+      'contact:read': 'View Contacts',
+      'contact:update': 'Edit Contact',
+      'contact:delete': 'Delete Contact',
+      'transaction:create': 'Add Transaction',
+      'transaction:read': 'View Transactions',
+      'transaction:update': 'Edit Transaction',
+      'transaction:delete': 'Delete Transaction',
+      'transaction:close': 'Close Debt',
+      'events:read': 'View Activity Log',
+      'wallet:read': 'View Wallet Details',
+      'wallet:update': 'Edit Wallet Details',
+      'wallet:delete': 'Delete Wallet',
+      'wallet:manage_members': 'Manage Members',
+    };
+    
+    if (manualNames.containsKey(name)) {
+      return manualNames[name]!;
+    }
+
+    final parts = name.split(':');
+    if (parts.length > 1) {
+      // Capitalize first letter of action
+      final action = parts[1];
+      return action[0].toUpperCase() + action.substring(1).replaceAll('_', ' ');
+    }
+    return name;
+  }
+
+  IconData _getCategoryIcon(String category) {
+    switch (category) {
+      case 'contact':
+        return Icons.contacts_outlined;
+      case 'transaction':
+        return Icons.receipt_long_outlined;
+      case 'wallet':
+        return Icons.account_balance_wallet_outlined;
+      case 'events':
+        return Icons.history;
+      default:
+        return Icons.settings_outlined;
+    }
+  }
+
+  IconData _getActionIcon(String name) {
+    if (name.contains(':create')) return Icons.add_circle_outline;
+    if (name.contains(':read')) return Icons.visibility_outlined;
+    if (name.contains(':update')) return Icons.edit_outlined;
+    if (name.contains(':delete')) return Icons.delete_outline;
+    if (name.contains(':close')) return Icons.check_circle_outlined;
+    if (name.contains('manage')) return Icons.manage_accounts_outlined;
+    return Icons.circle_outlined;
+  }
+
+  void _onPermissionChanged(String name, bool? value) {
+    setState(() {
+      if (value == true) {
+        _selected.add(name);
+        
+        // Dependency: Write implies Read
+        if (!name.endsWith(':read')) {
+          final parts = name.split(':');
+          if (parts.length > 1) {
+             _selected.add('${parts[0]}:read');
+          }
+        }
+        
+        // Dependency: Transaction implies Contact Read
+        if (name.startsWith('transaction:')) {
+          _selected.add('contact:read');
+        }
+      } else {
+        _selected.remove(name);
+        
+        // Dependency: Removing Read removes all Writes
+        if (name.endsWith(':read')) {
+          final resource = name.split(':')[0];
+          // Remove all other actions for this resource
+          _selected.removeWhere((action) => action.startsWith('$resource:'));
+          
+          // Dependency: Removing Contact Read removes all Transaction permissions
+          if (resource == 'contact') {
+             _selected.removeWhere((action) => action.startsWith('transaction:'));
+          }
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final categories = _groupedActions.keys.toList()..sort();
+
+    return AlertDialog(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Edit Permissions'),
+          const SizedBox(height: 4),
+          Text(
+            '${widget.userGroupName} → ${widget.contactGroupName}',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: categories.length,
+          itemBuilder: (context, index) {
+            final category = categories[index];
+            final actions = _groupedActions[category]!;
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (index > 0) const Divider(height: 24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(_getCategoryIcon(category), size: 20, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        category[0].toUpperCase() + category.substring(1),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            )),
-          ],
-          rows: widget.userGroups.map((ug) {
-            final ugId = ug['id'] as String? ?? '';
-            final ugName = ug['name'] as String? ?? '';
-            return DataRow(
-              cells: [
-                DataCell(ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 140),
-                  child: Text(ugName, overflow: TextOverflow.ellipsis),
-                )),
-                ...widget.contactGroups.map((cg) {
-                  final cgId = cg['id'] as String? ?? '';
-                  return DataCell(
-                    Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
+                ...actions.map((action) {
+                  final name = action['name'] as String? ?? '';
+                  final displayName = _formatActionName(name);
+                  
+                  return CheckboxListTile(
+                    value: _selected.contains(name),
+                    title: Row(
                       children: [
-                        for (final a in actions)
-                          Builder(
-                            builder: (ctx) {
-                              final name = a['name'] as String? ?? '';
-                              final checked = _hasAction(ugId, cgId, name);
-                              return FilterChip(
-                                label: Text(name, style: const TextStyle(fontSize: 10)),
-                                selected: checked,
-                                onSelected: (v) => _toggleAction(ugId, cgId, name, v ?? false),
-                              );
-                            },
-                          ),
+                        Icon(
+                          _getActionIcon(name), 
+                          size: 18, 
+                          color: Theme.of(context).colorScheme.onSurfaceVariant
+                        ),
+                        const SizedBox(width: 12),
+                        Text(displayName),
                       ],
                     ),
+                    dense: true,
+                    onChanged: (val) => _onPermissionChanged(name, val),
                   );
                 }),
               ],
             );
-          }).toList(),
+          },
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            widget.onSave(_selected.toList());
+            Navigator.pop(context);
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+// Helper to format group names
+String _formatGroupName(String name) {
+  if (name == 'all_users') return 'All Members';
+  if (name == 'all_contacts') return 'All Contacts';
+  return name;
+}
+
+// Dialog for adding a member (searchable)
+class _AddMemberDialog extends StatefulWidget {
+  final String walletId;
+  final String groupId;
+  final Function(String) onAdd;
+
+  const _AddMemberDialog({
+    required this.walletId,
+    required this.groupId,
+    required this.onAdd,
+  });
+
+  @override
+  State<_AddMemberDialog> createState() => _AddMemberDialogState();
+}
+
+class _AddMemberDialogState extends State<_AddMemberDialog> {
+  final _searchController = TextEditingController();
+  List<dynamic> _walletUsers = [];
+  List<dynamic> _searchResults = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    try {
+      final users = await Api.getWalletUsers(widget.walletId);
+      
+      if (mounted) {
+        setState(() {
+          _walletUsers = users;
+          _searchResults = users;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _search(String query) {
+    final q = query.toLowerCase();
+    setState(() {
+      _searchResults = _walletUsers.where((u) {
+        final username = (u['username'] as String? ?? '').toLowerCase();
+        return username.contains(q);
+      }).toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add member to group'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: 'Search members',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: _search,
+            ),
+            const SizedBox(height: 16),
+            if (_loading)
+              const CircularProgressIndicator()
+            else if (_error != null)
+              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _searchResults.length,
+                  itemBuilder: (context, index) {
+                    final user = _searchResults[index];
+                    final username = user['username'] as String? ?? 'Unknown';
+                    return ListTile(
+                      title: Text(username),
+                      onTap: () => widget.onAdd(username),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
+}
+
+// Dialog for adding a contact (searchable)
+class _AddContactDialog extends StatefulWidget {
+  final String walletId;
+  final String groupId;
+  final Function(String) onAdd;
+
+  const _AddContactDialog({
+    required this.walletId,
+    required this.groupId,
+    required this.onAdd,
+  });
+
+  @override
+  State<_AddContactDialog> createState() => _AddContactDialogState();
+}
+
+class _AddContactDialogState extends State<_AddContactDialog> {
+  final _searchController = TextEditingController();
+  List<dynamic> _contacts = [];
+  List<dynamic> _searchResults = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContacts();
+  }
+
+  Future<void> _loadContacts() async {
+    try {
+      final jsonStr = await Api.getContacts();
+      final List<dynamic> contacts = jsonDecode(jsonStr);
+      
+      if (mounted) {
+        setState(() {
+          _contacts = contacts;
+          _searchResults = contacts;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  void _search(String query) {
+    final q = query.toLowerCase();
+    setState(() {
+      _searchResults = _contacts.where((c) {
+        final name = (c['name'] as String? ?? '').toLowerCase();
+        return name.contains(q);
+      }).toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add contact to group'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: 'Search contacts',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: _search,
+            ),
+            const SizedBox(height: 16),
+            if (_loading)
+              const CircularProgressIndicator()
+            else if (_error != null)
+              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _searchResults.length,
+                  itemBuilder: (context, index) {
+                    final contact = _searchResults[index];
+                    final name = contact['name'] as String? ?? 'Unknown';
+                    final id = contact['id'] as String? ?? '';
+                    return ListTile(
+                      title: Text(name),
+                      onTap: () => widget.onAdd(id),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
     );
   }
 }
