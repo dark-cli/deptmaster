@@ -42,6 +42,7 @@ static STORAGE_READY: AtomicBool = AtomicBool::new(false);
 static SYNC_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
 static LAST_BACKOFF_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static LAST_INFLIGHT_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+static LAST_NO_WALLET_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 
 struct SyncGuard;
 
@@ -75,7 +76,7 @@ fn start_sync_loop_if_ready() {
         return;
     }
     rust_log!("[debitum_rs] sync loop: started (interval=1000ms)");
-    crate::api::spawn_background(async {
+    std::thread::spawn(|| {
         loop {
             // Only attempt sync when storage and backend are ready.
             if STORAGE_READY.load(Ordering::Relaxed)
@@ -90,7 +91,7 @@ fn start_sync_loop_if_ready() {
                     .map(|d| d.as_millis().clamp(100, 3000) as u64)
                     .unwrap_or(1000)
             };
-            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            std::thread::sleep(Duration::from_millis(delay_ms));
         }
     });
 }
@@ -452,6 +453,15 @@ fn manual_sync_with_source(source: &str) -> Result<(), String> {
             }
             return Ok(());
         }
+    }
+    if get_current_wallet_id().is_none() {
+        if should_log_skip(&LAST_NO_WALLET_SKIP_LOG, 5000) {
+            rust_log!(
+                "[debitum_rs] manual_sync skipped (no wallet selected, source={})",
+                source
+            );
+        }
+        return Ok(());
     }
     let _guard = match SyncGuard::try_acquire() {
         Some(g) => g,

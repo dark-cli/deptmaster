@@ -371,9 +371,6 @@ pub fn bulk_delete_transactions(transaction_ids: Vec<String>) -> Result<(), Stri
 }
 
 pub fn logout() -> Result<(), String> {
-    storage::config_remove("token")?;
-    storage::config_remove("user_id")?;
-    storage::config_remove("current_wallet_id")?;
-    storage::config_remove("last_sync_timestamp")?;
+    storage::clear_all()?;
     Ok(())
 }

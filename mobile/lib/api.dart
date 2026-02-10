@@ -79,6 +79,9 @@ class Api {
         hasAuthIssue: _hasAuthIssue,
       );
 
+  static bool get hasWalletSelected =>
+      _cachedWalletId != null && _cachedWalletId!.isNotEmpty;
+
   static const _keyBackendHost = 'backend_host';
   static const _keyBackendPort = 'backend_port';
   static const _keyBackendUseHttps = 'backend_use_https';
@@ -154,6 +157,11 @@ class Api {
     if (!_initialized) await init();
     try {
       await rust.initStorage(storagePath: path);
+      try {
+        final id = await rust.getCurrentWalletId();
+        _cachedWalletId = (id == null || id.isEmpty) ? null : id;
+        _notifyConnectionStateChanged();
+      } catch (_) {}
     } catch (e) {
       debugPrint('Api.initStorage: $e');
     }
@@ -244,8 +252,15 @@ class Api {
       } catch (_) {}
     }
     await _wsDisconnect();
+    _cachedWalletId = null;
+    _hasSyncError = false;
     _hasAuthIssue = false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+    } catch (_) {}
     _notifyConnectionStateChanged();
+    DataBus.instance.emit(DataChangeType.all);
     onLogout?.call();
   }
 
@@ -827,14 +842,10 @@ class Api {
     try {
       final currentWalletId = await getCurrentWalletId();
       if (currentWalletId == null || currentWalletId.isEmpty) {
-        debugPrint('Api.getEvents: no current wallet set – cannot load events');
         return '[]';
       }
       final json = await rust.getEvents();
       final list = jsonDecode(json) as List<dynamic>? ?? [];
-      if (list.isEmpty) {
-        debugPrint('Api.getEvents: 0 events for current wallet $currentWalletId');
-      }
       if (_hasAuthIssue) {
         _hasAuthIssue = false;
         _notifyConnectionStateChanged();

@@ -41,6 +41,10 @@ void main() async {
 
   FlutterError.onError = (FlutterErrorDetails details) {
     final errorStr = details.exception.toString().toLowerCase();
+    if (errorStr.contains('a disposed renderobject was mutated') &&
+        errorStr.contains('renderchartfadetransition')) {
+      return;
+    }
     if (errorStr.contains('socketexception') ||
         errorStr.contains('connection refused') ||
         errorStr.contains('connection reset') ||
@@ -56,6 +60,10 @@ void main() async {
 
   PlatformDispatcher.instance.onError = (error, stack) {
     final errorStr = error.toString().toLowerCase();
+    if (errorStr.contains('a disposed renderobject was mutated') &&
+        errorStr.contains('renderchartfadetransition')) {
+      return true;
+    }
     if (errorStr.contains('socketexception') ||
         errorStr.contains('connection refused') ||
         errorStr.contains('connection reset') ||

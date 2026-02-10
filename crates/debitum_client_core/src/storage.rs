@@ -88,6 +88,19 @@ pub fn config_remove(key: &str) -> Result<(), String> {
     })
 }
 
+pub fn clear_all() -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute_batch(
+            r#"
+            DELETE FROM events;
+            DELETE FROM state;
+            DELETE FROM config;
+            "#,
+        )?;
+        Ok(())
+    })
+}
+
 // Events
 #[derive(Clone, Debug)]
 pub struct StoredEvent {

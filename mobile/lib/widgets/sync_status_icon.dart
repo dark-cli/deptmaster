@@ -59,6 +59,20 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
 
     final theme = Theme.of(context);
     final state = Api.connectionState;
+    final hasWalletSelected = Api.hasWalletSelected;
+    if (!hasWalletSelected) {
+      return Tooltip(
+        message: 'Select a wallet to sync',
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.account_balance_wallet_outlined,
+            size: 20,
+            color: ThemeColors.gray(context, shade: 600),
+          ),
+        ),
+      );
+    }
     final isOffline = !state.isOnline;
     final hasError = state.hasSyncError;
     final hasAuthIssue = state.hasAuthIssue;

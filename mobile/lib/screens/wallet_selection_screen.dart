@@ -39,6 +39,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
   String? _inviteCodeError;
   final _inviteCodeController = TextEditingController();
   static const _inviteCodeLength = 4;
+  static const _createWalletRoute = '/create-wallet';
 
   @override
   void initState() {
@@ -58,6 +59,14 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
     // Clear error when user types and trigger rebuild for button state
     setState(() {
       _inviteCodeError = null;
+    });
+  }
+
+  void _openCreateWallet() {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    Navigator.pop(context, false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      navigator.pushNamed(_createWalletRoute);
     });
   }
 
@@ -209,6 +218,12 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _openCreateWallet,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('New wallet'),
+                ),
               ],
             ),
           ),
@@ -309,10 +324,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                             ),
                             const SizedBox(height: 8),
                             TextButton.icon(
-                              onPressed: () {
-                                Navigator.pop(context, false);
-                                Navigator.pushNamed(context, '/create-wallet');
-                              },
+                              onPressed: _openCreateWallet,
                               icon: const Icon(Icons.add, size: 20),
                               label: const Text('Create new wallet anyway'),
                             ),
@@ -325,10 +337,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                             title: 'No wallets yet',
                             subtitle: 'Create your first wallet to track contacts and transactions.',
                             action: FilledButton.icon(
-                              onPressed: () {
-                                Navigator.pop(context, false);
-                                Navigator.pushNamed(context, '/create-wallet');
-                              },
+                              onPressed: _openCreateWallet,
                               icon: const Icon(Icons.add, size: 20),
                               label: const Text('Create your first wallet'),
                               style: FilledButton.styleFrom(

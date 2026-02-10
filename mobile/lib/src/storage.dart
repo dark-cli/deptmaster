@@ -22,6 +22,8 @@ Future<void> configSet({required String key, required String value}) =>
 Future<void> configRemove({required String key}) =>
     RustLib.instance.api.crateStorageConfigRemove(key: key);
 
+Future<void> clearAll() => RustLib.instance.api.crateStorageClearAll();
+
 Future<void> eventsInsert({required StoredEvent e}) =>
     RustLib.instance.api.crateStorageEventsInsert(e: e);
 

@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1609448693;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1175860225;
 
 // Section: executor
 
@@ -1207,6 +1207,38 @@ fn wire__crate__crud__bulk_delete_transactions_impl(
             move |context| {
                 transform_result_sse::<_, String>((move || {
                     let output_ok = crate::crud::bulk_delete_transactions(api_transaction_ids)?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__storage__clear_all_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "clear_all",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::storage::clear_all()?;
                     Ok(output_ok)
                 })())
             }
@@ -5772,141 +5804,142 @@ fn pde_ffi_dispatcher_primary_impl(
         25 => wire__crate__crud__bulk_delete_contacts_impl(port, ptr, rust_vec_len, data_len),
         26 => wire__crate__bulk_delete_transactions_impl(port, ptr, rust_vec_len, data_len),
         27 => wire__crate__crud__bulk_delete_transactions_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__storage__config_get_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__storage__config_remove_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__storage__config_set_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__ids__contact_id_as_str_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__create_contact_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__crud__create_contact_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__create_contact_group_api_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__create_transaction_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__crud__create_transaction_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__create_user_group_api_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__create_wallet_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__create_wallet_api_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__create_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__create_wallet_invite_api_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__create_wallet_invite_code_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__create_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__models__currency_as_str_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__models__currency_default_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__models__currency_from_str_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__delete_contact_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__crud__delete_contact_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__delete_contact_group_api_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__delete_transaction_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__crud__delete_transaction_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__delete_user_group_api_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__delete_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__delete_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__drain_rust_logs_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__log_bridge__drain_rust_logs_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__ensure_current_wallet_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__ids__event_id_as_str_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__storage__events_count_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__storage__events_delete_unsynced_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__storage__events_get_all_impl(port, ptr, rust_vec_len, data_len),
-        62 => {
+        28 => wire__crate__storage__clear_all_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__storage__config_get_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__storage__config_remove_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__storage__config_set_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__ids__contact_id_as_str_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__create_contact_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__crud__create_contact_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__create_contact_group_api_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__create_transaction_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__crud__create_transaction_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__create_user_group_api_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__create_wallet_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__create_wallet_api_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__create_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__create_wallet_invite_api_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__create_wallet_invite_code_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__create_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__models__currency_as_str_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__models__currency_default_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__models__currency_from_str_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__delete_contact_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__crud__delete_contact_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__delete_contact_group_api_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__delete_transaction_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__crud__delete_transaction_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__delete_user_group_api_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__delete_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__delete_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__drain_rust_logs_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__log_bridge__drain_rust_logs_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__ensure_current_wallet_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__ids__event_id_as_str_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__storage__events_count_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__storage__events_delete_unsynced_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__storage__events_get_all_impl(port, ptr, rust_vec_len, data_len),
+        63 => {
             wire__crate__storage__events_get_for_aggregate_impl(port, ptr, rust_vec_len, data_len)
         }
-        63 => wire__crate__storage__events_get_unsynced_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__storage__events_insert_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__storage__events_mark_synced_impl(port, ptr, rust_vec_len, data_len),
-        66 => {
+        64 => wire__crate__storage__events_get_unsynced_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__storage__events_insert_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__storage__events_mark_synced_impl(port, ptr, rust_vec_len, data_len),
+        67 => {
             wire__crate__storage__events_update_event_data_impl(port, ptr, rust_vec_len, data_len)
         }
-        67 => wire__crate__sync__full_sync_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__get_base_url_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__get_contact_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__crud__get_contact_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__get_contacts_impl(port, ptr, rust_vec_len, data_len),
-        72 => wire__crate__crud__get_contacts_impl(port, ptr, rust_vec_len, data_len),
-        73 => wire__crate__get_current_wallet_id_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__get_events_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__get_permission_matrix_api_impl(port, ptr, rust_vec_len, data_len),
-        76 => wire__crate__get_token_impl(port, ptr, rust_vec_len, data_len),
-        77 => wire__crate__get_transaction_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__crud__get_transaction_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__get_transactions_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__crud__get_transactions_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__get_user_id_impl(port, ptr, rust_vec_len, data_len),
-        82 => wire__crate__get_wallet_permission_matrix_impl(port, ptr, rust_vec_len, data_len),
-        83 => wire__crate__get_wallets_impl(port, ptr, rust_vec_len, data_len),
-        84 => wire__crate__api__get_wallets_api_impl(port, ptr, rust_vec_len, data_len),
-        85 => wire__crate__get_ws_url_impl(port, ptr, rust_vec_len, data_len),
-        86 => wire__crate__greet_impl(port, ptr, rust_vec_len, data_len),
-        87 => wire__crate__storage__init_impl(port, ptr, rust_vec_len, data_len),
-        88 => wire__crate__init_app_impl(port, ptr, rust_vec_len, data_len),
-        89 => wire__crate__init_storage_impl(port, ptr, rust_vec_len, data_len),
-        90 => wire__crate__is_logged_in_impl(port, ptr, rust_vec_len, data_len),
-        91 => wire__crate__join_wallet_by_code_impl(port, ptr, rust_vec_len, data_len),
-        92 => wire__crate__api__join_wallet_by_code_api_impl(port, ptr, rust_vec_len, data_len),
-        93 => {
+        68 => wire__crate__sync__full_sync_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__get_base_url_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__get_contact_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__crud__get_contact_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__get_contacts_impl(port, ptr, rust_vec_len, data_len),
+        73 => wire__crate__crud__get_contacts_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__get_current_wallet_id_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__get_events_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__api__get_permission_matrix_api_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__get_token_impl(port, ptr, rust_vec_len, data_len),
+        78 => wire__crate__get_transaction_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__crud__get_transaction_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__get_transactions_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__crud__get_transactions_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__get_user_id_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__get_wallet_permission_matrix_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__get_wallets_impl(port, ptr, rust_vec_len, data_len),
+        85 => wire__crate__api__get_wallets_api_impl(port, ptr, rust_vec_len, data_len),
+        86 => wire__crate__get_ws_url_impl(port, ptr, rust_vec_len, data_len),
+        87 => wire__crate__greet_impl(port, ptr, rust_vec_len, data_len),
+        88 => wire__crate__storage__init_impl(port, ptr, rust_vec_len, data_len),
+        89 => wire__crate__init_app_impl(port, ptr, rust_vec_len, data_len),
+        90 => wire__crate__init_storage_impl(port, ptr, rust_vec_len, data_len),
+        91 => wire__crate__is_logged_in_impl(port, ptr, rust_vec_len, data_len),
+        92 => wire__crate__join_wallet_by_code_impl(port, ptr, rust_vec_len, data_len),
+        93 => wire__crate__api__join_wallet_by_code_api_impl(port, ptr, rust_vec_len, data_len),
+        94 => {
             wire__crate__api__list_contact_group_members_api_impl(port, ptr, rust_vec_len, data_len)
         }
-        94 => wire__crate__api__list_contact_groups_api_impl(port, ptr, rust_vec_len, data_len),
-        95 => wire__crate__api__list_permission_actions_api_impl(port, ptr, rust_vec_len, data_len),
-        96 => wire__crate__api__list_user_group_members_api_impl(port, ptr, rust_vec_len, data_len),
-        97 => wire__crate__api__list_user_groups_api_impl(port, ptr, rust_vec_len, data_len),
-        98 => {
+        95 => wire__crate__api__list_contact_groups_api_impl(port, ptr, rust_vec_len, data_len),
+        96 => wire__crate__api__list_permission_actions_api_impl(port, ptr, rust_vec_len, data_len),
+        97 => wire__crate__api__list_user_group_members_api_impl(port, ptr, rust_vec_len, data_len),
+        98 => wire__crate__api__list_user_groups_api_impl(port, ptr, rust_vec_len, data_len),
+        99 => {
             wire__crate__list_wallet_contact_group_members_impl(port, ptr, rust_vec_len, data_len)
         }
-        99 => wire__crate__list_wallet_contact_groups_impl(port, ptr, rust_vec_len, data_len),
-        100 => wire__crate__list_wallet_permission_actions_impl(port, ptr, rust_vec_len, data_len),
-        101 => wire__crate__list_wallet_user_group_members_impl(port, ptr, rust_vec_len, data_len),
-        102 => wire__crate__list_wallet_user_groups_impl(port, ptr, rust_vec_len, data_len),
-        103 => wire__crate__list_wallet_users_impl(port, ptr, rust_vec_len, data_len),
-        104 => wire__crate__api__list_wallet_users_api_impl(port, ptr, rust_vec_len, data_len),
-        105 => wire__crate__login_impl(port, ptr, rust_vec_len, data_len),
-        106 => wire__crate__api__login_impl(port, ptr, rust_vec_len, data_len),
-        107 => wire__crate__logout_impl(port, ptr, rust_vec_len, data_len),
-        108 => wire__crate__crud__logout_impl(port, ptr, rust_vec_len, data_len),
-        109 => wire__crate__manual_sync_impl(port, ptr, rust_vec_len, data_len),
-        110 => wire__crate__sync__pull_and_merge_impl(port, ptr, rust_vec_len, data_len),
-        111 => wire__crate__log_bridge__push_impl(port, ptr, rust_vec_len, data_len),
-        112 => wire__crate__sync__push_unsynced_impl(port, ptr, rust_vec_len, data_len),
-        113 => wire__crate__api__put_permission_matrix_api_impl(port, ptr, rust_vec_len, data_len),
-        114 => wire__crate__put_wallet_permission_matrix_impl(port, ptr, rust_vec_len, data_len),
-        115 => wire__crate__register_impl(port, ptr, rust_vec_len, data_len),
-        116 => wire__crate__api__register_impl(port, ptr, rust_vec_len, data_len),
-        117 => wire__crate__api__remove_contact_group_member_api_impl(
+        100 => wire__crate__list_wallet_contact_groups_impl(port, ptr, rust_vec_len, data_len),
+        101 => wire__crate__list_wallet_permission_actions_impl(port, ptr, rust_vec_len, data_len),
+        102 => wire__crate__list_wallet_user_group_members_impl(port, ptr, rust_vec_len, data_len),
+        103 => wire__crate__list_wallet_user_groups_impl(port, ptr, rust_vec_len, data_len),
+        104 => wire__crate__list_wallet_users_impl(port, ptr, rust_vec_len, data_len),
+        105 => wire__crate__api__list_wallet_users_api_impl(port, ptr, rust_vec_len, data_len),
+        106 => wire__crate__login_impl(port, ptr, rust_vec_len, data_len),
+        107 => wire__crate__api__login_impl(port, ptr, rust_vec_len, data_len),
+        108 => wire__crate__logout_impl(port, ptr, rust_vec_len, data_len),
+        109 => wire__crate__crud__logout_impl(port, ptr, rust_vec_len, data_len),
+        110 => wire__crate__manual_sync_impl(port, ptr, rust_vec_len, data_len),
+        111 => wire__crate__sync__pull_and_merge_impl(port, ptr, rust_vec_len, data_len),
+        112 => wire__crate__log_bridge__push_impl(port, ptr, rust_vec_len, data_len),
+        113 => wire__crate__sync__push_unsynced_impl(port, ptr, rust_vec_len, data_len),
+        114 => wire__crate__api__put_permission_matrix_api_impl(port, ptr, rust_vec_len, data_len),
+        115 => wire__crate__put_wallet_permission_matrix_impl(port, ptr, rust_vec_len, data_len),
+        116 => wire__crate__register_impl(port, ptr, rust_vec_len, data_len),
+        117 => wire__crate__api__register_impl(port, ptr, rust_vec_len, data_len),
+        118 => wire__crate__api__remove_contact_group_member_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        118 => {
+        119 => {
             wire__crate__api__remove_user_group_member_api_impl(port, ptr, rust_vec_len, data_len)
         }
-        119 => {
+        120 => {
             wire__crate__remove_wallet_contact_group_member_impl(port, ptr, rust_vec_len, data_len)
         }
-        120 => wire__crate__remove_wallet_user_impl(port, ptr, rust_vec_len, data_len),
-        121 => wire__crate__api__remove_wallet_user_api_impl(port, ptr, rust_vec_len, data_len),
-        122 => wire__crate__remove_wallet_user_group_member_impl(port, ptr, rust_vec_len, data_len),
-        123 => wire__crate__search_wallet_users_impl(port, ptr, rust_vec_len, data_len),
-        124 => wire__crate__api__search_wallet_users_api_impl(port, ptr, rust_vec_len, data_len),
-        125 => wire__crate__set_backend_config_impl(port, ptr, rust_vec_len, data_len),
-        126 => wire__crate__set_current_wallet_id_impl(port, ptr, rust_vec_len, data_len),
-        127 => wire__crate__storage__state_load_impl(port, ptr, rust_vec_len, data_len),
-        128 => wire__crate__storage__state_save_impl(port, ptr, rust_vec_len, data_len),
-        129 => wire__crate__ids__transaction_id_as_str_impl(port, ptr, rust_vec_len, data_len),
-        130 => wire__crate__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),
-        131 => wire__crate__crud__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),
-        132 => wire__crate__undo_transaction_action_impl(port, ptr, rust_vec_len, data_len),
-        133 => wire__crate__crud__undo_transaction_action_impl(port, ptr, rust_vec_len, data_len),
-        134 => wire__crate__update_contact_impl(port, ptr, rust_vec_len, data_len),
-        135 => wire__crate__crud__update_contact_impl(port, ptr, rust_vec_len, data_len),
-        136 => wire__crate__api__update_contact_group_api_impl(port, ptr, rust_vec_len, data_len),
-        137 => wire__crate__update_transaction_impl(port, ptr, rust_vec_len, data_len),
-        138 => wire__crate__crud__update_transaction_impl(port, ptr, rust_vec_len, data_len),
-        139 => wire__crate__api__update_user_group_api_impl(port, ptr, rust_vec_len, data_len),
-        140 => wire__crate__update_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
-        141 => wire__crate__api__update_wallet_user_api_impl(port, ptr, rust_vec_len, data_len),
-        142 => wire__crate__update_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
-        143 => wire__crate__update_wallet_user_role_impl(port, ptr, rust_vec_len, data_len),
-        144 => wire__crate__ids__user_id_as_str_impl(port, ptr, rust_vec_len, data_len),
-        145 => wire__crate__ids__wallet_id_as_str_impl(port, ptr, rust_vec_len, data_len),
+        121 => wire__crate__remove_wallet_user_impl(port, ptr, rust_vec_len, data_len),
+        122 => wire__crate__api__remove_wallet_user_api_impl(port, ptr, rust_vec_len, data_len),
+        123 => wire__crate__remove_wallet_user_group_member_impl(port, ptr, rust_vec_len, data_len),
+        124 => wire__crate__search_wallet_users_impl(port, ptr, rust_vec_len, data_len),
+        125 => wire__crate__api__search_wallet_users_api_impl(port, ptr, rust_vec_len, data_len),
+        126 => wire__crate__set_backend_config_impl(port, ptr, rust_vec_len, data_len),
+        127 => wire__crate__set_current_wallet_id_impl(port, ptr, rust_vec_len, data_len),
+        128 => wire__crate__storage__state_load_impl(port, ptr, rust_vec_len, data_len),
+        129 => wire__crate__storage__state_save_impl(port, ptr, rust_vec_len, data_len),
+        130 => wire__crate__ids__transaction_id_as_str_impl(port, ptr, rust_vec_len, data_len),
+        131 => wire__crate__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),
+        132 => wire__crate__crud__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),
+        133 => wire__crate__undo_transaction_action_impl(port, ptr, rust_vec_len, data_len),
+        134 => wire__crate__crud__undo_transaction_action_impl(port, ptr, rust_vec_len, data_len),
+        135 => wire__crate__update_contact_impl(port, ptr, rust_vec_len, data_len),
+        136 => wire__crate__crud__update_contact_impl(port, ptr, rust_vec_len, data_len),
+        137 => wire__crate__api__update_contact_group_api_impl(port, ptr, rust_vec_len, data_len),
+        138 => wire__crate__update_transaction_impl(port, ptr, rust_vec_len, data_len),
+        139 => wire__crate__crud__update_transaction_impl(port, ptr, rust_vec_len, data_len),
+        140 => wire__crate__api__update_user_group_api_impl(port, ptr, rust_vec_len, data_len),
+        141 => wire__crate__update_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
+        142 => wire__crate__api__update_wallet_user_api_impl(port, ptr, rust_vec_len, data_len),
+        143 => wire__crate__update_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
+        144 => wire__crate__update_wallet_user_role_impl(port, ptr, rust_vec_len, data_len),
+        145 => wire__crate__ids__user_id_as_str_impl(port, ptr, rust_vec_len, data_len),
+        146 => wire__crate__ids__wallet_id_as_str_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
