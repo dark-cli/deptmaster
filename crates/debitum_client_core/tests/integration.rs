@@ -13,3 +13,5 @@ mod conflict;
 mod resync;
 mod stress;
 mod connection;
+mod permissions;
+mod groups;

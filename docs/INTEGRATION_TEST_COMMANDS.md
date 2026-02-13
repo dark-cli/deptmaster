@@ -87,10 +87,26 @@ Used with `AppInstance::assert_commands(&["...", ...])`. The app is activated, t
 - **Labels**: Lowercase, no spaces (e.g. `alice`, `contact1`, `t1`). Stored in the runner and shared across commands in the same test.
 - **Sync**: Tests assume sync is driven by the app (e.g. WebSocket); use `wait 300` (or similar) after sequences that trigger sync, then one sync to simulate “WS connected”, then assert. No need for per-app manual sync in every step unless a scenario requires it.
 
-**Run tests** (requires a running server; default `TEST_SERVER_URL=http://127.0.0.1:8000`):
+**Run tests** (requires a running server; default `TEST_SERVER_URL=http://127.0.0.1:8000`). From the **repository root**:
 
-- `cargo test --test integration_single_app -- --ignored` — single/two-app: signup, login, offline/online, many events
-- `cargo test --test integration_multi_app_sync -- --ignored` — three-app: create/sync, concurrent creates, update/delete propagation
-- `cargo test --test integration_comprehensive_events -- --ignored` — three-app: event types, mixed ops, full lifecycle
+```bash
+cd crates/debitum_client_core
+cargo test --test integration -- --ignored
+```
+
+For more reliable multi-app runs, add `--test-threads=1`. Filter by module: `cargo test --test integration single_app:: -- --ignored`.
+
+**Suites** (all in one binary; filter by name):
+
+- `single_app::` — single/two-app: signup, login, offline/online, many events
+- `multi_app_sync::` — three-app: create/sync, concurrent creates, update/delete propagation
+- `comprehensive_events::` — three-app: event types, mixed ops, full lifecycle, complex 20+ events
+- `offline_online_multi_app::` — partial offline, offline multi-app conflict (skipped: thread-local offline)
+- `conflict::` — simultaneous updates, update-delete conflict, offline-update conflict
+- `resync::` — full resync, incremental resync
+- `stress::` — high volume, rapid create-update-delete, mixed operations
+- `connection::` — sync after many operations (single and multi-app)
+- `permissions::` — give/take permissions: member sees data after grant, loses after revoke, read-only cannot create, grant create then member can create
+- `groups::` — user groups and contact groups: create/list/add members (simple); revoke default read and grant per (user_group × contact_group) so member sees only contacts in permitted groups (complex). Priority/union: all_users×all_contacts (everyone sees all); custom user group×all_contacts (only that group sees all); different user groups×different contact groups (scoped visibility); user in multiple user groups gets union of permitted contacts.
 
 For multi-app setup and shared helpers, see `crates/debitum_client_core/tests/common/` and [DEVELOPMENT.md](./DEVELOPMENT.md).

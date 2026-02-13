@@ -50,7 +50,7 @@ declare -A VALID_FLAGS=(
     ["build-server"]="verbose"
     ["run-flutter-app"]="verbose,clear-app-data,window-size,separate-instance,instances"
     ["run-flutter-web"]="verbose"
-    ["test-flutter-app"]="verbose"
+    ["test-integration"]="verbose"
     ["test-api-server"]="verbose"
     ["test-flutter-integration"]="verbose,skip-server-build"
     ["test-flutter-integration-multi-app"]="verbose"
@@ -1442,18 +1442,14 @@ cmd_show_android_logs() {
     adb logcat -s flutter:D DartVM:D
 }
 
-cmd_test_flutter_app() {
-    validate_flags "test-flutter-app"
+cmd_test_integration() {
+    validate_flags "test-integration"
     
-    print_step "Running Flutter tests..."
+    print_step "Running client-core integration tests (Rust)..."
     
-    if [ -n "$1" ]; then
-        (cd "$ROOT_DIR/mobile" && flutter test "$1")
-    else
-        (cd "$ROOT_DIR/mobile" && flutter test)
-    fi
+    (cd "$ROOT_DIR/crates/debitum_client_core" && cargo test --test integration -- --ignored)
     
-    print_success "Tests complete"
+    print_success "Integration tests complete"
 }
 
 cmd_test_api_server() {
@@ -2415,7 +2411,7 @@ Flutter App Commands:
   show-android-logs                Show filtered Android logs (Flutter/Dart only)
                                   Use this in a separate terminal while Flutter app is running
   run-flutter-web [mode]           Run Flutter web app (dev/prod)
-  test-flutter-app [test_file]     Run Flutter tests
+  test-integration                 Run client-core integration tests (Rust, requires server)
   test-flutter-integration [test]   Run Flutter integration tests (with database reset)
                                   Use --skip-server-build to skip server build during reset
   test-flutter-integration-multi-app [SELECTIONS...]
@@ -2470,8 +2466,8 @@ Examples:
   $0 run-flutter-app android release <device-id>  # Run Android app in release mode on specific device
   $0 show-android-logs                            # Show filtered Android logs (in separate terminal)
   $0 run-flutter-web dev                          # Run web app in dev mode
-  $0 test-flutter-app                             # Run all Flutter tests
-  $0 test-api-server                              # Test server endpoints
+  $0 test-integration                              # Run client-core integration tests
+  $0 test-api-server                               # Test server endpoints
   $0 test-flutter-integration ui                  # Run UI integration tests
   $0 test-flutter-integration-multi-app                    # Run all multi-app sync tests
   $0 test-flutter-integration-multi-app 2                 # Run file 2 only
@@ -2548,8 +2544,8 @@ case "$COMMAND" in
     run-flutter-web)
         cmd_run_flutter_web "${2:-prod}"
         ;;
-    test-flutter-app)
-        cmd_test_flutter_app "${2:-}"
+    test-integration)
+        cmd_test_integration
         ;;
     test-api-server)
         cmd_test_api_server
