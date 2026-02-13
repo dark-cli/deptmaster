@@ -1,11 +1,8 @@
 //! Comprehensive event scenarios: contact/transaction event types, mixed operations, full lifecycle.
 //!
 //! Uses three apps (same user). After execute_commands: sleep 300ms then one sync. See docs/INTEGRATION_TEST_COMMANDS.md.
-//! Run: `cargo test --test integration_comprehensive_events -- --ignored`
 
-mod common;
-
-use common::test_helpers::{setup_three_apps, test_server_url};
+use crate::common::test_helpers::{setup_three_apps, test_server_url};
 
 /// Contact event types: CREATED, UPDATED, DELETED.
 #[test]
@@ -212,5 +209,50 @@ fn comprehensive_full_lifecycle() {
         "events aggregate_type transaction event_type CREATED count >= 10",
         "events aggregate_type transaction event_type UPDATED count > 2",
         "events aggregate_type transaction event_type DELETED or UNDO count >= 1",
+    ]).expect("assert_commands");
+}
+
+/// Complex multi-app scenario with 20+ events (ported from Flutter comprehensive_event_generator_test).
+#[test]
+#[ignore]
+fn comprehensive_complex_multi_app_20_events() {
+    let server_url = test_server_url();
+    let generator = setup_three_apps(&server_url);
+    let commands = [
+        "app1: contact create \"Alice\" alice",
+        "app1: contact create \"Bob\" bob",
+        "app1: contact create \"Charlie\" charlie",
+        "app2: transaction create alice owed 1000 \"Lunch\" t1",
+        "app2: transaction create alice lent 500 \"Coffee\" t2",
+        "app2: transaction create alice owed 2000 \"Dinner\" t3",
+        "app3: transaction create bob lent 1500 \"Loan\" t4",
+        "app3: transaction create bob owed 800 \"Groceries\" t5",
+        "app1: transaction update t1 amount 1200",
+        "app1: transaction update t2 description \"Coffee and snacks\"",
+        "app2: contact update alice name \"Alice Smith\"",
+        "app3: transaction create charlie owed 3000 \"Rent\" t6",
+        "app3: transaction create charlie lent 1000 \"Refund\" t7",
+        "app1: transaction delete t3",
+        "app2: transaction create bob owed 500 \"Taxi\" t8",
+        "app2: transaction create alice lent 200 \"Tip\" t9",
+        "app3: contact update bob name \"Bob Jones\"",
+        "app2: transaction create charlie owed 1500 \"Utilities\" t10",
+        "app2: transaction create alice lent 300 \"Bonus\" t11",
+        "app3: transaction delete t5",
+        "app1: transaction create bob lent 2500 \"Payment\" t12",
+        "app1: transaction create alice owed 600 \"Extra\" t13",
+        "app2: transaction create bob lent 700 \"Extra 2\" t14",
+        "app3: transaction create alice owed 900 \"Extra 3\" t15",
+    ];
+    generator.execute_commands(&commands).expect("execute_commands");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let app1_ref = generator.apps.get("app1").unwrap();
+    app1_ref.sync().expect("app1 sync");
+
+    app1_ref.assert_commands(&[
+        "events count >= 20",
+        "events event_type UPDATED count > 0",
+        "contacts count >= 2",
+        "transactions count > 5",
     ]).expect("assert_commands");
 }

@@ -1,11 +1,8 @@
 //! Multi-app basic sync: one app creates then all sync; concurrent creates; update/delete propagation.
 //!
 //! Uses three apps (same user). After execute_commands: sleep 300ms then one sync. See docs/INTEGRATION_TEST_COMMANDS.md.
-//! Run: `cargo test --test integration_multi_app_sync -- --ignored`
 
-mod common;
-
-use common::test_helpers::{setup_three_apps, test_server_url};
+use crate::common::test_helpers::{setup_three_apps, test_server_url};
 
 /// Single app creates contact and transactions; after sync that app sees final state.
 #[test]

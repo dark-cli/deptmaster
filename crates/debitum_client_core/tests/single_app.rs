@@ -1,13 +1,10 @@
 //! Single-app and two-app integration tests: signup/login, create contact, sync, offline/online, many events.
 //!
 //! Style: command/assert only; after run_commands use wait 300ms then sync once. See docs/INTEGRATION_TEST_COMMANDS.md.
-//! Run: `cargo test --test integration_single_app -- --ignored`
 
-mod common;
-
-use common::app_instance::{create_unique_test_user_and_wallet, AppInstance};
-use common::event_generator::EventGenerator;
-use common::test_helpers::test_server_url;
+use crate::common::app_instance::{create_unique_test_user_and_wallet, AppInstance};
+use crate::common::event_generator::EventGenerator;
+use crate::common::test_helpers::test_server_url;
 use std::collections::HashMap;
 
 /// Single app: signup, create contact, wait, assert contacts and events.
@@ -125,6 +122,52 @@ fn single_app_offline_create_then_online_sync() {
     app.assert_commands(&[
         "contact name \"Online First\"",
         "contact name \"Created Offline\"",
+    ]).expect("assert_commands");
+}
+
+/// Offline update then online sync (ported from Flutter offline_online_scenarios).
+#[test]
+#[ignore]
+fn single_app_offline_update_then_online_sync() {
+    let server_url = test_server_url();
+    let app = AppInstance::new("app1", &server_url);
+    app.initialize().expect("initialize");
+    app.signup().expect("signup");
+
+    app.run_commands(&[
+        "contact create \"Original Name\" contact1",
+        "transaction create contact1 owed 1000 \"T1\" t1",
+        "transaction create contact1 lent 500 \"T2\" t2",
+        "transaction create contact1 owed 2000 \"T3\" t3",
+        "transaction create contact1 lent 800 \"T4\" t4",
+        "transaction create contact1 owed 1500 \"T5\" t5",
+        "wait 300",
+    ]).expect("run_commands (setup)");
+    app.sync().expect("sync while online");
+
+    app.go_offline().expect("go_offline");
+    app.run_commands(&[
+        "contact update contact1 name \"Updated Offline\"",
+        "transaction update t1 amount 2000",
+        "transaction update t2 description \"Updated T2\"",
+        "transaction update t3 amount 2200",
+        "transaction update t4 description \"Updated T4\"",
+        "transaction update t5 amount 1600",
+        "transaction create contact1 lent 600 \"T6\" t6",
+        "transaction create contact1 owed 1200 \"T7\" t7",
+        "transaction update t6 amount 700",
+        "transaction delete t5",
+    ]).expect("run_commands (offline updates)");
+
+    app.go_online().expect("go_online");
+    app.sync().expect("sync after coming online");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    app.assert_commands(&[
+        "contacts count 1",
+        "contact name \"Updated Offline\"",
+        "transactions count > 5",
+        "events event_type UPDATED count >= 6",
     ]).expect("assert_commands");
 }
 

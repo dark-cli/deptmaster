@@ -1,5 +1,5 @@
 //! App instance: one simulated app (own storage, optional own user/wallet).
-//! Mirror of Flutter's AppInstance — create, initialize, signup/login, sync, run_commands, get_*.
+//! Mirror of Flutter's AppInstance — create, initialize, signup/login, sync, run_commands, assert_commands.
 
 use debitum_client_core::{
     create_wallet, ensure_current_wallet, get_contacts, get_transactions, init_storage,
@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use super::command_runner::CommandRunner;
 
 /// Simulated app instance. Each has its own storage path; "activate" switches global state to this app.
-/// Holds a single CommandRunner so contact/transaction labels persist across run_command calls (e.g. from EventGenerator).
+/// Holds a single CommandRunner so contact/transaction labels persist across run_commands (e.g. from EventGenerator).
 pub struct AppInstance {
-    pub id: String,
+    pub _id: String,
     pub server_url: String,
     pub ws_url: String,
     pub username: String,
@@ -34,7 +34,7 @@ impl AppInstance {
         let storage_path = dir.path().to_path_buf();
         let ws_url = ws_url_from_base(server_url);
         Self {
-            id: id.clone(),
+            _id: id.clone(),
             server_url: server_url.to_string(),
             ws_url: ws_url.clone(),
             username,
@@ -59,7 +59,7 @@ impl AppInstance {
         let storage_path = dir.path().to_path_buf();
         let ws_url = ws_url_from_base(server_url);
         Self {
-            id,
+            _id: id,
             server_url: server_url.to_string(),
             ws_url,
             username,
@@ -112,24 +112,6 @@ impl AppInstance {
         manual_sync()
     }
 
-    /// Get events for this app. Call after sync to assert.
-    pub fn get_events(&self) -> Result<String, String> {
-        self.activate()?;
-        debitum_client_core::get_events()
-    }
-
-    /// Get contacts for this app.
-    pub fn get_contacts(&self) -> Result<String, String> {
-        self.activate()?;
-        get_contacts()
-    }
-
-    /// Get transactions for this app.
-    pub fn get_transactions(&self) -> Result<String, String> {
-        self.activate()?;
-        get_transactions()
-    }
-
     /// Run assertion commands (same style as run_commands). E.g. "contacts count 1", "contact name \"Alice\"", "events count >= 12".
     pub fn assert_commands(&self, commands: &[&str]) -> Result<(), String> {
         self.activate()?;
@@ -139,23 +121,18 @@ impl AppInstance {
         super::assert_runner::assert_commands(&contacts, &events, &transactions, commands)
     }
 
-    /// Run a single command (action part only, e.g. "contact create \"Alice\" alice"). No "app1:" prefix.
-    /// Uses a shared CommandRunner so labels (contact1, t1, etc.) persist across calls (e.g. from EventGenerator).
-    pub fn run_command(&self, command: &str) -> Result<(), String> {
-        self.activate()?;
-        self.runner.borrow_mut().execute_command(command)
-    }
-
     /// Run a list of commands on this app. Commands have no "app:" prefix (e.g. "contact create \"Alice\" alice").
     pub fn run_commands(&self, commands: &[&str]) -> Result<(), String> {
         self.activate()?;
-        self.runner.borrow_mut().execute_commands(commands)
-    }
-
-    /// Logout (clear session for this app's storage).
-    pub fn logout(&self) -> Result<(), String> {
-        self.activate()?;
-        debitum_client_core::logout()
+        let mut runner = self.runner.borrow_mut();
+        for cmd in commands {
+            let cmd = cmd.trim();
+            if cmd.is_empty() || cmd.starts_with('#') {
+                continue;
+            }
+            runner.execute_command(cmd)?;
+        }
+        Ok(())
     }
 
     /// Simulate offline: API calls (sync, login, etc.) will return "Network offline" without sending requests.

@@ -7,9 +7,8 @@
 //! Full vocabulary: see project docs at `docs/INTEGRATION_TEST_COMMANDS.md`.
 
 use debitum_client_core::{
-    create_contact, create_transaction, create_wallet, delete_contact, delete_transaction,
-    get_transaction, init_storage, manual_sync, register, set_backend_config,
-    set_current_wallet_id, update_contact, update_transaction,
+    create_contact, create_transaction, delete_contact, delete_transaction,
+    get_transaction, manual_sync, update_contact, update_transaction,
 };
 use std::collections::HashMap;
 
@@ -55,18 +54,6 @@ impl CommandRunner {
             contact_ids: HashMap::new(),
             transaction_ids: HashMap::new(),
         }
-    }
-
-    /// Execute a list of commands. Returns Err on first failure.
-    pub fn execute_commands(&mut self, commands: &[&str]) -> Result<(), String> {
-        for cmd in commands {
-            let cmd = cmd.trim();
-            if cmd.is_empty() || cmd.starts_with('#') {
-                continue;
-            }
-            self.execute_command(cmd)?;
-        }
-        Ok(())
     }
 
     pub fn execute_command(&mut self, command: &str) -> Result<(), String> {
@@ -276,34 +263,4 @@ impl Default for CommandRunner {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// One-off: setup app (storage, backend, unique user, one wallet), run commands, sync.
-/// Returns (contacts_json, events_json) for assertions.
-pub fn run_app_with_commands(
-    base_url: &str,
-    ws_url: &str,
-    commands: &[&str],
-) -> Result<(String, String), String> {
-    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let storage_path = dir.path().to_string_lossy().to_string();
-    init_storage(storage_path)?;
-    set_backend_config(base_url.to_string(), ws_url.to_string());
-
-    let username = format!("itest-{}", uuid::Uuid::new_v4());
-    let password = "test-pass-1234";
-    register(username, password.to_string())?;
-
-    let wallet_json = create_wallet("Test Wallet".to_string(), "".to_string())?;
-    let wallet: serde_json::Value = serde_json::from_str(&wallet_json).map_err(|e| e.to_string())?;
-    let wallet_id = wallet["id"].as_str().ok_or("No wallet id")?;
-    set_current_wallet_id(wallet_id.to_string())?;
-
-    let mut runner = CommandRunner::new();
-    runner.execute_commands(commands)?;
-    manual_sync()?;
-
-    let contacts = debitum_client_core::get_contacts()?;
-    let events = debitum_client_core::get_events()?;
-    Ok((contacts, events))
 }
