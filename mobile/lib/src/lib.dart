@@ -22,6 +22,15 @@ Future<String?> getBaseUrl() => RustLib.instance.api.crateGetBaseUrl();
 
 Future<String?> getWsUrl() => RustLib.instance.api.crateGetWsUrl();
 
+/// Set whether the client is in "offline" mode. When true, all API requests return an error without hitting the network.
+/// The app reconnects WS when going online; WS connection triggers sync (app logic, not here).
+/// Thread-local (per test / per app when using multiple instances).
+Future<void> setNetworkOffline({required bool offline}) =>
+    RustLib.instance.api.crateSetNetworkOffline(offline: offline);
+
+/// True if the client is in offline mode (network requests will fail).
+Future<bool> isNetworkOffline() => RustLib.instance.api.crateIsNetworkOffline();
+
 Future<void> login({required String username, required String password}) =>
     RustLib.instance.api.crateLogin(username: username, password: password);
 

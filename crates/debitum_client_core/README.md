@@ -17,6 +17,18 @@ From the repo root (if you have a workspace):
 cargo test -p debitum_client_core
 ```
 
+### Integration tests (real server)
+
+The tests in `tests/integration_test.rs` use the **mobile Rust client** (this crate) to simulate app instance(s) that talk to a **real server** over the network. They are ignored by default.
+
+1. Start the server (e.g. from `backend/rust-api`: `cargo run --bin debt-tracker-api` with a test DB). Default server port is 8000.
+2. Set `TEST_SERVER_URL` if the server is not on port 8000 (e.g. `http://127.0.0.1:8000`). Optionally set `TEST_USERNAME` / `TEST_PASSWORD` to use an existing user in the login test.
+3. Run with a single thread (client uses global state, so tests must run sequentially):
+
+```bash
+TEST_SERVER_URL=http://127.0.0.1:8000 cargo test -p debitum_client_core --test integration_test -- --ignored --test-threads=1
+```
+
 ## What the tests cover
 
 - **Storage**: `init` creates the DB file; config and events persist.

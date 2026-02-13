@@ -9,6 +9,8 @@ use std::path::Path;
 
 thread_local! {
     static DB: RefCell<Option<Connection>> = RefCell::new(None);
+    /// Path this thread was initialized with, for idempotent init (avoid reopen on every Dart call).
+    static INIT_PATH: RefCell<Option<String>> = RefCell::new(None);
 }
 
 /// True if the current thread has called init() successfully.
@@ -18,12 +20,18 @@ pub fn is_ready() -> bool {
 
 pub fn init(path: &str) -> Result<(), String> {
     let path_obj = Path::new(path);
-    std::fs::create_dir_all(path_obj).map_err(|e| e.to_string())?;
     let db_path = path_obj.join("debitum.db");
+    let path_key = db_path.to_string_lossy().to_string();
+    let already_same = INIT_PATH.with(|c| c.borrow().as_deref() == Some(path_key.as_str()));
+    if already_same && is_ready() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(path_obj).map_err(|e| e.to_string())?;
     rust_log!("[debitum_rs] storage::init path={:?} db={:?}", path, db_path);
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     create_tables(&conn)?;
     DB.with(|cell| *cell.borrow_mut() = Some(conn));
+    INIT_PATH.with(|cell| *cell.borrow_mut() = Some(path_key));
     rust_log!("[debitum_rs] storage::init OK");
     Ok(())
 }

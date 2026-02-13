@@ -3,7 +3,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../api.dart';
+import '../providers/api_provider.dart';
 import '../providers/wallet_data_providers.dart';
 import 'backend_setup_screen.dart';
 import 'sign_up_screen.dart';
@@ -38,38 +38,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
 
+    final api = ref.read(apiProvider);
     try {
-      await Api.login(
+      await api.login(
         _usernameController.text.trim(),
         _passwordController.text,
       );
       if (!mounted) return;
-      // Ensure wallet context
       try {
-        await Api.ensureCurrentWallet();
+        await api.ensureCurrentWallet();
       } catch (_) {}
-      
-      // Recovery: if we still have no current wallet but have wallets, set first
-      if (await Api.getCurrentWalletId() == null) {
+
+      if (await api.getCurrentWalletId() == null) {
         try {
-          final list = await Api.getWallets();
+          final list = await api.getWallets();
           if (list.isNotEmpty && list.first['id'] != null) {
-            await Api.setCurrentWalletId(list.first['id'] as String);
+            await api.setCurrentWalletId(list.first['id'] as String);
           }
         } catch (_) {}
       }
 
-      // Perform initial sync (wait for it to ensure data is ready)
       try {
-        if (await Api.getCurrentWalletId() != null) {
-          await Api.manualSync();
+        if (await api.getCurrentWalletId() != null) {
+          await api.manualSync();
         }
       } catch (e) {
         debugPrint('Login sync failed: $e');
-        // Continue anyway, dashboard will show empty/error state
       }
-      
-      Api.connectRealtime().catchError((_) {});
+
+      api.connectRealtime().catchError((_) {});
       if (!mounted) return;
       // Force data providers to refetch so home screen shows synced data (e.g. after permission change).
       ref.invalidate(activeWalletIdProvider);

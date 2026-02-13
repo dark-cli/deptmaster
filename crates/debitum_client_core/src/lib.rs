@@ -25,17 +25,22 @@ struct BackendConfig {
     ws_url: String,
 }
 
-// Thread-local: each thread has its own backend config (e.g. each integration test); Flutter uses a single thread.
+// Thread-local: each thread has its own backend config (e.g. each integration test).
+// When a thread has no config, get_base_url falls back to this global so Flutter (which may
+// dispatch Rust calls to different threads) still sees the config set by set_backend_config.
 thread_local! {
     static BACKEND_CONFIG: RefCell<Option<BackendConfig>> = RefCell::new(None);
 }
+static BACKEND_CONFIG_GLOBAL: Lazy<Mutex<Option<BackendConfig>>> = Lazy::new(|| Mutex::new(None));
 
 // Thread-local offline flag: when true, API calls return "Network offline" (see set_network_offline).
 thread_local! {
     static NETWORK_OFFLINE: RefCell<bool> = RefCell::new(false);
 }
-static SYNC_BACKOFF: Lazy<Mutex<backoff::Backoff>> = Lazy::new(|| {
-    Mutex::new(backoff::Backoff::new(vec![
+
+// Thread-local so parallel integration tests (each on their own thread) don't block each other's sync.
+thread_local! {
+    static SYNC_BACKOFF: RefCell<backoff::Backoff> = RefCell::new(backoff::Backoff::new(vec![
         Duration::from_millis(500),
         Duration::from_millis(500),
         Duration::from_secs(1),
@@ -45,9 +50,11 @@ static SYNC_BACKOFF: Lazy<Mutex<backoff::Backoff>> = Lazy::new(|| {
         Duration::from_secs(2),
         Duration::from_secs(2),
         Duration::from_secs(3),
-    ]))
-});
-static SYNC_IN_FLIGHT: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+    ]));
+}
+thread_local! {
+    static SYNC_IN_FLIGHT: RefCell<bool> = RefCell::new(false);
+}
 static SYNC_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
 static LAST_BACKOFF_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static LAST_INFLIGHT_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
@@ -57,19 +64,19 @@ struct SyncGuard;
 
 impl SyncGuard {
     fn try_acquire() -> Option<Self> {
-        let mut in_flight = SYNC_IN_FLIGHT.lock().unwrap();
-        if *in_flight {
-            return None;
-        }
-        *in_flight = true;
-        Some(Self)
+        SYNC_IN_FLIGHT.with(|c| {
+            if *c.borrow() {
+                return None;
+            }
+            *c.borrow_mut() = true;
+            Some(Self)
+        })
     }
 }
 
 impl Drop for SyncGuard {
     fn drop(&mut self) {
-        let mut in_flight = SYNC_IN_FLIGHT.lock().unwrap();
-        *in_flight = false;
+        SYNC_IN_FLIGHT.with(|c| *c.borrow_mut() = false);
     }
 }
 
@@ -98,13 +105,13 @@ fn start_sync_loop_if_ready() {
             if storage::is_ready() && BACKEND_CONFIG.with(|c| c.borrow().is_some()) {
                 let _ = manual_sync_with_source("background_loop");
             }
-            let delay_ms = {
-                let backoff = SYNC_BACKOFF.lock().unwrap();
-                backoff
-                    .remaining()
-                    .map(|d| d.as_millis().clamp(100, 3000) as u64)
-                    .unwrap_or(1000)
-            };
+            let delay_ms = SYNC_BACKOFF
+                .with(|b| {
+                    b.borrow()
+                        .remaining()
+                        .map(|d| d.as_millis().clamp(100, 3000) as u64)
+                        .unwrap_or(1000)
+                });
             std::thread::sleep(Duration::from_millis(delay_ms));
         }
     });
@@ -136,17 +143,28 @@ pub fn init_storage(storage_path: String) -> Result<(), String> {
 }
 
 pub fn set_backend_config(base_url: String, ws_url: String) {
-    BACKEND_CONFIG.with(|cell| *cell.borrow_mut() = Some(BackendConfig { base_url, ws_url }));
+    let already_same = get_base_url().as_deref() == Some(base_url.as_str())
+        && get_ws_url().as_deref() == Some(ws_url.as_str());
+    if already_same {
+        return;
+    }
+    let cfg = BackendConfig { base_url, ws_url };
+    BACKEND_CONFIG.with(|cell| *cell.borrow_mut() = Some(BackendConfig { base_url: cfg.base_url.clone(), ws_url: cfg.ws_url.clone() }));
+    *BACKEND_CONFIG_GLOBAL.lock().unwrap() = Some(cfg);
     rust_log!("[debitum_rs] sync loop: backend config set");
     start_sync_loop_if_ready();
 }
 
 pub fn get_base_url() -> Option<String> {
-    BACKEND_CONFIG.with(|cell| cell.borrow().as_ref().map(|c| c.base_url.clone()))
+    BACKEND_CONFIG
+        .with(|cell| cell.borrow().as_ref().map(|c| c.base_url.clone()))
+        .or_else(|| BACKEND_CONFIG_GLOBAL.lock().unwrap().as_ref().map(|c| c.base_url.clone()))
 }
 
 pub fn get_ws_url() -> Option<String> {
-    BACKEND_CONFIG.with(|cell| cell.borrow().as_ref().map(|c| c.ws_url.clone()))
+    BACKEND_CONFIG
+        .with(|cell| cell.borrow().as_ref().map(|c| c.ws_url.clone()))
+        .or_else(|| BACKEND_CONFIG_GLOBAL.lock().unwrap().as_ref().map(|c| c.ws_url.clone()))
 }
 
 /// Set whether the client is in "offline" mode. When true, all API requests return an error without hitting the network.
@@ -473,16 +491,21 @@ pub fn manual_sync() -> Result<(), String> {
 
 fn manual_sync_with_source(source: &str) -> Result<(), String> {
     {
-        let backoff = SYNC_BACKOFF.lock().unwrap();
-        if !backoff.can_attempt() {
-            if let Some(wait) = backoff.remaining() {
-                if should_log_skip(&LAST_BACKOFF_SKIP_LOG, 1000) {
-                    rust_log!(
-                        "[debitum_rs] manual_sync skipped (backoff active, remaining={}ms, source={})",
-                        wait.as_millis(),
-                        source
-                    );
-                }
+        let skip = SYNC_BACKOFF.with(|b| {
+            let backoff = b.borrow();
+            if !backoff.can_attempt() {
+                backoff.remaining()
+            } else {
+                None
+            }
+        });
+        if let Some(wait) = skip {
+            if should_log_skip(&LAST_BACKOFF_SKIP_LOG, 1000) {
+                rust_log!(
+                    "[debitum_rs] manual_sync skipped (backoff active, remaining={}ms, source={})",
+                    wait.as_millis(),
+                    source
+                );
             }
             return Ok(());
         }
@@ -509,7 +532,7 @@ fn manual_sync_with_source(source: &str) -> Result<(), String> {
     rust_log!("[debitum_rs] manual_sync start (source={})", source);
     match sync::full_sync() {
         Ok(()) => {
-            SYNC_BACKOFF.lock().unwrap().reset();
+            SYNC_BACKOFF.with(|b| b.borrow_mut().reset());
             rust_log!("[debitum_rs] manual_sync success (source={})", source);
             Ok(())
         }
@@ -518,7 +541,7 @@ fn manual_sync_with_source(source: &str) -> Result<(), String> {
                 let _ = crud::logout();
             }
             if is_network_error(&e) || is_rate_limited(&e) {
-                let delay = SYNC_BACKOFF.lock().unwrap().on_failure();
+                let delay = SYNC_BACKOFF.with(|b| b.borrow_mut().on_failure());
                 rust_log!(
                     "[debitum_rs] manual_sync backoff set={}ms (source={})",
                     delay.as_millis(),

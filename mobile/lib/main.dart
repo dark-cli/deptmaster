@@ -20,6 +20,7 @@ final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<Scaffol
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Initialize API once; widgets and providers access it via apiProvider (see providers/api_provider.dart).
   final rustOk = await Api.init();
   if (!kIsWeb && !rustOk) {
     runApp(ProviderScope(

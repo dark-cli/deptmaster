@@ -6,40 +6,21 @@ use chrono::Utc;
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::middleware::wallet_context::WalletContext;
 
+/// Connect to the test database and ensure migrations are applied.
+/// Does not reset or clear data: each test is isolated by creating its own user and wallet
+/// (via create_test_user / create_test_wallet), so tests can run in parallel safely.
 pub async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("TEST_DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker_test".to_string());
-    
+
     let pool = sqlx::PgPool::connect(&database_url)
         .await
         .expect("Failed to connect to test database");
-    
-    // Reset database schema to ensure clean state
-    sqlx::query("DROP SCHEMA public CASCADE").execute(&pool).await.expect("Failed to drop schema");
-    sqlx::query("CREATE SCHEMA public").execute(&pool).await.expect("Failed to create schema");
 
-    // Run migrations (required for tests that use wallets, permission tables, etc.)
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .expect("Failed to run migrations - ensure TEST_DATABASE_URL points to a database that can be migrated");
-
-    // Clear test data (redundant if we dropped schema, but harmless)
-    // ...
-    sqlx::query("DELETE FROM projection_snapshots").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM transactions_projection").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM contacts_projection").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM events").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM wallet_users").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM wallets").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM users_projection").execute(&pool).await.ok();
-    // Permission tables: CASCADE from wallets, but clear if any orphaned
-    sqlx::query("DELETE FROM user_wallet_settings").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM group_permission_matrix").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM user_group_members").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM contact_group_members").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM user_groups").execute(&pool).await.ok();
-    sqlx::query("DELETE FROM contact_groups").execute(&pool).await.ok();
 
     pool
 }

@@ -132,6 +132,9 @@ class Api {
   /// Last init error (e.g. native library not found). Cleared on success.
   static String? initError;
 
+  /// Cached storage path so we can re-call initStorage on the thread that runs auth (Rust storage is thread-local).
+  static String? _storagePath;
+
   // ---------- Init ----------
   /// Returns true if Rust bridge is ready, false if load failed (e.g. .so not found on Android).
   static Future<bool> init() async {
@@ -157,6 +160,7 @@ class Api {
 
   static Future<void> initStorage(String path) async {
     if (kIsWeb) return;
+    _storagePath = path;
     if (!_initialized) await init();
     try {
       await rust.initStorage(storagePath: path);
@@ -223,7 +227,26 @@ class Api {
     if (!kIsWeb && _initialized) {
       try {
         await rust.setBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Api.setBackendConfig: Rust setBackendConfig failed: $e');
+        rethrow;
+      }
+    }
+  }
+
+  /// Ensures the thread that runs the next Rust call has storage and backend config (Rust state is thread-local).
+  /// Must be called before every Rust call that needs storage/API because the bridge may use different threads.
+  static Future<void> _ensureRustReady() async {
+    if (kIsWeb || !_initialized || _storagePath == null) return;
+    try {
+      await rust.initStorage(storagePath: _storagePath!);
+      if (await isBackendConfigured()) {
+        final baseUrl = await getBaseUrl();
+        final wsUrl = await getWebSocketUrl();
+        await rust.setBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
+      }
+    } catch (e) {
+      debugPrint('Api._ensureRustReady: $e');
     }
   }
 
@@ -233,6 +256,7 @@ class Api {
       throw StateError(initError ?? 'Rust library not loaded. Did you forget to call init?');
     }
     if (kIsWeb) throw UnsupportedError('Login not supported on web');
+    await _ensureRustReady();
     await rust.login(username: username, password: password);
     _hasAuthIssue = false;
     _notifyConnectionStateChanged();
@@ -243,6 +267,7 @@ class Api {
       throw StateError(initError ?? 'Rust library not loaded. Did you forget to call init?');
     }
     if (kIsWeb) throw UnsupportedError('Sign up not supported on web');
+    await _ensureRustReady();
     await rust.register(username: username, password: password);
     _hasAuthIssue = false;
     _notifyConnectionStateChanged();
@@ -251,6 +276,7 @@ class Api {
   static Future<void> logout() async {
     if (!kIsWeb) {
       try {
+        await _ensureRustReady();
         await rust.logout();
       } catch (_) {}
     }
@@ -271,6 +297,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return false;
     try {
+      await _ensureRustReady();
       return await rust.isLoggedIn();
     } catch (_) {
       return false;
@@ -281,6 +308,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return null;
     try {
+      await _ensureRustReady();
       return await rust.getUserId();
     } catch (_) {
       return null;
@@ -291,6 +319,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return null;
     try {
+      await _ensureRustReady();
       return await rust.getToken();
     } catch (_) {
       return null;
@@ -332,6 +361,7 @@ class Api {
   static Future<bool> validateAuth() async {
     if (kIsWeb) return false;
     try {
+      await _ensureRustReady();
       await rust.manualSync();
       _hasSyncError = false;
       _hasAuthIssue = false;
@@ -355,6 +385,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return null;
     try {
+      await _ensureRustReady();
       final id = await rust.getCurrentWalletId();
       _cachedWalletId = (id == null || id.isEmpty) ? null : id;
       return _cachedWalletId;
@@ -366,6 +397,7 @@ class Api {
   static Future<void> setCurrentWalletId(String walletId) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.setCurrentWalletId(walletId: walletId);
       _cachedWalletId = walletId;
       DataBus.instance.emit(DataChangeType.wallet, walletId: _cachedWalletId);
@@ -381,6 +413,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return [];
     try {
+      await _ensureRustReady();
       final json = await rust.getWallets();
       final list = jsonDecode(json) as List<dynamic>?;
       if (_hasAuthIssue) {
@@ -399,6 +432,7 @@ class Api {
   static Future<Map<String, dynamic>?> createWallet(String name, String description) async {
     if (kIsWeb) return null;
     try {
+      await _ensureRustReady();
       final json = await rust.createWallet(name: name, description: description);
       return jsonDecode(json) as Map<String, dynamic>?;
     } catch (e) {
@@ -408,6 +442,7 @@ class Api {
 
   static Future<void> ensureCurrentWallet() async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.ensureCurrentWallet();
     // Force cache update and notification to ensure UI stays in sync
     try {
@@ -437,6 +472,7 @@ class Api {
   // ---------- Wallet management (manage wallet screen) ----------
   static Future<List<Map<String, dynamic>>> getWalletUsers(String walletId) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.listWalletUsers(walletId: walletId);
     final data = jsonDecode(json) as Map<String, dynamic>?;
     final list = data?['users'] as List<dynamic>?;
@@ -447,6 +483,7 @@ class Api {
   static Future<List<Map<String, dynamic>>> searchWalletUsers(
       String walletId, String query) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.searchWalletUsers(
         walletId: walletId, query: query.trim());
     final list = jsonDecode(json) as List<dynamic>?;
@@ -458,53 +495,63 @@ class Api {
 
   static Future<void> addUserToWallet(String walletId, String username) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.addUserToWallet(walletId: walletId, username: username);
   }
 
   /// Create or replace 4-digit invite code for the wallet. Returns the code.
   static Future<String> createWalletInviteCode(String walletId) async {
     if (kIsWeb) throw UnsupportedError('Invite codes not supported on web');
+    await _ensureRustReady();
     return rust.createWalletInviteCode(walletId: walletId);
   }
 
   /// Join a wallet by invite code. Returns the joined wallet_id.
   static Future<String> joinWalletByCode(String code) async {
     if (kIsWeb) throw UnsupportedError('Join by code not supported on web');
+    await _ensureRustReady();
     return rust.joinWalletByCode(code: code);
   }
 
   static Future<void> updateWalletUserRole(String walletId, String userId, String role) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.updateWalletUserRole(walletId: walletId, userId: userId, role: role);
   }
 
   static Future<void> removeWalletUser(String walletId, String userId) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.removeWalletUser(walletId: walletId, userId: userId);
   }
 
   static Future<List<Map<String, dynamic>>> getWalletUserGroups(String walletId) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.listWalletUserGroups(walletId: walletId);
     final list = jsonDecode(json) as List<dynamic>?;
     return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
   }
 
   static Future<Map<String, dynamic>> createWalletUserGroup(String walletId, String name) async {
+    await _ensureRustReady();
     final json = await rust.createWalletUserGroup(walletId: walletId, name: name);
     return jsonDecode(json) as Map<String, dynamic>;
   }
 
   static Future<void> updateWalletUserGroup(String walletId, String groupId, String name) async {
+    await _ensureRustReady();
     await rust.updateWalletUserGroup(walletId: walletId, groupId: groupId, name: name);
   }
 
   static Future<void> deleteWalletUserGroup(String walletId, String groupId) async {
+    await _ensureRustReady();
     await rust.deleteWalletUserGroup(walletId: walletId, groupId: groupId);
   }
 
   static Future<List<Map<String, dynamic>>> getWalletUserGroupMembers(String walletId, String groupId) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.listWalletUserGroupMembers(walletId: walletId, groupId: groupId);
     final list = jsonDecode(json) as List<dynamic>?;
     return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
@@ -512,36 +559,43 @@ class Api {
 
   static Future<void> addWalletUserGroupMember(String walletId, String groupId, String userId) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.addWalletUserGroupMember(walletId: walletId, groupId: groupId, userId: userId);
   }
 
   static Future<void> removeWalletUserGroupMember(String walletId, String groupId, String userId) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.removeWalletUserGroupMember(walletId: walletId, groupId: groupId, userId: userId);
   }
 
   static Future<List<Map<String, dynamic>>> getWalletContactGroups(String walletId) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.listWalletContactGroups(walletId: walletId);
     final list = jsonDecode(json) as List<dynamic>?;
     return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
   }
 
   static Future<Map<String, dynamic>> createWalletContactGroup(String walletId, String name) async {
+    await _ensureRustReady();
     final json = await rust.createWalletContactGroup(walletId: walletId, name: name);
     return jsonDecode(json) as Map<String, dynamic>;
   }
 
   static Future<void> updateWalletContactGroup(String walletId, String groupId, String name) async {
+    await _ensureRustReady();
     await rust.updateWalletContactGroup(walletId: walletId, groupId: groupId, name: name);
   }
 
   static Future<void> deleteWalletContactGroup(String walletId, String groupId) async {
+    await _ensureRustReady();
     await rust.deleteWalletContactGroup(walletId: walletId, groupId: groupId);
   }
 
   static Future<List<Map<String, dynamic>>> getWalletContactGroupMembers(String walletId, String groupId) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.listWalletContactGroupMembers(walletId: walletId, groupId: groupId);
     final list = jsonDecode(json) as List<dynamic>?;
     return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
@@ -549,16 +603,19 @@ class Api {
 
   static Future<void> addWalletContactGroupMember(String walletId, String groupId, String contactId) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.addWalletContactGroupMember(walletId: walletId, groupId: groupId, contactId: contactId);
   }
 
   static Future<void> removeWalletContactGroupMember(String walletId, String groupId, String contactId) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     await rust.removeWalletContactGroupMember(walletId: walletId, groupId: groupId, contactId: contactId);
   }
 
   static Future<List<Map<String, dynamic>>> getWalletPermissionActions(String walletId) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.listWalletPermissionActions(walletId: walletId);
     final list = jsonDecode(json) as List<dynamic>?;
     return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
@@ -566,6 +623,7 @@ class Api {
 
   static Future<List<Map<String, dynamic>>> getWalletPermissionMatrix(String walletId) async {
     if (kIsWeb) return [];
+    await _ensureRustReady();
     final json = await rust.getWalletPermissionMatrix(walletId: walletId);
     final list = jsonDecode(json) as List<dynamic>?;
     return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
@@ -573,6 +631,7 @@ class Api {
 
   static Future<void> putWalletPermissionMatrix(String walletId, List<Map<String, dynamic>> entries) async {
     if (kIsWeb) return;
+    await _ensureRustReady();
     final entriesJson = jsonEncode(entries);
     await rust.putWalletPermissionMatrix(walletId: walletId, entriesJson: entriesJson);
   }
@@ -587,6 +646,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return '[]';
     try {
+      await _ensureRustReady();
       return await rust.getContacts();
     } catch (_) {
       return '[]';
@@ -597,6 +657,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return '[]';
     try {
+      await _ensureRustReady();
       return await rust.getTransactions();
     } catch (_) {
       return '[]';
@@ -607,6 +668,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return null;
     try {
+      await _ensureRustReady();
       return await rust.getContact(id: id);
     } catch (_) {
       return null;
@@ -617,6 +679,7 @@ class Api {
     if (!_initialized) await init();
     if (kIsWeb) return null;
     try {
+      await _ensureRustReady();
       return await rust.getTransaction(id: id);
     } catch (_) {
       return null;
@@ -632,6 +695,7 @@ class Api {
   }) async {
     if (kIsWeb) throw UnsupportedError('Not on web');
     try {
+      await _ensureRustReady();
       final result = await rust.createContact(
         name: name,
         username: username,
@@ -661,6 +725,7 @@ class Api {
   }) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.updateContact(
         id: id,
         name: name,
@@ -683,6 +748,7 @@ class Api {
   static Future<void> deleteContact(String contactId) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.deleteContact(contactId: contactId);
       _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
@@ -707,6 +773,7 @@ class Api {
   }) async {
     if (kIsWeb) throw UnsupportedError('Not on web');
     try {
+      await _ensureRustReady();
       final result = await rust.createTransaction(
         contactId: contactId,
         type: type,
@@ -742,6 +809,7 @@ class Api {
   }) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.updateTransaction(
         id: id,
         contactId: contactId,
@@ -767,6 +835,7 @@ class Api {
   static Future<void> deleteTransaction(String transactionId) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.deleteTransaction(transactionId: transactionId);
       _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
@@ -782,6 +851,7 @@ class Api {
   static Future<void> undoContactAction(String contactId) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.undoContactAction(contactId: contactId);
       _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
@@ -797,6 +867,7 @@ class Api {
   static Future<void> undoTransactionAction(String transactionId) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.undoTransactionAction(transactionId: transactionId);
       _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
@@ -812,6 +883,7 @@ class Api {
   static Future<void> bulkDeleteContacts(List<String> ids) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.bulkDeleteContacts(contactIds: ids);
       _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
@@ -827,6 +899,7 @@ class Api {
   static Future<void> bulkDeleteTransactions(List<String> ids) async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.bulkDeleteTransactions(transactionIds: ids);
       _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
@@ -847,6 +920,7 @@ class Api {
       if (currentWalletId == null || currentWalletId.isEmpty) {
         return '[]';
       }
+      await _ensureRustReady();
       final json = await rust.getEvents();
       final list = jsonDecode(json) as List<dynamic>? ?? [];
       if (_hasAuthIssue) {
@@ -886,6 +960,7 @@ class Api {
   static Future<void> manualSync() async {
     if (kIsWeb) return;
     try {
+      await _ensureRustReady();
       await rust.manualSync();
       _hasSyncError = false;
       _hasAuthIssue = false;
