@@ -9,16 +9,20 @@ use debitum_client_core::{
     add_wallet_contact_group_member,
     add_wallet_user_group_member,
     add_user_to_wallet,
+    clear_wallet_data,
     create_wallet_contact_group,
+    create_wallet_invite_code,
     create_wallet_user_group,
     get_contacts,
     get_current_wallet_id,
     get_wallet_permission_matrix,
+    join_wallet_by_code,
     list_wallet_contact_group_members,
     list_wallet_contact_groups,
     list_wallet_user_group_members,
     list_wallet_user_groups,
     put_wallet_permission_matrix,
+    set_current_wallet_id,
 };
 
 fn contact_id_by_name(contacts_json: &str, name: &str) -> Result<String, String> {
@@ -213,6 +217,9 @@ fn groups_complex_member_sees_only_contacts_in_permitted_group() {
         "contacts count 1",
         "contact name \"Alice\"",
     ]).expect("member sees only Alice (in Public); Bob not visible");
+    // Viewers×Public is read-only: create must be denied.
+    let create_res = member_in_wallet.run_commands(&["contact create \"Denied\" x"]);
+    assert!(create_res.is_err(), "member with read-only on Public must not be allowed to create contact");
 }
 
 // --- Complex: two contact groups, two user groups; member in one user group sees only that group's contacts ---
@@ -280,6 +287,8 @@ fn groups_complex_two_user_groups_two_contact_groups_scoped_visibility() {
     m1.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     m1.assert_commands(&["contacts count 2", "contact name \"Alice\"", "contact name \"Bob\""]).expect("member1 (Viewers) sees Alice and Bob");
+    let m1_create = m1.run_commands(&["contact create \"Denied\" x"]);
+    assert!(m1_create.is_err(), "member1 (Viewers) has read-only; create must be denied");
 
     let m2 = AppInstance::with_credentials("m2", &server_url, member2.username.clone(), member2.password.clone(), Some(wallet_id.clone()));
     m2.initialize().expect("initialize");
@@ -287,6 +296,8 @@ fn groups_complex_two_user_groups_two_contact_groups_scoped_visibility() {
     m2.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     m2.assert_commands(&["contacts count 1", "contact name \"Alice\""]).expect("member2 (GroupAOnly) sees only Alice");
+    let m2_create = m2.run_commands(&["contact create \"Denied\" y"]);
+    assert!(m2_create.is_err(), "member2 (GroupAOnly) has read-only; create must be denied");
 }
 
 // --- Priority / union: all_users × all_contacts, different user groups × all_contacts, different × different ---
@@ -335,6 +346,9 @@ fn groups_priority_all_users_all_contacts_member_sees_all() {
     member_app
         .assert_commands(&["contacts count 2", "contact name \"Alice\"", "contact name \"Bob\""])
         .expect("member sees all contacts via all_users × all_contacts");
+    // Default matrix is read-only: create must be denied.
+    let create_res = member_app.run_commands(&["contact create \"Denied\" x"]);
+    assert!(create_res.is_err(), "member with default read-only must not be allowed to create contact");
 }
 
 /// Different user group × all_contacts: revoke all_users×all_contacts, grant Viewers×all_contacts = read.
@@ -403,6 +417,9 @@ fn groups_priority_custom_user_group_times_all_contacts_sees_all() {
     member_app
         .assert_commands(&["contacts count 2", "contact name \"Alice\"", "contact name \"Bob\""])
         .expect("member in Viewers sees all (Viewers × all_contacts)");
+    // Viewers × all_contacts is read-only: create must be denied.
+    let create_res = member_app.run_commands(&["contact create \"Denied\" x"]);
+    assert!(create_res.is_err(), "member in Viewers with read-only must not be allowed to create contact");
 }
 
 /// Union of permissions: user in multiple user groups gets union of what each (ug × cg) grants.
@@ -500,6 +517,7 @@ fn groups_priority_union_multiple_user_groups_see_union_of_contact_groups() {
     app_viewers.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     app_viewers.assert_commands(&["contacts count 2", "contact name \"Alice\"", "contact name \"Bob\""]).expect("Viewers-only sees all");
+    assert!(app_viewers.run_commands(&["contact create \"X\" x"]).is_err(), "Viewers-only has read-only; create denied");
 
     let app_vip = AppInstance::with_credentials("mvip", &server_url, member_vip.username.clone(), member_vip.password.clone(), Some(wallet_id.clone()));
     app_vip.initialize().expect("initialize");
@@ -507,6 +525,7 @@ fn groups_priority_union_multiple_user_groups_see_union_of_contact_groups() {
     app_vip.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     app_vip.assert_commands(&["contacts count 1", "contact name \"Alice\""]).expect("VIPOnly sees only Alice");
+    assert!(app_vip.run_commands(&["contact create \"X\" x"]).is_err(), "VIPOnly has read-only; create denied");
 
     let app_both = AppInstance::with_credentials("mboth", &server_url, member_both.username.clone(), member_both.password.clone(), Some(wallet_id.clone()));
     app_both.initialize().expect("initialize");
@@ -514,6 +533,7 @@ fn groups_priority_union_multiple_user_groups_see_union_of_contact_groups() {
     app_both.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     app_both.assert_commands(&["contacts count 2", "contact name \"Alice\"", "contact name \"Bob\""]).expect("Viewers+VIPOnly sees union = all");
+    assert!(app_both.run_commands(&["contact create \"X\" x"]).is_err(), "Viewers+VIPOnly union is read-only; create denied");
 }
 
 /// Different user groups × different contact groups: Viewers×all_contacts, Editors×Staff, VIPOnly×VIP.
@@ -636,6 +656,7 @@ fn groups_priority_different_ug_to_different_cg_scoped_and_union() {
     app_v.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     app_v.assert_commands(&["contacts count 3", "contact name \"Alice\"", "contact name \"Bob\"", "contact name \"Carol\""]).expect("Viewers sees all");
+    assert!(app_v.run_commands(&["contact create \"X\" x"]).is_err(), "Viewers has read-only; create denied");
 
     let app_e = AppInstance::with_credentials("m2", &server_url, member_editors.username.clone(), member_editors.password.clone(), Some(wallet_id.clone()));
     app_e.initialize().expect("initialize");
@@ -643,6 +664,7 @@ fn groups_priority_different_ug_to_different_cg_scoped_and_union() {
     app_e.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     app_e.assert_commands(&["contacts count 1", "contact name \"Carol\""]).expect("Editors sees only Staff (Carol)");
+    assert!(app_e.run_commands(&["contact create \"X\" x"]).is_err(), "Editors has read-only; create denied");
 
     let app_vip = AppInstance::with_credentials("m3", &server_url, member_vip.username.clone(), member_vip.password.clone(), Some(wallet_id.clone()));
     app_vip.initialize().expect("initialize");
@@ -650,4 +672,118 @@ fn groups_priority_different_ug_to_different_cg_scoped_and_union() {
     app_vip.sync().expect("sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
     app_vip.assert_commands(&["contacts count 1", "contact name \"Alice\""]).expect("VIPOnly sees only VIP (Alice)");
+    assert!(app_vip.run_commands(&["contact create \"X\" x"]).is_err(), "VIPOnly has read-only; create denied");
+}
+
+/// Two apps: app1 creates wallet, contacts, transactions; sets all_users×all_contacts = none; app2 joins via invite.
+/// App2 sees nothing and cannot create. Then app1 creates a contact group, adds some (not all) contacts, grants
+/// all_users full actions on that contact group; app2 syncs (after clear for full pull) and sees only those contacts.
+#[test]
+#[ignore]
+fn groups_two_apps_join_with_no_default_then_grant_via_contact_group() {
+    let server_url = test_server_url();
+
+    let app1 = AppInstance::new("app1", &server_url);
+    app1.initialize().expect("initialize");
+    app1.signup().expect("signup");
+    app1.activate().expect("activate");
+    let wallet_id = get_current_wallet_id().ok_or("no wallet").expect("wallet");
+
+    let app2 = AppInstance::new("app2", &server_url);
+    app2.initialize().expect("initialize");
+    app2.signup().expect("signup");
+
+    app1.activate().expect("app1");
+    app1
+        .run_commands(&[
+            "contact create \"Alice\" alice",
+            "contact create \"Bob\" bob",
+            "contact create \"Carol\" carol",
+            "transaction create alice owed 100 \"T1\" t1",
+            "transaction create bob lent 50 \"T2\" t2",
+            "wait 300",
+        ])
+        .expect("app1 create contacts and transactions");
+    app1.sync().expect("app1 sync");
+
+    let (all_ug, all_cg) = get_default_matrix_ids(&wallet_id).expect("matrix ids");
+    set_matrix_actions(&wallet_id, &all_ug, &all_cg, &[]).expect("all_users × all_contacts = none");
+
+    let code = create_wallet_invite_code(wallet_id.clone()).expect("create invite code");
+    app2.activate().expect("app2");
+    app2.login().expect("app2 login");
+    let joined_wallet_id = join_wallet_by_code(code).expect("app2 join wallet");
+    set_current_wallet_id(joined_wallet_id.clone()).expect("app2 switch to joined wallet");
+    assert_eq!(joined_wallet_id, wallet_id, "joined wallet is app1's wallet");
+
+    let app2_in_wallet = AppInstance::with_credentials(
+        "app2",
+        &server_url,
+        app2.username.clone(),
+        app2.password.clone(),
+        Some(wallet_id.clone()),
+    );
+    app2_in_wallet.initialize().expect("initialize");
+    app2_in_wallet.login().expect("login");
+    app2_in_wallet.sync().expect("app2 sync");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    app2_in_wallet
+        .assert_commands(&["contacts count 0"])
+        .expect("app2 sees no contacts (all_users × all_contacts = none)");
+    let create_res = app2_in_wallet.run_commands(&["contact create \"Forbidden\" x"]);
+    assert!(create_res.is_err(), "app2 cannot create contact when no permissions");
+
+    app1.activate().expect("app1");
+    let cg_shared_id: String = serde_json::from_str::<serde_json::Value>(
+        &create_wallet_contact_group(wallet_id.clone(), "Shared".to_string()).expect("create contact group"),
+    )
+    .expect("parse")["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    let contacts_json = get_contacts().expect("get_contacts");
+    let alice_id = contact_id_by_name(&contacts_json, "Alice").expect("Alice id");
+    let bob_id = contact_id_by_name(&contacts_json, "Bob").expect("Bob id");
+    add_wallet_contact_group_member(wallet_id.clone(), cg_shared_id.clone(), alice_id).expect("Alice -> Shared");
+    add_wallet_contact_group_member(wallet_id.clone(), cg_shared_id.clone(), bob_id).expect("Bob -> Shared");
+    set_matrix_actions(
+        &wallet_id,
+        &all_ug,
+        &cg_shared_id,
+        &[
+            "contact:read",
+            "contact:create",
+            "contact:update",
+            "contact:delete",
+            "transaction:read",
+            "transaction:create",
+            "transaction:update",
+            "transaction:delete",
+            "events:read",
+        ],
+    )
+    .expect("all_users × Shared = full actions");
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    app2_in_wallet.activate().expect("app2");
+    clear_wallet_data(wallet_id.clone()).expect("clear app2 local data so full pull fetches Shared contacts");
+    app2_in_wallet.sync().expect("app2 sync after grant (full pull)");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app2_in_wallet
+        .assert_commands(&[
+            "contacts count 2",
+            "contact name \"Alice\"",
+            "contact name \"Bob\"",
+        ])
+        .expect("app2 sees only contacts in Shared and can read them (permission granted)");
+    // all_users × Shared has full actions (including contact:create): app2 must be allowed to create contact.
+    app2_in_wallet
+        .run_commands(&["contact create \"ByApp2\" app2c", "wait 300"])
+        .expect("app2 with full on Shared can create contact");
+    app2_in_wallet.sync().expect("app2 sync after create");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app2_in_wallet
+        .assert_commands(&["contacts count 3", "contact name \"ByApp2\""])
+        .expect("app2 sees own created contact");
 }

@@ -76,6 +76,11 @@ fn permission_give_take_read_member_sees_then_loses_then_sees() {
     member_in_wallet
         .assert_commands(&["contacts count 1", "contact name \"Shared Contact\""])
         .expect("member sees contact after grant");
+    // Member has read only: create must be denied.
+    let create_res = member_in_wallet.run_commands(&["contact create \"ByMember\" m2"]);
+    assert!(create_res.is_err(), "member with read-only must not be allowed to create contact");
+    let create_err = create_res.unwrap_err();
+    assert!(create_err.contains("403") || create_err.to_lowercase().contains("permission"), "expected 403 or permission error");
 
     owner.activate().expect("owner");
     let (ug_id, cg_id) = get_default_matrix_ids(&wallet_id).expect("get matrix ids before revoke");
@@ -85,6 +90,9 @@ fn permission_give_take_read_member_sees_then_loses_then_sees() {
     member_in_wallet
         .assert_commands(&["contacts count 0"])
         .expect("member sees no contacts after take");
+    // After revoke: create must still be denied.
+    let create_after_revoke = member_in_wallet.run_commands(&["contact create \"Denied\" m3"]);
+    assert!(create_after_revoke.is_err(), "member with no permissions must not be allowed to create contact");
 
     owner.activate().expect("owner");
     set_matrix_actions(
@@ -99,6 +107,9 @@ fn permission_give_take_read_member_sees_then_loses_then_sees() {
     member_in_wallet
         .assert_commands(&["contacts count 1", "contact name \"Shared Contact\""])
         .expect("member sees contact again");
+    // After re-grant read only: create still denied.
+    let create_after_regrant = member_in_wallet.run_commands(&["contact create \"Denied2\" m4"]);
+    assert!(create_after_regrant.is_err(), "member with read-only re-grant must not be allowed to create contact");
 }
 
 /// Default matrix is read-only. Member cannot create contact; run_commands returns error.
@@ -134,6 +145,7 @@ fn permission_member_read_only_cannot_create_contact() {
     member_in_wallet.initialize().expect("initialize");
     member_in_wallet.login().expect("login");
 
+    // Member has read-only: create must be denied.
     let res = member_in_wallet.run_commands(&["contact create \"Forbidden\" forb"]);
     assert!(res.is_err(), "member without contact:create should get error");
     let err = res.unwrap_err();
@@ -142,6 +154,15 @@ fn permission_member_read_only_cannot_create_contact() {
         "expected 403 or permission error, got: {}",
         err
     );
+    // Member can read: owner creates a contact, member syncs and sees it.
+    owner.activate().expect("owner");
+    owner.run_commands(&["contact create \"Visible\" vis", "wait 300"]).expect("owner create");
+    owner.sync().expect("owner sync");
+    member_in_wallet.sync().expect("member sync");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    member_in_wallet
+        .assert_commands(&["contacts count 1", "contact name \"Visible\""])
+        .expect("member with read-only can read contacts");
 }
 
 /// Complex: owner creates contacts and transactions (many events). Member syncs and sees data.
@@ -201,6 +222,9 @@ fn permission_read_revoke_clears_local_then_grant_restores_via_sync() {
             "events count >= 8",
         ])
         .expect("member sees all data after initial sync");
+    // Read-only: create must be denied.
+    let create_initial = member_in_wallet.run_commands(&["contact create \"No\" nope"]);
+    assert!(create_initial.is_err(), "member with read-only must not be allowed to create contact");
 
     owner.activate().expect("owner");
     let (ug_id, cg_id) = get_default_matrix_ids(&wallet_id).expect("get matrix ids before revoke");
@@ -214,6 +238,9 @@ fn permission_read_revoke_clears_local_then_grant_restores_via_sync() {
             "transactions count 0",
         ])
         .expect("member local state cleared: no contacts, no transactions (syncer removed read data)");
+    // After revoke: create still denied.
+    let create_after_revoke = member_in_wallet.run_commands(&["contact create \"Denied\" d"]);
+    assert!(create_after_revoke.is_err(), "member with no permissions must not be allowed to create contact");
 
     owner.activate().expect("owner");
     set_matrix_actions(
@@ -236,6 +263,9 @@ fn permission_read_revoke_clears_local_then_grant_restores_via_sync() {
             "events count >= 8",
         ])
         .expect("member sees all data again (syncer restored events)");
+    // After re-grant read only: create still denied.
+    let create_after_regrant = member_in_wallet.run_commands(&["contact create \"Denied2\" d2"]);
+    assert!(create_after_regrant.is_err(), "member with read-only re-grant must not be allowed to create contact");
 }
 
 /// Owner grants contact:create (and read) to all_users × all_contacts. Member creates contact and syncs.
@@ -296,4 +326,13 @@ fn permission_grant_create_then_member_can_create() {
     member_in_wallet
         .assert_commands(&["contacts count 1", "contact name \"Member Created\""])
         .expect("member sees own contact");
+    // Full permissions: transaction create must be allowed.
+    member_in_wallet
+        .run_commands(&["transaction create m1 owed 100 \"Member Tx\" mt1", "wait 300"])
+        .expect("member with full permissions can create transaction");
+    member_in_wallet.sync().expect("member sync after tx");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    member_in_wallet
+        .assert_commands(&["transactions count >= 1"])
+        .expect("member sees own transaction");
 }
