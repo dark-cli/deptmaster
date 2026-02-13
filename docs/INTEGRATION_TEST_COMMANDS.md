@@ -87,4 +87,10 @@ Used with `AppInstance::assert_commands(&["...", ...])`. The app is activated, t
 - **Labels**: Lowercase, no spaces (e.g. `alice`, `contact1`, `t1`). Stored in the runner and shared across commands in the same test.
 - **Sync**: Tests assume sync is driven by the app (e.g. WebSocket); use `wait 300` (or similar) after sequences that trigger sync, then one sync to simulate “WS connected”, then assert. No need for per-app manual sync in every step unless a scenario requires it.
 
-For how to run the tests and how multi-app scenarios are set up, see the top comment in `crates/debitum_client_core/tests/integration_test.rs` and [DEVELOPMENT.md](./DEVELOPMENT.md).
+**Run tests** (requires a running server; default `TEST_SERVER_URL=http://127.0.0.1:8000`):
+
+- `cargo test --test integration_single_app -- --ignored` — single/two-app: signup, login, offline/online, many events
+- `cargo test --test integration_multi_app_sync -- --ignored` — three-app: create/sync, concurrent creates, update/delete propagation
+- `cargo test --test integration_comprehensive_events -- --ignored` — three-app: event types, mixed ops, full lifecycle
+
+For multi-app setup and shared helpers, see `crates/debitum_client_core/tests/common/` and [DEVELOPMENT.md](./DEVELOPMENT.md).
