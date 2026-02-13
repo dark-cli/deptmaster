@@ -3,7 +3,7 @@
 
 use debitum_client_core::{
     create_wallet, ensure_current_wallet, get_contacts, get_transactions, init_storage,
-    manual_sync, register, set_backend_config, set_current_wallet_id,
+    manual_sync, register, set_backend_config, set_current_wallet_id, set_network_offline,
 };
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -149,13 +149,17 @@ impl AppInstance {
         debitum_client_core::logout()
     }
 
-    /// Stub: simulate offline. No-op in Rust client (no network interceptor).
+    /// Simulate offline: API calls (sync, login, etc.) will return "Network offline" without sending requests.
     pub fn go_offline(&self) -> Result<(), String> {
+        self.activate()?;
+        set_network_offline(true);
         Ok(())
     }
 
-    /// Stub: simulate online. No-op in Rust client.
+    /// Simulate online: clear offline flag so API calls hit the server again.
     pub fn go_online(&self) -> Result<(), String> {
+        self.activate()?;
+        set_network_offline(false);
         Ok(())
     }
 }

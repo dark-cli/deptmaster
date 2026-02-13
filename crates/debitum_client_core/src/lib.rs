@@ -29,6 +29,11 @@ struct BackendConfig {
 thread_local! {
     static BACKEND_CONFIG: RefCell<Option<BackendConfig>> = RefCell::new(None);
 }
+
+// Thread-local offline flag: when true, API calls return "Network offline" (see set_network_offline).
+thread_local! {
+    static NETWORK_OFFLINE: RefCell<bool> = RefCell::new(false);
+}
 static SYNC_BACKOFF: Lazy<Mutex<backoff::Backoff>> = Lazy::new(|| {
     Mutex::new(backoff::Backoff::new(vec![
         Duration::from_millis(500),
@@ -142,6 +147,18 @@ pub fn get_base_url() -> Option<String> {
 
 pub fn get_ws_url() -> Option<String> {
     BACKEND_CONFIG.with(|cell| cell.borrow().as_ref().map(|c| c.ws_url.clone()))
+}
+
+/// Set whether the client is in "offline" mode. When true, all API requests return an error without hitting the network.
+/// The app reconnects WS when going online; WS connection triggers sync (app logic, not here).
+/// Thread-local (per test / per app when using multiple instances).
+pub fn set_network_offline(offline: bool) {
+    NETWORK_OFFLINE.with(|cell| *cell.borrow_mut() = offline);
+}
+
+/// True if the client is in offline mode (network requests will fail).
+pub fn is_network_offline() -> bool {
+    NETWORK_OFFLINE.with(|cell| *cell.borrow())
 }
 
 // --- Auth ---

@@ -24,6 +24,9 @@ where
 }
 
 fn base_url() -> Result<String, String> {
+    if crate::is_network_offline() {
+        return Err("Network offline".to_string());
+    }
     crate::get_base_url().ok_or_else(|| "Backend not configured".to_string())
 }
 

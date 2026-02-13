@@ -119,6 +119,36 @@ fn test_two_app_instances_sync_via_server() {
     assert!(list.iter().any(|c| c["name"].as_str() == Some("Carol")), "app2 should see Carol: {:?}", list);
 }
 
+/// Test core behavior: offline → API fails; online → app's WS-connect flow triggers sync.
+/// We simulate the app: go_online then sync (app calls sync when WS is created). We test the core, not invent app logic.
+#[test]
+#[ignore]
+fn test_offline_create_then_online_sync() {
+    let server_url = test_server_url();
+    let app = AppInstance::new("app1", &server_url);
+    app.initialize().expect("initialize");
+    app.signup().expect("signup");
+
+    app.run_commands(&["contact create \"Online First\" contact1", "wait 300"]).expect("run_commands");
+    app.sync().expect("sync while online");
+
+    app.go_offline().expect("go_offline");
+    app.run_commands(&["contact create \"Created Offline\" contact2"]).expect("create contact offline (local only)");
+    let sync_offline = app.sync();
+    let err = sync_offline.unwrap_err();
+    assert!(err.contains("Network offline"), "sync while offline should fail with Network offline; got {}", err);
+
+    app.go_online().expect("go_online");
+    // Simulate app: WS (re)connects and triggers sync. We don't add this to the core; we test that the core responds correctly.
+    app.sync().expect("sync (as app does when WS connects)");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let contacts_json = app.get_contacts().expect("get_contacts");
+    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
+    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Online First")), "should have Online First");
+    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Created Offline")), "should have Created Offline after sync");
+}
+
 /// Single app: many events (contacts, transactions, updates, deletes), then assert state.
 #[test]
 #[ignore]
