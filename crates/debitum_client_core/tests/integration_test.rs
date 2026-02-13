@@ -19,16 +19,9 @@ mod common;
 use common::app_instance::{create_unique_test_user_and_wallet, AppInstance};
 use common::event_generator::EventGenerator;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
-use std::thread;
 
 fn test_server_url() -> String {
     std::env::var("TEST_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8000".to_string())
-}
-
-/// Allow time for sync to propagate before asserting on events/contacts/transactions.
-fn sync_wait() {
-    thread::sleep(Duration::from_millis(100));
 }
 
 /// Single app: new instance, signup, run commands (create contact + sync), assert on get_contacts and get_events.
@@ -41,7 +34,7 @@ fn test_app_instance_create_contact_and_sync() {
     app1.signup().expect("signup");
 
     app1
-        .run_commands(&["contact create \"Alice\" alice", "sync"])
+        .run_commands(&["contact create \"Alice\" alice", "wait 300"])
         .expect("run_commands");
 
     let contacts_json = app1.get_contacts().expect("get_contacts");
@@ -73,7 +66,7 @@ fn test_app_instance_login_and_sync() {
     app1.login().expect("login");
 
     app1
-        .run_commands(&["contact create \"Bob\" bob", "sync"])
+        .run_commands(&["contact create \"Bob\" bob", "wait 300"])
         .expect("run_commands");
 
     let contacts_json = app1.get_contacts().expect("get_contacts");
@@ -111,12 +104,15 @@ fn test_two_app_instances_sync_via_server() {
     generator
         .execute_commands(&[
             "app1: contact create \"Carol\" carol",
-            "app1: sync",
+            "app1: wait 300",
         ])
         .expect("execute_commands");
 
+    let app1_ref = generator.apps.get("app1").unwrap();
     let app2_ref = generator.apps.get("app2").unwrap();
-    app2_ref.sync().expect("app2 sync");
+    app1_ref.sync().expect("app1 sync (push)");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app2_ref.sync().expect("app2 sync (simulates WS notification)");
 
     let contacts_json = app2_ref.get_contacts().expect("get_contacts");
     let list: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
@@ -147,7 +143,7 @@ fn test_many_events_sync() {
         "transaction update t3 description \"Updated Transaction 3\"",
         "transaction delete t5",
         "contact update contact1 name \"Updated Contact 1\"",
-        "sync",
+        "wait 300",
     ];
     app1.run_commands(&commands).expect("run_commands");
 
@@ -192,7 +188,7 @@ fn test_many_contacts_and_transactions() {
         "transaction update t3 description \"Updated T3\"",
         "transaction delete t5",
         "contact update alice name \"Alice Updated\"",
-        "sync",
+        "wait 300",
     ];
     app1.run_commands(&commands).expect("run_commands");
 
@@ -209,7 +205,7 @@ fn test_many_contacts_and_transactions() {
 }
 
 // ---------- Basic Sync Scenarios (ported from Flutter basic_sync_scenarios.dart) ----------
-// No manual_sync in commands; sync_wait() before assertions so robust sync can propagate.
+// Sync commands replaced with "wait 300"; after execute_commands use 300ms sleep then one sync (simulates WS notification).
 
 fn setup_three_apps(server_url: &str) -> EventGenerator {
     let (username, password, wallet_id) =
@@ -263,9 +259,9 @@ fn test_basic_single_app_create_multi_app_sync() {
         "app1: contact update contact1 name \"Updated Contact 1\"",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
@@ -307,9 +303,9 @@ fn test_basic_concurrent_creates() {
         "app3: transaction delete t5",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
@@ -341,9 +337,7 @@ fn test_basic_update_propagation() {
         "app3: transaction create contact1 lent 900 \"T8\" t8",
         "app3: transaction create contact1 owed 1800 \"T9\" t9",
         "app3: transaction create contact1 lent 400 \"T10\" t10",
-        "app1: sync",
-        "app2: sync",
-        "app3: sync",
+        "app1: wait 300",
         "app1: contact update contact1 name \"Updated by App1\"",
         "app2: contact update contact1 name \"Updated by App2\"",
         "app1: transaction update t1 amount 2000",
@@ -353,9 +347,9 @@ fn test_basic_update_propagation() {
         "app3: transaction update t7 amount 1300",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
@@ -377,9 +371,7 @@ fn test_basic_delete_propagation() {
         "app1: transaction create contact1 owed 2000 \"T3\" t3",
         "app1: transaction create contact1 lent 800 \"T4\" t4",
         "app1: transaction create contact1 owed 1500 \"T5\" t5",
-        "app1: sync",
-        "app2: sync",
-        "app3: sync",
+        "app1: wait 300",
         "app2: transaction create contact1 lent 600 \"T6\" t6",
         "app2: transaction create contact1 owed 1200 \"T7\" t7",
         "app3: transaction create contact1 lent 900 \"T8\" t8",
@@ -387,17 +379,15 @@ fn test_basic_delete_propagation() {
         "app3: transaction create contact1 lent 400 \"T10\" t10",
         "app1: transaction create contact1 owed 1100 \"T11\" t11",
         "app2: transaction create contact1 lent 700 \"T12\" t12",
-        "app1: sync",
-        "app2: sync",
-        "app3: sync",
+        "app1: wait 300",
         "app2: transaction delete t1",
         "app3: transaction delete t5",
         "app3: contact delete contact1",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
@@ -427,9 +417,7 @@ fn test_comprehensive_contact_event_types() {
         "app1: transaction create contact2 lent 800 \"T4\" t4",
         "app1: transaction create contact3 owed 1500 \"T5\" t5",
         "app1: transaction create contact3 lent 600 \"T6\" t6",
-        "app1: sync",
-        "app2: sync",
-        "app3: sync",
+        "app1: wait 300",
         "app2: contact update contact1 name \"Updated Name 1\"",
         "app2: contact update contact2 name \"Updated Name 2\"",
         "app1: transaction update t1 amount 1100",
@@ -438,9 +426,9 @@ fn test_comprehensive_contact_event_types() {
         "app1: transaction delete t5",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
@@ -470,9 +458,7 @@ fn test_comprehensive_transaction_event_types() {
         "app1: transaction create contact1 lent 900 \"T8\" t8",
         "app1: transaction create contact1 owed 1800 \"T9\" t9",
         "app1: transaction create contact1 lent 400 \"T10\" t10",
-        "app1: sync",
-        "app2: sync",
-        "app3: sync",
+        "app1: wait 300",
         "app2: transaction update t1 amount 2000",
         "app2: transaction update t2 description \"Updated T2\"",
         "app2: transaction update t3 amount 2200",
@@ -482,9 +468,9 @@ fn test_comprehensive_transaction_event_types() {
         "app3: transaction delete t7",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
@@ -515,9 +501,7 @@ fn test_comprehensive_mixed_operations() {
         "app3: transaction create contact2 owed 1800 \"T9\" t9",
         "app1: transaction create contact1 lent 400 \"T10\" t10",
         "app1: transaction create contact2 owed 1100 \"T11\" t11",
-        "app1: sync",
-        "app2: sync",
-        "app3: sync",
+        "app1: wait 300",
         "app3: contact update contact1 name \"Updated Contact 1\"",
         "app3: transaction update t1 amount 1500",
         "app1: transaction update t3 description \"Updated T3\"",
@@ -527,9 +511,9 @@ fn test_comprehensive_mixed_operations() {
         "app3: transaction create contact1 owed 1300 \"T12\" t12",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
@@ -574,18 +558,16 @@ fn test_comprehensive_concurrent_mixed_operations() {
         "app2: transaction create contact3 lent 550 \"T16\" t16",
         "app3: transaction create contact3 owed 2200 \"T17\" t17",
         "app3: transaction create contact1 lent 900 \"T18\" t18",
-        "app1: sync",
-        "app2: sync",
-        "app3: sync",
+        "app1: wait 300",
         "app1: transaction update t1 amount 1100",
         "app2: transaction update t3 description \"Updated T3\"",
         "app3: transaction delete t5",
         "app1: transaction delete t7",
     ];
     generator.execute_commands(&commands).expect("execute_commands");
-    sync_wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync before assert");
+    app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
     let events_json = app1_ref.get_events().expect("get_events");
     let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
