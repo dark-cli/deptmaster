@@ -1,4 +1,5 @@
 #![allow(unexpected_cfgs)] // flutter_rust_bridge macro emits frb_expand cfg
+use std::cell::RefCell;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,7 +24,11 @@ struct BackendConfig {
     base_url: String,
     ws_url: String,
 }
-static BACKEND_CONFIG: Lazy<Mutex<Option<BackendConfig>>> = Lazy::new(|| Mutex::new(None));
+
+// Thread-local: each thread has its own backend config (e.g. each integration test); Flutter uses a single thread.
+thread_local! {
+    static BACKEND_CONFIG: RefCell<Option<BackendConfig>> = RefCell::new(None);
+}
 static SYNC_BACKOFF: Lazy<Mutex<backoff::Backoff>> = Lazy::new(|| {
     Mutex::new(backoff::Backoff::new(vec![
         Duration::from_millis(500),
@@ -38,7 +43,6 @@ static SYNC_BACKOFF: Lazy<Mutex<backoff::Backoff>> = Lazy::new(|| {
     ]))
 });
 static SYNC_IN_FLIGHT: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
-static STORAGE_READY: AtomicBool = AtomicBool::new(false);
 static SYNC_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
 static LAST_BACKOFF_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static LAST_INFLIGHT_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
@@ -64,17 +68,18 @@ impl Drop for SyncGuard {
     }
 }
 
-/// Set to true to re-enable the background sync loop (interval ~1s).
+/// Sync is driven by WS notification (client pulls when server pushes). No background polling.
+/// Set to true only to re-enable a fallback sync loop (interval ~1s).
 const BACKGROUND_SYNC_LOOP_ENABLED: bool = false;
 
 fn start_sync_loop_if_ready() {
     if !BACKGROUND_SYNC_LOOP_ENABLED {
         return;
     }
-    if !STORAGE_READY.load(Ordering::Relaxed) {
+    if !storage::is_ready() {
         return;
     }
-    let backend_ready = BACKEND_CONFIG.lock().unwrap().is_some();
+    let backend_ready = BACKEND_CONFIG.with(|c| c.borrow().is_some());
     if !backend_ready {
         return;
     }
@@ -84,10 +89,8 @@ fn start_sync_loop_if_ready() {
     rust_log!("[debitum_rs] sync loop: started (interval=1000ms)");
     std::thread::spawn(|| {
         loop {
-            // Only attempt sync when storage and backend are ready.
-            if STORAGE_READY.load(Ordering::Relaxed)
-                && BACKEND_CONFIG.lock().unwrap().is_some()
-            {
+            // Only attempt sync when storage and backend are ready on this thread (sync loop has its own thread-local state; when disabled this is never true).
+            if storage::is_ready() && BACKEND_CONFIG.with(|c| c.borrow().is_some()) {
                 let _ = manual_sync_with_source("background_loop");
             }
             let delay_ms = {
@@ -122,24 +125,23 @@ pub fn init_app() {
 /// Call once at startup with the app documents directory path (e.g. from path_provider).
 pub fn init_storage(storage_path: String) -> Result<(), String> {
     storage::init(&storage_path)?;
-    STORAGE_READY.store(true, Ordering::Relaxed);
     rust_log!("[debitum_rs] sync loop: storage ready");
     start_sync_loop_if_ready();
     Ok(())
 }
 
 pub fn set_backend_config(base_url: String, ws_url: String) {
-    *BACKEND_CONFIG.lock().unwrap() = Some(BackendConfig { base_url, ws_url });
+    BACKEND_CONFIG.with(|cell| *cell.borrow_mut() = Some(BackendConfig { base_url, ws_url }));
     rust_log!("[debitum_rs] sync loop: backend config set");
     start_sync_loop_if_ready();
 }
 
 pub fn get_base_url() -> Option<String> {
-    BACKEND_CONFIG.lock().unwrap().as_ref().map(|c| c.base_url.clone())
+    BACKEND_CONFIG.with(|cell| cell.borrow().as_ref().map(|c| c.base_url.clone()))
 }
 
 pub fn get_ws_url() -> Option<String> {
-    BACKEND_CONFIG.lock().unwrap().as_ref().map(|c| c.ws_url.clone())
+    BACKEND_CONFIG.with(|cell| cell.borrow().as_ref().map(|c| c.ws_url.clone()))
 }
 
 // --- Auth ---

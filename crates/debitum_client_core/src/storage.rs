@@ -1,13 +1,20 @@
 //! SQLite storage: config, events, projection state.
+//! Thread-local so each thread (e.g. each integration test) has its own DB; Flutter uses a single thread.
 
 use crate::models::{Contact, Transaction};
 use crate::rust_log;
 use rusqlite::{Connection, params};
+use std::cell::RefCell;
 use std::path::Path;
-use std::sync::Mutex;
 
-static DB: once_cell::sync::Lazy<Mutex<Option<Connection>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(None));
+thread_local! {
+    static DB: RefCell<Option<Connection>> = RefCell::new(None);
+}
+
+/// True if the current thread has called init() successfully.
+pub fn is_ready() -> bool {
+    DB.with(|cell| cell.borrow().is_some())
+}
 
 pub fn init(path: &str) -> Result<(), String> {
     let path_obj = Path::new(path);
@@ -16,7 +23,7 @@ pub fn init(path: &str) -> Result<(), String> {
     rust_log!("[debitum_rs] storage::init path={:?} db={:?}", path, db_path);
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     create_tables(&conn)?;
-    *DB.lock().map_err(|e| e.to_string())? = Some(conn);
+    DB.with(|cell| *cell.borrow_mut() = Some(conn));
     rust_log!("[debitum_rs] storage::init OK");
     Ok(())
 }
@@ -54,9 +61,11 @@ fn with_db<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
 {
-    let guard = DB.lock().map_err(|e| e.to_string())?;
-    let conn = guard.as_ref().ok_or("Storage not initialized")?;
-    f(conn).map_err(|e| e.to_string())
+    DB.with(|cell| {
+        let borrow = cell.borrow();
+        let conn = borrow.as_ref().ok_or("Storage not initialized")?;
+        f(conn).map_err(|e| e.to_string())
+    })
 }
 
 // Config
