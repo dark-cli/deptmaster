@@ -15,6 +15,7 @@ static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Runtime::new().expect("tokio runtime")
 });
 
+#[allow(dead_code)]
 pub(crate) fn spawn_background<F>(fut: F)
 where
     F: Future<Output = ()> + Send + 'static,

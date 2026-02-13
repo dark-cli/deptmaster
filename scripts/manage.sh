@@ -960,6 +960,28 @@ cmd_rebuild_database_projections() {
     fi
 }
 
+# Resolve Flutter binary: FLUTTER_CMD, then PATH, then FLUTTER_SDK_ROOT, then common path.
+# Outputs the command (e.g. "flutter" or "/path/to/flutter") or exits with 1 if not found.
+resolve_flutter_cmd() {
+    if [ -n "${FLUTTER_CMD:-}" ]; then
+        echo "$FLUTTER_CMD"
+        return 0
+    fi
+    if command -v flutter &> /dev/null; then
+        echo "flutter"
+        return 0
+    fi
+    if [ -n "${FLUTTER_SDK_ROOT:-}" ] && [ -x "$FLUTTER_SDK_ROOT/bin/flutter" ]; then
+        echo "$FLUTTER_SDK_ROOT/bin/flutter"
+        return 0
+    fi
+    if [ -x "$HOME/flutter/bin/flutter" ]; then
+        echo "$HOME/flutter/bin/flutter"
+        return 0
+    fi
+    return 1
+}
+
 # Build and prepare Rust bridge so Dart and native lib are in sync. Call before run-flutter-app.
 prepare_rust_bridge_for_flutter() {
     local platform="$1"
@@ -1073,13 +1095,20 @@ cmd_run_flutter_app() {
     
     print_step "Running Flutter app ($platform, mode: $mode)..."
     
+    # Resolve Flutter binary (script may run in env where flutter is not in PATH)
+    local flutter_bin
+    flutter_bin=$(resolve_flutter_cmd) || {
+        print_error "Flutter not found. Install Flutter SDK or set FLUTTER_CMD or FLUTTER_SDK_ROOT."
+        exit 1
+    }
+    
     # Build and prepare Rust bridge so Dart hash and native lib match (all-in-one)
     if [ "$platform" = "android" ] || [ "$platform" = "linux" ]; then
         prepare_rust_bridge_for_flutter "$platform"
     fi
     
     # Build flutter run command with mode flag
-    local flutter_cmd="flutter run"
+    local flutter_cmd="$flutter_bin run"
     if [ -n "$mode_flag" ]; then
         flutter_cmd="$flutter_cmd $mode_flag"
     fi
