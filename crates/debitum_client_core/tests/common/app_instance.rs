@@ -130,6 +130,15 @@ impl AppInstance {
         get_transactions()
     }
 
+    /// Run assertion commands (same style as run_commands). E.g. "contacts count 1", "contact name \"Alice\"", "events count >= 12".
+    pub fn assert_commands(&self, commands: &[&str]) -> Result<(), String> {
+        self.activate()?;
+        let contacts = get_contacts()?;
+        let events = debitum_client_core::get_events()?;
+        let transactions = get_transactions()?;
+        super::assert_runner::assert_commands(&contacts, &events, &transactions, commands)
+    }
+
     /// Run a single command (action part only, e.g. "contact create \"Alice\" alice"). No "app1:" prefix.
     /// Uses a shared CommandRunner so labels (contact1, t1, etc.) persist across calls (e.g. from EventGenerator).
     pub fn run_command(&self, command: &str) -> Result<(), String> {

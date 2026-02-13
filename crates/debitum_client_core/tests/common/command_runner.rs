@@ -1,8 +1,10 @@
 //! Run text commands against the client API (same style as server event_generator).
 //! Commands: contact create "Name" [label], contact update label field "value", contact delete label,
 //!   transaction create contactLabel direction amount ["description"] [label],
-//!   transaction update transLabel field value, transaction delete transLabel, sync
+//!   transaction update transLabel field value, transaction delete transLabel, sync, wait [ms]
 //! Empty lines and # comments are skipped.
+//!
+//! Full vocabulary: see project docs at `docs/INTEGRATION_TEST_COMMANDS.md`.
 
 use debitum_client_core::{
     create_contact, create_transaction, create_wallet, delete_contact, delete_transaction,

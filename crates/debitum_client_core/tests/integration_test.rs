@@ -5,7 +5,9 @@
 //! - Call `app1.initialize()`, `app1.signup()` or `app1.login()`, `app1.run_commands([...])`, `app1.sync()`.
 //! - For multi-app: build `EventGenerator` with a map of app name → AppInstance, then `generator.execute_commands(&["app1: contact create ..."])`.
 //! - Rely on robust sync: no manual_sync in commands; sleep 50–100ms before asserting on data that came from sync.
-//! - Assert via `app1.get_contacts()`, `app1.get_events()`, `app1.get_transactions()`.
+//! - Assert via `app1.assert_commands(&["contacts count 1", "contact name \"Alice\"", ...])` (or raw `get_*` + manual asserts).
+//!
+//! **Command and assert vocabulary**: see project docs at `docs/INTEGRATION_TEST_COMMANDS.md`.
 //!
 //! Requires a running server. Set `TEST_SERVER_URL` (default `http://127.0.0.1:8000`).
 //!
@@ -18,7 +20,7 @@ mod common;
 
 use common::app_instance::{create_unique_test_user_and_wallet, AppInstance};
 use common::event_generator::EventGenerator;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 fn test_server_url() -> String {
     std::env::var("TEST_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8000".to_string())
@@ -37,14 +39,13 @@ fn test_app_instance_create_contact_and_sync() {
         .run_commands(&["contact create \"Alice\" alice", "wait 300"])
         .expect("run_commands");
 
-    let contacts_json = app1.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse contacts");
-    assert_eq!(contacts.len(), 1, "expected 1 contact");
-    assert_eq!(contacts[0]["name"], "Alice");
-
-    let events_json = app1.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    assert!(!events.is_empty(), "expected at least one event");
+    app1
+        .assert_commands(&[
+            "contacts count 1",
+            "contact 0 name \"Alice\"",
+            "events count >= 1",
+        ])
+        .expect("assert_commands");
 }
 
 /// Single app with shared credentials: create unique user, then login and run commands.
@@ -69,9 +70,7 @@ fn test_app_instance_login_and_sync() {
         .run_commands(&["contact create \"Bob\" bob", "wait 300"])
         .expect("run_commands");
 
-    let contacts_json = app1.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
-    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Bob")), "expected Bob: {:?}", contacts);
+    app1.assert_commands(&["contact name \"Bob\""]).expect("assert_commands");
 }
 
 /// Two app instances (same user): app1 creates contact and syncs; app2 syncs and sees the contact.
@@ -114,9 +113,7 @@ fn test_two_app_instances_sync_via_server() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     app2_ref.sync().expect("app2 sync (simulates WS notification)");
 
-    let contacts_json = app2_ref.get_contacts().expect("get_contacts");
-    let list: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
-    assert!(list.iter().any(|c| c["name"].as_str() == Some("Carol")), "app2 should see Carol: {:?}", list);
+    app2_ref.assert_commands(&["contact name \"Carol\""]).expect("assert_commands");
 }
 
 /// Test core behavior: offline → API fails; online → app's WS-connect flow triggers sync.
@@ -143,10 +140,10 @@ fn test_offline_create_then_online_sync() {
     app.sync().expect("sync (as app does when WS connects)");
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    let contacts_json = app.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
-    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Online First")), "should have Online First");
-    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Created Offline")), "should have Created Offline after sync");
+    app.assert_commands(&[
+        "contact name \"Online First\"",
+        "contact name \"Created Offline\"",
+    ]).expect("assert_commands");
 }
 
 /// Single app: many events (contacts, transactions, updates, deletes), then assert state.
@@ -177,19 +174,13 @@ fn test_many_events_sync() {
     ];
     app1.run_commands(&commands).expect("run_commands");
 
-    let contacts_json = app1.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse contacts");
-    assert_eq!(contacts.len(), 1, "expected 1 contact after updates");
-    assert_eq!(contacts[0]["name"], "Updated Contact 1");
-
-    let events_json = app1.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    assert!(events.len() >= 12, "expected at least 12 events (creates + updates + delete), got {}", events.len());
-
-    let create_count = events.iter().filter(|e| e["event_type"].as_str() == Some("CREATED")).count();
-    let update_count = events.iter().filter(|e| e["event_type"].as_str() == Some("UPDATED")).count();
-    assert!(create_count >= 9, "expected at least 9 CREATED events");
-    assert!(update_count >= 3, "expected at least 3 UPDATED events");
+    app1.assert_commands(&[
+        "contacts count 1",
+        "contact 0 name \"Updated Contact 1\"",
+        "events count >= 12",
+        "events event_type CREATED count >= 9",
+        "events event_type UPDATED count >= 3",
+    ]).expect("assert_commands");
 }
 
 /// Single app: multiple contacts, many transactions, updates and deletes; assert final contacts and event count.
@@ -222,16 +213,13 @@ fn test_many_contacts_and_transactions() {
     ];
     app1.run_commands(&commands).expect("run_commands");
 
-    let contacts_json = app1.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse contacts");
-    assert_eq!(contacts.len(), 3, "expected 3 contacts");
-    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Alice Updated")));
-    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Bob")));
-    assert!(contacts.iter().any(|c| c["name"].as_str() == Some("Carol")));
-
-    let events_json = app1.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    assert!(events.len() >= 15, "expected at least 15 events (3 contacts + 9 tx + updates + delete), got {}", events.len());
+    app1.assert_commands(&[
+        "contacts count 3",
+        "contact name \"Alice Updated\"",
+        "contact name \"Bob\"",
+        "contact name \"Carol\"",
+        "events count >= 15",
+    ]).expect("assert_commands");
 }
 
 // ---------- Basic Sync Scenarios (ported from Flutter basic_sync_scenarios.dart) ----------
@@ -293,20 +281,13 @@ fn test_basic_single_app_create_multi_app_sync() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    assert!(events.len() >= 12, "at least 12 events; got {}", events.len());
-    let update_count = events.iter().filter(|e| e["event_type"].as_str() == Some("UPDATED")).count();
-    assert!(update_count > 0, "should have UPDATED events");
-
-    let contacts_json = app1_ref.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse contacts");
-    assert_eq!(contacts.len(), 1);
-    assert_eq!(contacts[0]["name"], "Updated Contact 1");
-
-    let tx_json = app1_ref.get_transactions().expect("get_transactions");
-    let tx: Vec<serde_json::Value> = serde_json::from_str(&tx_json).expect("parse transactions");
-    assert!(tx.len() > 5, "expected >5 transactions");
+    app1_ref.assert_commands(&[
+        "events count >= 12",
+        "events event_type UPDATED count > 0",
+        "contacts count 1",
+        "contact 0 name \"Updated Contact 1\"",
+        "transactions count > 5",
+    ]).expect("assert_commands");
 }
 
 /// All three apps create contacts and transactions; after sync all see the same set.
@@ -337,16 +318,11 @@ fn test_basic_concurrent_creates() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    assert!(events.len() >= 12, "at least 12 events; got {}", events.len());
-
-    let contacts_json = app1_ref.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse contacts");
-    assert_eq!(contacts.len(), 3, "all 3 contacts; got {:?}", contacts);
-    let tx_json = app1_ref.get_transactions().expect("get_transactions");
-    let tx: Vec<serde_json::Value> = serde_json::from_str(&tx_json).expect("parse transactions");
-    assert!(tx.len() > 5);
+    app1_ref.assert_commands(&[
+        "events count >= 12",
+        "contacts count 3",
+        "transactions count > 5",
+    ]).expect("assert_commands");
 }
 
 /// Updates from different apps propagate; final state has many UPDATED events.
@@ -381,11 +357,10 @@ fn test_basic_update_propagation() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    assert!(events.len() >= 18, "at least 18 events; got {}", events.len());
-    let update_count = events.iter().filter(|e| e["event_type"].as_str() == Some("UPDATED")).count();
-    assert!(update_count >= 7, "at least 7 UPDATED events; got {}", update_count);
+    app1_ref.assert_commands(&[
+        "events count >= 18",
+        "events event_type UPDATED count >= 7",
+    ]).expect("assert_commands");
 }
 
 /// Deletes from different apps propagate; contact is removed from final state.
@@ -419,14 +394,10 @@ fn test_basic_delete_propagation() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    // 1 contact + up to 12 tx creates + deletes; full pull/merge can yield 14+ events
-    assert!(events.len() >= 14, "at least 14 events; got {}", events.len());
-    let contacts_json = app1_ref.get_contacts().expect("get_contacts");
-    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse contacts");
-    let contact_removed = !contacts.iter().any(|c| c["name"].as_str() == Some("Contact to Delete"));
-    assert!(contact_removed, "contact should be removed; got {:?}", contacts);
+    app1_ref.assert_commands(&[
+        "events count >= 14",
+        "contact name \"Contact to Delete\" removed",
+    ]).expect("assert_commands");
 }
 
 // ---------- Comprehensive Event Scenarios (ported from Flutter comprehensive_event_scenarios.dart) ----------
@@ -460,14 +431,11 @@ fn test_comprehensive_contact_event_types() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    let contact_created = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact") && e["event_type"].as_str() == Some("CREATED")).count();
-    let contact_updated = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact") && e["event_type"].as_str() == Some("UPDATED")).count();
-    let contact_deleted = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact") && e["event_type"].as_str() == Some("DELETED")).count();
-    assert_eq!(contact_created, 3, "3 contact CREATED");
-    assert_eq!(contact_updated, 2, "2 contact UPDATED");
-    assert_eq!(contact_deleted, 1, "1 contact DELETED");
+    app1_ref.assert_commands(&[
+        "events aggregate_type contact event_type CREATED count 3",
+        "events aggregate_type contact event_type UPDATED count 2",
+        "events aggregate_type contact event_type DELETED count 1",
+    ]).expect("assert_commands");
 }
 
 /// Transaction event types: CREATED, UPDATED, DELETED (or UNDO).
@@ -502,13 +470,10 @@ fn test_comprehensive_transaction_event_types() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    let tx_created = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("transaction") && e["event_type"].as_str() == Some("CREATED")).count();
-    let tx_updated = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("transaction") && e["event_type"].as_str() == Some("UPDATED")).count();
-    assert!(tx_created >= 10, "many transaction CREATED");
-    assert!(tx_updated >= 4, "many transaction UPDATED");
-    // Server may use UNDO for recent deletes; DELETED/UNDO may not appear in synced event list
+    app1_ref.assert_commands(&[
+        "events aggregate_type transaction event_type CREATED count >= 10",
+        "events aggregate_type transaction event_type UPDATED count >= 4",
+    ]).expect("assert_commands");
 }
 
 /// Mixed operations: contacts and transactions from multiple apps; all event types present.
@@ -545,19 +510,15 @@ fn test_comprehensive_mixed_operations() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    let contact_events = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact")).count();
-    let transaction_events = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("transaction")).count();
-    assert!(contact_events > 2);
-    assert!(transaction_events > 15);
-    let contact_types: HashSet<_> = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact")).filter_map(|e| e["event_type"].as_str()).collect();
-    let tx_types: HashSet<_> = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("transaction")).filter_map(|e| e["event_type"].as_str()).collect();
-    assert!(contact_types.contains("CREATED"));
-    assert!(contact_types.contains("UPDATED"));
-    assert!(tx_types.contains("CREATED"));
-    assert!(tx_types.contains("UPDATED"));
-    assert!(tx_types.contains("DELETED") || tx_types.contains("UNDO"));
+    app1_ref.assert_commands(&[
+        "events aggregate_type contact count > 2",
+        "events aggregate_type transaction count > 15",
+        "events aggregate_type contact event_type CREATED count >= 1",
+        "events aggregate_type contact event_type UPDATED count >= 1",
+        "events aggregate_type transaction event_type CREATED count >= 1",
+        "events aggregate_type transaction event_type UPDATED count >= 1",
+        "events aggregate_type transaction event_type DELETED or UNDO count >= 1",
+    ]).expect("assert_commands");
 }
 
 /// Concurrent mixed operations across all three apps.
@@ -599,12 +560,10 @@ fn test_comprehensive_concurrent_mixed_operations() {
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    let contact_events = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact")).count();
-    let transaction_events = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("transaction")).count();
-    assert_eq!(contact_events, 3, "3 contact CREATED events");
-    assert!(transaction_events > 20, "many transaction events");
+    app1_ref.assert_commands(&[
+        "events aggregate_type contact count 3",
+        "events aggregate_type transaction count > 20",
+    ]).expect("assert_commands");
 }
 
 /// Full lifecycle: create, update, delete for both contacts and transactions.
@@ -643,21 +602,12 @@ fn test_comprehensive_full_lifecycle() {
     // In production, WS message triggers sync; in test we have no WS client so we trigger sync here after the wait.
     app1_ref.sync().expect("app1 sync (simulates WS notification)");
 
-    let events_json = app1_ref.get_events().expect("get_events");
-    let events: Vec<serde_json::Value> = serde_json::from_str(&events_json).expect("parse events");
-    let contact_created = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact") && e["event_type"].as_str() == Some("CREATED")).count();
-    let contact_updated = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact") && e["event_type"].as_str() == Some("UPDATED")).count();
-    let contact_deleted = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("contact") && e["event_type"].as_str() == Some("DELETED")).count();
-    let tx_created = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("transaction") && e["event_type"].as_str() == Some("CREATED")).count();
-    let tx_updated = events.iter().filter(|e| e["aggregate_type"].as_str() == Some("transaction") && e["event_type"].as_str() == Some("UPDATED")).count();
-    let tx_deleted_or_undo = events.iter().filter(|e| {
-        e["aggregate_type"].as_str() == Some("transaction") && (e["event_type"].as_str() == Some("DELETED") || e["event_type"].as_str() == Some("UNDO"))
-    }).count();
-    assert_eq!(contact_created, 2);
-    assert_eq!(contact_updated, 1);
-    assert_eq!(contact_deleted, 1);
-    assert!(tx_created >= 10);
-    assert!(tx_updated > 2);
-    // Server may emit UNDO for recent deletes; at least one delete-like event expected
-    assert!(tx_deleted_or_undo >= 1, "expected at least 1 tx DELETED/UNDO; got {}", tx_deleted_or_undo);
+    app1_ref.assert_commands(&[
+        "events aggregate_type contact event_type CREATED count 2",
+        "events aggregate_type contact event_type UPDATED count 1",
+        "events aggregate_type contact event_type DELETED count 1",
+        "events aggregate_type transaction event_type CREATED count >= 10",
+        "events aggregate_type transaction event_type UPDATED count > 2",
+        "events aggregate_type transaction event_type DELETED or UNDO count >= 1",
+    ]).expect("assert_commands");
 }
