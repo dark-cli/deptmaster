@@ -1,9 +1,18 @@
 //! Group-group permission resolution (Discord/Telegram style).
 //! Owner/admin bypass; else resolve user groups x contact groups -> matrix -> allowed actions.
 
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::collections::HashSet;
 use uuid::Uuid;
+
+/// Precomputed read permissions for sync: one batch of queries, then filter events in memory.
+#[derive(Clone)]
+pub struct SyncReadContext {
+    /// User can read all transactions (wallet-level transaction:read via all_contacts).
+    pub has_transaction_read: bool,
+    /// None = can read all contacts; Some(set) = can only read these contact ids.
+    pub contact_ids_allowed: Option<HashSet<Uuid>>,
+}
 
 /// If wallet role is owner or admin, user has all actions. Otherwise check matrix.
 pub async fn can_perform(
@@ -120,6 +129,87 @@ async fn resolve_contact_groups_for_resource(
     }
 
     Ok(group_ids)
+}
+
+/// Compute read context for sync in one batch (avoids N per-event permission queries).
+pub async fn sync_read_context(
+    pool: &PgPool,
+    wallet_id: Uuid,
+    user_id: Uuid,
+    user_role: &str,
+) -> Result<SyncReadContext, sqlx::Error> {
+    if user_role == "owner" || user_role == "admin" {
+        return Ok(SyncReadContext {
+            has_transaction_read: true,
+            contact_ids_allowed: None,
+        });
+    }
+    let user_group_ids = resolve_user_groups(pool, wallet_id, user_id).await?;
+    let all_contacts_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
+    )
+    .bind(wallet_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if user_group_ids.is_empty() {
+        return Ok(SyncReadContext {
+            has_transaction_read: false,
+            contact_ids_allowed: Some(HashSet::new()),
+        });
+    }
+
+    // One query: which contact groups grant contact:read or transaction:read for this user's groups
+    let rows = sqlx::query(
+        r#"
+        SELECT m.contact_group_id, pa.name
+        FROM group_permission_matrix m
+        JOIN permission_actions pa ON pa.id = m.permission_action_id
+        WHERE m.user_group_id = ANY($1)
+          AND pa.name IN ('contact:read', 'transaction:read')
+        "#,
+    )
+    .bind(&user_group_ids)
+    .fetch_all(pool)
+    .await?;
+
+    let mut contact_read_groups = HashSet::new();
+    let mut transaction_read_groups = HashSet::new();
+    for row in &rows {
+        let cg_id: Uuid = row.get("contact_group_id");
+        let name: String = row.get("name");
+        if name == "contact:read" {
+            contact_read_groups.insert(cg_id);
+        } else if name == "transaction:read" {
+            transaction_read_groups.insert(cg_id);
+        }
+    }
+
+    let has_transaction_read = all_contacts_id
+        .map(|id| transaction_read_groups.contains(&id))
+        .unwrap_or(false);
+
+    let contact_ids_allowed = if all_contacts_id
+        .map(|id| contact_read_groups.contains(&id))
+        .unwrap_or(false)
+    {
+        None
+    } else if contact_read_groups.is_empty() {
+        Some(HashSet::new())
+    } else {
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT contact_id FROM contact_group_members WHERE contact_group_id = ANY($1)",
+        )
+        .bind(contact_read_groups.into_iter().collect::<Vec<_>>())
+        .fetch_all(pool)
+        .await?;
+        Some(ids.into_iter().collect())
+    };
+
+    Ok(SyncReadContext {
+        has_transaction_read,
+        contact_ids_allowed,
+    })
 }
 
 /// Return 403 body with DEBITUM_INSUFFICIENT_WALLET_PERMISSION for use in handlers.

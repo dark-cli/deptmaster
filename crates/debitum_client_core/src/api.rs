@@ -480,6 +480,11 @@ pub fn list_permission_actions_api(wallet_id: &str) -> Result<String, String> {
     wallet_management_get(wallet_id, "/permission-actions")
 }
 
+/// GET /api/wallets/:wallet_id/me/permissions - Returns {"actions": ["contact:read", ...]}
+pub fn get_my_permissions_api(wallet_id: &str) -> Result<String, String> {
+    wallet_management_get(wallet_id, "/me/permissions")
+}
+
 pub fn get_permission_matrix_api(wallet_id: &str) -> Result<String, String> {
     wallet_management_get(wallet_id, "/permission-matrix")
 }

@@ -24,6 +24,11 @@ Future<void> configRemove({required String key}) =>
 
 Future<void> clearAll() => RustLib.instance.api.crateStorageClearAll();
 
+/// Clear all local data for a specific wallet (events, state, last_sync_timestamp).
+/// Use when read permissions are revoked so client can resync from server.
+Future<void> clearWallet({required String walletId}) =>
+    RustLib.instance.api.crateStorageClearWallet(walletId: walletId);
+
 Future<void> eventsInsert({required StoredEvent e}) =>
     RustLib.instance.api.crateStorageEventsInsert(e: e);
 
@@ -45,6 +50,11 @@ Future<void> eventsMarkSynced({required List<String> ids}) =>
 /// Delete all unsynced (pending) events for a wallet.
 Future<BigInt> eventsDeleteUnsynced({required String walletId}) =>
     RustLib.instance.api.crateStorageEventsDeleteUnsynced(walletId: walletId);
+
+/// Delete all events for a wallet. Used on full pull so local state is replaced by server response (permission-filtered).
+Future<void> eventsDeleteAllForWallet({required String walletId}) =>
+    RustLib.instance.api
+        .crateStorageEventsDeleteAllForWallet(walletId: walletId);
 
 Future<PlatformInt64> eventsCount({required String walletId}) =>
     RustLib.instance.api.crateStorageEventsCount(walletId: walletId);

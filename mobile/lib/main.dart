@@ -103,7 +103,8 @@ void main() async {
     runZoned(() {
       Api.connectRealtime().catchError((_) {});
     }, onError: (_, __) {});
-    Api.syncWhenOnline().catchError((_) {});
+    // Temporarily disabled: auto background sync when online.
+    // Api.syncWhenOnline().catchError((_) {});
   }
 
   if (kIsWeb && isBackendConfigured) {

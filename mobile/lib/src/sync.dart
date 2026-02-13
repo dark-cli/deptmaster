@@ -6,14 +6,17 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `last_sync_key`
+// These functions are ignored because they are not marked as `pub`: `check_read_revoked_and_resync`, `last_sync_key`, `perms_cache_key`
 
 /// Push unsynced events to server, mark accepted as synced.
 Future<void> pushUnsynced() => RustLib.instance.api.crateSyncPushUnsynced();
 
 /// Pull server events (since last sync for this wallet), merge into local, rebuild state.
 /// When we have zero local events for this wallet, do a full pull (no since) so server data loads.
+/// On full pull (since=None), we replace local events with the server response so that permission
+/// filtering takes effect: the client ends up with exactly the events the server allows.
 Future<void> pullAndMerge() => RustLib.instance.api.crateSyncPullAndMerge();
 
-/// Full sync: push then pull.
+/// Full sync: push then pull. After pull, if read permission was revoked (contact:read or
+/// transaction:read removed), clear wallet data and full resync so local state matches server.
 Future<void> fullSync() => RustLib.instance.api.crateSyncFullSync();

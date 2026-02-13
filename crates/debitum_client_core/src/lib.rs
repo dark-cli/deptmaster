@@ -64,7 +64,13 @@ impl Drop for SyncGuard {
     }
 }
 
+/// Set to true to re-enable the background sync loop (interval ~1s).
+const BACKGROUND_SYNC_LOOP_ENABLED: bool = false;
+
 fn start_sync_loop_if_ready() {
+    if !BACKGROUND_SYNC_LOOP_ENABLED {
+        return;
+    }
     if !STORAGE_READY.load(Ordering::Relaxed) {
         return;
     }
@@ -391,6 +397,14 @@ pub fn remove_wallet_contact_group_member(wallet_id: String, group_id: String, c
 
 pub fn list_wallet_permission_actions(wallet_id: String) -> Result<String, String> {
     api::list_permission_actions_api(&wallet_id)
+}
+
+pub fn get_my_permissions(wallet_id: String) -> Result<String, String> {
+    api::get_my_permissions_api(&wallet_id)
+}
+
+pub fn clear_wallet_data(wallet_id: String) -> Result<(), String> {
+    storage::clear_wallet(&wallet_id)
 }
 
 pub fn get_wallet_permission_matrix(wallet_id: String) -> Result<String, String> {

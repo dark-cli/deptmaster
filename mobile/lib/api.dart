@@ -1,6 +1,9 @@
 // Single API to Rust. UI calls only this. No other service layers.
 // Initialize: Api.init() then Api.initStorage(documentsPath).
 //
+// INVARIANT: All business logic, behavior, and bug fixes live in Rust — never in Dart.
+// This file is a thin FFI wrapper. Do not add logic here.
+//
 // Connection state (online/offline) is determined entirely in Flutter by the WebSocket:
 // - Connected => online. Not connected => offline.
 // - When offline, we retry connecting every [Api.reconnectInterval].

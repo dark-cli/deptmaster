@@ -330,6 +330,7 @@ pub async fn create_contact(
         "contact_created",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "contact");
 
     Ok((
         StatusCode::CREATED,
@@ -556,6 +557,7 @@ pub async fn update_contact(
         "contact_updated",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "contact");
 
     Ok((
         StatusCode::OK,
@@ -759,6 +761,7 @@ pub async fn delete_contact(
         "contact_deleted",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "contact");
 
     Ok((
         StatusCode::OK,

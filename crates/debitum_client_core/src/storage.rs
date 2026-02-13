@@ -101,6 +101,18 @@ pub fn clear_all() -> Result<(), String> {
     })
 }
 
+/// Clear all local data for a specific wallet (events, state, last_sync_timestamp).
+/// Use when read permissions are revoked so client can resync from server.
+pub fn clear_wallet(wallet_id: &str) -> Result<(), String> {
+    let key = format!("last_sync_timestamp_{}", wallet_id);
+    with_db(|conn| {
+        conn.execute("DELETE FROM events WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM state WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM config WHERE key = ?1", params![key])?;
+        Ok(())
+    })
+}
+
 // Events
 #[derive(Clone, Debug)]
 pub struct StoredEvent {
@@ -217,6 +229,14 @@ pub fn events_delete_unsynced(wallet_id: &str) -> Result<u64, String> {
             params![wallet_id],
         )?;
         Ok(affected as u64)
+    })
+}
+
+/// Delete all events for a wallet. Used on full pull so local state is replaced by server response (permission-filtered).
+pub fn events_delete_all_for_wallet(wallet_id: &str) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM events WHERE wallet_id = ?1", params![wallet_id])?;
+        Ok(())
     })
 }
 

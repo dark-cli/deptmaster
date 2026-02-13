@@ -8,7 +8,7 @@ use sqlx::Row;
 use crate::AppState;
 use crate::websocket;
 use crate::services::projection_snapshot_service;
-use crate::services::permission_service::{self, ResourceType};
+use crate::services::permission_service::{self, ResourceType, SyncReadContext};
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use sha2::{Sha256, Digest};
@@ -38,6 +38,70 @@ fn map_event_to_permission_action(
     };
 
     Some((action.to_string(), resource_type, resource_id))
+}
+
+/// Returns true if the user is allowed to read this event using precomputed SyncReadContext (no DB).
+fn event_read_allowed(
+    ctx: &SyncReadContext,
+    aggregate_type: &str,
+    aggregate_id: uuid::Uuid,
+    event_data: &serde_json::Value,
+    transaction_contact_map: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
+) -> bool {
+    if aggregate_type == "permission" {
+        return true;
+    }
+    if aggregate_type == "contact" {
+        return match &ctx.contact_ids_allowed {
+            None => true,
+            Some(set) => set.contains(&aggregate_id),
+        };
+    }
+    if aggregate_type == "transaction" {
+        if !ctx.has_transaction_read {
+            return false;
+        }
+        let contact_id = event_data
+            .get("contact_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok())
+            .or_else(|| transaction_contact_map.get(&aggregate_id).copied());
+        let Some(contact_id) = contact_id else {
+            return false;
+        };
+        return match &ctx.contact_ids_allowed {
+            None => true,
+            Some(set) => set.contains(&contact_id),
+        };
+    }
+    false
+}
+
+/// Build map transaction_id -> contact_id for transaction events that don't have contact_id in event_data.
+async fn transaction_contact_ids_for_events(
+    state: &AppState,
+    wallet_id: uuid::Uuid,
+    transaction_ids: &[uuid::Uuid],
+) -> Result<std::collections::HashMap<uuid::Uuid, uuid::Uuid>, sqlx::Error> {
+    if transaction_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let rows = sqlx::query(
+        "SELECT id, contact_id FROM transactions_projection WHERE wallet_id = $1 AND id = ANY($2)",
+    )
+    .bind(wallet_id)
+    .bind(transaction_ids)
+    .fetch_all(&*state.db_pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| {
+            (
+                r.get::<uuid::Uuid, _>("id"),
+                r.get::<uuid::Uuid, _>("contact_id"),
+            )
+        })
+        .collect())
 }
 
 /// Calculate total debt (sum of all contact balances) at current time for a wallet
@@ -72,31 +136,16 @@ pub struct SyncHashResponse {
     pub last_event_timestamp: Option<chrono::NaiveDateTime>,
 }
 
-/// Get hash of all events for sync comparison
+/// Get hash of all events for sync comparison. Hash is computed only over events the user is allowed to read (same filter as get_sync_events).
 pub async fn get_sync_hash(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
     Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<SyncHashResponse>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    let can = permission_service::can_perform(
-        &*state.db_pool,
-        wallet_id,
-        auth_user.user_id,
-        &wallet_context.user_role,
-        "events:read",
-        ResourceType::Events,
-        None,
-    )
-    .await
-    .map_err(|_| permission_service::insufficient_permission_response())?;
-    if !can {
-        return Err(permission_service::insufficient_permission_response());
-    }
-    // Get all events for this wallet ordered by timestamp
     let events = sqlx::query(
         r#"
-        SELECT event_id, aggregate_type, aggregate_id, event_type, created_at
+        SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at
         FROM events
         WHERE wallet_id = $1
         ORDER BY created_at ASC
@@ -113,28 +162,83 @@ pub async fn get_sync_hash(
         )
     })?;
 
-    // Calculate hash from event IDs and timestamps
-    let mut hasher = Sha256::new();
+    let transaction_ids_missing_contact: Vec<uuid::Uuid> = events
+        .iter()
+        .filter(|row| row.get::<String, _>("aggregate_type") == "transaction")
+        .filter(|row| {
+            let event_data: serde_json::Value = row.get("event_data");
+            !event_data.get("contact_id").and_then(|v| v.as_str()).is_some()
+        })
+        .map(|row| row.get::<uuid::Uuid, _>("aggregate_id"))
+        .collect();
+    let transaction_contact_map = transaction_contact_ids_for_events(
+        &state,
+        wallet_id,
+        &transaction_ids_missing_contact,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("transaction_contact_ids_for_events: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch events"})),
+        )
+    })?;
+
+    let read_ctx = permission_service::sync_read_context(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("sync_read_context: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    let mut filtered_event_ids_with_timestamps: Vec<(uuid::Uuid, chrono::NaiveDateTime)> = Vec::new();
     for row in &events {
-        let event_id: uuid::Uuid = row.get("event_id");
-        let created_at: chrono::NaiveDateTime = row.get("created_at");
+        let aggregate_type: String = row.get("aggregate_type");
+        let aggregate_id: uuid::Uuid = row.get("aggregate_id");
+        let event_data: serde_json::Value = row.get("event_data");
+        if event_read_allowed(
+            &read_ctx,
+            &aggregate_type,
+            aggregate_id,
+            &event_data,
+            &transaction_contact_map,
+        ) {
+            let event_id: uuid::Uuid = row.get("event_id");
+            let created_at: chrono::NaiveDateTime = row.get("created_at");
+            filtered_event_ids_with_timestamps.push((event_id, created_at));
+        }
+    }
+
+    let mut hasher = Sha256::new();
+    for (event_id, created_at) in &filtered_event_ids_with_timestamps {
         hasher.update(event_id.to_string().as_bytes());
         hasher.update(created_at.to_string().as_bytes());
     }
     let hash = format!("{:x}", hasher.finalize());
 
-    let last_event_timestamp = events.last().map(|row| row.get::<chrono::NaiveDateTime, _>("created_at"));
+    let last_event_timestamp = filtered_event_ids_with_timestamps
+        .last()
+        .map(|(_, created_at)| *created_at);
 
     Ok(Json(SyncHashResponse {
         hash,
-        event_count: events.len() as i64,
+        event_count: filtered_event_ids_with_timestamps.len() as i64,
         last_event_timestamp,
     }))
 }
 
 #[derive(Deserialize)]
 pub struct SyncEventsQuery {
-    since: Option<String>, // ISO timestamp
+    pub since: Option<String>, // ISO timestamp
 }
 
 #[derive(Serialize)]
@@ -148,7 +252,7 @@ pub struct SyncEvent {
     pub version: i32,
 }
 
-/// Get events since a timestamp
+/// Get events since a timestamp. Only returns events the user is allowed to read (contact:read / transaction:read).
 pub async fn get_sync_events(
     Query(params): Query<SyncEventsQuery>,
     State(state): State<AppState>,
@@ -156,20 +260,6 @@ pub async fn get_sync_events(
     Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<SyncEvent>>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    let can = permission_service::can_perform(
-        &*state.db_pool,
-        wallet_id,
-        auth_user.user_id,
-        &wallet_context.user_role,
-        "events:read",
-        ResourceType::Events,
-        None,
-    )
-    .await
-    .map_err(|_| permission_service::insufficient_permission_response())?;
-    if !can {
-        return Err(permission_service::insufficient_permission_response());
-    }
     let since_timestamp = params.since.and_then(|s| {
         chrono::DateTime::parse_from_rfc3339(&s)
             .ok()
@@ -210,23 +300,71 @@ pub async fn get_sync_events(
             )
         })?;
 
-    let sync_events: Vec<SyncEvent> = events
+    let transaction_ids_missing_contact: Vec<uuid::Uuid> = events
         .iter()
-        .map(|row| {
-            SyncEvent {
-                id: row.get::<uuid::Uuid, _>("event_id").to_string(),
-                aggregate_type: row.get("aggregate_type"),
-                aggregate_id: row.get::<uuid::Uuid, _>("aggregate_id").to_string(),
-                event_type: row.get("event_type"),
-                event_data: row.get("event_data"),
-                timestamp: {
-                    let naive_dt: chrono::NaiveDateTime = row.get("created_at");
-                    chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive_dt, chrono::Utc).to_rfc3339()
-                },
-                version: row.get("event_version"),
-            }
+        .filter(|row| row.get::<String, _>("aggregate_type") == "transaction")
+        .filter(|row| {
+            let event_data: serde_json::Value = row.get("event_data");
+            !event_data.get("contact_id").and_then(|v| v.as_str()).is_some()
         })
+        .map(|row| row.get::<uuid::Uuid, _>("aggregate_id"))
         .collect();
+    let transaction_contact_map = transaction_contact_ids_for_events(
+        &state,
+        wallet_id,
+        &transaction_ids_missing_contact,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("transaction_contact_ids_for_events: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch events"})),
+        )
+    })?;
+
+    let read_ctx = permission_service::sync_read_context(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("sync_read_context: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    let mut sync_events = Vec::with_capacity(events.len());
+    for row in &events {
+        let aggregate_type: String = row.get("aggregate_type");
+        let aggregate_id: uuid::Uuid = row.get("aggregate_id");
+        let event_data: serde_json::Value = row.get("event_data");
+        if !event_read_allowed(
+            &read_ctx,
+            &aggregate_type,
+            aggregate_id,
+            &event_data,
+            &transaction_contact_map,
+        ) {
+            continue;
+        }
+        sync_events.push(SyncEvent {
+            id: row.get::<uuid::Uuid, _>("event_id").to_string(),
+            aggregate_type,
+            aggregate_id: aggregate_id.to_string(),
+            event_type: row.get("event_type"),
+            event_data,
+            timestamp: {
+                let naive_dt: chrono::NaiveDateTime = row.get("created_at");
+                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive_dt, chrono::Utc).to_rfc3339()
+            },
+            version: row.get("event_version"),
+        });
+    }
 
     Ok(Json(sync_events))
 }
@@ -278,7 +416,9 @@ pub(crate) async fn insert_permission_event_and_apply(
         timestamp: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(created_at, chrono::Utc).to_rfc3339(),
         version: 1,
     };
-    apply_single_event_to_projections(state, &event_req, aggregate_id, user_id, wallet_id, created_at).await
+    apply_single_event_to_projections(state, &event_req, aggregate_id, user_id, wallet_id, created_at).await?;
+
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -710,18 +850,7 @@ pub async fn post_sync_events(
         }
     }
 
-    // Broadcast WebSocket message when events are synced (so other clients get notified immediately)
-    if !accepted.is_empty() {
-        websocket::broadcast_wallet_change(
-            &state.broadcast_tx,
-            wallet_id,
-            "events_synced",
-            &serde_json::json!({
-                "accepted_count": accepted.len(),
-                "conflicts_count": conflicts.len()
-            }).to_string(),
-        );
-    }
+    // Each accepted event already triggered broadcast_events_synced in apply_single_event_to_projections.
 
     Ok(Json(SyncEventsResponse {
         accepted,
@@ -1925,7 +2054,10 @@ pub(crate) async fn apply_single_event_to_projections(
         }
         _ => {}
     }
-    
+
+    // Canonical refresh so clients run manualSync (same for all event types, current and future).
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, &event.aggregate_type);
+
     Ok(())
 }
 

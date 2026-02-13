@@ -339,6 +339,7 @@ pub async fn create_transaction(
         "transaction_created",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "transaction");
 
     Ok((
         StatusCode::CREATED,
@@ -638,6 +639,7 @@ pub async fn update_transaction(
         "transaction_updated",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "transaction");
 
     Ok((
         StatusCode::OK,
@@ -866,6 +868,7 @@ pub async fn delete_transaction(
         "transaction_deleted",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "transaction");
 
     Ok((
         StatusCode::OK,

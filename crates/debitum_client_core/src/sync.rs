@@ -5,8 +5,68 @@ use crate::rust_log;
 use crate::state_builder;
 use crate::storage;
 
+const READ_ACTIONS: &[&str] = &["contact:read", "transaction:read"];
+fn perms_cache_key(wallet_id: &str) -> String {
+    format!("perms_cache_{}", wallet_id)
+}
+
 fn last_sync_key(wallet_id: &str) -> String {
     format!("last_sync_timestamp_{}", wallet_id)
+}
+
+/// If the server has revoked or granted contact:read / transaction:read since last sync, clear
+/// local wallet data and full resync so the client sees exactly what they are allowed to see
+/// (revoke: less data; grant: more data without needing logout/login).
+fn check_read_revoked_and_resync(wallet_id: &str) -> Result<(), String> {
+    let current_json = api::get_my_permissions_api(wallet_id)?;
+    let current: serde_json::Value = serde_json::from_str(&current_json).map_err(|e| e.to_string())?;
+    let actions = current
+        .get("actions")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let current_set: std::collections::HashSet<&str> = actions.iter().copied().collect();
+
+    let cached_json = storage::config_get(&perms_cache_key(wallet_id))?;
+    storage::config_set(&perms_cache_key(wallet_id), &current_json)?;
+
+    let cached = match cached_json {
+        Some(s) => s,
+        None => return Ok(()),
+    };
+    let cached_val: serde_json::Value = match serde_json::from_str(&cached) {
+        Ok(v) => v,
+        Err(_) => return Ok(()),
+    };
+    let cached_actions = cached_val
+        .get("actions")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let cached_set: std::collections::HashSet<&str> = cached_actions.iter().copied().collect();
+
+    let read_revoked = READ_ACTIONS.iter().any(|action| {
+        cached_set.contains(action) && !current_set.contains(*action)
+    });
+    let read_granted = READ_ACTIONS.iter().any(|action| {
+        !cached_set.contains(action) && current_set.contains(*action)
+    });
+    if read_revoked {
+        rust_log!(
+            "[debitum_rs] read permission revoked for wallet {} — clearing local data and resyncing",
+            wallet_id
+        );
+        storage::clear_wallet(wallet_id)?;
+        pull_and_merge()?;
+    } else if read_granted {
+        rust_log!(
+            "[debitum_rs] read permission granted for wallet {} — clearing local data and resyncing so new data appears",
+            wallet_id
+        );
+        storage::clear_wallet(wallet_id)?;
+        pull_and_merge()?;
+    }
+    Ok(())
 }
 
 /// Push unsynced events to server, mark accepted as synced.
@@ -72,6 +132,8 @@ pub fn push_unsynced() -> Result<(), String> {
 
 /// Pull server events (since last sync for this wallet), merge into local, rebuild state.
 /// When we have zero local events for this wallet, do a full pull (no since) so server data loads.
+/// On full pull (since=None), we replace local events with the server response so that permission
+/// filtering takes effect: the client ends up with exactly the events the server allows.
 pub fn pull_and_merge() -> Result<(), String> {
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
@@ -82,12 +144,19 @@ pub fn pull_and_merge() -> Result<(), String> {
     } else {
         storage::config_get(&last_sync_key(&wallet_id))?
     };
+    let is_full_pull = since.is_none();
     if since.as_ref().is_some() {
         rust_log!("[debitum_rs] pull_and_merge: incremental pull since={:?}", since);
     }
     rust_log!("[debitum_rs] pull_and_merge: requesting server events");
     let server_events = api::get_sync_events(since.clone())?;
     rust_log!("[debitum_rs] pull_and_merge: server returned {} events for wallet {}", server_events.len(), wallet_id);
+
+    if is_full_pull {
+        storage::events_delete_all_for_wallet(&wallet_id)?;
+        rust_log!("[debitum_rs] pull_and_merge: full pull — cleared local events for wallet {}", wallet_id);
+    }
+
     for ev in &server_events {
         let id = ev.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let aggregate_type = ev.get("aggregate_type").and_then(|v| v.as_str()).unwrap_or("");
@@ -121,9 +190,15 @@ pub fn pull_and_merge() -> Result<(), String> {
     Ok(())
 }
 
-/// Full sync: push then pull.
+/// Full sync: push then pull. After pull, if read permission was revoked (contact:read or
+/// transaction:read removed), clear wallet data and full resync so local state matches server.
 pub fn full_sync() -> Result<(), String> {
     push_unsynced()?;
     pull_and_merge()?;
+    if let Some(wallet_id) = storage::config_get("current_wallet_id")? {
+        if !wallet_id.is_empty() {
+            let _ = check_read_revoked_and_resync(&wallet_id);
+        }
+    }
     Ok(())
 }

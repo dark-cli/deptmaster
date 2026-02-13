@@ -178,3 +178,12 @@ pub fn broadcast_wallet_change(channel: &BroadcastChannel, wallet_id: Uuid, even
     );
     let _ = channel.send((wallet_id, message));
 }
+
+/// Canonical refresh notification for any event (contact, transaction, permission, or future types).
+/// Call this whenever an event is written so clients run manualSync and see up-to-date data.
+/// - Events that go through `apply_single_event_to_projections` get this automatically.
+/// - For handlers that write events directly (e.g. contact/transaction API), call this after the write.
+pub fn broadcast_events_synced(channel: &BroadcastChannel, wallet_id: Uuid, source: &str) {
+    let data = serde_json::json!({ "source": source }).to_string();
+    broadcast_wallet_change(channel, wallet_id, "events_synced", &data);
+}

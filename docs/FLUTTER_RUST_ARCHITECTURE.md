@@ -1,5 +1,9 @@
 # Flutter UI + Rust Logic Architecture
 
+## Invariant: All Logic in Rust
+
+**All business logic, behavior, and bug fixes live in Rust — never in Dart.** The Dart `api.dart` is a thin FFI wrapper. Do not add logic there.
+
 ## Goal
 
 - **Flutter/Dart**: UI only — user input/output, layout, navigation. No business logic, no direct storage/sync/auth/WebSocket.

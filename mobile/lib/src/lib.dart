@@ -264,6 +264,12 @@ Future<void> removeWalletContactGroupMember(
 Future<String> listWalletPermissionActions({required String walletId}) =>
     RustLib.instance.api.crateListWalletPermissionActions(walletId: walletId);
 
+Future<String> getMyPermissions({required String walletId}) =>
+    RustLib.instance.api.crateGetMyPermissions(walletId: walletId);
+
+Future<void> clearWalletData({required String walletId}) =>
+    RustLib.instance.api.crateClearWalletData(walletId: walletId);
+
 Future<String> getWalletPermissionMatrix({required String walletId}) =>
     RustLib.instance.api.crateGetWalletPermissionMatrix(walletId: walletId);
 

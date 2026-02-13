@@ -465,7 +465,7 @@ class _WalletSelectionTileState extends ConsumerState<_WalletSelectionTile> {
             await Api.manualSync();
           } catch (_) {}
         }
-        if (mounted) Navigator.pop(context);
+        if (mounted) Scaffold.maybeOf(context)?.closeDrawer();
       },
     );
   }

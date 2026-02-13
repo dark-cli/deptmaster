@@ -149,6 +149,10 @@ Future<void> removeContactGroupMemberApi(
 Future<String> listPermissionActionsApi({required String walletId}) =>
     RustLib.instance.api.crateApiListPermissionActionsApi(walletId: walletId);
 
+/// GET /api/wallets/:wallet_id/me/permissions - Returns {"actions": ["contact:read", ...]}
+Future<String> getMyPermissionsApi({required String walletId}) =>
+    RustLib.instance.api.crateApiGetMyPermissionsApi(walletId: walletId);
+
 Future<String> getPermissionMatrixApi({required String walletId}) =>
     RustLib.instance.api.crateApiGetPermissionMatrixApi(walletId: walletId);
 

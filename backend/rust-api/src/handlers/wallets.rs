@@ -1128,6 +1128,47 @@ pub async fn remove_user_from_wallet(
         )
     })?;
 
+    // Owner may remove themselves only if there is at least one other owner.
+    if auth_user.user_id == user_uuid {
+        let role: Option<String> = sqlx::query_scalar(
+            "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_uuid)
+        .bind(user_uuid)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("remove_user_from_wallet role check: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
+            )
+        })?;
+        if role.as_deref() == Some("owner") {
+            let owner_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1 AND role = 'owner'",
+            )
+            .bind(wallet_uuid)
+            .fetch_one(&*state.db_pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("remove_user_from_wallet owner count: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
+                )
+            })?;
+            if owner_count <= 1 {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "Cannot remove the only owner from the wallet. Add another owner first."
+                    })),
+                ));
+            }
+        }
+    }
+
     // Emit event and apply to projection
     let event_data = serde_json::json!({ "user_id": user_id });
     sync::insert_permission_event_and_apply(

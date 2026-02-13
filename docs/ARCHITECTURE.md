@@ -13,6 +13,8 @@ Debt Tracker is a debt management application with:
 - **Database**: PostgreSQL (events and projections)
 - **Real-time**: WebSocket with broadcast channels
 
+**Client invariant:** All business logic, behavior, and bug fixes live in Rust — never in Dart. The Dart API layer is a thin FFI wrapper.
+
 ---
 
 ## Application Flow

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../providers/wallet_data_providers.dart';
 import 'backend_setup_screen.dart';
 import 'sign_up_screen.dart';
 import '../widgets/gradient_background.dart';
@@ -69,6 +70,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
       
       Api.connectRealtime().catchError((_) {});
+      if (!mounted) return;
+      // Force data providers to refetch so home screen shows synced data (e.g. after permission change).
+      ref.invalidate(activeWalletIdProvider);
+      ref.invalidate(contactsProvider);
+      ref.invalidate(transactionsProvider);
+      ref.invalidate(eventsProvider);
+      ref.invalidate(walletsProvider);
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e, stackTrace) {
