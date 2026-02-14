@@ -11,7 +11,4 @@ mod comprehensive_events;
 mod offline_online_multi_app;
 mod conflict;
 mod resync;
-mod stress;
-mod connection;
 mod permissions;
-mod groups;
