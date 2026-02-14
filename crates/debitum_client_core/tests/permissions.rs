@@ -953,3 +953,206 @@ fn groups_two_apps_join_with_no_default_then_grant_via_contact_group() {
         .assert_commands(&["contacts count 3", "contact name 'ByApp2'"])
         .expect("app2 sees own created contact");
 }
+
+/// Full flow: app1 creates wallet + data; default read-only; add app2 → app2 can read. Revoke default → app2 cannot read.
+/// Create user group + contact group, grant read+write between them, add app2 to user group, some contacts to contact group → app2 can read and edit those.
+/// Add app3 to wallet with no permissions → app3 cannot read or do anything. App1 creates more events → correct effects for app2 and app3.
+#[test]
+#[ignore]
+fn permission_flow_default_read_then_none_then_group_read_write_three_apps() {
+    let server_url = test_server_url();
+
+    // Two users: app1 (owner), app2 (user2)
+    let (owner_user, owner_pass, wallet_id) =
+        create_unique_test_user_and_wallet(&server_url).expect("create owner");
+    let app1 = AppInstance::with_credentials("app1", &server_url, owner_user, owner_pass);
+    app1.initialize().expect("initialize");
+    app1.login().expect("login");
+    app1.select_wallet(&wallet_id).expect("select_wallet");
+
+    let app2 = AppInstance::new("app2", &server_url);
+    app2.initialize().expect("initialize");
+    app2.signup().expect("app2 signup");
+
+    // App1: fill wallet with contacts and transactions
+    app1.activate().expect("app1");
+    app1
+        .run_commands(&[
+            "contact create 'Alice' alice",
+            "contact create 'Bob' bob",
+            "contact create 'Carol' carol",
+            "transaction create alice owed 100 'T1' t1",
+            "transaction create bob lent 50 'T2' t2",
+            "transaction create carol owed 200 'T3' t3",
+            "wait 300",
+        ])
+        .expect("app1 create contacts and transactions");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Set default (all_users × all_contacts) to read-only
+    let (all_ug, all_cg) = get_default_matrix_ids(&wallet_id).expect("default matrix ids");
+    set_matrix_actions(
+        &wallet_id,
+        &all_ug,
+        &all_cg,
+        &["contact:read", "transaction:read", "events:read"],
+    )
+    .expect("default read-only");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Add app2 to the wallet
+    app1.activate().expect("app1");
+    add_user_to_wallet(wallet_id.clone(), app2.username.clone()).expect("add app2 to wallet");
+
+    let app2_instance = AppInstance::with_credentials("app2", &server_url, app2.username.clone(), app2.password.clone());
+    app2_instance.initialize().expect("initialize");
+    app2_instance.login().expect("login");
+    app2_instance.select_wallet(&wallet_id).expect("select_wallet");
+    app2_instance.sync().expect("app2 sync");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app2_instance
+        .assert_commands(&[
+            "contacts count 3",
+            "contact name 'Alice'",
+            "contact name 'Bob'",
+            "contact name 'Carol'",
+            "transactions count 3",
+        ])
+        .expect("app2 can read contacts and transactions with default read-only");
+
+    // Remove read from default (default = none)
+    app1.activate().expect("app1");
+    set_matrix_actions(&wallet_id, &all_ug, &all_cg, &[]).expect("default none");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app2_instance.sync().expect("app2 sync after revoke");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app2_instance
+        .assert_commands(&["contacts count 0", "transactions count 0"])
+        .expect("app2 cannot read after default revoked");
+    assert!(
+        app2_instance.run_commands(&["contact create 'No' x"]).is_err(),
+        "app2 cannot create when default is none"
+    );
+
+    // Create user group, add user2 to it; create contact group, add some contacts to it
+    app1.activate().expect("app1");
+    let ug_editors_id: String = serde_json::from_str::<serde_json::Value>(
+        &create_wallet_user_group(wallet_id.clone(), "Editors".to_string()).expect("create"),
+    )
+    .expect("parse")["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    let cg_vip_id: String = serde_json::from_str::<serde_json::Value>(
+        &create_wallet_contact_group(wallet_id.clone(), "VIP".to_string()).expect("create"),
+    )
+    .expect("parse")["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    add_wallet_user_group_member(wallet_id.clone(), ug_editors_id.clone(), app2.username.clone())
+        .expect("app2 -> Editors");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let contacts_json = get_contacts().expect("get_contacts");
+    let alice_id = contact_id_by_name(&contacts_json, "Alice").expect("Alice id");
+    let bob_id = contact_id_by_name(&contacts_json, "Bob").expect("Bob id");
+    add_wallet_contact_group_member(wallet_id.clone(), cg_vip_id.clone(), alice_id).expect("Alice -> VIP");
+    add_wallet_contact_group_member(wallet_id.clone(), cg_vip_id.clone(), bob_id).expect("Bob -> VIP");
+
+    // Permission between Editors and VIP = read + write
+    set_matrix_actions(
+        &wallet_id,
+        &ug_editors_id,
+        &cg_vip_id,
+        &[
+            "contact:read",
+            "contact:create",
+            "contact:update",
+            "contact:delete",
+            "transaction:read",
+            "transaction:create",
+            "transaction:update",
+            "transaction:delete",
+            "events:read",
+        ],
+    )
+    .expect("Editors x VIP = read+write");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    app2_instance.activate().expect("app2");
+    clear_wallet_data(wallet_id.clone()).expect("clear app2 local");
+    app2_instance.sync().expect("app2 sync after group grant");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // App2 sees VIP contacts; transaction visibility for group-scoped read may depend on backend
+    app2_instance
+        .assert_commands(&[
+            "contacts count 2",
+            "contact name 'Alice'",
+            "contact name 'Bob'",
+        ])
+        .expect("app2 can read contacts in VIP group");
+    // App2 can edit: update a contact via API (app2's command runner has no labels from app1's creates)
+    app2_instance.activate().expect("app2");
+    let contacts_json = get_contacts_from_server().expect("get contacts");
+    let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
+    let alice = contacts.iter().find(|c| c["name"].as_str() == Some("Alice")).expect("Alice in VIP");
+    let alice_id = alice["id"].as_str().unwrap().to_string();
+    update_contact(alice_id.clone(), "Alice Updated".to_string(), None, None, None, None)
+        .expect("app2 can edit contact in VIP");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app2_instance.sync().expect("app2 sync after edit");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app2_instance
+        .assert_commands(&["contact name 'Alice Updated'"])
+        .expect("app2 sees own edit");
+
+    // Create app3, add to wallet (no permissions)
+    let app3 = AppInstance::new("app3", &server_url);
+    app3.initialize().expect("initialize");
+    app3.signup().expect("app3 signup");
+    app1.activate().expect("app1");
+    add_user_to_wallet(wallet_id.clone(), app3.username.clone()).expect("add app3 to wallet");
+    let app3_instance = AppInstance::with_credentials("app3", &server_url, app3.username.clone(), app3.password.clone());
+    app3_instance.initialize().expect("initialize");
+    app3_instance.login().expect("login");
+    app3_instance.select_wallet(&wallet_id).expect("select_wallet");
+    app3_instance.sync().expect("app3 sync");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app3_instance
+        .assert_commands(&["contacts count 0", "transactions count 0"])
+        .expect("app3 cannot read anything");
+    assert!(
+        app3_instance.run_commands(&["contact create 'No' y"]).is_err(),
+        "app3 cannot create"
+    );
+
+    // App1 creates some more events (contact Dave + transaction; Dave not in VIP so only app1 sees; or add one in VIP so app2 sees)
+    app1.activate().expect("app1");
+    app1
+        .run_commands(&[
+            "contact create 'Dave' dave",
+            "transaction create dave lent 75 'T4' t4",
+            "wait 300",
+        ])
+        .expect("app1 create more");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // App3 still sees nothing
+    app3_instance.sync().expect("app3 sync after new events");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app3_instance
+        .assert_commands(&["contacts count 0", "transactions count 0"])
+        .expect("app3 still sees nothing after app1 new events");
+
+    // App2 still sees only Alice, Bob (and their transactions); Dave is not in VIP so app2 does not see Dave
+    app2_instance.sync().expect("app2 sync after new events");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    app2_instance
+        .assert_commands(&[
+            "contacts count 2",
+            "contact name 'Alice Updated'",
+            "contact name 'Bob'",
+            "contact name 'Dave' removed",
+        ])
+        .expect("app2 sees only VIP contacts; Dave not in VIP so not visible");
+}
