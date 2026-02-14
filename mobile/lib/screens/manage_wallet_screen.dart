@@ -1076,6 +1076,7 @@ class _RulesTab extends StatefulWidget {
 class _RulesTabState extends State<_RulesTab> {
   late List<Map<String, dynamic>> _matrix;
   final Map<String, Set<String>> _matrixMap = {};
+  final Map<String, Set<String>> _matrixMapDenied = {};
 
   @override
   void initState() {
@@ -1096,12 +1097,17 @@ class _RulesTabState extends State<_RulesTab> {
 
   void _buildMatrixMap() {
     _matrixMap.clear();
+    _matrixMapDenied.clear();
     for (final e in _matrix) {
       final ug = e['user_group_id'] as String? ?? '';
       final cg = e['contact_group_id'] as String? ?? '';
       final key = '$ug:$cg';
-      final names = (e['action_names'] as List<dynamic>?)?.cast<String>() ?? <String>[];
-      _matrixMap[key] = Set<String>.from(names);
+      final allowed = (e['allowed_actions'] as List<dynamic>?)?.cast<String>() ??
+          (e['action_names'] as List<dynamic>?)?.cast<String>() ??
+          <String>[];
+      final denied = (e['denied_actions'] as List<dynamic>?)?.cast<String>() ?? <String>[];
+      _matrixMap[key] = Set<String>.from(allowed);
+      _matrixMapDenied[key] = Set<String>.from(denied);
     }
   }
 
@@ -1110,40 +1116,58 @@ class _RulesTabState extends State<_RulesTab> {
     return _matrixMap[key] ?? {};
   }
 
-  Future<void> _savePermissions(String userGroupId, String contactGroupId, List<String> newActions) async {
+  Set<String> _getDenied(String userGroupId, String contactGroupId) {
+    final key = '$userGroupId:$contactGroupId';
+    return _matrixMapDenied[key] ?? {};
+  }
+
+  Future<void> _savePermissions(
+    String userGroupId,
+    String contactGroupId,
+    List<String> allowedActions,
+    List<String> deniedActions,
+  ) async {
     final key = '$userGroupId:$contactGroupId';
     final prevMap = Map<String, Set<String>>.from(_matrixMap);
+    final prevDenied = Map<String, Set<String>>.from(_matrixMapDenied);
     final prevMatrix = List<Map<String, dynamic>>.from(_matrix);
 
     setState(() {
-      _matrixMap[key] = Set<String>.from(newActions);
+      _matrixMap[key] = Set<String>.from(allowedActions);
+      _matrixMapDenied[key] = Set<String>.from(deniedActions);
     });
 
     final entry = {
       'user_group_id': userGroupId,
       'contact_group_id': contactGroupId,
-      'action_names': newActions
+      'action_names': allowedActions,
+      'allowed_actions': allowedActions,
+      'denied_actions': deniedActions,
     };
 
     try {
       await Api.putWalletPermissionMatrix(widget.walletId, [entry]);
       widget.onReload();
+      if (mounted) {
+        ToastService.showSuccessFromContext(context, 'Permissions saved');
+      }
     } catch (e) {
       if (mounted) {
-         if (Api.isPermissionDeniedError(e)) {
-            widget.onPermissionError();
-         } else {
-            ToastService.showErrorFromContext(
-              context,
-              e.toString().replaceFirst('Exception: ', ''),
-            );
-         }
-         // Revert
-         setState(() {
-           _matrixMap.clear();
-           _matrixMap.addAll(prevMap);
-           _matrix = prevMatrix;
-         });
+        if (Api.isPermissionDeniedError(e)) {
+          widget.onPermissionError();
+        } else {
+          ToastService.showErrorFromContext(
+            context,
+            e.toString().replaceFirst('Exception: ', ''),
+          );
+        }
+        setState(() {
+          _matrixMap.clear();
+          _matrixMap.addAll(prevMap);
+          _matrixMapDenied.clear();
+          _matrixMapDenied.addAll(prevDenied);
+          _matrix = prevMatrix;
+        });
       }
     }
   }
@@ -1155,8 +1179,9 @@ class _RulesTabState extends State<_RulesTab> {
         userGroupName: ugName,
         contactGroupName: cgName,
         availableActions: widget.permissionActions,
-        initialActions: _getActions(ugId, cgId).toList(),
-        onSave: (actions) => _savePermissions(ugId, cgId, actions),
+        initialAllowed: _getActions(ugId, cgId).toList(),
+        initialDenied: _getDenied(ugId, cgId).toList(),
+        onSave: (allowed, denied) => _savePermissions(ugId, cgId, allowed, denied),
       ),
     );
   }
@@ -1175,59 +1200,70 @@ class _RulesTabState extends State<_RulesTab> {
       );
     }
 
-    return ListView.builder(
+    return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-      itemCount: widget.userGroups.length,
-      itemBuilder: (context, index) {
-        final ug = widget.userGroups[index];
-        final ugId = ug['id'] as String? ?? '';
-        final rawUgName = ug['name'] as String? ?? '';
-        final ugName = _formatGroupName(rawUgName);
+      children: [
+        ...List.generate(widget.userGroups.length, (index) {
+          final ug = widget.userGroups[index];
+          final ugId = ug['id'] as String? ?? '';
+          final rawUgName = ug['name'] as String? ?? '';
+          final ugName = _formatGroupName(rawUgName);
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          child: ExpansionTile(
-            title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('User Group'),
-            initiallyExpanded: index == 0,
-            children: [
-              const Divider(height: 1),
-              ...widget.contactGroups.map((cg) {
-                final cgId = cg['id'] as String? ?? '';
-                final rawCgName = cg['name'] as String? ?? '';
-                final cgName = _formatGroupName(rawCgName);
-                final activeActions = _getActions(ugId, cgId);
-                
-                return ListTile(
-                  title: Text(cgName),
-                  subtitle: activeActions.isEmpty 
-                      ? const Text('No access', style: TextStyle(color: Colors.grey))
-                      : Text('${activeActions.length} permissions active', maxLines: 1, overflow: TextOverflow.ellipsis),
-                  trailing: const Icon(Icons.edit, size: 20),
-                  onTap: () => _openEditor(ugId, ugName, cgId, cgName),
-                );
-              }),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ExpansionTile(
+              title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('User Group'),
+              initiallyExpanded: index == 0,
+              children: [
+                const Divider(height: 1),
+                ...widget.contactGroups.map((cg) {
+                  final cgId = cg['id'] as String? ?? '';
+                  final rawCgName = cg['name'] as String? ?? '';
+                  final cgName = _formatGroupName(rawCgName);
+                  final activeActions = _getActions(ugId, cgId);
+
+                  return ListTile(
+                    title: Text(cgName),
+                    subtitle: activeActions.isEmpty
+                        ? const Text('No access', style: TextStyle(color: Colors.grey))
+                        : Text(
+                            _getDenied(ugId, cgId).isEmpty
+                                ? '${activeActions.length} allow'
+                                : '${activeActions.length} allow, ${_getDenied(ugId, cgId).length} deny',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                    trailing: const Icon(Icons.edit, size: 20),
+                    onTap: () => _openEditor(ugId, ugName, cgId, cgName),
+                  );
+                }),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        }),
+      ],
     );
   }
 }
+
+enum _PermissionState { allow, deny, unset }
 
 class _PermissionsDialog extends StatefulWidget {
   final String userGroupName;
   final String contactGroupName;
   final List<Map<String, dynamic>> availableActions;
-  final List<String> initialActions;
-  final ValueChanged<List<String>> onSave;
+  final List<String> initialAllowed;
+  final List<String> initialDenied;
+  final void Function(List<String> allowed, List<String> denied) onSave;
 
   const _PermissionsDialog({
     required this.userGroupName,
     required this.contactGroupName,
     required this.availableActions,
-    required this.initialActions,
+    required this.initialAllowed,
+    required this.initialDenied,
     required this.onSave,
   });
 
@@ -1236,14 +1272,59 @@ class _PermissionsDialog extends StatefulWidget {
 }
 
 class _PermissionsDialogState extends State<_PermissionsDialog> {
-  late Set<String> _selected;
+  late Set<String> _allowed;
+  late Set<String> _denied;
   late Map<String, List<Map<String, dynamic>>> _groupedActions;
 
   @override
   void initState() {
     super.initState();
-    _selected = Set.from(widget.initialActions);
+    _allowed = Set.from(widget.initialAllowed);
+    _denied = Set.from(widget.initialDenied);
     _groupActions();
+  }
+
+  bool _isActive(String name) {
+    return _allowed.contains(name) || _denied.contains(name);
+  }
+
+  _PermissionState _getAllowDeny(String name) {
+    if (_denied.contains(name)) return _PermissionState.deny;
+    return _PermissionState.allow;
+  }
+
+  /// When clearing a permission, also clear any permissions that depend on it (backend rule:
+  /// e.g. contact:delete requires contact:read; transaction:* requires contact:read).
+  void _clearDependents(String name) {
+    if (name == 'contact:read') {
+      _allowed.removeAll(['contact:create', 'contact:update', 'contact:delete', 'contact:close']);
+      _denied.removeAll(['contact:create', 'contact:update', 'contact:delete', 'contact:close']);
+      _allowed.removeWhere((a) => a.startsWith('transaction:'));
+      _denied.removeWhere((a) => a.startsWith('transaction:'));
+    } else if (name == 'wallet:read') {
+      _allowed.removeAll(['wallet:update', 'wallet:delete', 'wallet:manage_members']);
+      _denied.removeAll(['wallet:update', 'wallet:delete', 'wallet:manage_members']);
+    }
+  }
+
+  void _setState(String name, _PermissionState state) {
+    setState(() {
+      _allowed.remove(name);
+      _denied.remove(name);
+      if (state == _PermissionState.allow) {
+        _allowed.add(name);
+        if (!name.endsWith(':read')) {
+          final parts = name.split(':');
+          if (parts.length > 1) _allowed.add('${parts[0]}:read');
+        }
+        if (name.startsWith('transaction:')) _allowed.add('contact:read');
+      } else if (state == _PermissionState.deny) {
+        _denied.add(name);
+      } else {
+        // Unset: clear any permissions that depend on this one so the backend accepts the save
+        _clearDependents(name);
+      }
+    });
   }
 
   void _groupActions() {
@@ -1316,46 +1397,34 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
     return Icons.circle_outlined;
   }
 
-  void _onPermissionChanged(String name, bool? value) {
-    setState(() {
-      if (value == true) {
-        _selected.add(name);
-        
-        // Dependency: Write implies Read
-        if (!name.endsWith(':read')) {
-          final parts = name.split(':');
-          if (parts.length > 1) {
-             _selected.add('${parts[0]}:read');
-          }
-        }
-        
-        // Dependency: Transaction implies Contact Read
-        if (name.startsWith('transaction:')) {
-          _selected.add('contact:read');
-        }
-      } else {
-        _selected.remove(name);
-        
-        // Dependency: Removing Read removes all Writes
-        if (name.endsWith(':read')) {
-          final resource = name.split(':')[0];
-          // Remove all other actions for this resource
-          _selected.removeWhere((action) => action.startsWith('$resource:'));
-          
-          // Dependency: Removing Contact Read removes all Transaction permissions
-          if (resource == 'contact') {
-             _selected.removeWhere((action) => action.startsWith('transaction:'));
-          }
-        }
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
+    if (widget.availableActions.isEmpty) {
+      return AlertDialog(
+        title: const Text('Edit Permissions'),
+        content: const Text(
+          'No permission actions loaded. Pull down to refresh the page.',
+          textAlign: TextAlign.center,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      );
+    }
+
     final categories = _groupedActions.keys.toList()..sort();
 
+    final screenWidth = MediaQuery.sizeOf(context).width;
+
     return AlertDialog(
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: (screenWidth < 400) ? 8.0 : 40.0,
+        vertical: 24,
+      ),
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1365,62 +1434,102 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
           Text(
             '${widget.userGroupName} → ${widget.contactGroupName}',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: categories.length,
-          itemBuilder: (context, index) {
-            final category = categories[index];
-            final actions = _groupedActions[category]!;
-            
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (index > 0) const Divider(height: 24),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      Icon(_getCategoryIcon(category), size: 20, color: Theme.of(context).colorScheme.primary),
-                      const SizedBox(width: 8),
-                      Text(
-                        category[0].toUpperCase() + category.substring(1),
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                ...actions.map((action) {
-                  final name = action['name'] as String? ?? '';
-                  final displayName = _formatActionName(name);
-                  
-                  return CheckboxListTile(
-                    value: _selected.contains(name),
-                    title: Row(
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: categories.length,
+            itemBuilder: (context, index) {
+              final category = categories[index];
+              final actions = _groupedActions[category]!;
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (index > 0) const Divider(height: 24),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
                       children: [
-                        Icon(
-                          _getActionIcon(name), 
-                          size: 18, 
-                          color: Theme.of(context).colorScheme.onSurfaceVariant
+                        Icon(_getCategoryIcon(category), size: 20, color: Theme.of(context).colorScheme.primary),
+                        const SizedBox(width: 8),
+                        Text(
+                          category[0].toUpperCase() + category.substring(1),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                        const SizedBox(width: 12),
-                        Text(displayName),
                       ],
                     ),
-                    dense: true,
-                    onChanged: (val) => _onPermissionChanged(name, val),
-                  );
-                }),
-              ],
-            );
-          },
+                  ),
+                  ...actions.map((action) {
+                    final name = action['name'] as String? ?? '';
+                    final displayName = _formatActionName(name);
+                    final active = _isActive(name);
+                    final allowDeny = _getAllowDeny(name);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: active,
+                                onChanged: (checked) {
+                                  if (checked == true) {
+                                    _setState(name, _PermissionState.allow);
+                                  } else {
+                                    _setState(name, _PermissionState.unset);
+                                  }
+                                },
+                              ),
+                              Icon(_getActionIcon(name), size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  displayName,
+                                  style: Theme.of(context).textTheme.bodyMedium,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (active) ...[
+                            const SizedBox(height: 6),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final narrow = constraints.maxWidth < 280;
+                                return SegmentedButton<_PermissionState>(
+                                  style: narrow
+                                      ? const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap, padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 6)))
+                                      : null,
+                                  segments: [
+                                    ButtonSegment(value: _PermissionState.allow, icon: const Icon(Icons.check, size: 16), label: narrow ? null : const Text('Allow')),
+                                    ButtonSegment(value: _PermissionState.deny, icon: const Icon(Icons.block, size: 16), label: narrow ? null : const Text('Deny')),
+                                  ],
+                                  selected: {allowDeny},
+                                  onSelectionChanged: (s) => _setState(name, s.first),
+                                );
+                              },
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              );
+            },
+          ),
         ),
       ),
       actions: [
@@ -1430,7 +1539,7 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
         ),
         FilledButton(
           onPressed: () {
-            widget.onSave(_selected.toList());
+            widget.onSave(_allowed.toList(), _denied.toList());
             Navigator.pop(context);
           },
           child: const Text('Save'),
