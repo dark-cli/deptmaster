@@ -6,11 +6,12 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `is_network_error`, `is_rate_limited`, `manual_sync_with_source`, `should_log_skip`, `start_sync_loop_if_ready`, `try_acquire`
+// These functions are ignored because they are not marked as `pub`: `is_network_error`, `is_rate_limited`, `jwt_payload`, `manual_sync_with_source`, `should_log_skip`, `start_sync_loop_if_ready`, `try_acquire`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BackendConfig`, `SyncGuard`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
 /// Call once at startup with the app documents directory path (e.g. from path_provider).
+/// Storage is process-wide; no need to call again from every thread.
 Future<void> initStorage({required String storagePath}) =>
     RustLib.instance.api.crateInitStorage(storagePath: storagePath);
 
@@ -296,8 +297,43 @@ Future<void> manualSync() => RustLib.instance.api.crateManualSync();
 Future<List<String>> drainRustLogs() =>
     RustLib.instance.api.crateDrainRustLogs();
 
+Future<String?> getPreference({required String key}) =>
+    RustLib.instance.api.crateGetPreference(key: key);
+
+Future<void> setPreference({required String key, required String value}) =>
+    RustLib.instance.api.crateSetPreference(key: key, value: value);
+
+Future<String?> getUsername() => RustLib.instance.api.crateGetUsername();
+
+/// True if JWT is expired or invalid. Used to avoid WebSocket 401 spam.
+Future<bool> isTokenExpired() => RustLib.instance.api.crateIsTokenExpired();
+
 Future<String> greet({required String name}) =>
     RustLib.instance.api.crateGreet(name: name);
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< Value>>
 abstract class Value implements RustOpaqueInterface {}
+
+class JwtPayload {
+  final String? username;
+  final bool expired;
+
+  const JwtPayload({
+    this.username,
+    required this.expired,
+  });
+
+  static Future<JwtPayload> default_() =>
+      RustLib.instance.api.crateJwtPayloadDefault();
+
+  @override
+  int get hashCode => username.hashCode ^ expired.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is JwtPayload &&
+          runtimeType == other.runtimeType &&
+          username == other.username &&
+          expired == other.expired;
+}

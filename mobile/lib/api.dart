@@ -164,6 +164,7 @@ class Api {
     if (!_initialized) await init();
     try {
       await rust.initStorage(storagePath: path);
+      await _migratePreferencesToRust();
       try {
         final id = await rust.getCurrentWalletId();
         _cachedWalletId = (id == null || id.isEmpty) ? null : id;
@@ -172,6 +173,38 @@ class Api {
     } catch (e) {
       debugPrint('Api.initStorage: $e');
     }
+  }
+
+  /// One-time: copy UI preferences from SharedPreferences to Rust, then remove from prefs.
+  static Future<void> _migratePreferencesToRust() async {
+    if (kIsWeb) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = [
+        _keyDarkMode,
+        _keyDefaultDirection,
+        _keyFlipColors,
+        _keyDueDateEnabled,
+        _keyDefaultDueDateDays,
+        _keyDefaultDueDateSwitch,
+        _keyShowDashboardChart,
+        _keyDashboardDefaultPeriod,
+        _keyGraphDefaultPeriod,
+        _keyInvertYAxis,
+      ];
+      for (final key in keys) {
+        final v = prefs.get(key);
+        if (v == null) continue;
+        if (v is bool) {
+          await rust.setPreference(key: key, value: v ? 'true' : 'false');
+        } else if (v is int) {
+          await rust.setPreference(key: key, value: v.toString());
+        } else if (v is String) {
+          await rust.setPreference(key: key, value: v);
+        }
+        await prefs.remove(key);
+      }
+    } catch (_) {}
   }
 
   // ---------- Backend config (prefs + Rust) ----------
@@ -234,12 +267,10 @@ class Api {
     }
   }
 
-  /// Ensures the thread that runs the next Rust call has storage and backend config (Rust state is thread-local).
-  /// Must be called before every Rust call that needs storage/API because the bridge may use different threads.
+  /// Ensures backend config is set in Rust (storage is process-wide and inited once at startup).
   static Future<void> _ensureRustReady() async {
-    if (kIsWeb || !_initialized || _storagePath == null) return;
+    if (kIsWeb || !_initialized) return;
     try {
-      await rust.initStorage(storagePath: _storagePath!);
       if (await isBackendConfigured()) {
         final baseUrl = await getBaseUrl();
         final wsUrl = await getWebSocketUrl();
@@ -326,32 +357,23 @@ class Api {
     }
   }
 
+  /// Username from JWT (Rust decodes token; single source of truth).
   static Future<String?> getUsername() async {
-    final token = await getToken();
-    if (token == null || token.isEmpty) return null;
-    final parts = token.split('.');
-    if (parts.length != 3) return null;
+    if (kIsWeb) return null;
     try {
-      final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
-      final map = json.decode(payload) as Map<String, dynamic>;
-      return map['username'] as String?;
+      await _ensureRustReady();
+      return await rust.getUsername();
     } catch (_) {
       return null;
     }
   }
 
-  /// True if JWT is expired or invalid. Used to avoid WebSocket 401 spam.
-  static bool _isTokenExpired(String? token) {
-    if (token == null || token.isEmpty) return true;
-    final parts = token.split('.');
-    if (parts.length != 3) return true;
+  /// True if JWT is expired or invalid (Rust decodes token). Used to avoid WebSocket 401 spam.
+  static Future<bool> isTokenExpired() async {
+    if (kIsWeb) return true;
     try {
-      final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
-      final map = json.decode(payload) as Map<String, dynamic>;
-      final exp = map['exp'];
-      if (exp == null) return true;
-      final expSec = exp is int ? exp : (exp as num).toInt();
-      return DateTime.now().millisecondsSinceEpoch ~/ 1000 >= expSec;
+      await _ensureRustReady();
+      return await rust.isTokenExpired();
     } catch (_) {
       return true;
     }
@@ -619,6 +641,13 @@ class Api {
     final json = await rust.listWalletPermissionActions(walletId: walletId);
     final list = jsonDecode(json) as List<dynamic>?;
     return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+  }
+
+  /// Returns JSON string {"actions": ["contact:read", ...]} for the current user in this wallet.
+  static Future<String> getMyPermissions(String walletId) async {
+    if (kIsWeb) return '{}';
+    await _ensureRustReady();
+    return rust.getMyPermissions(walletId: walletId);
   }
 
   static Future<List<Map<String, dynamic>>> getWalletPermissionMatrix(String walletId) async {
@@ -1024,7 +1053,7 @@ class Api {
     if (_wsConnecting) return;
     final token = await getToken();
     if (token == null || token.isEmpty) return;
-    if (_isTokenExpired(token)) return;
+    if (await isTokenExpired()) return;
     final walletId = await getCurrentWalletId();
     if (walletId == null || walletId.isEmpty) return;
     final subscribedWalletId = walletId;
@@ -1083,10 +1112,12 @@ class Api {
   static void _reconnectWs() {
     getToken().then((token) {
       if (token == null || token.isEmpty) return;
-      if (_isTokenExpired(token)) return;
-      Future.delayed(reconnectInterval, () {
-        if (!_wsConnected) connectRealtime().catchError((_) {
-          _reconnectWs();
+      isTokenExpired().then((expired) {
+        if (expired) return;
+        Future.delayed(reconnectInterval, () {
+          if (!_wsConnected) connectRealtime().catchError((_) {
+            _reconnectWs();
+          });
         });
       });
     });
@@ -1116,106 +1147,114 @@ class Api {
     } catch (_) {}
   }
 
-  // ---------- Settings (prefs only) ----------
-  static Future<bool> getDarkMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyDarkMode) ?? true;
+  // ---------- Settings (Rust-stored preferences; Dart only reads/writes via FFI) ----------
+  static Future<bool> _getPrefBool(String key, bool defaultValue) async {
+    if (kIsWeb) return defaultValue;
+    try {
+      await _ensureRustReady();
+      final v = await rust.getPreference(key: key);
+      return v == 'true';
+    } catch (_) {
+      return defaultValue;
+    }
   }
 
-  static Future<void> setDarkMode(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyDarkMode, enabled);
+  static Future<void> _setPrefBool(String key, bool value) async {
+    if (kIsWeb) return;
+    try {
+      await _ensureRustReady();
+      await rust.setPreference(key: key, value: value ? 'true' : 'false');
+    } catch (_) {}
   }
 
-  static Future<String> getDefaultDirection() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyDefaultDirection) ?? 'received';
+  static Future<String> _getPrefString(String key, String defaultValue) async {
+    if (kIsWeb) return defaultValue;
+    try {
+      await _ensureRustReady();
+      final v = await rust.getPreference(key: key);
+      return (v != null && v.isNotEmpty) ? v : defaultValue;
+    } catch (_) {
+      return defaultValue;
+    }
   }
 
-  static Future<void> setDefaultDirection(String direction) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyDefaultDirection, direction);
+  static Future<void> _setPrefString(String key, String value) async {
+    if (kIsWeb) return;
+    try {
+      await _ensureRustReady();
+      await rust.setPreference(key: key, value: value);
+    } catch (_) {}
   }
 
-  static Future<bool> getFlipColors() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyFlipColors) ?? false;
+  static Future<int> _getPrefInt(String key, int defaultValue) async {
+    if (kIsWeb) return defaultValue;
+    try {
+      await _ensureRustReady();
+      final v = await rust.getPreference(key: key);
+      if (v == null || v.isEmpty) return defaultValue;
+      return int.tryParse(v) ?? defaultValue;
+    } catch (_) {
+      return defaultValue;
+    }
   }
 
-  static Future<void> setFlipColors(bool flip) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyFlipColors, flip);
+  static Future<void> _setPrefInt(String key, int value) async {
+    if (kIsWeb) return;
+    try {
+      await _ensureRustReady();
+      await rust.setPreference(key: key, value: value.toString());
+    } catch (_) {}
   }
 
-  static Future<bool> getDueDateEnabled() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyDueDateEnabled) ?? true;
-  }
+  static Future<bool> getDarkMode() async =>
+      _getPrefBool(_keyDarkMode, true);
+  static Future<void> setDarkMode(bool enabled) async =>
+      _setPrefBool(_keyDarkMode, enabled);
 
-  static Future<void> setDueDateEnabled(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyDueDateEnabled, enabled);
-  }
+  static Future<String> getDefaultDirection() async =>
+      _getPrefString(_keyDefaultDirection, 'received');
+  static Future<void> setDefaultDirection(String direction) async =>
+      _setPrefString(_keyDefaultDirection, direction);
 
-  static Future<int> getDefaultDueDateDays() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_keyDefaultDueDateDays) ?? 14;
-  }
+  static Future<bool> getFlipColors() async =>
+      _getPrefBool(_keyFlipColors, false);
+  static Future<void> setFlipColors(bool flip) async =>
+      _setPrefBool(_keyFlipColors, flip);
 
-  static Future<void> setDefaultDueDateDays(int days) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_keyDefaultDueDateDays, days);
-  }
+  static Future<bool> getDueDateEnabled() async =>
+      _getPrefBool(_keyDueDateEnabled, true);
+  static Future<void> setDueDateEnabled(bool enabled) async =>
+      _setPrefBool(_keyDueDateEnabled, enabled);
 
-  static Future<bool> getDefaultDueDateSwitch() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyDefaultDueDateSwitch) ?? true;
-  }
+  static Future<int> getDefaultDueDateDays() async =>
+      _getPrefInt(_keyDefaultDueDateDays, 14);
+  static Future<void> setDefaultDueDateDays(int days) async =>
+      _setPrefInt(_keyDefaultDueDateDays, days);
 
-  static Future<void> setDefaultDueDateSwitch(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyDefaultDueDateSwitch, enabled);
-  }
+  static Future<bool> getDefaultDueDateSwitch() async =>
+      _getPrefBool(_keyDefaultDueDateSwitch, true);
+  static Future<void> setDefaultDueDateSwitch(bool enabled) async =>
+      _setPrefBool(_keyDefaultDueDateSwitch, enabled);
 
-  static Future<bool> getShowDashboardChart() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyShowDashboardChart) ?? true;
-  }
+  static Future<bool> getShowDashboardChart() async =>
+      _getPrefBool(_keyShowDashboardChart, true);
+  static Future<void> setShowDashboardChart(bool enabled) async =>
+      _setPrefBool(_keyShowDashboardChart, enabled);
 
-  static Future<void> setShowDashboardChart(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyShowDashboardChart, enabled);
-  }
+  static Future<String> getDashboardDefaultPeriod() async =>
+      _getPrefString(_keyDashboardDefaultPeriod, 'month');
+  static Future<void> setDashboardDefaultPeriod(String period) async =>
+      _setPrefString(_keyDashboardDefaultPeriod, period);
 
-  static Future<String> getDashboardDefaultPeriod() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyDashboardDefaultPeriod) ?? 'month';
-  }
+  static Future<String> getGraphDefaultPeriod() async =>
+      _getPrefString(_keyGraphDefaultPeriod, 'month');
+  static Future<void> setGraphDefaultPeriod(String period) async =>
+      _setPrefString(_keyGraphDefaultPeriod, period);
 
-  static Future<void> setDashboardDefaultPeriod(String period) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyDashboardDefaultPeriod, period);
-  }
-
-  static Future<String> getGraphDefaultPeriod() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyGraphDefaultPeriod) ?? 'month';
-  }
-
-  static Future<void> setGraphDefaultPeriod(String period) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyGraphDefaultPeriod, period);
-  }
-
-  static Future<bool> getInvertYAxis() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyInvertYAxis) ?? false;
-  }
-
-  static Future<void> setInvertYAxis(bool invert) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyInvertYAxis, invert);
-  }
+  static Future<bool> getInvertYAxis() async =>
+      _getPrefBool(_keyInvertYAxis, false);
+  static Future<void> setInvertYAxis(bool invert) async =>
+      _setPrefBool(_keyInvertYAxis, invert);
 
   static Future<void> loadSettingsFromBackend() async {}
 

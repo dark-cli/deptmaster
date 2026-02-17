@@ -8,9 +8,10 @@ import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `create_tables`, `with_db`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `StorageState`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`
 
-/// True if the current thread has called init() successfully.
+/// True if init() has been called successfully (process-wide).
 Future<bool> isReady() => RustLib.instance.api.crateStorageIsReady();
 
 Future<void> init({required String path}) =>

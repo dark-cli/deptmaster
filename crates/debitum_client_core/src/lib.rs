@@ -135,10 +135,14 @@ pub fn init_app() {
 }
 
 /// Call once at startup with the app documents directory path (e.g. from path_provider).
+/// Storage is process-wide; no need to call again from every thread.
 pub fn init_storage(storage_path: String) -> Result<(), String> {
+    let was_ready = storage::is_ready();
     storage::init(&storage_path)?;
-    rust_log!("[debitum_rs] sync loop: storage ready");
-    start_sync_loop_if_ready();
+    if !was_ready {
+        rust_log!("[debitum_rs] sync loop: storage ready");
+        start_sync_loop_if_ready();
+    }
     Ok(())
 }
 
@@ -575,6 +579,69 @@ pub fn drain_rust_logs() -> Vec<String> {
     log_bridge::drain_rust_logs()
 }
 
+// --- UI preferences (stored in Rust config; Dart only reads/writes via these) ---
+const PREF_PREFIX: &str = "pref_";
+
+pub fn get_preference(key: String) -> Option<String> {
+    let storage_key = format!("{}{}", PREF_PREFIX, key);
+    storage::config_get(&storage_key).ok().and_then(|o| o)
+}
+
+pub fn set_preference(key: String, value: String) -> Result<(), String> {
+    let storage_key = format!("{}{}", PREF_PREFIX, key);
+    storage::config_set(&storage_key, &value)
+}
+
+// --- JWT (single place for token parsing; Dart no longer decodes) ---
+pub fn get_username() -> Option<String> {
+    let token = storage::config_get("token").ok().and_then(|o| o)?;
+    if token.is_empty() {
+        return None;
+    }
+    jwt_payload(&token).and_then(|p| p.username)
+}
+
+/// True if JWT is expired or invalid. Used to avoid WebSocket 401 spam.
+pub fn is_token_expired() -> bool {
+    let token = match storage::config_get("token").ok().and_then(|o| o) {
+        Some(t) if !t.is_empty() => t,
+        _ => return true,
+    };
+    match jwt_payload(&token) {
+        Some(p) => p.expired,
+        None => true,
+    }
+}
+
+#[derive(Default)]
+struct JwtPayload {
+    username: Option<String>,
+    expired: bool,
+}
+
+fn jwt_payload(token: &str) -> Option<JwtPayload> {
+    use base64::Engine;
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let payload_b64 = parts[1];
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64.as_bytes())
+        .ok()?;
+    let payload_str = String::from_utf8(decoded).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
+    let obj = json.as_object()?;
+    let username = obj
+        .get("username")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let expired = obj.get("exp").and_then(|v| v.as_i64()).map_or(true, |exp_sec| {
+        chrono::Utc::now().timestamp() >= exp_sec
+    });
+    Some(JwtPayload { username, expired })
+}
+
 // Kept for compatibility
 pub fn greet(name: String) -> String {
     format!("Hello, {} from Rust!", name)
@@ -582,6 +649,7 @@ pub fn greet(name: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    // Storage is process-wide; run with: cargo test --lib -- --test-threads=1
     use super::*;
     use crate::storage::{self, StoredEvent};
     use std::path::PathBuf;

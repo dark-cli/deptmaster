@@ -1,37 +1,48 @@
 //! SQLite storage: config, events, projection state.
-//! Thread-local so each thread (e.g. each integration test) has its own DB; Flutter uses a single thread.
+//! Single process-wide instance (global Mutex<Connection>) so Dart only needs to init once.
 
 use crate::models::{Contact, Transaction};
 use crate::rust_log;
+use once_cell::sync::Lazy;
 use rusqlite::{Connection, params};
-use std::cell::RefCell;
 use std::path::Path;
+use std::sync::Mutex;
 
-thread_local! {
-    static DB: RefCell<Option<Connection>> = RefCell::new(None);
-    /// Path this thread was initialized with, for idempotent init (avoid reopen on every Dart call).
-    static INIT_PATH: RefCell<Option<String>> = RefCell::new(None);
+struct StorageState {
+    path: String,
+    conn: Connection,
 }
 
-/// True if the current thread has called init() successfully.
+static STORAGE: Lazy<Mutex<Option<StorageState>>> = Lazy::new(|| Mutex::new(None));
+
+/// True if init() has been called successfully (process-wide).
 pub fn is_ready() -> bool {
-    DB.with(|cell| cell.borrow().is_some())
+    STORAGE.lock().unwrap().is_some()
 }
 
 pub fn init(path: &str) -> Result<(), String> {
     let path_obj = Path::new(path);
     let db_path = path_obj.join("debitum.db");
     let path_key = db_path.to_string_lossy().to_string();
-    let already_same = INIT_PATH.with(|c| c.borrow().as_deref() == Some(path_key.as_str()));
-    if already_same && is_ready() {
-        return Ok(());
+    {
+        let guard = STORAGE.lock().unwrap();
+        if let Some(ref s) = *guard {
+            if s.path == path_key {
+                return Ok(());
+            }
+        }
     }
     std::fs::create_dir_all(path_obj).map_err(|e| e.to_string())?;
     rust_log!("[debitum_rs] storage::init path={:?} db={:?}", path, db_path);
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     create_tables(&conn)?;
-    DB.with(|cell| *cell.borrow_mut() = Some(conn));
-    INIT_PATH.with(|cell| *cell.borrow_mut() = Some(path_key));
+    {
+        let mut guard = STORAGE.lock().unwrap();
+        *guard = Some(StorageState {
+            path: path_key,
+            conn,
+        });
+    }
     rust_log!("[debitum_rs] storage::init OK");
     Ok(())
 }
@@ -69,11 +80,9 @@ fn with_db<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
 {
-    DB.with(|cell| {
-        let borrow = cell.borrow();
-        let conn = borrow.as_ref().ok_or("Storage not initialized")?;
-        f(conn).map_err(|e| e.to_string())
-    })
+    let guard = STORAGE.lock().unwrap();
+    let state = guard.as_ref().ok_or("Storage not initialized")?;
+    f(&state.conn).map_err(|e| e.to_string())
 }
 
 // Config
