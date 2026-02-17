@@ -274,6 +274,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                       : AppColors.getReceivedColor(flipColors, isDark);
                   return GradientCard(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                    variationSeed: widget.contact.id.hashCode,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -586,8 +587,9 @@ class _TransactionListItem extends StatelessWidget {
     final amount = transaction.amount;
     final status = _getStatus(transaction.direction);
 
-    return Card(
+    return GradientCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      variationSeed: transaction.id.hashCode,
       child: InkWell(
         onTap: selectionMode ? onSelectionChanged : onEdit,
         onLongPress: onSelectionChanged != null ? () {

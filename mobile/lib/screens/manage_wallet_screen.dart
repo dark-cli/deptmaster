@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
+import '../widgets/gradient_card.dart';
 
 class ManageWalletScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -470,8 +472,9 @@ class _MembersTabState extends State<_MembersTab> {
           final role = u['role'] as String? ?? '';
           final userId = u['user_id'] as String? ?? '';
           final displayName = u['username'] as String? ?? userId;
-          return Card(
+          return GradientCard(
             margin: const EdgeInsets.only(bottom: 8),
+            variationSeed: userId.hashCode,
             child: ListTile(
               title: Text(displayName),
               subtitle: Text('Role: $role'),
@@ -617,8 +620,10 @@ class _UserGroupsTabState extends State<_UserGroupsTab> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
       children: [
         ...widget.userGroups.map((g) {
-          return Card(
+          final groupId = g['id'] as String? ?? '';
+          return GradientCard(
             margin: const EdgeInsets.only(bottom: 8),
+            variationSeed: groupId.hashCode,
             child: ExpansionTile(
               title: Text(_formatGroupName(g['name'] as String? ?? '')),
               subtitle: const Text('Static'),
@@ -895,8 +900,10 @@ class _ContactGroupsTabState extends State<_ContactGroupsTab> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
       children: [
         ...widget.contactGroups.map((g) {
-          return Card(
+          final groupId = g['id'] as String? ?? '';
+          return GradientCard(
             margin: const EdgeInsets.only(bottom: 8),
+            variationSeed: groupId.hashCode,
             child: ExpansionTile(
               title: Text(_formatGroupName(g['name'] as String? ?? '')),
               subtitle: const Text('Static'),
@@ -1209,8 +1216,9 @@ class _RulesTabState extends State<_RulesTab> {
           final rawUgName = ug['name'] as String? ?? '';
           final ugName = _formatGroupName(rawUgName);
 
-          return Card(
+          return GradientCard(
             margin: const EdgeInsets.only(bottom: 12),
+            variationSeed: ugId.hashCode,
             child: ExpansionTile(
               title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: const Text('User Group'),
@@ -1226,7 +1234,7 @@ class _RulesTabState extends State<_RulesTab> {
                   return ListTile(
                     title: Text(cgName),
                     subtitle: activeActions.isEmpty
-                        ? const Text('No access', style: TextStyle(color: Colors.grey))
+                        ? Text('No access', style: TextStyle(color: ThemeColors.gray(context)))
                         : Text(
                             _getDenied(ugId, cgId).isEmpty
                                 ? '${activeActions.length} allow'
@@ -1433,7 +1441,7 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
           const SizedBox(height: 4),
           Text(
             '${widget.userGroupName} → ${widget.contactGroupName}',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: ThemeColors.gray(context)),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),

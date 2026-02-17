@@ -1,27 +1,55 @@
 import 'package:flutter/material.dart';
-import 'app_colors.dart';
 
-/// Helper class to get theme-consistent colors
-/// Use this instead of hard-coded Colors.red, Colors.green, etc.
+import 'app_colors.dart';
+import 'custom_app_colors_extension.dart';
+
+/// Helper class to get theme-consistent colors from Theme and CustomAppColorsExtension.
+/// Prefer these over hard-coded AppColors.lightX/darkX so theming stays in one place.
 class ThemeColors {
   ThemeColors._();
 
-  /// Get error color from theme
-  static Color error(BuildContext context) {
-    return Theme.of(context).colorScheme.error;
-  }
+  static ColorScheme _scheme(BuildContext context) => Theme.of(context).colorScheme;
+  static bool _isDark(BuildContext context) => Theme.of(context).brightness == Brightness.dark;
+  static CustomAppColorsExtension? _extension(BuildContext context) =>
+      Theme.of(context).extension<CustomAppColorsExtension>();
 
-  /// Get success color from theme
+  /// Error color from theme
+  static Color error(BuildContext context) => _scheme(context).error;
+
+  /// Success color (from extension or AppColors fallback)
   static Color success(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
+    final ext = _extension(context);
+    if (ext?.success != null) return ext!.success!;
+    return _isDark(context) ? AppColors.darkSuccess : AppColors.lightSuccess;
   }
 
-  /// Get warning color from theme
+  /// Warning color (from extension or AppColors fallback)
   static Color warning(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return isDark ? AppColors.darkWarning : AppColors.lightWarning;
+    final ext = _extension(context);
+    if (ext?.warning != null) return ext!.warning!;
+    return _isDark(context) ? AppColors.darkWarning : AppColors.lightWarning;
   }
+
+  /// Give (positive/lent) color. Pass [flipColors] from settings to swap with received.
+  static Color give(BuildContext context, {bool flipColors = false}) {
+    if (flipColors) return received(context, flipColors: false);
+    final ext = _extension(context);
+    final isDark = _isDark(context);
+    if (ext != null) return isDark ? (ext.darkGive ?? AppColors.darkGive) : (ext.lightGive ?? AppColors.lightGive);
+    return isDark ? AppColors.darkGive : AppColors.lightGive;
+  }
+
+  /// Received (negative/owed) color. Pass [flipColors] from settings to swap with give.
+  static Color received(BuildContext context, {bool flipColors = false}) {
+    if (flipColors) return give(context, flipColors: false);
+    final ext = _extension(context);
+    final isDark = _isDark(context);
+    if (ext != null) return isDark ? (ext.darkReceived ?? AppColors.darkReceived) : (ext.lightReceived ?? AppColors.lightReceived);
+    return isDark ? AppColors.darkReceived : AppColors.lightReceived;
+  }
+
+  /// Surface variant (cards, chips) from theme
+  static Color surfaceVariant(BuildContext context) => _scheme(context).surfaceContainerHigh;
 
   /// Get gray color from theme
   static Color gray(BuildContext context, {int shade = 600}) {
@@ -51,65 +79,27 @@ class ThemeColors {
     }
   }
 
-  /// Get surface color from theme
-  static Color surface(BuildContext context) {
-    return Theme.of(context).colorScheme.surface;
-  }
+  /// Surface color from theme
+  static Color surface(BuildContext context) => _scheme(context).surface;
 
-  /// Get onSurface color from theme
-  static Color onSurface(BuildContext context) {
-    return Theme.of(context).colorScheme.onSurface;
-  }
+  /// On-surface text/icon color
+  static Color onSurface(BuildContext context) => _scheme(context).onSurface;
 
-  /// Get primary color from theme
-  static Color primary(BuildContext context) {
-    return Theme.of(context).colorScheme.primary;
-  }
+  /// Primary brand color
+  static Color primary(BuildContext context) => _scheme(context).primary;
 
-  /// Get background color from theme
-  static Color background(BuildContext context) {
-    return Theme.of(context).colorScheme.background;
-  }
+  /// On-primary text/icon color (e.g. for FAB, primary buttons)
+  static Color onPrimary(BuildContext context) => _scheme(context).onPrimary;
 
-  /// Get SnackBar background color from theme
-  static Color snackBarBackground(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final colorScheme = Theme.of(context).colorScheme;
-    // Use surfaceContainerHighest if available (Material 3), otherwise fallback to surface
-    if (isDark) {
-      // Dark mode: use a lighter surface color for contrast
-      return colorScheme.surfaceContainerHighest;
-    } else {
-      // Light mode: use a darker surface color for contrast
-      return colorScheme.surfaceContainerHighest;
-    }
-  }
+  /// Background color from theme
+  static Color background(BuildContext context) => _scheme(context).background;
 
-  /// Get SnackBar text color from theme
-  static Color snackBarTextColor(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    // Use onSurface for proper contrast - Material automatically handles dark/light
-    return colorScheme.onSurface;
-  }
+  /// SnackBar background (elevated surface)
+  static Color snackBarBackground(BuildContext context) => _scheme(context).surfaceContainerHighest;
 
-  /// Get accent color for SnackBar actions (UNDO button)
-  static Color snackBarActionColor(BuildContext context) {
-    return Theme.of(context).colorScheme.primary; // Use primary/accent color
-  }
-
-  /// Get SnackBar error background color from theme (light and dark)
-  static Color snackBarErrorBackground(BuildContext context) {
-    return Theme.of(context).colorScheme.errorContainer;
-  }
-
-  /// Get SnackBar error text color from theme (for use on errorContainer)
-  static Color snackBarErrorTextColor(BuildContext context) {
-    return Theme.of(context).colorScheme.onErrorContainer;
-  }
-
-  /// Get SnackBar success background color from theme
-  static Color snackBarSuccessBackground(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
-  }
+  static Color snackBarTextColor(BuildContext context) => _scheme(context).onSurface;
+  static Color snackBarActionColor(BuildContext context) => _scheme(context).primary;
+  static Color snackBarErrorBackground(BuildContext context) => _scheme(context).errorContainer;
+  static Color snackBarErrorTextColor(BuildContext context) => _scheme(context).onErrorContainer;
+  static Color snackBarSuccessBackground(BuildContext context) => success(context);
 }

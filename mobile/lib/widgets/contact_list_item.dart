@@ -9,6 +9,7 @@ import '../utils/text_utils.dart';
 import 'animated_pixelated_text.dart';
 import 'avatar_with_selection.dart';
 import 'glitch_transition.dart';
+import 'gradient_card.dart';
 
 class ContactListItem extends StatelessWidget {
   final Contact contact;
@@ -117,8 +118,9 @@ class ContactListItem extends StatelessWidget {
     // Width calculated to fit "1000,000 IQD" (approximately 110-120 pixels)
     const double amountSectionWidth = 120.0;
 
-    return Card(
+    return GradientCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      variationSeed: contact.id.hashCode,
       child: InkWell(
         onTap: onTap,
         onLongPress: onSelectionChanged != null ? () {

@@ -1,6 +1,31 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 
+// Provider for dark mode – single source of truth; no polling
+final darkModeProvider = StateNotifierProvider<DarkModeNotifier, bool>((ref) {
+  return DarkModeNotifier();
+});
+
+class DarkModeNotifier extends StateNotifier<bool> {
+  DarkModeNotifier() : super(true) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final value = await Api.getDarkMode();
+      if (state != value) state = value;
+    } catch (_) {}
+  }
+
+  Future<void> setDarkMode(bool value) async {
+    await Api.setDarkMode(value);
+    state = value;
+  }
+
+  Future<void> refresh() async => _load();
+}
+
 // Provider for flip colors that can be watched and updated
 final flipColorsProvider = StateNotifierProvider<FlipColorsNotifier, bool>((ref) {
   return FlipColorsNotifier();

@@ -228,6 +228,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ] else ...[
                 GradientCard(
                   padding: const EdgeInsets.all(16),
+                  variationSeed: 1,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -278,6 +279,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         
         return GradientCard(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          variationSeed: 2,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -347,6 +349,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         
         return GradientCard(
           padding: const EdgeInsets.all(16),
+          variationSeed: 3,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -595,6 +598,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         
         return GradientCard(
           padding: const EdgeInsets.all(16),
+          variationSeed: title.hashCode,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

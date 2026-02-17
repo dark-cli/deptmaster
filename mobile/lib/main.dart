@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'api.dart';
+import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/sign_up_screen.dart';
@@ -164,40 +165,15 @@ class DebtTrackerApp extends ConsumerStatefulWidget {
 }
 
 class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
-  bool _darkMode = true;
-  Timer? _themeTimer;
-
   @override
   void initState() {
     super.initState();
-    _loadTheme();
-    _watchTheme();
     Api.setRealtimeErrorCallback((_) {});
   }
 
   @override
-  void dispose() {
-    _themeTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _loadTheme() async {
-    final dark = await Api.getDarkMode();
-    if (mounted) setState(() => _darkMode = dark);
-  }
-
-  void _watchTheme() {
-    _themeTimer?.cancel();
-    _themeTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) {
-        _loadTheme();
-        _watchTheme();
-      }
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final darkMode = ref.watch(darkModeProvider);
     final instanceId = const String.fromEnvironment('INSTANCE_ID', defaultValue: '');
     final appTitle = instanceId.isEmpty ? 'Debt Tracker' : 'Instance $instanceId';
     return MaterialApp(
@@ -207,7 +183,7 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
       builder: (context, child) => Directionality(textDirection: TextDirection.ltr, child: child!),
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
+      themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       initialRoute: widget.initialRoute,
       routes: {
         '/': (context) => _Wrapper(child: const HomeScreen()),

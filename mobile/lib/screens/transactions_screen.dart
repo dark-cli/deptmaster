@@ -24,6 +24,7 @@ import '../widgets/diff_animated_list.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/animated_pixelated_text.dart';
 import '../widgets/glitch_transition.dart';
+import '../widgets/gradient_card.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -682,8 +683,9 @@ class TransactionListItem extends StatelessWidget {
     final amount = transaction.amount;
     final status = _getStatus(transaction.direction);
 
-    return Card(
+    return GradientCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      variationSeed: transaction.id.hashCode,
       child: InkWell(
         onTap: null, // Add navigation if needed
         child: Padding(

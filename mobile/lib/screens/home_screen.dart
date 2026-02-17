@@ -480,7 +480,6 @@ class _SettingsContent extends ConsumerStatefulWidget {
 }
 
 class _SettingsContentState extends ConsumerState<_SettingsContent> {
-  bool _darkMode = true;
   String _defaultDirection = 'give';
   int _defaultDueDateDays = 30;
   bool _defaultDueDateSwitch = false;
@@ -494,16 +493,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   }
 
   Future<void> _loadSettings() async {
-    final darkMode = await Api.getDarkMode();
     final defaultDir = await Api.getDefaultDirection();
     final defaultDays = await Api.getDefaultDueDateDays();
     final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
     final backendHost = await Api.getBackendHost();
     final backendPort = await Api.getBackendPort();
-    
     if (mounted) {
       setState(() {
-        _darkMode = darkMode;
         _defaultDirection = defaultDir;
         _defaultDueDateDays = defaultDays;
         _defaultDueDateSwitch = defaultDueDateSwitch;
@@ -520,17 +516,16 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
       children: [
         // Appearance
         _buildSectionHeader('Appearance'),
-        SwitchListTile(
-          title: const Text('Dark Mode'),
-          value: _darkMode,
-          onChanged: (value) async {
-            await Api.setDarkMode(value);
-            setState(() {
-              _darkMode = value;
-            });
-            if (mounted) {
-              (context as Element).markNeedsBuild();
-            }
+        Consumer(
+          builder: (context, ref, _) {
+            final darkMode = ref.watch(darkModeProvider);
+            return SwitchListTile(
+              title: const Text('Dark Mode'),
+              value: darkMode,
+              onChanged: (value) {
+                ref.read(darkModeProvider.notifier).setDarkMode(value);
+              },
+            );
           },
         ),
         

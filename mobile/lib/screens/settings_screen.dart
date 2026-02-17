@@ -13,7 +13,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  bool _darkMode = true; // Default to dark mode
   String _defaultDirection = 'give';
   // ignore: unused_field
   bool _dueDateEnabled = false;
@@ -27,16 +26,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final darkMode = await Api.getDarkMode();
     final defaultDir = await Api.getDefaultDirection();
     await Api.getFlipColors();
     final dueDateEnabled = await Api.getDueDateEnabled();
     final defaultDays = await Api.getDefaultDueDateDays();
     final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
-    
     if (mounted) {
       setState(() {
-        _darkMode = darkMode;
         _defaultDirection = defaultDir;
         _dueDateEnabled = dueDateEnabled;
         _defaultDueDateDays = defaultDays;
@@ -57,18 +53,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         children: [
           // Appearance
           _buildSectionHeader('Appearance'),
-          SwitchListTile(
-            title: const Text('Dark Mode'),
-            value: _darkMode,
-            onChanged: (value) async {
-              await SettingsService.setDarkMode(value);
-              setState(() {
-                _darkMode = value;
-              });
-              // Trigger theme rebuild
-              if (mounted) {
-                (context as Element).markNeedsBuild();
-              }
+          Consumer(
+            builder: (context, ref, _) {
+              final darkMode = ref.watch(darkModeProvider);
+              return SwitchListTile(
+                title: const Text('Dark Mode'),
+                value: darkMode,
+                onChanged: (value) {
+                  ref.read(darkModeProvider.notifier).setDarkMode(value);
+                },
+              );
             },
           ),
           

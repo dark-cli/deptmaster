@@ -1,9 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import '../utils/app_colors.dart';
 
-/// Gradient background widget matching Kaleem.dev design
-/// Supports both light and dark modes with fixed attachment
+/// Gradient background using only theme colors for consistency
 class GradientBackground extends StatelessWidget {
   final Widget child;
 
@@ -14,24 +12,17 @@ class GradientBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
-    
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: isDark
-              ? [
-                  AppColors.darkBackground, // Keep existing dark gradient
-                  AppColors.darkBackgroundEnd,
-                ]
-              : [
-                  // Use Material 3 surface colors for softer light mode
-                  colorScheme.surfaceContainerHighest, // Softer top - no opacity needed
-                  colorScheme.surfaceContainerHigh, // Softer bottom - no opacity needed
-                ],
+          colors: [
+            colorScheme.surface,
+            colorScheme.surfaceContainerLow,
+            colorScheme.surfaceContainerHigh,
+          ],
         ),
       ),
       child: child,
@@ -50,17 +41,13 @@ class HeaderBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
-    
     return Container(
       decoration: BoxDecoration(
-        color: isDark
-            ? AppColors.darkSurface // Keep existing dark surface
-            : colorScheme.surfaceContainerHighest.withOpacity(0.7), // Softer Material 3 surface
+        color: colorScheme.surfaceContainerHighest.withOpacity(0.8),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: colorScheme.shadow.withOpacity(0.06),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -68,7 +55,7 @@ class HeaderBackground extends StatelessWidget {
       ),
       child: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0), // No blur for header, just transparency
+          filter: ImageFilter.blur(sigmaX: 0, sigmaY: 0),
           child: child,
         ),
       ),
