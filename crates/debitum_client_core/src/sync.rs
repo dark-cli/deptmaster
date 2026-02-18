@@ -149,10 +149,19 @@ pub fn pull_and_merge() -> Result<(), String> {
         rust_log!("[debitum_rs] pull_and_merge: incremental pull since={:?}", since);
     }
     rust_log!("[debitum_rs] pull_and_merge: requesting server events");
-    let server_events = api::get_sync_events(since.clone())?;
+    let mut server_events = api::get_sync_events(since.clone())?;
     rust_log!("[debitum_rs] pull_and_merge: server returned {} events for wallet {}", server_events.len(), wallet_id);
 
-    if is_full_pull {
+    // If this was incremental and the batch includes permission events, our visible set may have changed — do a full resync.
+    let has_permission_event = server_events.iter().any(|ev| {
+        ev.get("aggregate_type").and_then(|v| v.as_str()) == Some("permission")
+    });
+    if !is_full_pull && has_permission_event {
+        rust_log!("[debitum_rs] pull_and_merge: permission event in batch — clearing and full pull so view is up to date");
+        let _ = storage::config_remove(&perms_cache_key(&wallet_id));
+        storage::events_delete_all_for_wallet(&wallet_id)?;
+        server_events = api::get_sync_events(None)?;
+    } else if is_full_pull {
         storage::events_delete_all_for_wallet(&wallet_id)?;
         rust_log!("[debitum_rs] pull_and_merge: full pull — cleared local events for wallet {}", wallet_id);
     }
@@ -201,4 +210,27 @@ pub fn full_sync() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Clear local wallet data and full pull so the client sees the server's permission-filtered view.
+/// Use after permission matrix or group membership changes (hot update without logout).
+pub fn clear_wallet_and_resync(wallet_id: &str) -> Result<(), String> {
+    let _ = storage::config_remove(&perms_cache_key(wallet_id));
+    rust_log!(
+        "[debitum_rs] permission-related change for wallet {} — clearing local data and full resync",
+        wallet_id
+    );
+    storage::clear_wallet(wallet_id)?;
+    pull_and_merge()
+}
+
+/// Invalidate permission cache, clear local data, and full resync. Use after contact group
+/// membership or permission matrix changes so the client sees updated data without logout/login.
+/// Only has effect when wallet_id is the current wallet.
+pub fn invalidate_perms_cache_and_pull(wallet_id: &str) -> Result<(), String> {
+    let current = storage::config_get("current_wallet_id")?.filter(|c| !c.is_empty());
+    if current.as_deref() != Some(wallet_id) {
+        return Ok(());
+    }
+    clear_wallet_and_resync(wallet_id)
 }

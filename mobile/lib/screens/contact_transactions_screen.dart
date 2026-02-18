@@ -195,10 +195,12 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           ],
         ],
       ),
-      floatingActionButton: Tooltip(
-        message: 'Add Transaction',
-        child: FloatingActionButton(
-          onPressed: () async {
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 24.0),
+        child: Tooltip(
+          message: 'Add Transaction',
+          child: FloatingActionButton(
+            onPressed: () async {
             final result = await showScreenAsBottomSheet(
               context: context,
               screen: AddTransactionScreen(contact: widget.contact),
@@ -209,6 +211,7 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
             }
           },
           child: const Icon(Icons.add),
+        ),
         ),
       ),
       body: Builder(

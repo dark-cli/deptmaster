@@ -11,7 +11,7 @@ use crate::AppState;
 use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
-use crate::services::permission_service::{self, ResourceType};
+use crate::services::permission_service::{self, ResourceType, insufficient_permission_response};
 use crate::websocket;
 
 /// Validate permission dependencies (e.g., Write implies Read)
@@ -1470,6 +1470,41 @@ async fn require_wallet_admin(
     Ok(())
 }
 
+/// Returns the user's role in the wallet (owner, admin, member) or error if not a member.
+async fn get_wallet_role(
+    state: &AppState,
+    wallet_id: Uuid,
+    auth_user: &AuthUser,
+) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    if auth_user.is_admin {
+        return Ok("admin".to_string());
+    }
+    let role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
+    )
+    .bind(wallet_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("get_wallet_role: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have access to this wallet"
+            })),
+        )
+    })?;
+    Ok(role)
+}
+
 /// Returns error if the user group is system (all_users). System groups cannot be edited or have members changed.
 async fn reject_system_user_group(
     state: &AppState,
@@ -1970,7 +2005,7 @@ pub async fn list_contact_groups(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    let _ = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "member").await?;
 
     let rows = sqlx::query(
         "SELECT id, wallet_id, name, type, is_system FROM contact_groups WHERE wallet_id = $1 ORDER BY is_system DESC, name",
@@ -2184,7 +2219,7 @@ pub async fn list_contact_group_members(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    let _ = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "member").await?;
 
     let rows = sqlx::query(
         r#"
@@ -2234,13 +2269,51 @@ pub async fn add_contact_group_member(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    let _contact_uuid = Uuid::parse_str(&payload.contact_id).map_err(|e| {
+    let contact_uuid = Uuid::parse_str(&payload.contact_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": format!("Invalid contact_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
+    if role != "owner" && role != "admin" {
+        let can_edit_contact = permission_service::can_perform(
+            &*state.db_pool,
+            wallet_uuid,
+            auth_user.user_id,
+            &role,
+            "contact:edit",
+            ResourceType::Contact,
+            Some(contact_uuid),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("add_contact_group_member can_perform: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
+        let can_edit_group = permission_service::can_perform_action_on_contact_group(
+            &*state.db_pool,
+            wallet_uuid,
+            auth_user.user_id,
+            &role,
+            group_uuid,
+            "contact:edit",
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("add_contact_group_member can_perform_action_on_contact_group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
+        if !can_edit_contact || !can_edit_group {
+            return Err(insufficient_permission_response());
+        }
+    }
     reject_system_contact_group(&state, wallet_uuid, group_uuid).await?;
 
     let group_row = sqlx::query(
@@ -2307,13 +2380,51 @@ pub async fn remove_contact_group_member(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    let _contact_uuid = Uuid::parse_str(&contact_id).map_err(|e| {
+    let contact_uuid = Uuid::parse_str(&contact_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": format!("Invalid contact_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
+    if role != "owner" && role != "admin" {
+        let can_edit_contact = permission_service::can_perform(
+            &*state.db_pool,
+            wallet_uuid,
+            auth_user.user_id,
+            &role,
+            "contact:edit",
+            ResourceType::Contact,
+            Some(contact_uuid),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("remove_contact_group_member can_perform: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
+        let can_edit_group = permission_service::can_perform_action_on_contact_group(
+            &*state.db_pool,
+            wallet_uuid,
+            auth_user.user_id,
+            &role,
+            group_uuid,
+            "contact:edit",
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("remove_contact_group_member can_perform_action_on_contact_group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
+        if !can_edit_contact || !can_edit_group {
+            return Err(insufficient_permission_response());
+        }
+    }
     reject_system_contact_group(&state, wallet_uuid, group_uuid).await?;
 
     let event_data = serde_json::json!({ "contact_id": contact_id });

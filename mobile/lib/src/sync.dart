@@ -20,3 +20,15 @@ Future<void> pullAndMerge() => RustLib.instance.api.crateSyncPullAndMerge();
 /// Full sync: push then pull. After pull, if read permission was revoked (contact:read or
 /// transaction:read removed), clear wallet data and full resync so local state matches server.
 Future<void> fullSync() => RustLib.instance.api.crateSyncFullSync();
+
+/// Clear local wallet data and full pull so the client sees the server's permission-filtered view.
+/// Use after permission matrix or group membership changes (hot update without logout).
+Future<void> clearWalletAndResync({required String walletId}) =>
+    RustLib.instance.api.crateSyncClearWalletAndResync(walletId: walletId);
+
+/// Invalidate permission cache, clear local data, and full resync. Use after contact group
+/// membership or permission matrix changes so the client sees updated data without logout/login.
+/// Only has effect when wallet_id is the current wallet.
+Future<void> invalidatePermsCacheAndPull({required String walletId}) =>
+    RustLib.instance.api
+        .crateSyncInvalidatePermsCacheAndPull(walletId: walletId);

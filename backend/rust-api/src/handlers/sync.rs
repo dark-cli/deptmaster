@@ -58,9 +58,6 @@ fn event_read_allowed(
         };
     }
     if aggregate_type == "transaction" {
-        if !ctx.has_transaction_read {
-            return false;
-        }
         let contact_id = event_data
             .get("contact_id")
             .and_then(|v| v.as_str())
@@ -69,7 +66,8 @@ fn event_read_allowed(
         let Some(contact_id) = contact_id else {
             return false;
         };
-        return match &ctx.contact_ids_allowed {
+        // Transactions don't have their own groups; visibility is by contact's contact groups (transaction:read).
+        return match &ctx.transaction_contact_ids_allowed {
             None => true,
             Some(set) => set.contains(&contact_id),
         };

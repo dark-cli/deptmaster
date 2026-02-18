@@ -635,6 +635,22 @@ class Api {
     await rust.removeWalletContactGroupMember(walletId: walletId, groupId: groupId, contactId: contactId);
   }
 
+  /// Returns IDs of contact groups that contain this contact. Sourced from Rust (list groups + list members).
+  static Future<List<String>> getContactGroupIdsForContact(String walletId, String contactId) async {
+    if (kIsWeb) return [];
+    await _ensureRustReady();
+    final groups = await getWalletContactGroups(walletId);
+    final result = <String>[];
+    for (final g in groups) {
+      final groupId = g['id'] as String?;
+      if (groupId == null) continue;
+      final members = await getWalletContactGroupMembers(walletId, groupId);
+      final inGroup = members.any((m) => m['contact_id'] == contactId);
+      if (inGroup) result.add(groupId);
+    }
+    return result;
+  }
+
   static Future<List<Map<String, dynamic>>> getWalletPermissionActions(String walletId) async {
     if (kIsWeb) return [];
     await _ensureRustReady();
@@ -1153,6 +1169,7 @@ class Api {
     try {
       await _ensureRustReady();
       final v = await rust.getPreference(key: key);
+      if (v == null || v.isEmpty) return defaultValue;
       return v == 'true';
     } catch (_) {
       return defaultValue;

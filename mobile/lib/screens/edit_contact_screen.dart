@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../models/contact.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../providers/wallet_data_providers.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
 
@@ -27,6 +28,11 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
   final _emailController = TextEditingController();
   final _notesController = TextEditingController();
   bool _saving = false;
+  String? _walletId;
+  List<Map<String, dynamic>> _contactGroups = [];
+  Set<String> _contactGroupIds = {};
+  bool _groupsLoading = true;
+  String? _groupsError;
 
   @override
   void initState() {
@@ -35,6 +41,36 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     _phoneController.text = widget.contact.phone ?? '';
     _emailController.text = widget.contact.email ?? '';
     _notesController.text = widget.contact.notes ?? '';
+    _loadGroups();
+  }
+
+  Future<void> _loadGroups() async {
+    if (kIsWeb) return;
+    final walletId = await Api.getCurrentWalletId();
+    if (walletId == null || !mounted) return;
+    setState(() {
+      _walletId = walletId;
+      _groupsLoading = true;
+      _groupsError = null;
+    });
+    try {
+      final groups = await Api.getWalletContactGroups(walletId);
+      final ids = await Api.getContactGroupIdsForContact(walletId, widget.contact.id);
+      if (mounted) {
+        setState(() {
+          _contactGroups = groups;
+          _contactGroupIds = ids.toSet();
+          _groupsLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _groupsError = e.toString();
+          _groupsLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -44,6 +80,41 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     _emailController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleContactGroup(String groupId, String name, bool isSystem) async {
+    if (_walletId == null || isSystem) return;
+    final inGroup = _contactGroupIds.contains(groupId);
+    setState(() {
+      if (inGroup) {
+        _contactGroupIds.remove(groupId);
+      } else {
+        _contactGroupIds.add(groupId);
+      }
+    });
+    try {
+      if (inGroup) {
+        await Api.removeWalletContactGroupMember(_walletId!, groupId, widget.contact.id);
+      } else {
+        await Api.addWalletContactGroupMember(_walletId!, groupId, widget.contact.id);
+      }
+      ref.invalidate(contactsProvider);
+      ref.invalidate(transactionsProvider);
+      if (mounted) {
+        ToastService.showSuccessFromContext(context, inGroup ? 'Removed from $name' : 'Added to $name');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          if (inGroup) {
+            _contactGroupIds.add(groupId);
+          } else {
+            _contactGroupIds.remove(groupId);
+          }
+        });
+        ToastService.showErrorFromContext(context, 'Error: $e');
+      }
+    }
   }
 
   Future<void> _saveContact() async {
@@ -154,6 +225,41 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
               ),
               maxLines: 3,
             ),
+            if (!kIsWeb) ...[
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text(
+                'Contact groups',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              if (_groupsLoading)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_groupsError != null)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(_groupsError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                )
+              else
+                ..._contactGroups.map((g) {
+                  final groupId = g['id'] as String?;
+                  final name = g['name'] as String? ?? '';
+                  final isSystem = g['is_system'] as bool? ?? false;
+                  if (groupId == null) return const SizedBox.shrink();
+                  final inGroup = _contactGroupIds.contains(groupId);
+                  return CheckboxListTile(
+                    value: inGroup,
+                    onChanged: isSystem ? null : (v) => _toggleContactGroup(groupId, name, isSystem),
+                    title: Text(name),
+                    subtitle: isSystem ? const Text('All contacts (system)', style: TextStyle(fontSize: 12)) : null,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  );
+                }),
+            ],
           ],
         ),
       ),

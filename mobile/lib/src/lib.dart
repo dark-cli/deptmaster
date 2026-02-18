@@ -257,6 +257,12 @@ Future<String> listWalletContactGroupMembers(
     RustLib.instance.api.crateListWalletContactGroupMembers(
         walletId: walletId, groupId: groupId);
 
+/// Returns JSON array of contact group ids that contain this contact. Used by edit-contact UI.
+Future<String> getContactGroupIdsForContact(
+        {required String walletId, required String contactId}) =>
+    RustLib.instance.api.crateGetContactGroupIdsForContact(
+        walletId: walletId, contactId: contactId);
+
 Future<void> addWalletContactGroupMember(
         {required String walletId,
         required String groupId,

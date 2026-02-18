@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
@@ -192,6 +193,11 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                         walletId: widget.walletId,
                         contactGroups: _contactGroups.where((g) => g['is_system'] != true).toList(),
                         onReload: _loadAll,
+                        onContactGroupMembersChanged: () {
+                          ref.invalidate(contactsProvider);
+                          ref.invalidate(transactionsProvider);
+                          _loadAll();
+                        },
                         onPermissionError: _onPermissionError,
                         onRegisterFab: (action) => _registerFab(2, action),
                       ),
@@ -783,6 +789,7 @@ class _ContactGroupsTab extends StatefulWidget {
   final String walletId;
   final List<Map<String, dynamic>> contactGroups;
   final VoidCallback onReload;
+  final VoidCallback? onContactGroupMembersChanged;
   final VoidCallback onPermissionError;
   final void Function(VoidCallback? action) onRegisterFab;
 
@@ -790,6 +797,7 @@ class _ContactGroupsTab extends StatefulWidget {
     required this.walletId,
     required this.contactGroups,
     required this.onReload,
+    this.onContactGroupMembersChanged,
     required this.onPermissionError,
     required this.onRegisterFab,
   });
@@ -916,6 +924,7 @@ class _ContactGroupsTabState extends State<_ContactGroupsTab> {
                   walletId: widget.walletId,
                   groupId: g['id'] as String? ?? '',
                   onReload: widget.onReload,
+                  onContactGroupMembersChanged: widget.onContactGroupMembersChanged,
                   onPermissionError: widget.onPermissionError,
                 ),
               ],
@@ -931,12 +940,14 @@ class _ContactGroupMembers extends StatefulWidget {
   final String walletId;
   final String groupId;
   final VoidCallback onReload;
+  final VoidCallback? onContactGroupMembersChanged;
   final VoidCallback onPermissionError;
 
   const _ContactGroupMembers({
     required this.walletId,
     required this.groupId,
     required this.onReload,
+    this.onContactGroupMembersChanged,
     required this.onPermissionError,
   });
 
@@ -978,6 +989,7 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
           try {
             await Api.addWalletContactGroupMember(widget.walletId, widget.groupId, contactId);
             await _load();
+            widget.onContactGroupMembersChanged?.call();
             widget.onReload();
           } catch (e) {
             if (mounted) {
@@ -1001,6 +1013,7 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
     try {
       await Api.removeWalletContactGroupMember(widget.walletId, widget.groupId, contactId);
       await _load();
+      widget.onContactGroupMembersChanged?.call();
       widget.onReload();
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {

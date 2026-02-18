@@ -110,22 +110,47 @@ pub async fn create_contact(
     Json(payload): Json<CreateContactRequest>,
 ) -> Result<(StatusCode, Json<CreateContactResponse>), (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    let can = permission_service::can_perform(
-        &*state.db_pool,
-        wallet_id,
-        auth_user.user_id,
-        &wallet_context.user_role,
-        "contact:create",
-        ResourceType::Contact,
-        None,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Permission check error: {:?}", e);
-        permission_service::insufficient_permission_response()
-    })?;
-    if !can {
-        return Err(permission_service::insufficient_permission_response());
+    // Resolve group_ids first: request body or user's default contact groups
+    let group_ids: Vec<Uuid> = if let Some(ids) = &payload.group_ids {
+        ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect()
+    } else {
+        sqlx::query_scalar::<_, Vec<Uuid>>(
+            "SELECT COALESCE(default_contact_group_ids, '{}') FROM user_wallet_settings WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(auth_user.user_id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+    };
+    // Owner/admin can create without specifying groups (contact goes to all_contacts). Members must assign to at least one group they have contact:create in.
+    if group_ids.is_empty() && wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Contact must be assigned to at least one group you have create permission in"})),
+        ));
+    }
+    if wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
+        for cg_id in &group_ids {
+            let can_create = permission_service::can_perform_action_on_contact_group(
+                &*state.db_pool,
+                wallet_id,
+                auth_user.user_id,
+                &wallet_context.user_role,
+                *cg_id,
+                "contact:create",
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("Permission check error: {:?}", e);
+                permission_service::insufficient_permission_response()
+            })?;
+            if !can_create {
+                return Err(permission_service::insufficient_permission_response());
+            }
+        }
     }
     // Validate name
     if payload.name.trim().is_empty() {
@@ -282,22 +307,26 @@ pub async fn create_contact(
     .await
     .ok(); // Non-blocking update
 
-    // Add contact to groups: from request or user's default wallet settings
-    let group_ids: Vec<Uuid> = if let Some(ids) = &payload.group_ids {
-        ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect()
-    } else {
-        sqlx::query_scalar::<_, Vec<Uuid>>(
-            "SELECT COALESCE(default_contact_group_ids, '{}') FROM user_wallet_settings WHERE wallet_id = $1 AND user_id = $2",
+    // All contacts are in all_contacts (system group)
+    let all_contacts_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
+    )
+    .bind(wallet_id)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .ok()
+    .flatten();
+    if let Some(ac_id) = all_contacts_id {
+        let _ = sqlx::query(
+            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         )
-        .bind(wallet_id)
-        .bind(auth_user.user_id)
-        .fetch_optional(&*state.db_pool)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default()
-    };
-    for cg_id in group_ids {
+        .bind(contact_id)
+        .bind(ac_id)
+        .execute(&*state.db_pool)
+        .await;
+    }
+    // Add contact to chosen groups (already validated)
+    for cg_id in &group_ids {
         let same_wallet = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
         )

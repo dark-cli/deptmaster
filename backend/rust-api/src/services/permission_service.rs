@@ -8,10 +8,15 @@ use uuid::Uuid;
 /// Precomputed read permissions for sync: one batch of queries, then filter events in memory.
 #[derive(Clone)]
 pub struct SyncReadContext {
-    /// User can read all transactions (wallet-level transaction:read via all_contacts).
+    /// True when user has transaction:read on all_contacts (can read all transactions). Used to set transaction_contact_ids_allowed = None.
+    #[allow(dead_code)]
     pub has_transaction_read: bool,
-    /// None = can read all contacts; Some(set) = can only read these contact ids.
+    /// None = can read all contacts; Some(set) = can only read these contact ids (from contact:read groups).
     pub contact_ids_allowed: Option<HashSet<Uuid>>,
+    /// None = can read all transactions; Some(set) = can only read transactions for these contact ids.
+    /// Transactions don't have their own groups; they follow the contact's contact groups. So we derive
+    /// this from contact groups where the user has transaction:read.
+    pub transaction_contact_ids_allowed: Option<HashSet<Uuid>>,
 }
 
 /// If wallet role is owner or admin, user has all actions. Otherwise check matrix.
@@ -29,6 +34,43 @@ pub async fn can_perform(
     }
     let allowed = resolve_allowed_actions(pool, wallet_id, user_id, resource_type, resource_id).await?;
     Ok(allowed.contains(action_name))
+}
+
+/// True if the user has the given action on the given contact group (via user groups × matrix). Owner/admin have all.
+pub async fn can_perform_action_on_contact_group(
+    pool: &PgPool,
+    wallet_id: Uuid,
+    user_id: Uuid,
+    user_role: &str,
+    contact_group_id: Uuid,
+    action_name: &str,
+) -> Result<bool, sqlx::Error> {
+    if user_role == "owner" || user_role == "admin" {
+        return Ok(true);
+    }
+    let user_group_ids = resolve_user_groups(pool, wallet_id, user_id).await?;
+    if user_group_ids.is_empty() {
+        return Ok(false);
+    }
+    let has_action: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM group_permission_matrix m
+            JOIN permission_actions pa ON pa.id = m.permission_action_id
+            JOIN contact_groups cg ON cg.id = m.contact_group_id AND cg.wallet_id = $1
+            WHERE m.user_group_id = ANY($2)
+              AND m.contact_group_id = $3
+              AND pa.name = $4
+        )
+        "#,
+    )
+    .bind(wallet_id)
+    .bind(&user_group_ids)
+    .bind(contact_group_id)
+    .bind(action_name)
+    .fetch_one(pool)
+    .await?;
+    Ok(has_action)
 }
 
 #[derive(Clone, Copy)]
@@ -142,6 +184,7 @@ pub async fn sync_read_context(
         return Ok(SyncReadContext {
             has_transaction_read: true,
             contact_ids_allowed: None,
+            transaction_contact_ids_allowed: None,
         });
     }
     let user_group_ids = resolve_user_groups(pool, wallet_id, user_id).await?;
@@ -156,6 +199,7 @@ pub async fn sync_read_context(
         return Ok(SyncReadContext {
             has_transaction_read: false,
             contact_ids_allowed: Some(HashSet::new()),
+            transaction_contact_ids_allowed: Some(HashSet::new()),
         });
     }
 
@@ -206,9 +250,25 @@ pub async fn sync_read_context(
         Some(ids.into_iter().collect())
     };
 
+    // Transactions don't have their own groups; visibility is by contact's contact groups (transaction:read).
+    let transaction_contact_ids_allowed = if has_transaction_read {
+        None
+    } else if transaction_read_groups.is_empty() {
+        Some(HashSet::new())
+    } else {
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT contact_id FROM contact_group_members WHERE contact_group_id = ANY($1)",
+        )
+        .bind(transaction_read_groups.into_iter().collect::<Vec<_>>())
+        .fetch_all(pool)
+        .await?;
+        Some(ids.into_iter().collect())
+    };
+
     Ok(SyncReadContext {
         has_transaction_read,
         contact_ids_allowed,
+        transaction_contact_ids_allowed,
     })
 }
 

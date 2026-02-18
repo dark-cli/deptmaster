@@ -428,12 +428,46 @@ pub fn list_wallet_contact_group_members(wallet_id: String, group_id: String) ->
     api::list_contact_group_members_api(&wallet_id, &group_id)
 }
 
+/// Returns JSON array of contact group ids that contain this contact. Used by edit-contact UI.
+pub fn get_contact_group_ids_for_contact(wallet_id: String, contact_id: String) -> Result<String, String> {
+    let groups_json = api::list_contact_groups_api(&wallet_id)?;
+    let groups: Vec<serde_json::Value> = serde_json::from_str(&groups_json).map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for g in groups {
+        let group_id = match g.get("id").and_then(|v| v.as_str()) {
+            Some(id) => id.to_string(),
+            None => continue,
+        };
+        let members_json = api::list_contact_group_members_api(&wallet_id, &group_id)?;
+        let members: Vec<serde_json::Value> = serde_json::from_str(&members_json).unwrap_or_default();
+        for m in members {
+            if m.get("contact_id").and_then(|v| v.as_str()) == Some(contact_id.as_str()) {
+                result.push(group_id);
+                break;
+            }
+        }
+    }
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
 pub fn add_wallet_contact_group_member(wallet_id: String, group_id: String, contact_id: String) -> Result<(), String> {
-    api::add_contact_group_member_api(&wallet_id, &group_id, &contact_id)
+    api::add_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
+    if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
+        if current == wallet_id {
+            let _ = sync::invalidate_perms_cache_and_pull(&wallet_id);
+        }
+    }
+    Ok(())
 }
 
 pub fn remove_wallet_contact_group_member(wallet_id: String, group_id: String, contact_id: String) -> Result<(), String> {
-    api::remove_contact_group_member_api(&wallet_id, &group_id, &contact_id)
+    api::remove_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
+    if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
+        if current == wallet_id {
+            let _ = sync::invalidate_perms_cache_and_pull(&wallet_id);
+        }
+    }
+    Ok(())
 }
 
 pub fn list_wallet_permission_actions(wallet_id: String) -> Result<String, String> {
@@ -453,7 +487,13 @@ pub fn get_wallet_permission_matrix(wallet_id: String) -> Result<String, String>
 }
 
 pub fn put_wallet_permission_matrix(wallet_id: String, entries_json: String) -> Result<(), String> {
-    api::put_permission_matrix_api(&wallet_id, &entries_json)
+    api::put_permission_matrix_api(&wallet_id, &entries_json)?;
+    if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
+        if current == wallet_id {
+            let _ = sync::clear_wallet_and_resync(&wallet_id);
+        }
+    }
+    Ok(())
 }
 
 // --- Events (for events log / EventStoreService) ---
