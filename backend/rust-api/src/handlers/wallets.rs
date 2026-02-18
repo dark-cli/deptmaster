@@ -291,12 +291,11 @@ async fn initialize_wallet_permissions(
         .fetch_one(db_pool)
         .await?;
 
-    // 3. Grant default permissions: all_users can only READ contacts/transactions/events by default.
-    // Explicitly exclude create/update/delete/close to force admins to grant them.
+    // 3. Grant default permissions: all_users can only READ contacts/transactions by default.
+    // Events are always viewable (no permission). Explicitly exclude create/update/delete/close to force admins to grant them.
     let actions = [
         "contact:read",
         "transaction:read",
-        "events:read"
     ];
 
     for action in actions {
@@ -1258,44 +1257,46 @@ pub async fn get_my_permissions(
     Extension(auth_user): Extension<AuthUser>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<MyPermissionsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    if wallet_context.user_role == "owner" || wallet_context.user_role == "admin" {
-        let all: Vec<String> = vec![
+    let mut actions: Vec<String> = if wallet_context.user_role == "owner" || wallet_context.user_role == "admin" {
+        vec![
             "contact:create".into(), "contact:read".into(), "contact:update".into(), "contact:delete".into(),
             "transaction:create".into(), "transaction:read".into(), "transaction:update".into(), "transaction:delete".into(), "transaction:close".into(),
-            "events:read".into(),
             "wallet:read".into(), "wallet:update".into(), "wallet:delete".into(), "wallet:manage_members".into(),
-        ];
-        return Ok(Json(MyPermissionsResponse { actions: all }));
-    }
-    let wallet_id = wallet_context.wallet_id;
-    let resource_type = match params.get("resource_type").map(|s| s.as_str()) {
-        Some("contact") => ResourceType::Contact,
-        Some("transaction") => ResourceType::Transaction,
-        Some("events") => ResourceType::Events,
-        Some("wallet") => ResourceType::Wallet,
-        _ => ResourceType::Contact,
-    };
-    let resource_id = params
-        .get("resource_id")
-        .and_then(|s| Uuid::parse_str(s).ok());
-    let actions = permission_service::resolve_allowed_actions(
-        &*state.db_pool,
-        wallet_id,
-        auth_user.user_id,
-        resource_type,
-        resource_id,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("resolve_allowed_actions error: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to resolve permissions"})),
+        ]
+    } else {
+        let wallet_id = wallet_context.wallet_id;
+        let resource_type = match params.get("resource_type").map(|s| s.as_str()) {
+            Some("contact") => ResourceType::Contact,
+            Some("transaction") => ResourceType::Transaction,
+            Some("wallet") => ResourceType::Wallet,
+            _ => ResourceType::Contact,
+        };
+        let resource_id = params
+            .get("resource_id")
+            .and_then(|s| Uuid::parse_str(s).ok());
+        permission_service::resolve_allowed_actions(
+            &*state.db_pool,
+            wallet_id,
+            auth_user.user_id,
+            resource_type,
+            resource_id,
         )
-    })?;
-    Ok(Json(MyPermissionsResponse {
-        actions: actions.into_iter().collect(),
-    }))
+        .await
+        .map_err(|e| {
+            tracing::error!("resolve_allowed_actions error: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to resolve permissions"})),
+            )
+        })?
+        .into_iter()
+        .collect()
+    };
+    // Events are always viewable (no permission check).
+    if !actions.contains(&"events:read".to_string()) {
+        actions.push("events:read".into());
+    }
+    Ok(Json(MyPermissionsResponse { actions }))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2478,7 +2479,8 @@ pub async fn list_permission_actions(
 
     let list: Vec<PermissionActionResponse> = rows
         .into_iter()
-        .map(|row: sqlx::postgres::PgRow| PermissionActionResponse {
+        .filter(|row| row.get::<String, _>("name") != "events:read")
+        .map(|row| PermissionActionResponse {
             id: row.get("id"),
             name: row.get("name"),
             resource: row.get("resource"),
@@ -2526,7 +2528,8 @@ pub async fn get_permission_matrix(
     let list: Vec<MatrixEntry> = rows
         .into_iter()
         .map(|row: sqlx::postgres::PgRow| {
-            let arr: Vec<String> = row.get("action_names");
+            let mut arr: Vec<String> = row.get("action_names");
+            arr.retain(|a| a != "events:read");
             MatrixEntry {
                 user_group_id: row.get::<Uuid, _>("user_group_id").to_string(),
                 contact_group_id: row.get::<Uuid, _>("contact_group_id").to_string(),
@@ -2559,7 +2562,8 @@ pub async fn put_permission_matrix(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
     for entry in &payload.entries {
-        if let Err(e) = validate_permission_dependencies(&entry.action_names) {
+        let action_names: Vec<String> = entry.action_names.iter().filter(|a| *a != "events:read").cloned().collect();
+        if let Err(e) = validate_permission_dependencies(&action_names) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": e})),
@@ -2618,7 +2622,7 @@ pub async fn put_permission_matrix(
         let event_data = serde_json::json!({
             "user_group_id": entry.user_group_id,
             "contact_group_id": entry.contact_group_id,
-            "action_names": entry.action_names,
+            "action_names": action_names,
         });
         sync::insert_permission_event_and_apply(
             &state,

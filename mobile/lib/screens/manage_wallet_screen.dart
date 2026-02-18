@@ -697,11 +697,13 @@ class _UserGroupMembersState extends State<_UserGroupMembers> {
   }
 
   Future<void> _addMember() async {
+    final existingUserIds = _members.map((m) => m['user_id'] as String? ?? '').where((id) => id.isNotEmpty).toList();
     showDialog(
       context: context,
       builder: (context) => _AddMemberDialog(
         walletId: widget.walletId,
         groupId: widget.groupId,
+        existingUserIds: existingUserIds,
         onAdd: (username) async {
           Navigator.pop(context);
           try {
@@ -957,6 +959,7 @@ class _ContactGroupMembers extends StatefulWidget {
 
 class _ContactGroupMembersState extends State<_ContactGroupMembers> {
   List<Map<String, dynamic>> _members = [];
+  Map<String, Map<String, dynamic>> _contactById = {};
   bool _loading = true;
 
   @override
@@ -969,8 +972,17 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
     setState(() => _loading = true);
     try {
       final list = await Api.getWalletContactGroupMembers(widget.walletId, widget.groupId);
+      final jsonStr = await Api.getContacts();
+      final List<dynamic> contacts = jsonDecode(jsonStr);
+      final Map<String, Map<String, dynamic>> byId = {};
+      for (final c in contacts) {
+        final map = c as Map<String, dynamic>;
+        final id = map['id'] as String?;
+        if (id != null) byId[id] = map;
+      }
       if (mounted) setState(() {
         _members = list;
+        _contactById = byId;
         _loading = false;
       });
     } catch (_) {
@@ -979,11 +991,13 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
   }
 
   Future<void> _addMember() async {
+    final existingIds = _members.map((m) => m['contact_id'] as String? ?? '').where((id) => id.isNotEmpty).toList();
     showDialog(
       context: context,
       builder: (context) => _AddContactDialog(
         walletId: widget.walletId,
         groupId: widget.groupId,
+        existingContactIds: existingIds,
         onAdd: (contactId) async {
           Navigator.pop(context);
           try {
@@ -1053,9 +1067,14 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
           ),
           ..._members.map((m) {
             final contactId = m['contact_id'] as String? ?? '';
+            final contact = _contactById[contactId];
+            final name = contact?['name'] as String? ?? 'Unknown';
+            final username = contact?['username'] as String?;
+            final subtitle = username != null && username.isNotEmpty ? '@$username' : null;
             return ListTile(
               dense: true,
-              title: Text(contactId),
+              title: Text(name),
+              subtitle: subtitle != null ? Text(subtitle, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
               trailing: IconButton(
                 icon: const Icon(Icons.remove_circle_outline, size: 20),
                 onPressed: () => _removeMember(contactId),
@@ -1373,7 +1392,6 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
       'transaction:update': 'Edit Transaction',
       'transaction:delete': 'Delete Transaction',
       'transaction:close': 'Close Debt',
-      'events:read': 'View Activity Log',
       'wallet:read': 'View Wallet Details',
       'wallet:update': 'Edit Wallet Details',
       'wallet:delete': 'Delete Wallet',
@@ -1581,11 +1599,13 @@ String _formatGroupName(String name) {
 class _AddMemberDialog extends StatefulWidget {
   final String walletId;
   final String groupId;
+  final List<String> existingUserIds;
   final Function(String) onAdd;
 
   const _AddMemberDialog({
     required this.walletId,
     required this.groupId,
+    required this.existingUserIds,
     required this.onAdd,
   });
 
@@ -1609,11 +1629,12 @@ class _AddMemberDialogState extends State<_AddMemberDialog> {
   Future<void> _loadUsers() async {
     try {
       final users = await Api.getWalletUsers(widget.walletId);
-      
+      final existing = widget.existingUserIds.toSet();
+      final available = users.where((u) => !existing.contains(u['user_id'] as String?)).toList();
       if (mounted) {
         setState(() {
-          _walletUsers = users;
-          _searchResults = users;
+          _walletUsers = available;
+          _searchResults = available;
           _loading = false;
         });
       }
@@ -1626,7 +1647,11 @@ class _AddMemberDialogState extends State<_AddMemberDialog> {
   }
 
   void _search(String query) {
-    final q = query.toLowerCase();
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) {
+      setState(() => _searchResults = List.from(_walletUsers));
+      return;
+    }
     setState(() {
       _searchResults = _walletUsers.where((u) {
         final username = (u['username'] as String? ?? '').toLowerCase();
@@ -1690,11 +1715,13 @@ class _AddMemberDialogState extends State<_AddMemberDialog> {
 class _AddContactDialog extends StatefulWidget {
   final String walletId;
   final String groupId;
+  final List<String> existingContactIds;
   final Function(String) onAdd;
 
   const _AddContactDialog({
     required this.walletId,
     required this.groupId,
+    required this.existingContactIds,
     required this.onAdd,
   });
 
@@ -1719,11 +1746,12 @@ class _AddContactDialogState extends State<_AddContactDialog> {
     try {
       final jsonStr = await Api.getContacts();
       final List<dynamic> contacts = jsonDecode(jsonStr);
-      
+      final existing = widget.existingContactIds.toSet();
+      final available = contacts.where((c) => !existing.contains(c['id'] as String?)).toList();
       if (mounted) {
         setState(() {
-          _contacts = contacts;
-          _searchResults = contacts;
+          _contacts = available;
+          _searchResults = available;
           _loading = false;
         });
       }
@@ -1736,11 +1764,16 @@ class _AddContactDialogState extends State<_AddContactDialog> {
   }
 
   void _search(String query) {
-    final q = query.toLowerCase();
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) {
+      setState(() => _searchResults = List.from(_contacts));
+      return;
+    }
     setState(() {
       _searchResults = _contacts.where((c) {
         final name = (c['name'] as String? ?? '').toLowerCase();
-        return name.contains(q);
+        final username = (c['username'] as String? ?? '').toLowerCase();
+        return name.contains(q) || username.contains(q);
       }).toList();
     });
   }
@@ -1776,9 +1809,11 @@ class _AddContactDialogState extends State<_AddContactDialog> {
                   itemBuilder: (context, index) {
                     final contact = _searchResults[index];
                     final name = contact['name'] as String? ?? 'Unknown';
+                    final username = contact['username'] as String?;
                     final id = contact['id'] as String? ?? '';
                     return ListTile(
                       title: Text(name),
+                      subtitle: username != null && username.isNotEmpty ? Text('@$username', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
                       onTap: () => widget.onAdd(id),
                     );
                   },

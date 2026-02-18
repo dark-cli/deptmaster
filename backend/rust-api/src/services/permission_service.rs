@@ -77,7 +77,6 @@ pub async fn can_perform_action_on_contact_group(
 pub enum ResourceType {
     Contact,
     Transaction,
-    Events,
     Wallet,
 }
 
