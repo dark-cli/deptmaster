@@ -1506,6 +1506,7 @@ fn wire__crate__create_contact_impl(
             let api_phone = <Option<String>>::sse_decode(&mut deserializer);
             let api_email = <Option<String>>::sse_decode(&mut deserializer);
             let api_notes = <Option<String>>::sse_decode(&mut deserializer);
+            let api_group_ids = <Option<Vec<String>>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -1515,6 +1516,7 @@ fn wire__crate__create_contact_impl(
                         api_phone,
                         api_email,
                         api_notes,
+                        api_group_ids,
                     )?;
                     Ok(output_ok)
                 })())
@@ -1549,6 +1551,7 @@ fn wire__crate__crud__create_contact_impl(
             let api_phone = <Option<String>>::sse_decode(&mut deserializer);
             let api_email = <Option<String>>::sse_decode(&mut deserializer);
             let api_notes = <Option<String>>::sse_decode(&mut deserializer);
+            let api_group_ids = <Option<Vec<String>>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -1558,6 +1561,7 @@ fn wire__crate__crud__create_contact_impl(
                         api_phone,
                         api_email,
                         api_notes,
+                        api_group_ids,
                     )?;
                     Ok(output_ok)
                 })())
@@ -5419,6 +5423,7 @@ fn wire__crate__update_contact_impl(
             let api_phone = <Option<String>>::sse_decode(&mut deserializer);
             let api_email = <Option<String>>::sse_decode(&mut deserializer);
             let api_notes = <Option<String>>::sse_decode(&mut deserializer);
+            let api_group_ids = <Option<Vec<String>>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -5429,6 +5434,7 @@ fn wire__crate__update_contact_impl(
                         api_phone,
                         api_email,
                         api_notes,
+                        api_group_ids,
                     )?;
                     Ok(output_ok)
                 })())
@@ -5464,6 +5470,7 @@ fn wire__crate__crud__update_contact_impl(
             let api_phone = <Option<String>>::sse_decode(&mut deserializer);
             let api_email = <Option<String>>::sse_decode(&mut deserializer);
             let api_notes = <Option<String>>::sse_decode(&mut deserializer);
+            let api_group_ids = <Option<Vec<String>>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
@@ -5474,6 +5481,7 @@ fn wire__crate__crud__update_contact_impl(
                         api_phone,
                         api_email,
                         api_notes,
+                        api_group_ids,
                     )?;
                     Ok(output_ok)
                 })())
@@ -6144,6 +6152,17 @@ impl SseDecode for Option<(Vec<crate::models::Contact>, Vec<crate::models::Trans
                 Vec<crate::models::Contact>,
                 Vec<crate::models::Transaction>,
             )>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<String>>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -7091,6 +7110,16 @@ impl SseEncode for Option<(Vec<crate::models::Contact>, Vec<crate::models::Trans
             <(Vec<crate::models::Contact>, Vec<crate::models::Transaction>)>::sse_encode(
                 value, serializer,
             );
+        }
+    }
+}
+
+impl SseEncode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<String>>::sse_encode(value, serializer);
         }
     }
 }

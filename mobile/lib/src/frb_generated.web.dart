@@ -146,6 +146,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
           dynamic raw);
 
   @protected
+  List<String>? dco_decode_opt_list_String(dynamic raw);
+
+  @protected
   (List<Contact>, List<Transaction>)
       dco_decode_record_list_contact_list_transaction(dynamic raw);
 
@@ -297,6 +300,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   (List<Contact>, List<Transaction>)?
       sse_decode_opt_box_autoadd_record_list_contact_list_transaction(
           SseDeserializer deserializer);
+
+  @protected
+  List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
 
   @protected
   (List<Contact>, List<Transaction>)
@@ -457,6 +463,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_record_list_contact_list_transaction(
       (List<Contact>, List<Transaction>)? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
 
   @protected
   void sse_encode_record_list_contact_list_transaction(

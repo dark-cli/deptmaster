@@ -258,8 +258,9 @@ pub fn create_contact(
     phone: Option<String>,
     email: Option<String>,
     notes: Option<String>,
+    group_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
-    let c = crud::create_contact(name, username, phone, email, notes)?;
+    let c = crud::create_contact(name, username, phone, email, notes, group_ids)?;
     serde_json::to_string(&c).map_err(|e| e.to_string())
 }
 
@@ -297,8 +298,9 @@ pub fn update_contact(
     phone: Option<String>,
     email: Option<String>,
     notes: Option<String>,
+    group_ids: Option<Vec<String>>,
 ) -> Result<(), String> {
-    crud::update_contact(id, name, username, phone, email, notes)
+    crud::update_contact(id, name, username, phone, email, notes, group_ids)
 }
 
 pub fn delete_contact(contact_id: String) -> Result<(), String> {

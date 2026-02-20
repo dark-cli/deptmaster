@@ -179,9 +179,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           IconButton(
             icon: const Icon(Icons.edit),
             onPressed: () async {
+              final walletId = await ref.read(activeWalletIdProvider.future);
+              if (!context.mounted) return;
               final result = await showScreenAsBottomSheet(
                 context: context,
-                screen: EditContactScreen(contact: widget.contact),
+                screen: EditContactScreen(contact: widget.contact, initialWalletId: walletId),
               );
               if (result == true) {
                 if (!mounted) return;

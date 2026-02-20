@@ -11,10 +11,13 @@ import '../widgets/gradient_background.dart';
 
 class EditContactScreen extends ConsumerStatefulWidget {
   final Contact contact;
+  /// Wallet context when opening from contact list/transactions (ensures group load/save works for members).
+  final String? initialWalletId;
 
   const EditContactScreen({
     super.key,
     required this.contact,
+    this.initialWalletId,
   });
 
   @override
@@ -31,6 +34,7 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
   String? _walletId;
   List<Map<String, dynamic>> _contactGroups = [];
   Set<String> _contactGroupIds = {};
+  Set<String> _initialGroupIds = {};
   bool _groupsLoading = true;
   String? _groupsError;
 
@@ -41,13 +45,17 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     _phoneController.text = widget.contact.phone ?? '';
     _emailController.text = widget.contact.email ?? '';
     _notesController.text = widget.contact.notes ?? '';
+    if (widget.initialWalletId != null && widget.initialWalletId!.isNotEmpty) {
+      _walletId = widget.initialWalletId;
+    }
     _loadGroups();
   }
 
   Future<void> _loadGroups() async {
     if (kIsWeb) return;
-    final walletId = await Api.getCurrentWalletId();
-    if (walletId == null || !mounted) return;
+    final currentWalletId = await Api.getCurrentWalletId();
+    final walletId = currentWalletId ?? widget.initialWalletId ?? widget.contact.walletId;
+    if (walletId == null || walletId.isEmpty || !mounted) return;
     setState(() {
       _walletId = walletId;
       _groupsLoading = true;
@@ -60,6 +68,7 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
         setState(() {
           _contactGroups = groups;
           _contactGroupIds = ids.toSet();
+          _initialGroupIds = ids.toSet();
           _groupsLoading = false;
         });
       }
@@ -82,39 +91,15 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     super.dispose();
   }
 
-  Future<void> _toggleContactGroup(String groupId, String name, bool isSystem) async {
-    if (_walletId == null || isSystem) return;
-    final inGroup = _contactGroupIds.contains(groupId);
+  void _toggleContactGroup(String groupId, bool isSystem) {
+    if (isSystem) return;
     setState(() {
-      if (inGroup) {
+      if (_contactGroupIds.contains(groupId)) {
         _contactGroupIds.remove(groupId);
       } else {
         _contactGroupIds.add(groupId);
       }
     });
-    try {
-      if (inGroup) {
-        await Api.removeWalletContactGroupMember(_walletId!, groupId, widget.contact.id);
-      } else {
-        await Api.addWalletContactGroupMember(_walletId!, groupId, widget.contact.id);
-      }
-      ref.invalidate(contactsProvider);
-      ref.invalidate(transactionsProvider);
-      if (mounted) {
-        ToastService.showSuccessFromContext(context, inGroup ? 'Removed from $name' : 'Added to $name');
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          if (inGroup) {
-            _contactGroupIds.add(groupId);
-          } else {
-            _contactGroupIds.remove(groupId);
-          }
-        });
-        ToastService.showErrorFromContext(context, 'Error: $e');
-      }
-    }
   }
 
   Future<void> _saveContact() async {
@@ -132,7 +117,11 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+        groupIds: !kIsWeb ? _contactGroupIds.toList() : null,
       );
+
+      ref.invalidate(contactsProvider);
+      ref.invalidate(transactionsProvider);
 
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -253,7 +242,7 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
                   final inGroup = _contactGroupIds.contains(groupId);
                   return CheckboxListTile(
                     value: inGroup,
-                    onChanged: isSystem ? null : (v) => _toggleContactGroup(groupId, name, isSystem),
+                    onChanged: isSystem ? null : (v) => _toggleContactGroup(groupId, isSystem),
                     title: Text(name),
                     subtitle: isSystem ? const Text('All contacts (system)', style: TextStyle(fontSize: 12)) : null,
                     controlAffinity: ListTileControlAffinity.leading,

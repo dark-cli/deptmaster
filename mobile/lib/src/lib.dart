@@ -74,13 +74,15 @@ Future<String> createContact(
         String? username,
         String? phone,
         String? email,
-        String? notes}) =>
+        String? notes,
+        List<String>? groupIds}) =>
     RustLib.instance.api.crateCreateContact(
         name: name,
         username: username,
         phone: phone,
         email: email,
-        notes: notes);
+        notes: notes,
+        groupIds: groupIds);
 
 Future<String> createTransaction(
         {required String contactId,
@@ -110,14 +112,16 @@ Future<void> updateContact(
         String? username,
         String? phone,
         String? email,
-        String? notes}) =>
+        String? notes,
+        List<String>? groupIds}) =>
     RustLib.instance.api.crateUpdateContact(
         id: id,
         name: name,
         username: username,
         phone: phone,
         email: email,
-        notes: notes);
+        notes: notes,
+        groupIds: groupIds);
 
 Future<void> deleteContact({required String contactId}) =>
     RustLib.instance.api.crateDeleteContact(contactId: contactId);

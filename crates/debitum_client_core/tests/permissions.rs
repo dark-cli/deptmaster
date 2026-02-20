@@ -355,7 +355,7 @@ fn permission_limits_deny_overrides_allow() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     member.activate().expect("activate");
     set_current_wallet_id(wallet_id.clone()).expect("member must use shared wallet");
-    let res = create_contact("Allowed Contact".to_string(), None, None, None, None);
+    let res = create_contact("Allowed Contact".to_string(), None, None, None, None, None);
     assert!(res.is_ok(), "User should be able to create contact with Allow permission");
 
     owner.activate().expect("activate owner to set matrix");
@@ -363,7 +363,7 @@ fn permission_limits_deny_overrides_allow() {
 
     std::thread::sleep(std::time::Duration::from_millis(300));
     member.activate().expect("activate");
-    let _ = create_contact("Denied Contact".to_string(), None, None, None, None);
+    let _ = create_contact("Denied Contact".to_string(), None, None, None, None, None);
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     member.activate().expect("activate");
@@ -393,7 +393,7 @@ fn permission_limits_union_of_groups() {
 
     owner.activate().expect("activate");
     set_current_wallet_id(wallet_id.clone()).expect("owner");
-    create_contact("Test Contact".to_string(), None, None, None, None).expect("create contact");
+    create_contact("Test Contact".to_string(), None, None, None, None, None).expect("create contact");
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     let cg_all = get_contact_group_id(&wallet_id, "all_contacts").expect("all_contacts");
@@ -443,12 +443,12 @@ fn permission_limits_scoped_denial() {
     let cg_work = get_contact_group_id(&wallet_id, "Work").expect("Work");
     let cg_personal = get_contact_group_id(&wallet_id, "Personal").expect("Personal");
 
-    let c_work_json = create_contact("Work Contact".to_string(), None, None, None, None).expect("create work c");
+    let c_work_json = create_contact("Work Contact".to_string(), None, None, None, None, None).expect("create work c");
     let c_work: serde_json::Value = serde_json::from_str(&c_work_json).expect("parse");
     let c_work_id = c_work["id"].as_str().unwrap().to_string();
     add_wallet_contact_group_member(wallet_id.clone(), cg_work.clone(), c_work_id).expect("add to work");
 
-    let c_personal_json = create_contact("Personal Contact".to_string(), None, None, None, None).expect("create personal c");
+    let c_personal_json = create_contact("Personal Contact".to_string(), None, None, None, None, None).expect("create personal c");
     let c_personal: serde_json::Value = serde_json::from_str(&c_personal_json).expect("parse");
     let c_personal_id = c_personal["id"].as_str().unwrap().to_string();
     add_wallet_contact_group_member(wallet_id.clone(), cg_personal.clone(), c_personal_id).expect("add to personal");

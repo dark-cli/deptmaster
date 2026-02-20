@@ -27,6 +27,10 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
   final _emailController = TextEditingController();
   final _notesController = TextEditingController();
   bool _saving = false;
+  String? _walletId;
+  List<Map<String, dynamic>> _contactGroups = [];
+  Set<String> _selectedGroupIds = {};
+  bool _groupsLoading = true;
 
   @override
   void initState() {
@@ -34,7 +38,31 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
     if (widget.initialName != null) {
       _nameController.text = widget.initialName!;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _requireWallet());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requireWallet();
+      _loadGroups();
+    });
+  }
+
+  Future<void> _loadGroups() async {
+    if (kIsWeb) return;
+    final walletId = await Api.getCurrentWalletId();
+    if (walletId == null || !mounted) return;
+    setState(() {
+      _walletId = walletId;
+      _groupsLoading = true;
+    });
+    try {
+      final groups = await Api.getWalletContactGroups(walletId);
+      if (mounted) {
+        setState(() {
+          _contactGroups = groups;
+          _groupsLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _groupsLoading = false);
+    }
   }
 
   Future<void> _requireWallet() async {
@@ -68,12 +96,14 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
     });
 
     try {
+      final groupIds = _selectedGroupIds.isEmpty ? null : _selectedGroupIds.toList();
       final jsonStr = await Api.createContact(
         name: _nameController.text.trim(),
         username: _usernameController.text.trim().isEmpty ? null : _usernameController.text.trim(),
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+        groupIds: groupIds,
       );
       final createdContact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
       if (mounted) {
@@ -178,6 +208,49 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
               ),
               maxLines: 3,
             ),
+            if (!kIsWeb) ...[
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text(
+                'Contact groups',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Add this contact to groups (optional). All contacts are in All Contacts.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_groupsLoading)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+                )
+              else
+                ..._contactGroups.map((g) {
+                  final groupId = g['id'] as String?;
+                  final name = g['name'] as String? ?? '';
+                  final isSystem = g['is_system'] as bool? ?? false;
+                  if (groupId == null) return const SizedBox.shrink();
+                  final selected = _selectedGroupIds.contains(groupId);
+                  return CheckboxListTile(
+                    value: selected,
+                    onChanged: isSystem ? null : (v) => setState(() {
+                      if (v == true) {
+                        _selectedGroupIds.add(groupId);
+                      } else {
+                        _selectedGroupIds.remove(groupId);
+                      }
+                    }),
+                    title: Text(name),
+                    subtitle: isSystem ? const Text('All contacts (system)', style: TextStyle(fontSize: 12)) : null,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  );
+                }),
+            ],
           ],
         ),
       ),

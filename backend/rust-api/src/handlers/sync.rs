@@ -13,6 +13,61 @@ use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use sha2::{Sha256, Digest};
 
+/// Sync contact_group_members for a contact from event_data.group_ids (contact UPDATED).
+/// Desired set is all_contacts + group_ids from event. Clears wallet's group memberships for this contact then inserts desired.
+async fn apply_contact_group_ids_from_event_data(
+    pool: &sqlx::PgPool,
+    wallet_id: uuid::Uuid,
+    contact_id: uuid::Uuid,
+    event_data: &serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    let Some(arr) = event_data.get("group_ids").and_then(|v| v.as_array()) else {
+        return Ok(());
+    };
+    let mut desired: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+    if let Some(all_contacts_id) = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
+    )
+    .bind(wallet_id)
+    .fetch_optional(pool)
+    .await?
+    {
+        desired.insert(all_contacts_id);
+    }
+    for g in arr {
+        if let Some(s) = g.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok()) {
+            let in_wallet = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
+            )
+            .bind(s)
+            .bind(wallet_id)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(false);
+            if in_wallet {
+                desired.insert(s);
+            }
+        }
+    }
+    sqlx::query(
+        "DELETE FROM contact_group_members WHERE contact_id = $1 AND contact_group_id IN (SELECT id FROM contact_groups WHERE wallet_id = $2)",
+    )
+    .bind(contact_id)
+    .bind(wallet_id)
+    .execute(pool)
+    .await?;
+    for cg_id in &desired {
+        sqlx::query(
+            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT (contact_id, contact_group_id) DO NOTHING",
+        )
+        .bind(contact_id)
+        .bind(cg_id)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
 fn map_event_to_permission_action(
     event: &SyncEventRequest,
     aggregate_id: uuid::Uuid,
@@ -1474,6 +1529,46 @@ async fn apply_events_to_projections(
                     .bind(created_at)
                     .execute(&*state.db_pool)
                     .await?;
+
+                    // All contacts go into all_contacts; optional group_ids from event_data (client add-contact)
+                    if let Some(all_contacts_id) = sqlx::query_scalar::<_, uuid::Uuid>(
+                        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
+                    )
+                    .bind(wallet_id)
+                    .fetch_optional(&*state.db_pool)
+                    .await?
+                    {
+                        let _ = sqlx::query(
+                            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                        )
+                        .bind(aggregate_id)
+                        .bind(all_contacts_id)
+                        .execute(&*state.db_pool)
+                        .await;
+                    }
+                    if let Some(arr) = event_data.get("group_ids").and_then(|v| v.as_array()) {
+                        for g in arr {
+                            if let Some(s) = g.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok()) {
+                                let in_wallet = sqlx::query_scalar::<_, bool>(
+                                    "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
+                                )
+                                .bind(s)
+                                .bind(wallet_id)
+                                .fetch_one(&*state.db_pool)
+                                .await
+                                .unwrap_or(false);
+                                if in_wallet {
+                                    let _ = sqlx::query(
+                                        "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                                    )
+                                    .bind(aggregate_id)
+                                    .bind(s)
+                                    .execute(&*state.db_pool)
+                                    .await;
+                                }
+                            }
+                        }
+                    }
                 }
                 "UPDATED" => {
                     let current = sqlx::query(
@@ -1520,6 +1615,7 @@ async fn apply_events_to_projections(
                         .execute(&*state.db_pool)
                         .await?;
                     }
+                    apply_contact_group_ids_from_event_data(&*state.db_pool, wallet_id, aggregate_id, &event_data).await?;
                 }
                 "DELETED" => {
                     // Mark contact as deleted
@@ -1858,6 +1954,46 @@ pub(crate) async fn apply_single_event_to_projections(
                     .bind(created_at)
                     .execute(&*state.db_pool)
                     .await?;
+
+                    // All contacts go into all_contacts; optional group_ids from event_data
+                    if let Some(all_contacts_id) = sqlx::query_scalar::<_, uuid::Uuid>(
+                        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
+                    )
+                    .bind(wallet_id)
+                    .fetch_optional(&*state.db_pool)
+                    .await?
+                    {
+                        let _ = sqlx::query(
+                            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                        )
+                        .bind(aggregate_id)
+                        .bind(all_contacts_id)
+                        .execute(&*state.db_pool)
+                        .await;
+                    }
+                    if let Some(arr) = event_data.get("group_ids").and_then(|v| v.as_array()) {
+                        for g in arr {
+                            if let Some(s) = g.as_str().and_then(|s| uuid::Uuid::parse_str(s).ok()) {
+                                let in_wallet = sqlx::query_scalar::<_, bool>(
+                                    "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
+                                )
+                                .bind(s)
+                                .bind(wallet_id)
+                                .fetch_one(&*state.db_pool)
+                                .await
+                                .unwrap_or(false);
+                                if in_wallet {
+                                    let _ = sqlx::query(
+                                        "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                                    )
+                                    .bind(aggregate_id)
+                                    .bind(s)
+                                    .execute(&*state.db_pool)
+                                    .await;
+                                }
+                            }
+                        }
+                    }
                 }
                 "UPDATED" => {
                     sqlx::query(
@@ -1882,6 +2018,7 @@ pub(crate) async fn apply_single_event_to_projections(
                     .bind(wallet_id)
                     .execute(&*state.db_pool)
                     .await?;
+                    apply_contact_group_ids_from_event_data(&*state.db_pool, wallet_id, aggregate_id, event_data).await?;
                 }
                 "DELETED" => {
                     // Mark contact as deleted

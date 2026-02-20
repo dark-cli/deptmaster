@@ -106,7 +106,7 @@ impl CommandRunner {
                     .map(|s| unquote(s).to_lowercase().replace(' ', "_"))
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| name.to_lowercase().replace(' ', "_"));
-                let json = create_contact(name, None, None, None, None)?;
+                let json = create_contact(name, None, None, None, None, None)?;
                 let c: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
                 let id = c["id"].as_str().ok_or("No id in contact response")?.to_string();
                 self.contact_ids.insert(label, id);

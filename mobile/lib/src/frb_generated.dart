@@ -191,14 +191,16 @@ abstract class RustLibApi extends BaseApi {
       String? username,
       String? phone,
       String? email,
-      String? notes});
+      String? notes,
+      List<String>? groupIds});
 
   Future<Contact> crateCrudCreateContact(
       {required String name,
       String? username,
       String? phone,
       String? email,
-      String? notes});
+      String? notes,
+      List<String>? groupIds});
 
   Future<String> crateApiCreateContactGroupApi(
       {required String walletId, required String name});
@@ -495,7 +497,8 @@ abstract class RustLibApi extends BaseApi {
       String? username,
       String? phone,
       String? email,
-      String? notes});
+      String? notes,
+      List<String>? groupIds});
 
   Future<void> crateCrudUpdateContact(
       {required String id,
@@ -503,7 +506,8 @@ abstract class RustLibApi extends BaseApi {
       String? username,
       String? phone,
       String? email,
-      String? notes});
+      String? notes,
+      List<String>? groupIds});
 
   Future<void> crateApiUpdateContactGroupApi(
       {required String walletId,
@@ -1496,7 +1500,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       String? username,
       String? phone,
       String? email,
-      String? notes}) {
+      String? notes,
+      List<String>? groupIds}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -1505,6 +1510,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(phone, serializer);
         sse_encode_opt_String(email, serializer);
         sse_encode_opt_String(notes, serializer);
+        sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 36, port: port_);
       },
@@ -1513,14 +1519,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateCreateContactConstMeta,
-      argValues: [name, username, phone, email, notes],
+      argValues: [name, username, phone, email, notes, groupIds],
       apiImpl: this,
     ));
   }
 
   TaskConstMeta get kCrateCreateContactConstMeta => const TaskConstMeta(
         debugName: "create_contact",
-        argNames: ["name", "username", "phone", "email", "notes"],
+        argNames: ["name", "username", "phone", "email", "notes", "groupIds"],
       );
 
   @override
@@ -1529,7 +1535,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       String? username,
       String? phone,
       String? email,
-      String? notes}) {
+      String? notes,
+      List<String>? groupIds}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -1538,6 +1545,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(phone, serializer);
         sse_encode_opt_String(email, serializer);
         sse_encode_opt_String(notes, serializer);
+        sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 37, port: port_);
       },
@@ -1546,14 +1554,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateCrudCreateContactConstMeta,
-      argValues: [name, username, phone, email, notes],
+      argValues: [name, username, phone, email, notes, groupIds],
       apiImpl: this,
     ));
   }
 
   TaskConstMeta get kCrateCrudCreateContactConstMeta => const TaskConstMeta(
         debugName: "create_contact",
-        argNames: ["name", "username", "phone", "email", "notes"],
+        argNames: ["name", "username", "phone", "email", "notes", "groupIds"],
       );
 
   @override
@@ -4440,7 +4448,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       String? username,
       String? phone,
       String? email,
-      String? notes}) {
+      String? notes,
+      List<String>? groupIds}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -4450,6 +4459,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(phone, serializer);
         sse_encode_opt_String(email, serializer);
         sse_encode_opt_String(notes, serializer);
+        sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 151, port: port_);
       },
@@ -4458,14 +4468,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateUpdateContactConstMeta,
-      argValues: [id, name, username, phone, email, notes],
+      argValues: [id, name, username, phone, email, notes, groupIds],
       apiImpl: this,
     ));
   }
 
   TaskConstMeta get kCrateUpdateContactConstMeta => const TaskConstMeta(
         debugName: "update_contact",
-        argNames: ["id", "name", "username", "phone", "email", "notes"],
+        argNames: [
+          "id",
+          "name",
+          "username",
+          "phone",
+          "email",
+          "notes",
+          "groupIds"
+        ],
       );
 
   @override
@@ -4475,7 +4493,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       String? username,
       String? phone,
       String? email,
-      String? notes}) {
+      String? notes,
+      List<String>? groupIds}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -4485,6 +4504,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(phone, serializer);
         sse_encode_opt_String(email, serializer);
         sse_encode_opt_String(notes, serializer);
+        sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 152, port: port_);
       },
@@ -4493,14 +4513,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateCrudUpdateContactConstMeta,
-      argValues: [id, name, username, phone, email, notes],
+      argValues: [id, name, username, phone, email, notes, groupIds],
       apiImpl: this,
     ));
   }
 
   TaskConstMeta get kCrateCrudUpdateContactConstMeta => const TaskConstMeta(
         debugName: "update_contact",
-        argNames: ["id", "name", "username", "phone", "email", "notes"],
+        argNames: [
+          "id",
+          "name",
+          "username",
+          "phone",
+          "email",
+          "notes",
+          "groupIds"
+        ],
       );
 
   @override
@@ -5103,6 +5131,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<String>? dco_decode_opt_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_String(raw);
+  }
+
+  @protected
   (List<Contact>, List<Transaction>)
       dco_decode_record_list_contact_list_transaction(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -5537,6 +5571,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<String>? sse_decode_opt_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   (List<Contact>, List<Transaction>)
       sse_decode_record_list_contact_list_transaction(
           SseDeserializer deserializer) {
@@ -5941,6 +5986,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_box_autoadd_record_list_contact_list_transaction(
           self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_list_String(
+      List<String>? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_String(self, serializer);
     }
   }
 

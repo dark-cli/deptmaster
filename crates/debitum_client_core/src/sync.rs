@@ -106,6 +106,18 @@ pub fn push_unsynced() -> Result<(), String> {
                 accepted.len()
             );
             storage::events_mark_synced(&accepted)?;
+            // Contact group membership may have changed; clear permission cache so next check refetches.
+            let had_contact_group_change = unsynced.iter().any(|e| {
+                e.aggregate_type == "contact"
+                    && e.event_type == "UPDATED"
+                    && serde_json::from_str::<serde_json::Value>(&e.event_data)
+                        .ok()
+                        .map(|d| d.get("group_ids").is_some())
+                        .unwrap_or(false)
+            });
+            if had_contact_group_change {
+                let _ = storage::config_remove(&perms_cache_key(&wallet_id));
+            }
             Ok(())
         }
         Err(e) => {

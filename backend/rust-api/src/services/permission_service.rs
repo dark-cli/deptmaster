@@ -33,7 +33,17 @@ pub async fn can_perform(
         return Ok(true);
     }
     let allowed = resolve_allowed_actions(pool, wallet_id, user_id, resource_type, resource_id).await?;
-    Ok(allowed.contains(action_name))
+    if allowed.contains(action_name) {
+        return Ok(true);
+    }
+    // contact:edit is UI alias for contact:update (sync push checks contact:update)
+    if action_name == "contact:update" && allowed.contains("contact:edit") {
+        return Ok(true);
+    }
+    if action_name == "contact:edit" && allowed.contains("contact:update") {
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// True if the user has the given action on the given contact group (via user groups × matrix). Owner/admin have all.

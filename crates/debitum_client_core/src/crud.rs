@@ -68,6 +68,7 @@ pub fn create_contact(
     phone: Option<String>,
     email: Option<String>,
     notes: Option<String>,
+    group_ids: Option<Vec<String>>,
 ) -> Result<Contact, String> {
     let wallet_id = ensure_wallet()?;
     let id = Uuid::new_v4().to_string();
@@ -88,6 +89,11 @@ pub fn create_contact(
     }
     if let Some(n) = notes {
         data["notes"] = serde_json::json!(n);
+    }
+    if let Some(ids) = &group_ids {
+        if !ids.is_empty() {
+            data["group_ids"] = serde_json::json!(ids);
+        }
     }
     append_event(&wallet_id, "contact", &id, "CREATED", data)?;
     let events = storage::events_get_all(&wallet_id)?;
@@ -190,6 +196,7 @@ pub fn update_contact(
     phone: Option<String>,
     email: Option<String>,
     notes: Option<String>,
+    group_ids: Option<Vec<String>>,
 ) -> Result<(), String> {
     let _ = ContactId::parse(&id).map_err(|e| e)?;
     let wallet_id = ensure_wallet()?;
@@ -210,6 +217,11 @@ pub fn update_contact(
     }
     if let Some(n) = notes {
         data["notes"] = serde_json::json!(n);
+    }
+    if let Some(ids) = &group_ids {
+        if !ids.is_empty() {
+            data["group_ids"] = serde_json::json!(ids);
+        }
     }
     append_event(&wallet_id, "contact", &id, "UPDATED", data)?;
     Ok(())

@@ -737,6 +737,7 @@ class Api {
     String? phone,
     String? email,
     String? notes,
+    List<String>? groupIds,
   }) async {
     if (kIsWeb) throw UnsupportedError('Not on web');
     try {
@@ -747,6 +748,7 @@ class Api {
         phone: phone,
         email: email,
         notes: notes,
+        groupIds: groupIds,
       );
       _notifyDataChanged(DataChangeType.contacts);
       return result;
@@ -767,6 +769,7 @@ class Api {
     String? phone,
     String? email,
     String? notes,
+    List<String>? groupIds,
   }) async {
     if (kIsWeb) return;
     try {
@@ -778,6 +781,7 @@ class Api {
         phone: phone,
         email: email,
         notes: notes,
+        groupIds: groupIds,
       );
       _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {

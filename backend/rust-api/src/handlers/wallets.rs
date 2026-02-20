@@ -2311,7 +2311,13 @@ pub async fn add_contact_group_member(
                 Json(serde_json::json!({"error": "Failed to check permissions"})),
             )
         })?;
-        if !can_edit_contact || !can_edit_group {
+        if !can_edit_contact && !can_edit_group {
+            tracing::warn!(
+                contact_id = %payload.contact_id,
+                group_id = %group_id,
+                user_id = %auth_user.user_id,
+                "add_contact_group_member: permission denied (contact:edit on contact or on group required)"
+            );
             return Err(insufficient_permission_response());
         }
     }
@@ -2356,6 +2362,12 @@ pub async fn add_contact_group_member(
             Json(serde_json::json!({"error": "Failed to add member"})),
         )
     })?;
+
+    tracing::info!(
+        contact_id = %payload.contact_id,
+        group_id = %group_id,
+        "contact group member added: contact added to group"
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -2422,7 +2434,13 @@ pub async fn remove_contact_group_member(
                 Json(serde_json::json!({"error": "Failed to check permissions"})),
             )
         })?;
-        if !can_edit_contact || !can_edit_group {
+        if !can_edit_contact && !can_edit_group {
+            tracing::warn!(
+                contact_id = %contact_id,
+                group_id = %group_id,
+                user_id = %auth_user.user_id,
+                "remove_contact_group_member: permission denied (contact:edit on contact or on group required)"
+            );
             return Err(insufficient_permission_response());
         }
     }
@@ -2445,6 +2463,12 @@ pub async fn remove_contact_group_member(
             Json(serde_json::json!({"error": "Failed to remove member"})),
         )
     })?;
+
+    tracing::info!(
+        contact_id = %contact_id,
+        group_id = %group_id,
+        "contact group member removed: contact removed from group"
+    );
 
     Ok((
         StatusCode::OK,
