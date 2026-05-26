@@ -1,8 +1,6 @@
 // ignore_for_file: unused_import
 
 import 'dart:async';
-import 'package:debt_tracker_mobile/services/sync_service_v2.dart';
-import 'package:debt_tracker_mobile/services/event_store_service.dart';
 import 'app_instance.dart';
 
 /// Monitor sync state across all app instances

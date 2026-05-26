@@ -59,13 +59,16 @@ class Transaction extends HiveObject {
   @HiveField(11)
   bool isSynced;
 
+  @HiveField(13)
+  String? walletId; // Wallet ID for multi-wallet support (nullable for migration)
+
   Transaction({
     required this.id,
     required this.contactId,
     required this.type,
     required this.direction,
     required this.amount,
-    this.currency = 'USD',
+    this.currency = 'IQD',
     this.description,
     required this.transactionDate,
     this.dueDate,
@@ -73,6 +76,7 @@ class Transaction extends HiveObject {
     required this.createdAt,
     required this.updatedAt,
     this.isSynced = false,
+    this.walletId,
   });
 
   String getFormattedAmount(int decimals) {
@@ -147,7 +151,7 @@ class Transaction extends HiveObject {
         type: (json['type']?.toString() ?? 'money') == 'money' ? TransactionType.money : TransactionType.item,
         direction: (json['direction']?.toString() ?? 'owed') == 'owed' ? TransactionDirection.owed : TransactionDirection.lent,
         amount: (json['amount'] as num?)?.toInt() ?? 0,
-        currency: json['currency']?.toString() ?? 'USD',
+        currency: json['currency']?.toString() ?? 'IQD',
         description: json['description']?.toString(),
         transactionDate: transactionDate,
         dueDate: json['due_date'] != null 
@@ -159,6 +163,7 @@ class Transaction extends HiveObject {
         createdAt: createdAt,
         updatedAt: updatedAt,
         isSynced: true,
+        walletId: json['wallet_id'] as String?, // Wallet ID from API (may be null for legacy data)
       );
     } catch (e, stackTrace) {
       print('❌ Error parsing transaction JSON: $e');

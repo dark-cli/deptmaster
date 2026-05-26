@@ -1,15 +1,13 @@
 // ignore_for_file: unused_import
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/auth_service.dart';
-import '../services/sync_service_v2.dart';
-import '../services/realtime_service.dart';
-import 'home_screen.dart';
+import '../providers/api_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import 'backend_setup_screen.dart';
+import 'sign_up_screen.dart';
 import '../widgets/gradient_background.dart';
-import '../widgets/gradient_card.dart';
-import 'dart:async';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -20,8 +18,8 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController(text: 'max'); // Temporary default
-  final _passwordController = TextEditingController(text: '1234'); // Temporary default
+  final _usernameController = TextEditingController(text: kDebugMode ? 'max' : '');
+  final _passwordController = TextEditingController(text: kDebugMode ? '12345678' : '');
   bool _loading = false;
   String? _error;
 
@@ -40,56 +38,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
 
+    final api = ref.read(apiProvider);
     try {
-      Map<String, dynamic> result = await AuthService.login(
+      await api.login(
         _usernameController.text.trim(),
         _passwordController.text,
       );
+      if (!mounted) return;
+      try {
+        await api.ensureCurrentWallet();
+      } catch (_) {}
 
-      if (mounted) {
-        if (result['success'] == true) {
-          // After successful login, immediately trigger sync and connect WebSocket
-          // Sync happens immediately, not waiting for WebSocket
-          try {
-            // Trigger immediate sync first (don't wait for WebSocket)
-            print('🔄 Triggering immediate sync after login...');
-            SyncServiceV2.manualSync().then((_) {
-              print('✅ Initial sync completed after login');
-            }).catchError((e, stackTrace) {
-              // Log all sync errors for debugging
-              final errorStr = e.toString().toLowerCase();
-              print('❌ Initial sync error after login: $e');
-              if (!errorStr.contains('connection refused') && 
-                  !errorStr.contains('failed host lookup') &&
-                  !errorStr.contains('network is unreachable')) {
-                print('   Stack trace: $stackTrace');
-              }
-            });
-            
-            // Connect WebSocket for real-time updates (in background)
-            RealtimeService.connect().catchError((e) {
-              // Silently handle connection errors
-            });
-          } catch (e) {
-            // Silently handle initialization errors
-            print('⚠️ Error initializing after login: $e');
+      if (await api.getCurrentWalletId() == null) {
+        try {
+          final list = await api.getWallets();
+          if (list.isNotEmpty && list.first['id'] != null) {
+            await api.setCurrentWalletId(list.first['id'] as String);
           }
-          
-          // Navigate to home - use pushNamedAndRemoveUntil to ensure clean navigation stack
-          Navigator.of(context).pushNamedAndRemoveUntil(
-            '/',
-            (route) => false, // Remove all previous routes
-          );
-        } else {
-          setState(() {
-            _error = result['error'] as String? ?? 'Unknown error occurred';
-            _loading = false;
-          });
-        }
+        } catch (_) {}
       }
+
+      try {
+        if (await api.getCurrentWalletId() != null) {
+          await api.manualSync();
+        }
+      } catch (e) {
+        debugPrint('Login sync failed: $e');
+      }
+
+      api.connectRealtime().catchError((_) {});
+      if (!mounted) return;
+      // Force data providers to refetch so home screen shows synced data (e.g. after permission change).
+      ref.invalidate(activeWalletIdProvider);
+      ref.invalidate(contactsProvider);
+      ref.invalidate(transactionsProvider);
+      ref.invalidate(eventsProvider);
+      ref.invalidate(walletsProvider);
+      if (!mounted) return;
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e, stackTrace) {
-      print('Login error: $e');
-      print('Stack trace: $stackTrace');
       if (mounted) {
         setState(() {
           _error = e.toString();
@@ -117,9 +104,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: Form(
                       key: _formKey,
                       child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisAlignment: MainAxisAlignment.start,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                  const SizedBox(height: 48),
                   Icon(
                     Icons.account_balance_wallet,
                     size: 64,
@@ -127,7 +115,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Login',
+                    'Sign in',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -213,7 +201,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         : const SizedBox.shrink(), // Empty space when no error
                   ),
                   const SizedBox(height: 24),
-                  // Stack buttons vertically on mobile (matching backend setup page)
+                  // Stack buttons vertically (matching backend setup page): primary, then back, then switch account
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -237,7 +225,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 ),
                               )
                             : const Text(
-                                'Login',
+                                'Sign in',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -265,6 +253,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.primary,
                             fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextButton(
+                        onPressed: _loading
+                            ? null
+                            : () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(builder: (context) => const SignUpScreen()),
+                                );
+                              },
+                        child: Text(
+                          'Don\'t have an account? Sign up',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),

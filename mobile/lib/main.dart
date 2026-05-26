@@ -1,60 +1,52 @@
-// ignore_for_file: unused_import, unused_field
-
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint, defaultTargetPlatform;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import 'models/contact.dart';
-import 'models/transaction.dart'; // This imports the generated adapters too
-import 'models/event.dart';
-import 'services/event_store_service.dart';
-import 'services/state_builder.dart';
+import 'package:path_provider/path_provider.dart';
+
+import 'api.dart';
+import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/sign_up_screen.dart';
 import 'screens/backend_setup_screen.dart';
-import 'services/dummy_data_service.dart';
-import 'services/data_service.dart';
-import 'services/realtime_service.dart';
-import 'services/settings_service.dart';
-import 'services/auth_service.dart';
-import 'services/backend_config_service.dart';
-import 'services/sync_service_v2.dart';
-import 'services/local_database_service_v2.dart';
+import 'screens/create_wallet_screen.dart';
 import 'utils/app_theme.dart';
 
-// Global navigator key for showing toasts from anywhere
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Helper function to suppress network errors (no logging - ConnectionStateTracker handles it)
-  void _handleNetworkError(dynamic error, StackTrace? stack) {
-    final errorStr = error.toString().toLowerCase();
-    
-    // Check if it's a network error
-    if (errorStr.contains('socketexception') ||
-        errorStr.contains('connection refused') ||
-        errorStr.contains('failed host lookup') ||
-        errorStr.contains('network is unreachable') ||
-        errorStr.contains('no route to host')) {
-      // Suppress the error - ConnectionStateTracker will log state changes
-      return;
-    }
-    
-    // Not a network error - return false to let it be handled normally
+
+  // Initialize API once; widgets and providers access it via apiProvider (see providers/api_provider.dart).
+  final rustOk = await Api.init();
+  if (!kIsWeb && !rustOk) {
+    runApp(ProviderScope(
+      child: DebtTrackerApp(initialRoute: '/rust-load-error'),
+    ));
     return;
   }
-  
-  // Suppress network error stack traces globally (synchronous errors)
+  if (!kIsWeb) {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      await Api.initStorage(dir.path);
+    } catch (e, st) {
+      debugPrint('Api.initStorage failed: $e');
+      debugPrint('$st');
+    }
+  }
+
+  void _handleNetworkError(dynamic error, StackTrace? stack) {}
+
   FlutterError.onError = (FlutterErrorDetails details) {
-    final error = details.exception;
-    final errorStr = error.toString().toLowerCase();
-    
-    // Only suppress network errors
+    final errorStr = details.exception.toString().toLowerCase();
+    if (errorStr.contains('a disposed renderobject was mutated') &&
+        errorStr.contains('renderchartfadetransition')) {
+      return;
+    }
     if (errorStr.contains('socketexception') ||
         errorStr.contains('connection refused') ||
         errorStr.contains('connection reset') ||
@@ -62,20 +54,18 @@ void main() async {
         errorStr.contains('network is unreachable') ||
         errorStr.contains('no route to host') ||
         errorStr.contains('httpexception')) {
-      // Fire and forget - don't await async call in sync handler
-      _handleNetworkError(error, details.stack);
-      return; // Suppress the error
+      _handleNetworkError(details.exception, details.stack);
+      return;
     }
-    
-    // For non-network errors, use default handler
     FlutterError.presentError(details);
   };
-  
-  // Suppress network error stack traces for async errors
+
   PlatformDispatcher.instance.onError = (error, stack) {
     final errorStr = error.toString().toLowerCase();
-    
-    // Only suppress network errors
+    if (errorStr.contains('a disposed renderobject was mutated') &&
+        errorStr.contains('renderchartfadetransition')) {
+      return true;
+    }
     if (errorStr.contains('socketexception') ||
         errorStr.contains('connection refused') ||
         errorStr.contains('connection reset') ||
@@ -83,145 +73,91 @@ void main() async {
         errorStr.contains('network is unreachable') ||
         errorStr.contains('no route to host') ||
         errorStr.contains('httpexception')) {
-      // Fire and forget - don't await async call in sync handler
-      _handleNetworkError(error, stack);
-      // Return true to suppress the error (prevent stack trace)
       return true;
     }
-    
-    // For non-network errors, let Flutter handle it (return false)
     return false;
   };
-  
-  // Check if backend is configured (check this first, before any API calls)
-  final isBackendConfigured = await BackendConfigService.isConfigured();
-  
-  // Hive doesn't work in web, skip initialization for web
-  if (!kIsWeb) {
-    // Initialize Hive for mobile/desktop
-    await Hive.initFlutter();
-    
-    // Register adapters
-    Hive.registerAdapter(ContactAdapter());
-    Hive.registerAdapter(TransactionAdapter());
-    Hive.registerAdapter(TransactionTypeAdapter());
-    Hive.registerAdapter(TransactionDirectionAdapter());
-    Hive.registerAdapter(EventAdapter());
-    
-    // Open boxes
-    await Hive.openBox<Contact>(DummyDataService.contactsBoxName);
-    await Hive.openBox<Transaction>(DummyDataService.transactionsBoxName);
-    
-    // Initialize EventStore for event sourcing
-    await EventStoreService.initialize();
-    
-    // Initialize LocalDatabaseServiceV2 (rebuilds state from events)
-    await LocalDatabaseServiceV2.initialize();
-    
-    // Initialize SyncServiceV2 for local-first architecture
-    await SyncServiceV2.initialize();
-    
-    if (isBackendConfigured) {
-      // Try to sync with server
+
+  final isBackendConfigured = await Api.isBackendConfigured();
+
+  if (!kIsWeb && isBackendConfigured) {
+    final isLoggedIn = await Api.isLoggedIn();
+    if (isLoggedIn) {
       try {
-        // Initial sync to get server events
-        await SyncServiceV2.manualSync();
-      } catch (e) {
-        // Silently handle connection errors - app works offline
-        final errorStr = e.toString();
-        if (!errorStr.contains('Connection refused') && 
-            !errorStr.contains('Failed host lookup') &&
-            !errorStr.contains('Network is unreachable')) {
-          print('⚠️ Could not sync with server, using local data: $e');
-        }
+        await Api.ensureCurrentWallet();
+      } catch (_) {}
+      // Recovery: if we still have no current wallet but have wallets, set first
+      if (await Api.getCurrentWalletId() == null) {
+        try {
+          final list = await Api.getWallets();
+          if (list.isNotEmpty && list.first['id'] != null) {
+            await Api.setCurrentWalletId(list.first['id'] as String);
+          }
+        } catch (_) {}
       }
-      
-      // Connect to WebSocket for real-time updates (silently fails if offline)
-      // Use runZoned to catch async exceptions
-      runZoned(() {
-      RealtimeService.connect().catchError((e) {
-          // Error is handled by RealtimeService error callback
-        });
-      }, onError: (error, stack) {
-        // Catch any unhandled async exceptions
-        // Error is handled by RealtimeService error callback
-      });
-      
-      // Sync when coming back online (silently fails if offline)
-      RealtimeService.syncWhenOnline().catchError((e) {
-        // Silently handle connection errors
-      });
-    } else {
-      // Backend not configured - just open boxes, no dummy data
-      // User will need to configure backend or import data
-      await DummyDataService.initialize(); // Just opens boxes, doesn't create dummy data
     }
+    try {
+      await Api.manualSync();
+    } catch (e) {
+      debugPrint('main: manualSync failed: $e');
+      await Api.drainRustLogsToConsole();
+    }
+    runZoned(() {
+      Api.connectRealtime().catchError((_) {});
+    }, onError: (_, __) {});
+    // Temporarily disabled: auto background sync when online.
+    // Api.syncWhenOnline().catchError((_) {});
   }
-  
-  // For web, also connect WebSocket (only if backend is configured)
+
   if (kIsWeb && isBackendConfigured) {
     runZoned(() {
-    RealtimeService.connect().catchError((e) {
-        // Error is handled by RealtimeService error callback
-      });
-    }, onError: (error, stack) {
-      // Catch any unhandled async exceptions
-      // Error is handled by RealtimeService error callback
-    });
+      Api.connectRealtime().catchError((_) {});
+    }, onError: (_, __) {});
   }
-  
-  // Load settings from backend on app start (only if configured)
+
   if (isBackendConfigured) {
-    SettingsService.loadSettingsFromBackend().catchError((e) {
-      // Silently handle connection errors
-    });
+    Api.loadSettingsFromBackend().catchError((_) {});
   }
-    
-    // Initialize flip colors provider
-    // This will be done automatically when the provider is first accessed
-    
-    // Determine initial route
-    String initialRoute;
-    if (!isBackendConfigured) {
-      initialRoute = '/setup';
-    } else {
-      // Check if user is logged in and validate token
-      final isLoggedIn = await AuthService.isLoggedIn();
-      if (isLoggedIn) {
-        // Validate token on startup
-        final isValid = await AuthService.validateAuth();
-        if (!isValid) {
-          // Token was invalid, user has been logged out
-          print('⚠️ Token validation failed on startup - redirecting to login');
-          initialRoute = '/login';
-        } else {
-          initialRoute = '/';
-        }
-      } else {
-        initialRoute = '/login';
+
+  String initialRoute;
+  if (!isBackendConfigured) {
+    initialRoute = '/setup';
+  } else {
+    final isLoggedIn = await Api.isLoggedIn();
+    if (isLoggedIn) {
+      bool isValid = true;
+      try {
+        isValid = await Api.validateAuth();
+      } catch (_) {
+        isValid = true; // Offline or network error: stay in app.
       }
+      initialRoute = isValid ? '/' : '/login';
+    } else {
+      initialRoute = '/login';
     }
-    
-    // Set up logout callback to navigate to login screen
-    AuthService.onLogout = () {
-      // Use navigatorKey to navigate from anywhere
+  }
+
+  Api.onLogout = () {
+    // Defer navigation to next frame so we never run during build (avoids Navigator _history.isNotEmpty).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       final context = navigatorKey.currentContext;
-      if (context != null) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
+      if (context != null && context.mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/login',
           (Route<dynamic> route) => false,
         );
       }
-    };
-    
-    runApp(ProviderScope(
-      child: DebtTrackerApp(initialRoute: initialRoute),
-    ));
+    });
+  };
+
+  runApp(ProviderScope(
+    child: DebtTrackerApp(initialRoute: initialRoute),
+  ));
 }
 
 class DebtTrackerApp extends ConsumerStatefulWidget {
   final String initialRoute;
-  
+
   const DebtTrackerApp({super.key, this.initialRoute = '/'});
 
   @override
@@ -229,87 +165,127 @@ class DebtTrackerApp extends ConsumerStatefulWidget {
 }
 
 class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
-  bool _darkMode = true; // Default to dark mode
-  DateTime? _lastBackPressTime;
-
   @override
   void initState() {
     super.initState();
-    _loadTheme();
-    // Listen for theme changes
-    _watchTheme();
-    // Set up error callback for WebSocket connection errors
-    _setupRealtimeErrorHandler();
-  }
-
-  void _setupRealtimeErrorHandler() {
-    RealtimeService.setErrorCallback((message) {
-      // Don't show toast for connection errors - they're handled in UI
-      // The setup screen shows errors in the error box, and other screens
-      // should handle connection errors gracefully without annoying toasts
-      return;
-    });
-  }
-
-  Future<void> _loadTheme() async {
-    final darkMode = await SettingsService.getDarkMode();
-    if (mounted) {
-      setState(() {
-        _darkMode = darkMode;
-      });
-    }
-  }
-
-  void _watchTheme() {
-    // Periodically check for theme changes
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        _loadTheme();
-        _watchTheme();
-      }
-    });
+    Api.setRealtimeErrorCallback((_) {});
   }
 
   @override
   Widget build(BuildContext context) {
+    final darkMode = ref.watch(darkModeProvider);
+    final instanceId = const String.fromEnvironment('INSTANCE_ID', defaultValue: '');
+    final appTitle = instanceId.isEmpty ? 'Debt Tracker' : 'Instance $instanceId';
     return MaterialApp(
       navigatorKey: navigatorKey,
-      title: 'Debt Tracker',
-      // Force LTR text direction to prevent RTL issues
-      builder: (context, child) {
-        return Directionality(
-          textDirection: TextDirection.ltr,
-          child: child!,
-        );
-      },
+      scaffoldMessengerKey: scaffoldMessengerKey,
+      title: appTitle,
+      builder: (context, child) => Directionality(textDirection: TextDirection.ltr, child: child!),
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: _darkMode ? ThemeMode.dark : ThemeMode.light,
+      themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       initialRoute: widget.initialRoute,
       routes: {
-        '/': (context) => _DoubleBackToExitWrapper(child: const HomeScreen()),
+        '/': (context) => _Wrapper(child: const HomeScreen()),
         '/setup': (context) => const BackendSetupScreen(),
         '/login': (context) => const LoginScreen(),
+        '/signup': (context) => const SignUpScreen(),
+        '/create-wallet': (context) => const CreateWalletScreen(),
+        '/rust-load-error': (context) => const RustLoadErrorScreen(),
       },
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-// Widget to handle double-back-press to exit
-class _DoubleBackToExitWrapper extends StatefulWidget {
-  final Widget child;
-  
-  const _DoubleBackToExitWrapper({required this.child});
+/// Shown when the Rust native library fails to load (e.g. Android .so not in jniLibs).
+class RustLoadErrorScreen extends StatelessWidget {
+  const RustLoadErrorScreen({super.key});
 
-  @override
-  State<_DoubleBackToExitWrapper> createState() => _DoubleBackToExitWrapperState();
-}
-
-class _DoubleBackToExitWrapperState extends State<_DoubleBackToExitWrapper> {
   @override
   Widget build(BuildContext context) {
-    // Just wrap the child - back button handling is done in HomeScreen
-    return widget.child;
+    final rawError = Api.initError ?? '';
+    final error = rawError.isEmpty
+        ? 'Rust library (libdebitum_client_core.so) could not be loaded.'
+        : rawError;
+    final isAndroid = defaultTargetPlatform == TargetPlatform.android;
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(height: 24),
+              const Icon(Icons.error_outline, size: 64, color: Colors.orange),
+              const SizedBox(height: 24),
+              const Text(
+                'Native library not loaded',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              SelectableText(
+                error,
+                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                maxLines: 6,
+              ),
+              if (isAndroid) ...[
+                const SizedBox(height: 28),
+                const Text(
+                  'Build and run from the project root (the folder that contains manage.sh and the mobile/ directory).',
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                const Text('In a terminal:', style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 6),
+                SelectableText(
+                  './manage.sh run-flutter-app android',
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    backgroundColor: Color(0xFF1E1E1E),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('Prerequisites (run once):', style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 4),
+                const SelectableText(
+                  'cargo install cargo-ndk\n'
+                  'rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android',
+                  style: TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Android NDK is also required (e.g. via Android Studio SDK Manager).',
+                  style: TextStyle(fontSize: 11),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'If the script failed before launching, fix the error it printed (e.g. install cargo-ndk, set ANDROID_NDK). If it launched but you still see this, the .so files may not have been copied into the app—run the script again and check that it says "Rust Android libs ready".',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
+}
+
+class _Wrapper extends StatefulWidget {
+  final Widget child;
+
+  const _Wrapper({required this.child});
+
+  @override
+  State<_Wrapper> createState() => _WrapperState();
+}
+
+class _WrapperState extends State<_Wrapper> {
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

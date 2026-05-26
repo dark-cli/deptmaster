@@ -30,6 +30,8 @@ VERBOSE=false
 SKIP_SERVER_BUILD=false
 CLEAR_APP_DATA=false
 WINDOW_SIZE=""  # Format: "WIDTHxHEIGHT" or "WIDTH HEIGHT"
+SEPARATE_INSTANCE=false  # Linux: run with isolated XDG data (no shared data with other instances)
+INSTANCES=""  # When set with --instances N (and Linux + separate-instance), spawn N instances and show unified log viewer
 
 # Define valid flags for each command
 # Format: "command:flag1,flag2,flag3"
@@ -46,9 +48,9 @@ declare -A VALID_FLAGS=(
     ["stop-server"]="verbose"
     ["restart-server"]="verbose,skip-server-build"
     ["build-server"]="verbose"
-    ["run-flutter-app"]="verbose,clear-app-data,window-size"
+    ["run-flutter-app"]="verbose,clear-app-data,window-size,separate-instance,instances"
     ["run-flutter-web"]="verbose"
-    ["test-flutter-app"]="verbose"
+    ["test-integration"]="verbose"
     ["test-api-server"]="verbose"
     ["test-flutter-integration"]="verbose,skip-server-build"
     ["test-flutter-integration-multi-app"]="verbose"
@@ -90,6 +92,18 @@ while [[ $# -gt 0 ]]; do
                 WINDOW_SIZE="$2"
                 shift 2
             fi
+            ;;
+        --separate-instance|--sandbox)
+            SEPARATE_INSTANCE=true
+            shift
+            ;;
+        --instances)
+            if [ -z "$2" ] || ! [[ "$2" =~ ^[0-9]+$ ]] || [ "$2" -lt 1 ] || [ "$2" -gt 9 ]; then
+                echo -e "${RED}❌ --instances requires a number from 1 to 9${NC}" >&2
+                exit 1
+            fi
+            INSTANCES="$2"
+            shift 2
             ;;
         --*)
             UNKNOWN_FLAGS+=("$1")
@@ -155,6 +169,15 @@ validate_flags() {
                     "clear-app-data")
                         echo "  --clear-app-data, --clean-app-data"
                         ;;
+                    "window-size")
+                        echo "  --window-size, --size WIDTHxHEIGHT"
+                        ;;
+                    "separate-instance")
+                        echo "  --separate-instance, --sandbox"
+                        ;;
+                    "instances")
+                        echo "  --instances N (N=1..9, spawn N instances; requires --separate-instance on Linux)"
+                        ;;
                 esac
             done
         fi
@@ -202,6 +225,20 @@ validate_flags() {
         exit 1
     fi
     
+    if [ "$SEPARATE_INSTANCE" = true ] && [[ ! " ${FLAGS[@]} " =~ " separate-instance " ]]; then
+        print_error "Flag --separate-instance is not valid for command '$command'"
+        echo ""
+        echo "This flag is only valid for 'run-flutter-app' command."
+        exit 1
+    fi
+
+    if [ -n "$INSTANCES" ] && [[ ! " ${FLAGS[@]} " =~ " instances " ]]; then
+        print_error "Flag --instances is not valid for command '$command'"
+        echo ""
+        echo "This flag is only valid for 'run-flutter-app' command (Linux + --separate-instance)."
+        exit 1
+    fi
+
 }
 
 check_docker() {
@@ -243,8 +280,22 @@ wait_for_service() {
 # Commands
 cmd_reset_database_complete() {
     local import_file="${1:-}"
+    local import_username="${2:-}"
+    local import_wallet="${3:-}"
     
     validate_flags "reset-database-complete"
+    
+    # When importing, username and wallet are required
+    if [ -n "$import_file" ]; then
+        if [ -z "$import_username" ] || [ -z "$import_wallet" ]; then
+            print_error "Username and wallet are required when importing from a backup."
+            echo ""
+            echo "Usage: $0 reset-database-complete <backup.zip> <username> <wallet>"
+            echo "  username  User to import as (e.g. max)"
+            echo "  wallet    Wallet name to import into (created if it does not exist)"
+            exit 1
+        fi
+    fi
     
     print_step "Complete Database Reset: Resetting system..."
     
@@ -254,7 +305,7 @@ cmd_reset_database_complete() {
     pkill -f "debt-tracker-api" > /dev/null 2>&1 || true
     sleep 2
     
-    # Reset database
+    # Reset database (no import here; we import after server is started)
     print_info "Resetting database..."
     cmd_reset_database_only
     
@@ -268,15 +319,16 @@ cmd_reset_database_complete() {
     
     # If import file provided, import data (import already rebuilds projections)
     if [ -n "$import_file" ]; then
-        cmd_import_backup "$import_file"
+        cmd_import_backup "$import_file" "$import_username" "$import_wallet"
     else
         print_step "Rebuilding projections..."
         cmd_rebuild_database_projections
     fi
     
     # Reset admin password to default (ensures admin access after reset)
+    # Must be at least 8 chars (set_admin_password binary requirement)
     print_info "Resetting admin password..."
-    local default_admin_password="admin"
+    local default_admin_password="admin123"
     
     # Wait for server to be ready (needed for database connection)
     if ! wait_for_service "http://localhost:8000/health" "API server" 30 1; then
@@ -304,6 +356,20 @@ cmd_reset_database_only() {
     validate_flags "reset-database-only"
     
     local import_file="${1:-}"
+    local import_username="${2:-}"
+    local import_wallet="${3:-}"
+    
+    # When importing, username and wallet are required
+    if [ -n "$import_file" ]; then
+        if [ -z "$import_username" ] || [ -z "$import_wallet" ]; then
+            print_error "Username and wallet are required when importing from a backup."
+            echo ""
+            echo "Usage: $0 reset-database-only <backup.zip> <username> <wallet>"
+            echo "  username  User to import as (e.g. max)"
+            echo "  wallet    Wallet name to import into (created if it does not exist)"
+            exit 1
+        fi
+    fi
     
     print_info "Resetting system (database only)..."
     
@@ -376,13 +442,11 @@ EOF
     
     # Ensure only the "max" user exists (clean up any other users)
     print_info "Ensuring only default user exists..."
-    # Generate password hash for "max" (bcrypt cost 12)
-    # Hash: $2b$12$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK is for "1234"
-    # We'll use Python to generate a hash for "max" if available, otherwise use "1234" hash
-    MAX_PASSWORD_HASH="\$2b\$12\$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK"  # Default: "1234"
+    # Generate password hash for "12345678" (bcrypt cost 12) to match the password we advertise
+    MAX_USER_PASSWORD="12345678"
+    MAX_PASSWORD_HASH="\$2b\$12\$MzvHQ6CeZgenzzwkEV2WeeDQscVKQed1kTh8NxB7w2bXCXe2qFjxK"  # Fallback: "1234" if bcrypt unavailable
     if command -v python3 &> /dev/null; then
-        # Try to generate hash for "max"
-        NEW_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'max', bcrypt.gensalt(rounds=12)).decode())" 2>/dev/null)
+        NEW_HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'$MAX_USER_PASSWORD', bcrypt.gensalt(rounds=12)).decode())" 2>/dev/null)
         if [ -n "$NEW_HASH" ]; then
             MAX_PASSWORD_HASH="$NEW_HASH"
         fi
@@ -391,7 +455,7 @@ EOF
     docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1 <<EOF
 -- Delete all users except "max"
 DELETE FROM users_projection WHERE email != 'max';
--- Ensure "max" user exists with password "max" (migration 005 should have created it, but just in case)
+-- Ensure "max" user exists with password 12345678 (migration 005 may have created it, but we set the hash)
 -- Update password hash if user exists, or create new user
 DO \$\$
 BEGIN
@@ -403,11 +467,28 @@ BEGIN
     END IF;
 END \$\$;
 EOF
+    
+    # Run wallet migrations after "max" exists so default wallet is assigned to max (not to pre-005 user)
+    if [ "$USE_SQLX" = false ]; then
+        print_info "Running wallet migrations (011, 012)..."
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/backend/rust-api/migrations/011_create_wallets.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/backend/rust-api/migrations/012_add_wallet_id_to_tables.sql" > /dev/null 2>&1 || true
+    else
+        # Sqlx already ran 001-012; block above may have replaced users. Ensure every user has a wallet.
+        print_info "Ensuring all users have a wallet..."
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1 <<WALLETEOF
+INSERT INTO wallet_users (wallet_id, user_id, role)
+SELECT w.id, u.id, 'owner' FROM users_projection u
+CROSS JOIN (SELECT id FROM wallets WHERE is_active = true LIMIT 1) w
+WHERE NOT EXISTS (SELECT 1 FROM wallet_users wu WHERE wu.user_id = u.id);
+WALLETEOF
+    fi
+    
     print_success "Database reset complete"
     
-    # If import file provided, import data
+    # If import file provided, import data (server must be running; cmd_import_backup will start it if needed)
     if [ -n "$import_file" ]; then
-        cmd_import_backup "$import_file"
+        cmd_import_backup "$import_file" "$import_username" "$import_wallet"
     else
         print_info "No import file provided. Database is clean and ready."
     fi
@@ -416,7 +497,16 @@ EOF
 cmd_import_backup() {
     validate_flags "import-backup"
     
-    local backup_file="${1:-debitum-backup-2026-01-18T05_51_03.zip}"
+    local backup_file="${1:-}"
+    local import_username="${2:-}"
+    local import_wallet="${3:-}"
+    
+    # Backup file is required
+    if [ -z "$backup_file" ]; then
+        print_error "Backup file is required."
+        echo "Usage: $0 import-backup <path-to-backup.zip> <username> <wallet>"
+        exit 1
+    fi
     
     # Expand ~ to home directory
     if [[ "$backup_file" == ~* ]]; then
@@ -447,10 +537,20 @@ cmd_import_backup() {
         fi
     fi
     
+    # Username and wallet are required for import
+    if [ -z "$import_username" ] || [ -z "$import_wallet" ]; then
+        print_error "Username and wallet are required for import."
+        echo ""
+        echo "Usage: $0 import-backup <path-to-backup.zip> <username> <wallet>"
+        echo "  username  User to import as (must exist)"
+        echo "  wallet    Wallet name to import into (created if it does not exist)"
+        exit 1
+    fi
+    
     if [ ! -f "$backup_file" ]; then
         print_error "Backup file not found: $backup_file"
         echo ""
-        echo "Usage: $0 import-backup <path-to-backup.zip>"
+        echo "Usage: $0 import-backup <path-to-backup.zip> <username> <wallet>"
         echo ""
         echo "Searched in:"
         echo "  - Current directory: $(pwd)"
@@ -462,7 +562,7 @@ cmd_import_backup() {
         exit 1
     fi
     
-    print_step "Importing data from: $backup_file"
+    print_step "Importing data from: $backup_file (user: $import_username, wallet: $import_wallet)"
     
     # Ensure server is running
     if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
@@ -488,17 +588,17 @@ cmd_import_backup() {
         }
     fi
     
-    # Run migration
+    # Run migration (username and wallet required; wallet is created if it does not exist)
     print_info "Running migration via API..."
     if [ "$VERBOSE" = true ]; then
-        python3 "$migrate_script" "$backup_file" || {
+        python3 "$migrate_script" "$backup_file" "$import_username" "$import_wallet" || {
             print_error "Failed to import data"
             print_error "Check the output above for details"
             exit 1
         }
     else
         # Show output on error, but suppress success messages
-        if ! python3 "$migrate_script" "$backup_file" 2>&1 | tee /tmp/import_output.log | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" || [ ${PIPESTATUS[0]} -eq 0 ]; then
+        if ! python3 "$migrate_script" "$backup_file" "$import_username" "$import_wallet" 2>&1 | tee /tmp/import_output.log | grep -E "(error|Error|ERROR|failed|Failed|FAILED)" || [ ${PIPESTATUS[0]} -eq 0 ]; then
             if [ ${PIPESTATUS[0]} -ne 0 ]; then
                 print_error "Failed to import data"
                 print_error "Last 20 lines of output:"
@@ -572,8 +672,8 @@ cmd_start_server_docker() {
     # Ensure services are running
     cmd_start_docker_services
     
-    # Build if needed
-    if [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
+    # Build so we run the latest code (use --skip-server-build to skip and use existing binary)
+    if [ "$SKIP_SERVER_BUILD" != true ]; then
         print_step "Building server (this may take a minute)..."
         if [ "$VERBOSE" = true ]; then
             (cd "$ROOT_DIR/backend/rust-api" && cargo build --release) || {
@@ -581,12 +681,16 @@ cmd_start_server_docker() {
                 exit 1
             }
         else
-            if ! (cd "$ROOT_DIR/backend/rust-api" && cargo build --release 2>&1 | tee /tmp/cargo-build.log | grep -E "error|Finished|Compiling" | head -20); then
+            (cd "$ROOT_DIR/backend/rust-api" && cargo build --release 2>&1 | tee /tmp/cargo-build.log) || true
+            if [ "${PIPESTATUS[0]}" -ne 0 ]; then
                 print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
                 print_error "Build log: /tmp/cargo-build.log"
                 exit 1
             fi
         fi
+    elif [ ! -f "$ROOT_DIR/backend/rust-api/target/release/debt-tracker-api" ]; then
+        print_error "Server binary not found and --skip-server-build was used. Build first: $0 build-server"
+        exit 1
     fi
     
     # Start server
@@ -737,20 +841,26 @@ cmd_start_server_direct() {
     export RUST_LOG="${RUST_LOG:-debug}"
     export JWT_SECRET="${JWT_SECRET:-your-secret-key-change-in-production}"
     export JWT_EXPIRATION="${JWT_EXPIRATION:-3600}"
+    export RATE_LIMIT_REQUESTS="${RATE_LIMIT_REQUESTS:-0}"
     
-    # Use cargo-watch if available, otherwise regular cargo run
-    if command -v cargo-watch &> /dev/null; then
-        print_info "Using cargo-watch for auto-reload..."
-        print_info "Watching: Rust source files (.rs) and static files (.html, .js)"
-        print_info "Note: Static file changes require recompilation (will auto-restart)"
-        # Watch both Rust files and static files
-        (cd "$ROOT_DIR/backend/rust-api" && cargo watch \
+    # Run server with cargo. Use cargo-watch only if explicitly requested and the real binary exists.
+    CARGO_WATCH_BIN=""
+    if [[ -n "${USE_CARGO_WATCH:-}" ]] || [[ -n "${CARGO_WATCH:-}" ]]; then
+        if [[ -x "$HOME/.cargo/bin/cargo-watch" ]]; then
+            CARGO_WATCH_BIN="$HOME/.cargo/bin/cargo-watch"
+        elif command -v cargo-watch &> /dev/null; then
+            CARGO_WATCH_BIN="cargo-watch"
+        fi
+    fi
+    if [[ -n "$CARGO_WATCH_BIN" ]]; then
+        print_info "Using cargo-watch for auto-reload (USE_CARGO_WATCH=1)"
+        (cd "$ROOT_DIR/backend/rust-api" && "$CARGO_WATCH_BIN" \
             --watch "$ROOT_DIR/backend/rust-api/src" \
             --watch "$ROOT_DIR/backend/rust-api/static" \
             -x 'run --bin debt-tracker-api')
     else
-        print_warning "cargo-watch not installed. Install for auto-reload: cargo install cargo-watch"
-        print_info "Note: Static file changes require restarting the server"
+        print_info "Starting server (restart manually after code changes)"
+        print_info "For auto-reload: USE_CARGO_WATCH=1 $0 start-server-direct (after: cargo install cargo-watch)"
         (cd "$ROOT_DIR/backend/rust-api" && cargo run --bin debt-tracker-api)
     fi
 }
@@ -850,6 +960,112 @@ cmd_rebuild_database_projections() {
     fi
 }
 
+# Resolve Flutter binary: FLUTTER_CMD, then PATH, then FLUTTER_SDK_ROOT, then common path.
+# Outputs the command (e.g. "flutter" or "/path/to/flutter") or exits with 1 if not found.
+resolve_flutter_cmd() {
+    if [ -n "${FLUTTER_CMD:-}" ]; then
+        echo "$FLUTTER_CMD"
+        return 0
+    fi
+    if command -v flutter &> /dev/null; then
+        echo "flutter"
+        return 0
+    fi
+    if [ -n "${FLUTTER_SDK_ROOT:-}" ] && [ -x "$FLUTTER_SDK_ROOT/bin/flutter" ]; then
+        echo "$FLUTTER_SDK_ROOT/bin/flutter"
+        return 0
+    fi
+    if [ -x "$HOME/flutter/bin/flutter" ]; then
+        echo "$HOME/flutter/bin/flutter"
+        return 0
+    fi
+    return 1
+}
+
+# Build and prepare Rust bridge so Dart and native lib are in sync. Call before run-flutter-app.
+prepare_rust_bridge_for_flutter() {
+    local platform="$1"
+    local crate_dir="$ROOT_DIR/crates/debitum_client_core"
+    local jni_libs_dir="$ROOT_DIR/mobile/android/app/src/main/jniLibs"
+    
+    print_info "Preparing Rust bridge (codegen + build for $platform)..."
+    
+    # 1. Regenerate Dart/Rust bindings so content hash matches
+    if [ ! -f "$SCRIPT_DIR/codegen-rust-bridge.sh" ]; then
+        print_error "codegen script not found: $SCRIPT_DIR/codegen-rust-bridge.sh"
+        exit 1
+    fi
+    "$SCRIPT_DIR/codegen-rust-bridge.sh" 2>/dev/null || {
+        print_error "Flutter Rust Bridge codegen failed. Install: cargo install flutter_rust_bridge_codegen"
+        exit 1
+    }
+    
+    # 2. Build Rust for the target platform
+    if [ "$platform" = "android" ]; then
+        if ! command -v cargo-ndk &>/dev/null; then
+            print_error "cargo-ndk is required for Android but is not installed."
+            echo "Install with: cargo install cargo-ndk"
+            echo "Then add Android targets: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android"
+            echo "Ensure Android NDK is installed (e.g. Android Studio SDK Manager) and ANDROID_NDK_HOME is set."
+            exit 1
+        fi
+        # Try to find NDK if ANDROID_NDK_HOME not set (cargo-ndk uses ANDROID_NDK_HOME)
+        if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+            _sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+            # Prefer NDK installed by scripts/install-android-ndk.sh (r27d LTS)
+            if [ -d "$_sdk/ndk/android-ndk-r27d" ] && { [ -f "$_sdk/ndk/android-ndk-r27d/ndk-build" ] || [ -f "$_sdk/ndk/android-ndk-r27d/source.properties" ]; }; then
+                export ANDROID_NDK_HOME="$_sdk/ndk/android-ndk-r27d"
+                print_info "Using NDK: $ANDROID_NDK_HOME"
+            else
+                for sdk in "$HOME/Android/Sdk" "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+                    [ -z "$sdk" ] || [ ! -d "$sdk/ndk" ] && continue
+                    _ndk=$(find "$sdk/ndk" -maxdepth 1 -type d -name "[0-9]*" 2>/dev/null | sort -V | tail -1)
+                    if [ -n "$_ndk" ] && [ -f "$_ndk/ndk-build" ] || [ -f "$_ndk/source.properties" ]; then
+                        export ANDROID_NDK_HOME="$_ndk"
+                        print_info "Using NDK: $ANDROID_NDK_HOME"
+                        break
+                    fi
+                done
+            fi
+        fi
+        if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+            print_error "Android NDK not found. Set ANDROID_NDK_HOME to your NDK root, or install NDK via Android Studio (SDK Manager → SDK Tools → NDK)."
+            exit 1
+        fi
+        print_info "Building Rust for Android (cargo-ndk)..."
+        mkdir -p "$jni_libs_dir"
+        (cd "$crate_dir" && cargo ndk -o "$jni_libs_dir" build 2>&1) || {
+            print_error "cargo ndk build failed."
+            echo "  ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-<not set>}"
+            echo "  Check: the path must exist and be the NDK root (contains source.properties, toolchains/, etc.)."
+            echo "  List installed NDKs: ls \$HOME/Android/Sdk/ndk"
+            echo "  If empty, install NDK: Android Studio → Settings → Android SDK → SDK Tools → NDK (Side by side) → Apply."
+            exit 1
+        }
+        # Verify at least one ABI has the .so (cargo-ndk puts them in arm64-v8a, armeabi-v7a, etc.)
+        local so_count
+        so_count=$(find "$jni_libs_dir" -name "libdebitum_client_core.so" 2>/dev/null | wc -l)
+        if [ "${so_count:-0}" -eq 0 ]; then
+            print_error "No libdebitum_client_core.so found under $jni_libs_dir. cargo ndk may have written to a different path."
+            exit 1
+        fi
+        print_success "Rust Android libs ready in jniLibs/ ($so_count ABI(s))"
+    elif [ "$platform" = "linux" ]; then
+        print_info "Building Rust for Linux..."
+        if (cd "$crate_dir" && cargo build --release 2>&1); then
+            :
+        else
+            (cd "$crate_dir" && cargo build 2>&1) || exit 1
+            if [ -f "$crate_dir/target/debug/libdebitum_client_core.so" ]; then
+                mkdir -p "$crate_dir/target/release"
+                cp -f "$crate_dir/target/debug/libdebitum_client_core.so" "$crate_dir/target/release/" 2>/dev/null || true
+            fi
+        fi
+        print_success "Rust Linux lib ready"
+    fi
+    # web: no native lib, codegen already done
+}
+
 cmd_run_flutter_app() {
     validate_flags "run-flutter-app"
     
@@ -879,13 +1095,28 @@ cmd_run_flutter_app() {
     
     print_step "Running Flutter app ($platform, mode: $mode)..."
     
+    # Resolve Flutter binary (script may run in env where flutter is not in PATH)
+    local flutter_bin
+    flutter_bin=$(resolve_flutter_cmd) || {
+        print_error "Flutter not found. Install Flutter SDK or set FLUTTER_CMD or FLUTTER_SDK_ROOT."
+        exit 1
+    }
+    
+    # Build and prepare Rust bridge so Dart hash and native lib match (all-in-one)
+    if [ "$platform" = "android" ] || [ "$platform" = "linux" ]; then
+        prepare_rust_bridge_for_flutter "$platform"
+    fi
+    
     # Build flutter run command with mode flag
-    local flutter_cmd="flutter run"
+    local flutter_cmd="$flutter_bin run"
     if [ -n "$mode_flag" ]; then
         flutter_cmd="$flutter_cmd $mode_flag"
     fi
     
     if [ "$platform" = "android" ]; then
+        if [ "$SEPARATE_INSTANCE" = true ]; then
+            print_warning "--separate-instance is only supported for Linux; ignored for Android"
+        fi
         # Check if adb is available
         if ! command -v adb &> /dev/null; then
             print_error "adb not found. Please install Android SDK platform-tools."
@@ -940,12 +1171,26 @@ cmd_run_flutter_app() {
         if [ "$CLEAR_APP_DATA" = true ]; then
             print_warning "--clear-app-data flag is only supported for Android and Linux platforms"
         fi
+        if [ "$SEPARATE_INSTANCE" = true ]; then
+            print_warning "--separate-instance is only supported for Linux; ignored for web"
+        fi
         if [ -n "$device_id" ]; then
             (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$device_id")
         else
             (cd "$ROOT_DIR/mobile" && $flutter_cmd -d chrome)
         fi
     elif [ "$platform" = "linux" ]; then
+        if [ -n "$INSTANCES" ] && [ "$INSTANCES" -ge 2 ] && [ "$SEPARATE_INSTANCE" != true ]; then
+            print_error "--instances N (N>=2) requires --separate-instance on Linux."
+            exit 1
+        fi
+        # Rust FFI: loader looks for libdebitum_client_core.so in target/release
+        local rust_lib_dir="$ROOT_DIR/crates/debitum_client_core/target/release"
+        if [ -f "$rust_lib_dir/libdebitum_client_core.so" ]; then
+            export LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        else
+            echo -e "${YELLOW}⚠ Rust lib not found at $rust_lib_dir - run: cd crates/debitum_client_core && cargo build --release (or: cp target/debug/libdebitum_client_core.so target/release/)${NC}" >&2
+        fi
         # Clean app data if --clear-app-data flag is set
         if [ "$CLEAR_APP_DATA" = true ]; then
             print_info "Clearing app data for Linux..."
@@ -989,9 +1234,57 @@ cmd_run_flutter_app() {
             fi
         fi
         
+        # Multi-instance: spawn N separate instances, unified log viewer, instance window titles
+        if [ "$SEPARATE_INSTANCE" = true ] && [ -n "$INSTANCES" ] && [ "$INSTANCES" -ge 2 ] && [ -z "$device_id" ]; then
+            local real_home="$HOME"
+            [ -z "$real_home" ] && real_home="$(getent passwd "$(whoami)" 2>/dev/null | cut -d: -f6)"
+            local log_dir="${TMPDIR:-/tmp}/debitum-multi-logs-$$"
+            local pids_file="${TMPDIR:-/tmp}/debitum-multi-pids-$$"
+            mkdir -p "$log_dir"
+            : > "$pids_file"
+            print_step "Spawning $INSTANCES instances (logs in $log_dir); press 1-$INSTANCES to switch, q to quit viewer"
+            local i=1
+            while [ $i -le "$INSTANCES" ]; do
+                local instance_base="${TMPDIR:-/tmp}/debitum-instance-$$-$i"
+                mkdir -p "$instance_base/Documents" "$instance_base/.local/share" "$instance_base/.config"
+                (
+                    export PUB_CACHE="${real_home}/.pub-cache"
+                    export HOME="$instance_base"
+                    export XDG_DATA_HOME="$instance_base/.local/share"
+                    export XDG_CONFIG_HOME="$instance_base/.config"
+                    export DEBITUM_INSTANCE_ID="$i"
+                    cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                        $flutter_cmd -d linux \
+                        > "$log_dir/instance_$i.log" 2>&1
+                ) &
+                echo $! >> "$pids_file"
+                i=$((i + 1))
+                [ $i -le "$INSTANCES" ] && sleep 4
+            done
+            sleep 2
+            python3 "$SCRIPT_DIR/multi_instance_log_viewer.py" --log-dir "$log_dir" --count "$INSTANCES" --pids-file "$pids_file" || true
+            print_info "Log viewer exited. App windows keep running; close them to stop instances."
+            return 0
+        fi
+        
+        # Separate instance: use isolated HOME so Documents + XDG paths do not share data with other instances
+        if [ "$SEPARATE_INSTANCE" = true ]; then
+            local real_home="$HOME"
+            [ -z "$real_home" ] && real_home="$(getent passwd "$(whoami)" 2>/dev/null | cut -d: -f6)"
+            local instance_base="${TMPDIR:-/tmp}/debitum-instance-$$"
+            mkdir -p "$instance_base/Documents" "$instance_base/.local/share" "$instance_base/.config"
+            export PUB_CACHE="${real_home}/.pub-cache"
+            export HOME="$instance_base"
+            export XDG_DATA_HOME="$instance_base/.local/share"
+            export XDG_CONFIG_HOME="$instance_base/.config"
+            export DEBITUM_INSTANCE_ID="1"
+            print_info "Using separate instance data: $instance_base (no shared data with other runs)"
+        fi
+        
         # Launch Flutter app and configure window for Hyprland
+        local linux_extra=""
         if [ -n "$device_id" ]; then
-            (cd "$ROOT_DIR/mobile" && $flutter_cmd -d "$device_id")
+            (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd $linux_extra -d "$device_id")
         else
             # Check if running on Hyprland
             if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || command -v hyprctl &> /dev/null; then
@@ -1088,18 +1381,14 @@ cmd_run_flutter_app() {
                 configure_hyprland_window $window_width $window_height &
                 local config_pid=$!
                 
-                # Start window configuration in background
-                configure_hyprland_window &
-                local config_pid=$!
-                
                 # Launch Flutter (foreground)
-                (cd "$ROOT_DIR/mobile" && $flutter_cmd -d linux)
+                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd $linux_extra -d linux)
                 
                 # Clean up background process if still running
                 kill $config_pid 2>/dev/null || true
             else
                 # Not on Hyprland, just run normally
-                (cd "$ROOT_DIR/mobile" && $flutter_cmd -d linux)
+                (cd "$ROOT_DIR/mobile" && LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $flutter_cmd $linux_extra -d linux)
             fi
         fi
     else
@@ -1153,18 +1442,14 @@ cmd_show_android_logs() {
     adb logcat -s flutter:D DartVM:D
 }
 
-cmd_test_flutter_app() {
-    validate_flags "test-flutter-app"
+cmd_test_integration() {
+    validate_flags "test-integration"
     
-    print_step "Running Flutter tests..."
+    print_step "Running client-core integration tests (Rust)..."
     
-    if [ -n "$1" ]; then
-        (cd "$ROOT_DIR/mobile" && flutter test "$1")
-    else
-        (cd "$ROOT_DIR/mobile" && flutter test)
-    fi
+    (cd "$ROOT_DIR/crates/debitum_client_core" && cargo test --test integration -- --ignored)
     
-    print_success "Tests complete"
+    print_success "Integration tests complete"
 }
 
 cmd_test_api_server() {
@@ -2081,14 +2366,23 @@ Flags:
                                   Set window size for Linux app (only for run-flutter-app linux)
                                   Format: WIDTHxHEIGHT (e.g., 800x600) or WIDTH HEIGHT
                                   Default: 390x844 (phone size)
+  --separate-instance, --sandbox   Run Linux app with isolated data (no shared data with other instances)
+  --instances N (1-9)              Spawn N instances at once (Linux + --separate-instance only).
+                                  Single terminal shows one instance's logs; press 1-9 to switch, q to quit.
+                                  Window titles become "Instance 1", "Instance 2", etc.
 
 Database Commands:
-  reset-database-complete [backup.zip]
+  reset-database-complete [backup.zip [username] [wallet]]
                                   Complete reset + rebuild + optional import (recommended)
+                                  If backup.zip is given, username and wallet are required.
+                                  Wallet is created if it does not exist.
                                   Use --skip-server-build to skip server build (faster if binary exists)
-  reset-database-only [backup.zip]
+  reset-database-only [backup.zip [username] [wallet]]
                                   Reset PostgreSQL database only, optionally import data
-  import-backup <backup.zip>       Import data from Debitum backup (creates events)
+                                  If backup.zip is given, username and wallet are required.
+  import-backup <backup.zip> <username> <wallet>
+                                  Import data from Debitum backup (creates events).
+                                  Username must exist; wallet is created if it does not exist.
   rebuild-database-projections      Rebuild projections from events (via API)
 
 Docker Services Commands:
@@ -2111,11 +2405,13 @@ Flutter App Commands:
                                   Mode: dev (default), debug, release, profile
                                   Use --clear-app-data to clear app data before running
                                   Use --window-size WIDTHxHEIGHT to set custom size (Linux only)
+                                  Use --separate-instance to run Linux app with isolated data (no shared state)
+                                  Use --instances N to spawn N instances with unified log viewer (1-9 switch, q quit)
                                   On Hyprland: automatically floats window with fixed size
   show-android-logs                Show filtered Android logs (Flutter/Dart only)
                                   Use this in a separate terminal while Flutter app is running
   run-flutter-web [mode]           Run Flutter web app (dev/prod)
-  test-flutter-app [test_file]     Run Flutter tests
+  test-integration                 Run client-core integration tests (Rust, requires server)
   test-flutter-integration [test]   Run Flutter integration tests (with database reset)
                                   Use --skip-server-build to skip server build during reset
   test-flutter-integration-multi-app [SELECTIONS...]
@@ -2149,10 +2445,11 @@ System Commands:
 
 Examples:
   $0 reset-database-complete                      # Complete reset + rebuild (clean system)
-  $0 reset-database-complete backup.zip           # Complete reset + import + rebuild (recommended)
+  $0 reset-database-complete backup.zip max MyWallet   # Complete reset + import + rebuild (recommended)
   $0 --skip-server-build reset-database-complete  # Fast reset (skip server build)
   $0 reset-database-only                          # Clean reset (no data)
-  $0 import-backup backup.zip                     # Import data (keeps existing data)
+  $0 reset-database-only backup.zip max MyWallet # Reset and import into user max, wallet MyWallet
+  $0 import-backup backup.zip max MyWallet       # Import data (wallet created if needed)
   $0 set-admin-password admin mypass              # Set admin panel login password
   $0 start-all-docker-production                  # Start production (all in Docker)
   $0 start-server-direct                          # Start development (Rust directly, faster, auto-reload)
@@ -2164,11 +2461,13 @@ Examples:
   $0 run-flutter-app linux dev                    # Run Linux app in dev mode (phone size, floating on Hyprland)
   $0 run-flutter-app linux dev --window-size 800x600  # Run Linux app with custom size
   $0 run-flutter-app android --clear-app-data     # Run Android app with cleared data
+  $0 run-flutter-app linux --separate-instance    # Run Linux app with isolated data (no shared state)
+  $0 run-flutter-app linux --separate-instance --instances 3   # Spawn 3 instances, one terminal, switch logs with 1-3
   $0 run-flutter-app android release <device-id>  # Run Android app in release mode on specific device
   $0 show-android-logs                            # Show filtered Android logs (in separate terminal)
   $0 run-flutter-web dev                          # Run web app in dev mode
-  $0 test-flutter-app                             # Run all Flutter tests
-  $0 test-api-server                              # Test server endpoints
+  $0 test-integration                              # Run client-core integration tests
+  $0 test-api-server                               # Test server endpoints
   $0 test-flutter-integration ui                  # Run UI integration tests
   $0 test-flutter-integration-multi-app                    # Run all multi-app sync tests
   $0 test-flutter-integration-multi-app 2                 # Run file 2 only
@@ -2190,18 +2489,18 @@ COMMAND="${1:-help}"
 
 case "$COMMAND" in
     reset-database-complete)
-        cmd_reset_database_complete "${2:-}"
+        cmd_reset_database_complete "${2:-}" "${3:-}" "${4:-}"
         ;;
     reset-database-only)
-        cmd_reset_database_only "${2:-}"
+        cmd_reset_database_only "${2:-}" "${3:-}" "${4:-}"
         ;;
     import-backup)
         if [ -z "$2" ]; then
-            print_error "Import requires a backup file"
-            echo "Usage: $0 import-backup <backup.zip>"
+            print_error "Import requires a backup file, username, and wallet"
+            echo "Usage: $0 import-backup <backup.zip> <username> <wallet>"
             exit 1
         fi
-        cmd_import_backup "$2"
+        cmd_import_backup "$2" "${3:-}" "${4:-}"
         ;;
     rebuild-database-projections)
         cmd_rebuild_database_projections
@@ -2245,8 +2544,8 @@ case "$COMMAND" in
     run-flutter-web)
         cmd_run_flutter_web "${2:-prod}"
         ;;
-    test-flutter-app)
-        cmd_test_flutter_app "${2:-}"
+    test-integration)
+        cmd_test_integration
         ;;
     test-api-server)
         cmd_test_api_server

@@ -1,24 +1,23 @@
 // ignore_for_file: unused_import, unused_field
 
-import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/dummy_data_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/sync_service_v2.dart';
-import '../services/settings_service.dart';
 import '../widgets/contact_list_item.dart';
+import '../widgets/diff_animated_list.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/sync_status_icon.dart';
+import '../widgets/glitch_transition.dart';
 import 'add_contact_screen.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
-import '../services/realtime_service.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/toast_service.dart';
 
@@ -42,56 +41,26 @@ enum ContactSortOption {
 }
 
 class _ContactsScreenState extends ConsumerState<ContactsScreen> {
-  List<Contact>? _contacts;
-  List<Contact>? _filteredContacts; // Filtered by search
-  bool _loading = true;
-  String? _error;
+  bool _loading = false; // Local busy state for UI actions (not initial data load)
   ContactSortOption _sortOption = ContactSortOption.alphabetical;
   Set<String> _selectedContacts = {}; // For multi-select
   bool _selectionMode = false;
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   Color? _defaultDirectionColor; // Color for default direction (for swipe background)
+  List<Contact> _lastValidContacts = []; // Cache to prevent flash on refresh
 
   @override
   void initState() {
     super.initState();
-    _loadContacts();
     _loadSettings();
     _searchController.addListener(_onSearchChanged);
-    
-    // Listen for real-time updates
-    RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Connect WebSocket if not connected
-    RealtimeService.connect();
-    
-    // Listen to local Hive box changes for offline updates
-    _setupLocalListeners();
+    Api.connectRealtime();
   }
 
-  void _setupLocalListeners() {
-    if (kIsWeb) return;
-    
-    // Listen to local Hive box changes for offline updates
-    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-    
-    contactsBox.listenable().addListener(_onLocalDataChanged);
-    transactionsBox.listenable().addListener(_onLocalDataChanged);
-  }
-
-  void _onLocalDataChanged() {
-    // Reload contacts when local database changes (works offline)
-    // Transactions affect contact balances, so reload when either changes
-    if (mounted) {
-      _loadContacts();
-    }
-  }
 
   Future<void> _loadSettings() async {
-    // Load default direction to set swipe background color
-    final defaultDir = await SettingsService.getDefaultDirection();
+    final defaultDir = await Api.getDefaultDirection();
     _updateSwipeColor(defaultDir);
   }
 
@@ -109,41 +78,34 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
     }
   }
 
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    // Reload contacts for any change - contacts, transactions (affect balance), etc.
-    if (type == 'contact_created' || 
-        type == 'contact_updated' || 
-        type == 'transaction_created' || 
-        type == 'transaction_updated' || 
-        type == 'transaction_deleted') {
-      // Reload contacts when real-time update received (transactions affect balance)
-      _loadContacts();
-    }
+  @override
+  void dispose() {
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _onSearchChanged() {
-    _applySearchAndSort();
+    if (mounted) setState(() {});
   }
 
-  void _applySearchAndSort() {
-    if (_contacts == null) return;
-    
+  List<Contact> _filterAndSortContacts(List<Contact> contacts) {
     final query = _searchController.text.toLowerCase().trim();
-    List<Contact> filtered = _contacts!;
-    
-    // Apply search filter
+    var filtered = contacts;
+
     if (query.isNotEmpty) {
       filtered = filtered.where((contact) {
         return contact.name.toLowerCase().contains(query) ||
-               (contact.username?.toLowerCase().contains(query) ?? false) ||
-               (contact.phone?.toLowerCase().contains(query) ?? false) ||
-               (contact.email?.toLowerCase().contains(query) ?? false) ||
-               (contact.notes?.toLowerCase().contains(query) ?? false);
+            (contact.username?.toLowerCase().contains(query) ?? false) ||
+            (contact.phone?.toLowerCase().contains(query) ?? false) ||
+            (contact.email?.toLowerCase().contains(query) ?? false) ||
+            (contact.notes?.toLowerCase().contains(query) ?? false);
       }).toList();
+    } else {
+      // Avoid copying when no filtering is required.
+      filtered = List<Contact>.from(filtered);
     }
-    
-    // Apply sort
+
     switch (_sortOption) {
       case ContactSortOption.alphabetical:
         filtered.sort((a, b) => a.name.compareTo(b.name));
@@ -164,65 +126,19 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         filtered.sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
         break;
     }
-    
-    if (mounted) {
-      setState(() {
-        _filteredContacts = filtered;
-      });
-    }
+    return filtered;
   }
 
-  List<Contact> _getContacts() {
-    return _filteredContacts ?? [];
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    if (!kIsWeb) {
-      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-      contactsBox.listenable().removeListener(_onLocalDataChanged);
-      transactionsBox.listenable().removeListener(_onLocalDataChanged);
-    }
-    RealtimeService.removeListener(_onRealtimeUpdate);
-    super.dispose();
-  }
-
-  Future<void> _loadContacts({bool sync = false}) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    
+  Future<void> _refreshContacts({bool sync = false}) async {
+    setState(() => _loading = true);
     try {
-      // Local-first: read from local database (instant, snappy)
-      List<Contact> contacts;
-      
-      // Always use local database - never call API from UI
-      contacts = await LocalDatabaseServiceV2.getContacts();
-      
-      // If sync requested, do full sync in background
       if (sync && !kIsWeb) {
-        SyncServiceV2.onPullToRefresh(); // Reset backoff and start sync
+        await Api.manualSync().catchError((_) {});
       }
-      
-      // Update state
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          _filteredContacts = contacts;
-          _loading = false;
-        });
-        _applySearchAndSort();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
+      // Providers will refetch from Rust. This keeps refresh work scoped to mounted screens.
+      ref.invalidate(contactsProvider);
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -242,6 +158,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         // If didPop is true, normal navigation happened (not in selection mode)
       },
       child: Scaffold(
+        backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -336,7 +253,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           final deletedIds = _selectedContacts.toList();
                           
                           // Always delete from local database first
-                          await LocalDatabaseServiceV2.bulkDeleteContacts(deletedIds);
+                          await Api.bulkDeleteContacts(deletedIds);
                           
                           // Check mounted before any UI operations
                           if (!mounted) return;
@@ -347,8 +264,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             _loading = false;
                           });
                           
-                          // Reload contacts
-                          _loadContacts();
+                          // ContactsProvider will refresh via DataBus; ensure UI picks it up.
+                          ref.invalidate(contactsProvider);
                           
                           // Show undo toast for all deletes (single or bulk) - always show, even in offline mode
                           // Use a small delay to ensure context is stable
@@ -361,10 +278,8 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                               message: '✅ $deletedCount contact(s) deleted',
                               onUndo: () async {
                                 try {
-                                  if (deletedIds.length == 1) {
-                                    await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
-                                  } else {
-                                    await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
+                                  for (final id in deletedIds) {
+                                    await Api.undoContactAction(id);
                                   }
                                 } catch (e) {
                                   // Error handled by ToastService
@@ -381,14 +296,10 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                             onUndo: () async {
                               if (!mounted) return;
                               try {
-                                if (deletedIds.length == 1) {
-                                  await LocalDatabaseServiceV2.undoContactAction(deletedIds.first);
-                                } else {
-                                  await LocalDatabaseServiceV2.undoBulkContactActions(deletedIds);
+                                for (final id in deletedIds) {
+                                  await Api.undoContactAction(id);
                                 }
-                                if (mounted) {
-                                  _loadContacts();
-                                }
+                                if (mounted) ref.invalidate(contactsProvider);
                               } catch (e) {
                                 // Error handled by ToastService
                               }
@@ -419,7 +330,6 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
               setState(() {
                 _sortOption = option;
               });
-              _applySearchAndSort();
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
@@ -457,22 +367,35 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => _loadContacts(sync: true),
+        onRefresh: () async {
+          await Api.refreshConnectionAndSync();
+          await _refreshContacts(sync: true);
+        },
         child: Builder(
           builder: (context) {
-            if (_loading) {
-              return const Center(child: CircularProgressIndicator());
+            // if (_loading) {
+            //   return const Center(child: CircularProgressIndicator());
+            // }
+
+            final contactsAsync = ref.watch(contactsProvider);
+            
+            // Update cache if we have a value
+            if (contactsAsync.hasValue) {
+              _lastValidContacts = contactsAsync.value!;
             }
             
-            if (_error != null) {
+            final baseContacts = contactsAsync.valueOrNull ?? _lastValidContacts;
+
+            if (contactsAsync.hasError && baseContacts.isEmpty) {
+              final e = contactsAsync.error;
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+                    Text('Error: $e', style: const TextStyle(color: Colors.red)),
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      onPressed: _loadContacts,
+                      onPressed: () => _refreshContacts(),
                       child: const Text('Retry'),
                     ),
                   ],
@@ -480,35 +403,61 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
               );
             }
 
-            final contacts = _getContacts();
-
-            if (contacts.isEmpty && _searchController.text.isNotEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.search_off, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No contacts found for "${_searchController.text}"',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
-                    ),
-                  ],
-                ),
-              );
+            if (contactsAsync.isLoading && baseContacts.isEmpty) {
+              return const Center(child: CircularProgressIndicator());
             }
-            
 
-          return ListView.builder(
-            itemCount: contacts.length,
-            cacheExtent: 200, // Cache more items for smoother scrolling
-            itemBuilder: (context, index) {
-              final contact = contacts[index];
+            final contacts = _filterAndSortContacts(baseContacts);
+
+                if (contacts.isEmpty && _searchController.text.isNotEmpty) {
+                  return EmptyState(
+                    icon: Icons.search_off,
+                    title: 'No contacts found for "${_searchController.text}"',
+                  );
+                }
+
+                if (contacts.isEmpty) {
+                  return EmptyState(
+                    icon: Icons.person_add_outlined,
+                    title: 'No contacts yet',
+                    subtitle: 'Add your first contact to get started',
+                  );
+                }
+
+            return Column(
+              children: [
+                Expanded(
+                  child: DiffAnimatedList<Contact>(
+                    items: contacts,
+                    itemId: (c) => c.id,
+                    padding: const EdgeInsets.only(bottom: 32),
+                    itemBuilder: (context, contact, animation) {
               final isSelected = _selectionMode && _selectedContacts.contains(contact.id);
-              
-              Widget contactItem = ContactListItem(
+              final isRemoving = animation.status == AnimationStatus.reverse;
+              // Add: 1) card scrambled + move (expand) 0-300ms, 2) delay 300ms, 3) glitch to real 600-800ms.
+              // Remove: 1) glitch to scrambles 0-300ms, 2) delay 300ms, 3) move (shrink) 600-800ms.
+              final moveAnimation = CurvedAnimation(
+                parent: animation,
+                curve: isRemoving
+                    ? const Interval(0.0, 0.25, curve: Curves.easeIn)  // Remove: shrink in last 300ms
+                    : const Interval(0.0, 0.375, curve: Curves.easeOut), // Add: expand in first 300ms
+              );
+              final glitchAnimation = CurvedAnimation(
+                parent: animation,
+                curve: isRemoving
+                    ? const Interval(0.625, 1.0, curve: Curves.easeOut) // Remove: glitch to scramble first 300ms
+                    : const Interval(0.75, 1.0, curve: Curves.easeOut),   // Add: glitch to real last 200ms
+              );
+
+              Widget contactItem = AnimatedBuilder(
+                animation: animation,
+                builder: (context, _) {
+                  final showScrambleForInsert = !isRemoving && animation.value < 0.75;
+                  return ContactListItem(
                         contact: contact,
                         isSelected: _selectionMode ? isSelected : null,
+                        isRemoving: isRemoving,
+                        glitchAnimation: glitchAnimation,
                         onSelectionChanged: _selectionMode
                             ? () {
                                 setState(() {
@@ -545,11 +494,15 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                                   ),
                                 );
                               },
+                    showScrambleForInsert: showScrambleForInsert,
                       );
-                      
+                },
+              );
+
                       // Wrap with Dismissible for swipe actions (only when not in selection mode)
+                      Widget currentItem;
                       if (!_selectionMode) {
-                        return Dismissible(
+                        currentItem = Dismissible(
                           key: Key(contact.id),
                           direction: DismissDirection.startToEnd, // Only swipe right (LTR)
                           dismissThresholds: const {
@@ -561,7 +514,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                               final flipColors = ref.watch(flipColorsProvider);
                               final isDark = Theme.of(context).brightness == Brightness.dark;
                               return FutureBuilder<String>(
-                                future: SettingsService.getDefaultDirection(),
+                                future: Api.getDefaultDirection(),
                                 builder: (context, snapshot) {
                                   final defaultDir = snapshot.data ?? 'received';
                                   // Set color based on default direction: received = red, give = green (respects flipColors)
@@ -591,7 +544,7 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           ),
                           confirmDismiss: (direction) async {
                             // Open new transaction screen with this contact (swipe right) using default direction
-                            final defaultDir = await SettingsService.getDefaultDirection();
+                            final defaultDir = await Api.getDefaultDirection();
                             final defaultDirection = defaultDir == 'received' 
                                 ? TransactionDirection.owed 
                                 : TransactionDirection.lent;
@@ -603,17 +556,27 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                               ),
                             );
                             if (result == true && mounted) {
-                              _loadContacts();
+                              ref.invalidate(contactsProvider);
                             }
                             return false; // Don't dismiss the contact item
                           },
                           child: contactItem,
                         );
-              }
-              
-              return contactItem;
-            },
-          );
+                      } else {
+                         // In selection mode, we just return the item (it has its own tap handlers)
+                         currentItem = contactItem;
+                      }
+
+                      return SizeTransition(
+                        key: ValueKey(contact.id),
+                        sizeFactor: moveAnimation,
+                        child: FadeTransition(opacity: moveAnimation, child: currentItem),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
           },
         ),
         ),

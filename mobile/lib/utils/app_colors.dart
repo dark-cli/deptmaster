@@ -52,15 +52,14 @@ class AppColors {
   static const Color darkGrayLight = Color(0xFF49454F); // Surface variant
   static const Color darkGrayDark = Color(0xFFCAC4D0); // On surface variant
 
-  // Semantic Colors for Give/Received - Material 3 defaults
+  // Semantic Colors for Give/Received - same green/red feel in both themes for directions
   // Standardized: Received = red (negative), Gave = green (positive)
-  // Light Mode: Gave = green (positive), Received = red (negative)
-  static const Color lightGive = Color(0xFF029C76); // Custom green
-  static const Color lightReceived = Color(0xFFBA1A1A); // Material 3 default error - red (negative)
-  
-  // Dark Mode: Gave = green (positive), Received = red (negative)
-  static const Color darkGive = Color(0xFF029C76); // Custom green
-  static const Color darkReceived = Color(0xFFFFB4AB); // Material 3 default error - light red (negative)
+  // Light: same green as dark; clear red so directions match dark theme visibility
+  static const Color lightGive = Color(0xFF029C76);   // Same green as dark
+  static const Color lightReceived = Color(0xFFC62828); // Strong red for directions (matches dark feel)
+  // Dark: green and light red for contrast on dark background
+  static const Color darkGive = Color(0xFF029C76);
+  static const Color darkReceived = Color(0xFFFFB4AB);
   
   // Semantic Colors (Balance) - Respects flipColors setting
   // These will be used with Consumer to watch flipColorsProvider

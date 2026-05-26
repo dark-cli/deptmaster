@@ -1,16 +1,17 @@
 // ignore_for_file: unused_import
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/local_database_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
@@ -43,6 +44,8 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
   bool _dueDateSwitchEnabled = false; // Switch state for due date
   bool _saving = false;
   List<Contact> _contacts = [];
+  bool _contactsReady = false;
+  ProviderSubscription<AsyncValue<List<Contact>>>? _contactsSub;
 
   // Parse number to integer (removes commas)
   static int _parseNumber(String value) {
@@ -67,8 +70,44 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
     _dueDateSwitchEnabled = widget.transaction.dueDate != null;
     _amountHasText = _amountController.text.isNotEmpty;
     _amountController.addListener(_onAmountChanged);
-    _loadContacts();
     _loadSettings();
+
+    _contactsSub = ref.listenManual<AsyncValue<List<Contact>>>(contactsProvider, (previous, next) {
+      if (!mounted) return;
+      final contacts = next.valueOrNull;
+      if (contacts == null) return;
+
+      setState(() {
+        _contacts = contacts;
+        _contactsReady = true;
+
+        if (_contacts.isNotEmpty) {
+          if (widget.contact != null) {
+            _selectedContact = _contacts.firstWhere(
+              (c) => c.id == widget.contact!.id,
+              orElse: () => _contacts.firstWhere(
+                (c) => c.id == widget.transaction.contactId,
+                orElse: () => widget.contact!,
+              ),
+            );
+          } else {
+            _selectedContact = _contacts.firstWhere(
+              (c) => c.id == widget.transaction.contactId,
+              orElse: () => _contacts.first,
+            );
+          }
+        }
+      });
+    }, fireImmediately: true);
+  }
+
+  @override
+  void dispose() {
+    _contactsSub?.close();
+    _amountController.removeListener(_onAmountChanged);
+    _amountController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
   }
 
   void _onAmountChanged() {
@@ -81,35 +120,8 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
     // Settings loaded, but due date switch state comes from transaction data
   }
 
-  Future<void> _loadContacts() async {
-    try {
-      // Always use local database - never call API from UI
-      final contacts = await LocalDatabaseServiceV2.getContacts();
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          // Set selected contact - find by ID from loaded list
-          if (widget.contact != null && contacts.isNotEmpty) {
-            _selectedContact = contacts.firstWhere(
-              (c) => c.id == widget.contact!.id,
-              orElse: () => contacts.firstWhere(
-                (c) => c.id == widget.transaction.contactId,
-                orElse: () => contacts.first,
-              ),
-            );
-          } else if (contacts.isNotEmpty) {
-            _selectedContact = contacts.firstWhere(
-              (c) => c.id == widget.transaction.contactId,
-              orElse: () => contacts.first,
-            );
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ToastService.showErrorFromContext(context, 'Error loading contacts: $e');
-      }
-    }
+  void _requestContactsRefresh() {
+    ref.invalidate(contactsProvider);
   }
 
   Future<void> _selectDate() async {
@@ -174,16 +186,24 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
         updatedAt: DateTime.now(),
         isSynced: false, // Mark as unsynced since we're updating locally
       );
-      await LocalDatabaseServiceV2.updateTransaction(updatedTransaction);
+      await Api.updateTransaction(
+        id: updatedTransaction.id,
+        contactId: updatedTransaction.contactId,
+        type: updatedTransaction.type == TransactionType.money ? 'money' : 'item',
+        direction: updatedTransaction.direction == TransactionDirection.owed ? 'owed' : 'lent',
+        amount: updatedTransaction.amount,
+        currency: updatedTransaction.currency,
+        description: updatedTransaction.description,
+        transactionDate: updatedTransaction.transactionDate.toIso8601String().split('T')[0],
+        dueDate: updatedTransaction.dueDate?.toIso8601String().split('T')[0],
+      );
 
       if (mounted) {
-        Navigator.of(context).pop(true); // Return true to indicate success
-        
-        // Show undo toast
+        Navigator.of(context).pop(true);
         ToastService.showUndoWithErrorHandlingFromContext(
           context: context,
           message: '✅ Transaction updated!',
-          onUndo: () => LocalDatabaseServiceV2.undoTransactionAction(updatedTransaction.id),
+          onUndo: () => Api.undoTransactionAction(updatedTransaction.id),
           successMessage: 'Transaction update undone',
         );
       }
@@ -198,14 +218,6 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
         });
       }
     }
-  }
-
-  @override
-  void dispose() {
-    _amountController.removeListener(_onAmountChanged);
-    _amountController.dispose();
-    _descriptionController.dispose();
-    super.dispose();
   }
 
   @override
@@ -243,9 +255,21 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
             // Contact selector (disabled if contact is fixed)
-            _contacts.isEmpty
+            !_contactsReady
                 ? const Center(child: CircularProgressIndicator())
-                : DropdownButtonFormField<Contact>(
+                : _contacts.isEmpty
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('No contacts available.'),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: _requestContactsRefresh,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : DropdownButtonFormField<Contact>(
                     value: _selectedContact,
                     decoration: const InputDecoration(
                       labelText: 'Contact *',
@@ -480,7 +504,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                 });
                 if (value && _dueDate == null) {
                   // Set default due date when switch is turned on
-                  final defaultDays = await SettingsService.getDefaultDueDateDays();
+                  final defaultDays = await Api.getDefaultDueDateDays();
                   if (mounted) {
                     setState(() {
                       _dueDate = DateTime.now().add(Duration(days: defaultDays));

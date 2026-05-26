@@ -6,15 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:intl/intl.dart';
+import '../models/contact.dart';
 import '../models/event.dart';
-import '../services/event_store_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/settings_service.dart';
+import '../api.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 // ignore: unused_import
 import '../utils/event_formatter.dart';
+import '../widgets/gradient_background.dart';
 import 'events_log_screen.dart';
 
 // Data model for Syncfusion charts
@@ -65,6 +66,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   Map<String, String> _contactNameCache = {}; // Cache for contact names
   Map<String, Event> _undoneEventsCache = {}; // Cache for undone events
   bool _isDisposed = false; // Flag to prevent operations after disposal
+  ProviderSubscription<AsyncValue<List<Event>>>? _eventsSub;
   
   // Filters (same as events log but without search)
   String _eventTypeFilter = 'all';
@@ -87,11 +89,53 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     _selectedDateTo = widget.initialDateTo;
     _tooltipBehavior = TooltipBehavior(enable: false); // Initialize, will be configured in build
     _loadDefaultPeriod();
-    _loadChartData();
+
+    // Reactively keep chart + list in sync with wallet events.
+    _eventsSub = ref.listenManual<AsyncValue<List<Event>>>(eventsProvider, (previous, next) async {
+      if (_isDisposed || !mounted) return;
+
+      final base = next.valueOrNull;
+      if (base == null) return;
+
+      final eventsWithDebt = base.where((e) {
+        final totalDebt = e.eventData['total_debt'];
+        return totalDebt != null && totalDebt is num;
+      }).toList()
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp)); // oldest first for chart building
+
+      // Caches
+      await _preloadUndoneEvents(eventsWithDebt);
+      final contacts = ref.read(contactsProvider).valueOrNull ?? const <Contact>[];
+      _contactNameCache = {for (final c in contacts) c.id: c.name};
+      for (final event in eventsWithDebt) {
+        final contactId = event.eventData['contact_id'] as String?;
+        final nameFromEvent = event.eventData['contact_name']?.toString();
+        if (contactId != null && nameFromEvent != null && nameFromEvent.isNotEmpty) {
+          _contactNameCache.putIfAbsent(contactId, () => nameFromEvent);
+        }
+        if (event.aggregateType == 'contact' &&
+            (event.eventType == 'CREATED' || event.eventType.contains('CREATE'))) {
+          final name = event.eventData['name']?.toString();
+          if (name != null && name.isNotEmpty) {
+            _contactNameCache[event.aggregateId] = name;
+          }
+        }
+      }
+
+      if (_isDisposed || !mounted) return;
+      setState(() {
+        _allEvents = eventsWithDebt;
+        _filteredEvents = eventsWithDebt;
+        _loading = false;
+      });
+      _applyDateFilters();
+    }, fireImmediately: true);
+
+    _loadChartData(); // triggers initial provider fetch indicator
   }
 
   Future<void> _loadDefaultPeriod() async {
-    final defaultPeriod = await SettingsService.getGraphDefaultPeriod();
+    final defaultPeriod = await Api.getGraphDefaultPeriod();
     if (mounted) {
       setState(() {
         _chartPeriod = defaultPeriod;
@@ -102,6 +146,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   @override
   void dispose() {
     _isDisposed = true;
+    _eventsSub?.close();
     // Hide tooltip before disposal to prevent chart updates
     try {
       _tooltipBehavior.hide();
@@ -117,46 +162,8 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     setState(() {
       _loading = true;
     });
-
-    try {
-      final events = await EventStoreService.getAllEvents();
-      
-      if (_isDisposed || !mounted) return;
-      
-      // Filter events that have total_debt in eventData
-      final eventsWithDebt = events.where((e) {
-        final totalDebt = e.eventData['total_debt'];
-        return totalDebt != null && totalDebt is num;
-      }).toList();
-      
-      // Sort by timestamp (oldest first for chart)
-      eventsWithDebt.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      
-      // Pre-load contact names for tooltip
-      await _preloadContactNames(eventsWithDebt);
-      
-      if (_isDisposed || !mounted) return;
-      
-      // Pre-load undone events cache
-      await _preloadUndoneEvents(eventsWithDebt);
-      
-      if (_isDisposed || !mounted) return;
-      
-      setState(() {
-        _allEvents = eventsWithDebt;
-        _filteredEvents = eventsWithDebt;
-        _loading = false;
-      });
-      
-      _applyDateFilters();
-    } catch (e) {
-      print('Error loading chart data: $e');
-      if (!_isDisposed && mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
+    // Trigger reactive reload.
+    ref.invalidate(eventsProvider);
   }
 
   void _applyDateFilters() {
@@ -230,24 +237,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   }
 
   Future<void> _preloadContactNames(List<Event> events) async {
-    final contactIds = <String>{};
-    for (final event in events) {
-      final contactId = event.eventData['contact_id'] as String?;
-      if (contactId != null) {
-        contactIds.add(contactId);
-      }
-    }
-    
-    for (final contactId in contactIds) {
-      try {
-        final contact = await LocalDatabaseServiceV2.getContact(contactId);
-        if (contact != null) {
-          _contactNameCache[contactId] = contact.name;
-        }
-      } catch (e) {
-        // Contact might not exist, continue
-      }
-    }
+    // No-op: contact names are sourced from `contactsProvider` + event payloads.
   }
 
   void _onChartPointTapped(DateTime intervalStart, DateTime intervalEnd) {
@@ -451,11 +441,13 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
     final primaryColor = isDark ? AppColors.darkPrimary : AppColors.lightPrimary;
     final chartData = _buildChartData();
     
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Debt Over Time'),
-      ),
-      body: _loading
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Debt Over Time'),
+        ),
+        body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               child: Column(
@@ -1294,6 +1286,7 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 

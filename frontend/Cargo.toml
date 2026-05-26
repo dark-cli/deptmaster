@@ -1,0 +1,52 @@
+[package]
+name = "debitum-frontend"
+version = "0.1.0"
+edition = "2021"
+description = "Debitum debt tracker - Dioxus frontend (Google-free)"
+
+[lib]
+name = "debitum_frontend"
+path = "src/lib.rs"
+
+[features]
+default = ["web"]
+# Run in browser (no system libs). Use: cargo run
+web = ["dioxus", "dioxus/web", "dioxus-web"]
+# Run as native desktop (needs libxdo, webkit, etc. on Linux). Use: cargo run --features desktop
+desktop = ["dioxus", "dioxus/desktop", "dioxus-desktop"]
+
+[dependencies]
+# UI (platform chosen by features; 0.7 matches dx 0.7.3)
+dioxus = { version = "0.7", optional = true }
+dioxus-web = { version = "0.7", optional = true }
+dioxus-desktop = { version = "0.7", optional = true }
+
+# Async / HTTP: see target-specific blocks (native = full reqwest; wasm = fetch-only to avoid mio)
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities (uuid: wasm needs "js" for v4 RNG; see target block)
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+once_cell = "1"
+sha2 = "0.10"
+base64 = "0.22"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+# uuid v4 on wasm needs "js" for randomness (browser crypto)
+uuid = { version = "1", features = ["v4", "serde", "js"] }
+getrandom = { version = "0.2", features = ["js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+# Tokio only on native; wasm build fails when mio (from tokio full) is compiled for wasm32
+tokio = { version = "1", features = ["full"] }
+# Local storage (desktop): use a simple dir + JSON for now; can add rusqlite later
+dirs = "5"
+
+
+[dev-dependencies]
+pretty_assertions = "1"

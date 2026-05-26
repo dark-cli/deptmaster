@@ -1,26 +1,30 @@
 // ignore_for_file: unused_field, unused_local_variable
 
-import 'dart:async';
+import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
 import '../utils/app_colors.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/dummy_data_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/sync_service_v2.dart';
-import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import 'edit_transaction_screen.dart';
 import 'add_transaction_screen.dart';
 import '../widgets/sync_status_icon.dart';
 import '../utils/bottom_sheet_helper.dart';
+import '../widgets/avatar_with_selection.dart';
+import '../widgets/diff_animated_list.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/animated_pixelated_text.dart';
+import '../widgets/glitch_transition.dart';
+import '../widgets/gradient_card.dart';
 
 class TransactionsScreen extends ConsumerStatefulWidget {
   final VoidCallback? onOpenDrawer;
@@ -42,119 +46,54 @@ enum TransactionSortOption {
 }
 
 class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
-  List<Transaction>? _transactions;
-  List<Transaction>? _filteredTransactions; // Filtered by search
-  List<Contact>? _contacts;
-  bool _loading = true;
-  String? _error;
+  bool _loading = false; // Local busy state for UI actions (not initial data load)
   TransactionSortOption _sortOption = TransactionSortOption.mostRecent;
   Set<String> _selectedTransactions = {}; // For multi-select
   bool _selectionMode = false;
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
   String? _lastMissingContactsHash; // Track missing contacts to avoid repeated warnings
+  List<Transaction> _lastValidTransactions = []; // Cache to prevent flash on refresh
 
   @override
   void initState() {
     super.initState();
-    _loadData();
     _searchController.addListener(_onSearchChanged);
-    
-    // Listen for real-time updates
-    RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Connect WebSocket if not connected
-    RealtimeService.connect();
-    
-    // Listen to local Hive box changes for offline updates
-    _setupLocalListeners();
-  }
-
-  void _setupLocalListeners() {
-    if (kIsWeb) return;
-    
-    // Listen to local Hive box changes for offline updates
-    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-    
-    contactsBox.listenable().addListener(_onLocalDataChanged);
-    transactionsBox.listenable().addListener(_onLocalDataChanged);
-  }
-
-  void _onLocalDataChanged() {
-    // Reload transactions when local database changes (works offline)
-    // Contacts affect transaction display (contact names), so reload when either changes
-    if (mounted) {
-      _loadData();
-    }
+    Api.connectRealtime();
   }
 
   @override
   void dispose() {
-    if (!kIsWeb) {
-      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-      contactsBox.listenable().removeListener(_onLocalDataChanged);
-      transactionsBox.listenable().removeListener(_onLocalDataChanged);
-    }
-    RealtimeService.removeListener(_onRealtimeUpdate);
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
   }
 
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    // Reload when transactions OR contacts change (contacts affect transaction display)
-    if (type == 'transaction_created' || 
-        type == 'transaction_updated' || 
-        type == 'transaction_deleted' ||
-        type == 'contact_created' ||
-        type == 'contact_updated' ||
-        type == 'contact_deleted') {
-      // Reload transactions and contacts when real-time update received
-      _loadData();
-    }
-  }
-
   void _onSearchChanged() {
-    _applySearchAndSort();
+    if (mounted) setState(() {});
   }
 
-  void _applySearchAndSort() {
-    if (_transactions == null) return;
-    
+  List<Transaction> _filterAndSortTransactions({
+    required List<Transaction> transactions,
+    required Map<String, Contact> contactsById,
+  }) {
     final query = _searchController.text.toLowerCase().trim();
-    List<Transaction> filtered = _transactions!;
-    
-    // Apply search filter
+    var filtered = transactions;
+
     if (query.isNotEmpty) {
       filtered = filtered.where((transaction) {
-        final contact = _contacts?.firstWhere(
-          (c) => c.id == transaction.contactId,
-          orElse: () => Contact(
-            id: '',
-            name: 'Unknown',
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-            balance: 0,
-          ),
-        );
+        final contact = contactsById[transaction.contactId];
         final contactName = contact?.name ?? 'Unknown';
         final contactUsername = contact?.username ?? '';
         return contactName.toLowerCase().contains(query) ||
-               (contactUsername.isNotEmpty && contactUsername.toLowerCase().contains(query)) ||
-               (transaction.description?.toLowerCase().contains(query) ?? false) ||
-               transaction.amount.toString().contains(query);
+            (contactUsername.isNotEmpty && contactUsername.toLowerCase().contains(query)) ||
+            (transaction.description?.toLowerCase().contains(query) ?? false) ||
+            transaction.amount.toString().contains(query);
       }).toList();
+    } else {
+      filtered = List<Transaction>.from(filtered);
     }
-    
-    // Build contact map for name sorting
-    final contactMap = _contacts != null 
-        ? Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)))
-        : <String, String>{};
-    
-    // Apply sort
+
     switch (_sortOption) {
       case TransactionSortOption.mostRecent:
         filtered.sort((a, b) => b.transactionDate.compareTo(a.transactionDate));
@@ -170,76 +109,33 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
         break;
       case TransactionSortOption.nameAZ:
         filtered.sort((a, b) {
-          final nameA = contactMap[a.contactId] ?? 'Unknown';
-          final nameB = contactMap[b.contactId] ?? 'Unknown';
+          final nameA = contactsById[a.contactId]?.name ?? 'Unknown';
+          final nameB = contactsById[b.contactId]?.name ?? 'Unknown';
           return nameA.compareTo(nameB);
         });
         break;
       case TransactionSortOption.nameZA:
         filtered.sort((a, b) {
-          final nameA = contactMap[a.contactId] ?? 'Unknown';
-          final nameB = contactMap[b.contactId] ?? 'Unknown';
+          final nameA = contactsById[a.contactId]?.name ?? 'Unknown';
+          final nameB = contactsById[b.contactId]?.name ?? 'Unknown';
           return nameB.compareTo(nameA);
         });
         break;
     }
-    
-    if (mounted) {
-      setState(() {
-        _filteredTransactions = filtered;
-      });
-    }
+
+    return filtered;
   }
 
-  List<Transaction> _getTransactions() {
-    return _filteredTransactions ?? [];
-  }
-
-  Future<void> _loadData({bool sync = false}) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    
+  Future<void> _refreshData({bool sync = false}) async {
+    setState(() => _loading = true);
     try {
-      // Local-first: read from local database (instant, snappy)
-      List<Transaction> transactions;
-      List<Contact> contacts;
-      
-      // Always use local database - never call API from UI
-      transactions = await LocalDatabaseServiceV2.getTransactions();
-      contacts = await LocalDatabaseServiceV2.getContacts();
-      
-      // In event-based systems, if transactions reference missing contacts, those contacts were deleted
-      // and the transactions should have been removed from the projection as well
-      // This check is no longer needed - missing contacts mean deleted contacts, which is expected
-      // The state builder ensures deleted contacts and their transactions are removed from projections
-      
-      // If sync requested, do full sync in background
       if (sync && !kIsWeb) {
-        SyncServiceV2.onPullToRefresh(); // Reset backoff and start sync
+        await Api.manualSync().catchError((_) {});
       }
-      
-      // Update state
-      if (mounted) {
-        setState(() {
-          _transactions = transactions;
-          _filteredTransactions = transactions;
-          _contacts = contacts;
-          _loading = false;
-        });
-        _applySearchAndSort();
-      }
-    } catch (e, stackTrace) {
-      print('❌ Error loading transactions: $e');
-      print('Stack trace: $stackTrace');
-      
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
+      ref.invalidate(transactionsProvider);
+      ref.invalidate(contactsProvider); // names affect transaction display
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -258,6 +154,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
         // If didPop is true, normal navigation happened (not in selection mode)
       },
       child: Scaffold(
+        backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -352,14 +249,16 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                             final deletedIds = _selectedTransactions.toList();
                             
                             // Delete from local database (creates events, rebuilds state)
-                            await LocalDatabaseServiceV2.bulkDeleteTransactions(deletedIds);
+                            await Api.bulkDeleteTransactions(deletedIds);
                             
                             if (mounted) {
                               setState(() {
                                 _selectedTransactions.clear();
                                 _selectionMode = false;
+                                _loading = false;
                               });
-                              _loadData();
+                              ref.invalidate(transactionsProvider);
+                              ref.invalidate(contactsProvider);
                               if (!mounted) return;
                               
                               // Show undo toast for all deletes (single or bulk)
@@ -367,12 +266,11 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                                 context: context,
                                 message: '✅ $deletedCount transaction(s) deleted',
                                 onUndo: () async {
-                                  if (deletedIds.length == 1) {
-                                    await LocalDatabaseServiceV2.undoTransactionAction(deletedIds.first);
-                                  } else {
-                                    await LocalDatabaseServiceV2.undoBulkTransactionActions(deletedIds);
+                                  for (final id in deletedIds) {
+                                    await Api.undoTransactionAction(id);
                                   }
-                                  _loadData();
+                                  ref.invalidate(transactionsProvider);
+                                  ref.invalidate(contactsProvider);
                                 },
                                 successMessage: '${deletedIds.length} transaction(s) deletion undone',
                               );
@@ -395,7 +293,6 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
               setState(() {
                 _sortOption = option;
               });
-              _applySearchAndSort();
             },
             itemBuilder: (context) => [
               const PopupMenuItem(
@@ -434,222 +331,227 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
       ),
       body: Builder(
         builder: (context) {
-          // Show loading state
-          if (_loading) {
-            return const Center(child: CircularProgressIndicator());
+          // if (_loading) {
+          //   return const Center(child: CircularProgressIndicator());
+          // }
+          final transactionsAsync = ref.watch(transactionsProvider);
+          final contactsAsync = ref.watch(contactsProvider);
+
+          // Update cache if we have a value
+          if (transactionsAsync.hasValue) {
+            _lastValidTransactions = transactionsAsync.value!;
           }
-          
-          // Show error state
-          if (_error != null) {
+
+          final baseTransactions = transactionsAsync.valueOrNull ?? _lastValidTransactions;
+
+          if (transactionsAsync.hasError && baseTransactions.isEmpty) {
+            final e = transactionsAsync.error;
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('Error: $_error'),
+                  Text('Error: $e'),
+                  const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: _loadData,
+                    onPressed: () => _refreshData(),
                     child: const Text('Retry'),
                   ),
                 ],
               ),
             );
           }
-    
-          // Use filtered and sorted transactions
-          final transactions = _getTransactions();
-          
-          if (transactions.isEmpty && _searchController.text.isNotEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.search_off, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No transactions found for "${_searchController.text}"',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
-          }
-          
-          if (transactions.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No transactions yet',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add your first transaction to get started',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
+
+          if (transactionsAsync.isLoading && baseTransactions.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
           }
 
-          // Build contact map for display - ALWAYS load from Hive directly for accuracy
-          // This ensures we get the most up-to-date contacts, matching how EditTransactionScreen loads them
-          Map<String, String> contactMap = <String, String>{};
-          if (!kIsWeb) {
-            try {
-              // Always load from Hive directly (same as EditTransactionScreen does)
-              final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-              final allContacts = contactsBox.values.toList();
-              if (allContacts.isNotEmpty) {
-                contactMap = Map.fromEntries(allContacts.map((c) => MapEntry(c.id, c.name)));
-              }
-            } catch (e) {
-              print('⚠️ Error loading contacts from Hive: $e');
-              // Fallback to _contacts if Hive fails
-              if (_contacts != null && _contacts!.isNotEmpty) {
-                contactMap = Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)));
-              }
-            }
-          } else if (_contacts != null && _contacts!.isNotEmpty) {
-            // Web fallback
-            contactMap = Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c.name)));
-          }
+          final contacts = contactsAsync.valueOrNull ?? const <Contact>[];
+          final contactsById = {for (final c in contacts) c.id: c};
+          final contactNameMap = {for (final c in contacts) c.id: c.name};
 
-          return RefreshIndicator(
-            onRefresh: () => _loadData(sync: true),
-            child: ListView.builder(
-              itemCount: transactions.length,
-              cacheExtent: 200, // Cache more items for smoother scrolling
-              itemBuilder: (context, index) {
-                final transaction = transactions[index];
-                final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
-                
-                // Handle missing contacts gracefully - missing contacts are already detected in _loadData()
-                // No need to log here to avoid spam during widget rebuilds
-                final contactId = transaction.contactId;
-                final contactNameFromMap = contactMap[contactId];
-                
-                Widget transactionItem = Container(
-                  color: isSelected ? Colors.blue.withOpacity(0.1) : null,
-                  child: TransactionListItem(
-                    transaction: transaction,
-                    contactName: contactNameFromMap, // Pass null if not found, let TransactionListItem handle it
-                  ),
+              final transactions = _filterAndSortTransactions(
+                transactions: baseTransactions,
+                contactsById: contactsById,
+              );
+
+              if (transactions.isEmpty && _searchController.text.isNotEmpty) {
+                return EmptyState(
+                  icon: Icons.search_off,
+                  title: 'No transactions found for "${_searchController.text}"',
                 );
-                
-                // Wrap with Dismissible for swipe actions (only when not in selection mode)
-                if (!_selectionMode) {
-                  return Dismissible(
-                    key: Key(transaction.id),
-                    direction: DismissDirection.startToEnd, // Only swipe right (LTR)
-                    dismissThresholds: const {
-                      DismissDirection.startToEnd: 0.7, // Require 70% swipe for close
-                    },
-                    movementDuration: const Duration(milliseconds: 300), // Slower animation
-                    background: Container(
-                      alignment: Alignment.centerLeft,
-                      padding: const EdgeInsets.only(left: 20),
-                      color: Colors.green,
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          Icon(Icons.check_circle, color: Colors.white),
-                          SizedBox(width: 8),
-                          Text(
-                            'Close',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    confirmDismiss: (direction) async {
-                      // Open reverse transaction - opposite direction, same amount, same contact (swipe right)
-                        final contact = _contacts?.firstWhere(
-                          (c) => c.id == transaction.contactId,
-                          orElse: () => Contact(
-                            id: transaction.contactId,
-                            name: 'Unknown',
-                            createdAt: DateTime.now(),
-                            updatedAt: DateTime.now(),
-                            balance: 0,
-                          ),
+              }
+
+              if (transactions.isEmpty) {
+                return const EmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'No transactions yet',
+                  subtitle: 'Add your first transaction to get started',
+                );
+              }
+
+          return Column(
+            children: [
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    await Api.refreshConnectionAndSync();
+                    await _refreshData(sync: true);
+                  },
+                  child: DiffAnimatedList<Transaction>(
+                    items: transactions,
+                    itemId: (t) => t.id,
+                    padding: const EdgeInsets.only(bottom: 32),
+                    itemBuilder: (context, transaction, animation) {
+                    final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
+                    final isRemoving = animation.status == AnimationStatus.reverse;
+                            // Add: 1) card scrambled + move (expand) 0-300ms, 2) delay 300ms, 3) glitch to real 600-800ms.
+                            // Remove: 1) glitch to scrambles 0-300ms, 2) delay 300ms, 3) move (shrink) 600-800ms.
+                            final moveAnimation = CurvedAnimation(
+                              parent: animation,
+                              curve: isRemoving
+                                  ? const Interval(0.0, 0.25, curve: Curves.easeIn)  // Remove: shrink in last 300ms (parent 0.25→0)
+                                  : const Interval(0.0, 0.375, curve: Curves.easeOut), // Add: expand in first 300ms
+                            );
+                            final glitchAnimation = CurvedAnimation(
+                              parent: animation,
+                              curve: isRemoving
+                                  ? const Interval(0.625, 1.0, curve: Curves.easeOut) // Remove: glitch to scramble in first 300ms (parent 1→0.625)
+                                  : const Interval(0.75, 1.0, curve: Curves.easeOut),   // Add: glitch to real in last 200ms (parent 0.75→1)
+                            );
+
+                    final contactId = transaction.contactId;
+                    final contactNameFromMap = contactNameMap[contactId];
+                    final contactForItem = contactsById[contactId];
+
+                    Widget transactionItem = AnimatedBuilder(
+                      animation: animation,
+                      builder: (context, _) {
+                        // Add: show scramble until glitch phase starts (after move + 300ms delay)
+                        final showScrambleForInsert = !isRemoving && animation.value < 0.75;
+                        return TransactionListItem(
+                          transaction: transaction,
+                          contactName: contactNameFromMap,
+                          contact: contactForItem,
+                          isSelected: _selectionMode ? isSelected : null,
+                          isRemoving: isRemoving,
+                          glitchAnimation: glitchAnimation,
+                          showScrambleForInsert: showScrambleForInsert,
                         );
-                        // Create a reverse transaction screen with pre-filled data to close/settle the transaction
-                        final reverseDirection = transaction.direction == TransactionDirection.owed
-                            ? TransactionDirection.lent
-                            : TransactionDirection.owed;
-                      final result = await showScreenAsBottomSheet(
-                        context: context,
-                        screen: AddTransactionScreenWithData(
+                      },
+                    );
+
+
+                    // Wrap with Dismissible for swipe actions (only when not in selection mode)
+                    if (!_selectionMode) {
+                      final inner = Dismissible(
+                        key: Key(transaction.id),
+                        direction: DismissDirection.startToEnd, // Only swipe right (LTR)
+                        dismissThresholds: const {
+                          DismissDirection.startToEnd: 0.7, // Require 70% swipe for close
+                        },
+                        movementDuration: const Duration(milliseconds: 300), // Slower animation
+                        background: Container(
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 20),
+                          color: Colors.green,
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            children: [
+                              Icon(Icons.check_circle, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Close',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        confirmDismiss: (direction) async {
+                          final contact = contactForItem ??
+                              Contact(
+                                id: transaction.contactId,
+                                name: 'Unknown',
+                                createdAt: DateTime.now(),
+                                updatedAt: DateTime.now(),
+                                balance: 0,
+                              );
+
+                          // Create a reverse transaction screen with pre-filled data to close/settle the transaction
+                          final reverseDirection = transaction.direction == TransactionDirection.owed
+                              ? TransactionDirection.lent
+                              : TransactionDirection.owed;
+                          final result = await showScreenAsBottomSheet(
+                            context: context,
+                            screen: AddTransactionScreenWithData(
                               contact: contact,
                               amount: transaction.amount,
                               direction: reverseDirection,
-                              description: transaction.description != null
-                                  ? 'Close: ${transaction.description}'
-                                  : 'Close transaction',
-                          ),
-                        );
-                        if (result == true && mounted) {
-                          _loadData();
-                        }
-                        return false; // Don't dismiss
-                    },
-                    child: GestureDetector(
-                      onTap: () async {
-                        // Open edit transaction screen
-                        // Try to find contact from _contacts first, then fallback to Hive lookup (same as EditTransactionScreen does)
-                        Contact? contact;
-                        if (_contacts != null) {
-                          try {
-                            contact = _contacts!.firstWhere(
-                              (c) => c.id == transaction.contactId,
+                              description: transaction.description != null ? 'Close: ${transaction.description}' : 'Close transaction',
+                            ),
+                          );
+                          if (result == true && mounted) {
+                            ref.invalidate(transactionsProvider);
+                            ref.invalidate(contactsProvider);
+                          }
+                          return false; // Don't dismiss
+                        },
+                        child: GestureDetector(
+                          onTap: () async {
+                            final contact = contactForItem ??
+                                Contact(
+                                  id: transaction.contactId,
+                                  name: 'Unknown',
+                                  createdAt: DateTime.now(),
+                                  updatedAt: DateTime.now(),
+                                  balance: 0,
+                                );
+
+                            final result = await showScreenAsBottomSheet(
+                              context: context,
+                              screen: EditTransactionScreen(
+                                transaction: transaction,
+                                contact: contact,
+                              ),
                             );
-                          } catch (e) {
-                            // Not found in _contacts, try Hive directly (same method EditTransactionScreen uses)
-                            if (!kIsWeb) {
-                              try {
-                                final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-                                contact = contactsBox.get(transaction.contactId);
-                              } catch (_) {
-                                // Contact not found
-                              }
+                            if (result == true && mounted) {
+                              ref.invalidate(transactionsProvider);
+                              ref.invalidate(contactsProvider);
                             }
-                          }
-                        } else if (!kIsWeb) {
-                          // _contacts is null, try Hive directly
-                          try {
-                            final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-                            contact = contactsBox.get(transaction.contactId);
-                          } catch (_) {
-                            // Contact not found
-                          }
-                        }
-                        
-                        // If still not found, create a placeholder (EditTransactionScreen will handle it)
-                        contact ??= Contact(
-                          id: transaction.contactId,
-                          name: 'Unknown',
-                          createdAt: DateTime.now(),
-                          updatedAt: DateTime.now(),
-                          balance: 0,
-                        );
-                        
-                        final result = await showScreenAsBottomSheet(
-                          context: context,
-                          screen: EditTransactionScreen(
-                              transaction: transaction,
-                              contact: contact,
-                          ),
-                        );
-                        if (result == true && mounted) {
-                          _loadData();
+                          },
+                          onLongPress: () {
+                            setState(() {
+                              _selectionMode = true;
+                              if (_selectedTransactions.contains(transaction.id)) {
+                                _selectedTransactions.remove(transaction.id);
+                              } else {
+                                _selectedTransactions.add(transaction.id);
+                              }
+                            });
+                          },
+                          child: transactionItem,
+                        ),
+                      );
+                      return SizeTransition(
+                        key: ValueKey(transaction.id),
+                        sizeFactor: moveAnimation,
+                        child: FadeTransition(opacity: moveAnimation, child: inner),
+                      );
+                    }
+
+                    final inner = GestureDetector(
+                      onTap: () {
+                        if (_selectionMode) {
+                          setState(() {
+                            if (_selectedTransactions.contains(transaction.id)) {
+                              _selectedTransactions.remove(transaction.id);
+                            } else {
+                              _selectedTransactions.add(transaction.id);
+                            }
+                          });
                         }
                       },
                       onLongPress: () {
@@ -663,25 +565,17 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                         });
                       },
                       child: transactionItem,
-                    ),
-                  );
-                }
-                
-                return GestureDetector(
-                  onLongPress: () {
-                    setState(() {
-                      _selectionMode = true;
-                      if (_selectedTransactions.contains(transaction.id)) {
-                        _selectedTransactions.remove(transaction.id);
-                      } else {
-                        _selectedTransactions.add(transaction.id);
-                      }
-                    });
-                  },
-                  child: transactionItem,
-                );
-              },
-            ),
+                    );
+                    return SizeTransition(
+                      key: ValueKey(transaction.id),
+                      sizeFactor: moveAnimation,
+                      child: FadeTransition(opacity: moveAnimation, child: inner),
+                    );
+                    },
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -692,44 +586,28 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
 
 class TransactionListItem extends StatelessWidget {
   final Transaction transaction;
-  final String? contactName; // For web, pass contact name directly
+  final String? contactName;
+  final Contact? contact;
+  final bool? isSelected;
+  final bool isRemoving;
+  final Animation<double>? glitchAnimation;
+  final bool showScrambleForInsert;
 
   const TransactionListItem({
     super.key,
     required this.transaction,
     this.contactName,
+    this.contact,
+    this.isSelected,
+    this.isRemoving = false,
+    this.glitchAnimation,
+    this.showScrambleForInsert = false,
   });
 
   String _getContactName() {
-    // ALWAYS try to look up from Hive first (most up-to-date source)
-    // This ensures we get the latest contact data even if contactMap is stale
-    // Ignore the passed contactName and always check Hive for accuracy
-    if (!kIsWeb && transaction.contactId.isNotEmpty) {
-      try {
-        final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-        final contact = contactsBox.get(transaction.contactId);
-        if (contact != null && contact.name.isNotEmpty) {
-          return contact.name;
-        }
-        // Contact not found - this means the contact was deleted or not synced yet
-        // Return "Unknown Contact" to indicate the contact is missing
-        return 'Unknown Contact';
-      } catch (e) {
-        // Fall through to use contactName if Hive lookup fails
-      }
-    }
-    // Fallback to passed contactName or 'Unknown Contact'
-    if (contactName != null && contactName!.isNotEmpty && contactName != 'Unknown') {
-      return contactName!;
-    }
-    if (kIsWeb) return 'Unknown Contact';
+    if (contact?.name != null && contact!.name.isNotEmpty) return contact!.name;
+    if (contactName != null && contactName!.isNotEmpty && contactName != 'Unknown') return contactName!;
     return 'Unknown Contact';
-  }
-
-  Contact? _getContact() {
-    if (kIsWeb) return null;
-    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-    return contactsBox.get(transaction.contactId);
   }
 
   @override
@@ -768,33 +646,66 @@ class TransactionListItem extends StatelessWidget {
     }
   }
 
+  Widget _glitchText(
+    String text,
+    TextStyle style, {
+    TextAlign? textAlign,
+    TextOverflow? overflow,
+    int? maxLines,
+  }) {
+    final shouldScramble = (isRemoving || showScrambleForInsert) && text.trim().isNotEmpty;
+    final hasArabic = TextUtils.hasArabic(text);
+    final base = AnimatedPixelatedText(
+      text,
+      style: style,
+      textAlign: textAlign,
+      textDirection: hasArabic ? ui.TextDirection.rtl : ui.TextDirection.ltr,
+      overflow: overflow,
+      maxLines: maxLines,
+      forceScramble: shouldScramble,
+    );
+    final animation = glitchAnimation;
+    if (animation == null) return base;
+    return GlitchTransition(
+      animation: animation,
+      child: base,
+      showScramble: true,
+      maxX: 10,
+      maxY: 5,
+      flickerChance: 0.35,
+    );
+  }
+
   Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color) {
-    // Pre-allocate width for amount section to ensure names align
     const double amountSectionWidth = 120.0;
-    
-    final contact = _getContact();
+    final contact = this.contact;
     final contactName = _getContactName();
     final amount = transaction.amount;
     final status = _getStatus(transaction.direction);
 
-    return Card(
+    return GradientCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      variationSeed: transaction.id.hashCode,
       child: InkWell(
         onTap: null, // Add navigation if needed
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
-              // Left side: Avatar
-              CircleAvatar(
-          backgroundColor: color.withOpacity(0.2),
+              // Left side: Avatar with optional selection checkmark
+              AvatarWithSelection(
                 radius: 24,
-          child: Icon(
-            Icons.attach_money,
-            color: color,
-                  size: 18,
-          ),
-        ),
+                isSelected: isSelected ?? false,
+                avatar: CircleAvatar(
+                  backgroundColor: color.withOpacity(0.2),
+                  radius: 24,
+                  child: Icon(
+                    Icons.attach_money,
+                    color: color,
+                    size: 18,
+                  ),
+                ),
+              ),
               const SizedBox(width: 16),
               // Name, Username, and Description/Date
               Expanded(
@@ -803,22 +714,28 @@ class TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-                    Text(
-                      TextUtils.forceLtr(contactName), // Force LTR for mixed Arabic/English text
-                      style: const TextStyle(
+                    _glitchText(
+                      TextUtils.hasArabic(contactName)
+                          ? contactName
+                          : TextUtils.forceLtr(contactName),
+                      const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     // Always reserve space for username to maintain consistent card height
                     if (contact?.username != null && contact!.username!.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Text(
+                      _glitchText(
                         '@${contact.username}',
-                        style: TextStyle(
+                        TextStyle(
                           color: ThemeColors.gray(context, shade: 500),
                           fontSize: 12,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ] else ...[
                       // Reserve same space when username is missing (2px spacing + 14px text height)
@@ -827,14 +744,14 @@ class TransactionListItem extends StatelessWidget {
                     if (transaction.description != null || transaction.dueDate != null) ...[
                       const SizedBox(height: 4),
             if (transaction.description != null) 
-            Text(
-                          transaction.description!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: ThemeColors.gray(context, shade: 600),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+            _glitchText(
+              transaction.description!,
+              TextStyle(
+                fontSize: 12,
+                color: ThemeColors.gray(context, shade: 600),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             if (transaction.dueDate != null) ...[
                         const SizedBox(height: 2),
@@ -848,21 +765,21 @@ class TransactionListItem extends StatelessWidget {
                                   : ThemeColors.warning(context),
                             ),
                   const SizedBox(width: 4),
-                  Text(
-                              dateFormat.format(transaction.dueDate!),
-                    style: TextStyle(
-                                fontSize: 11,
+                  _glitchText(
+                    dateFormat.format(transaction.dueDate!),
+                    TextStyle(
+                      fontSize: 11,
                       color: transaction.dueDate!.isBefore(DateTime.now())
-                                    ? ThemeColors.error(context)
-                                    : ThemeColors.warning(context),
+                          ? ThemeColors.error(context)
+                          : ThemeColors.warning(context),
                     ),
                   ),
                 ],
                         ),
                       ] else if (transaction.description == null) ...[
-                        Text(
+                        _glitchText(
                           dateFormat.format(transaction.transactionDate),
-                          style: TextStyle(
+                          TextStyle(
                             fontSize: 11,
                             color: ThemeColors.gray(context, shade: 500),
                           ),
@@ -870,13 +787,13 @@ class TransactionListItem extends StatelessWidget {
                       ],
                     ] else ...[
                       const SizedBox(height: 2),
-                      Text(
+                      _glitchText(
                         dateFormat.format(transaction.transactionDate),
-                        style: TextStyle(
+                        TextStyle(
                           fontSize: 11,
                           color: ThemeColors.gray(context, shade: 500),
                         ),
-              ),
+                      ),
             ],
           ],
         ),
@@ -890,24 +807,26 @@ class TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
+                    _glitchText(
                       '${_formatAmount(amount)} IQD',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
+                      TextStyle(
+                        fontWeight: FontWeight.bold,
                         fontSize: 16,
-            color: color,
+                        color: color,
                       ),
                       textAlign: TextAlign.right,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    Text(
+                    _glitchText(
                       status,
-                      style: TextStyle(
+                      TextStyle(
                         fontSize: 11,
                         color: ThemeColors.gray(context, shade: 600),
                       ),
                       textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),

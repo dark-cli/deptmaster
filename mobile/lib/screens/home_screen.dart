@@ -12,14 +12,14 @@ import 'add_transaction_screen.dart';
 import 'backend_setup_screen.dart';
 import 'login_screen.dart';
 import 'events_log_screen.dart';
-import '../services/auth_service.dart';
-import '../services/settings_service.dart';
-import '../services/backend_config_service.dart';
+import '../api.dart';
 import '../providers/settings_provider.dart';
 import '../widgets/gradient_background.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
+import '../models/wallet.dart';
+import 'wallet_selection_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -33,11 +33,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _biometricEnabled = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   DateTime? _lastBackPressTime;
+  int _walletChangeKey = 0; // Incremented when wallet changes so tab content reloads
+  String _username = '';
 
   @override
   void initState() {
     super.initState();
     _checkBiometricAvailability();
+    _loadUsername();
+  }
+
+  Future<void> _loadUsername() async {
+    final username = await Api.getUsername();
+    if (mounted) {
+      setState(() {
+        _username = username ?? '';
+      });
+    }
   }
 
   Future<bool> _onWillPop() async {
@@ -70,7 +82,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _checkBiometricAvailability() async {
     if (!kIsWeb) {
-      final available = await AuthService.isBiometricAvailable();
+      final available = await Api.isBiometricAvailable();
       if (mounted) {
         setState(() {
           _biometricEnabled = available;
@@ -82,7 +94,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _handleBiometricAuth() async {
     if (!_biometricEnabled) return;
     
-    final authenticated = await AuthService.authenticateWithBiometrics();
+    final authenticated = await Api.authenticateWithBiometrics();
     if (authenticated && mounted) {
       // User authenticated, app is already unlocked
       ToastService.showSuccessFromContext(context, '✅ Authenticated');
@@ -122,6 +134,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         backgroundColor: Colors.transparent,
         drawer: _buildDrawer(),
         body: IndexedStack(
+          key: ValueKey(_walletChangeKey),
           index: _selectedIndex,
           children: [
             TransactionsScreen(
@@ -208,7 +221,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget? _buildFloatingActionButton() {
     // All tabs: Click = transaction, Long press = contact
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0), // Raise the FAB position
+      padding: const EdgeInsets.only(bottom: 24.0), // Raised above bottom nav
       child: Semantics(
         button: true,
         label: 'Add transaction (tap) or contact (long press)',
@@ -246,22 +259,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Icon(
-                  Icons.settings,
-                  size: 48,
-                  color: Theme.of(context).colorScheme.onPrimary,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Settings',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onPrimary,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 32,
+                      backgroundColor: Theme.of(context).colorScheme.onPrimary,
+                      child: Text(
+                        _username.isNotEmpty ? _username[0].toUpperCase() : '?',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _username,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Theme.of(context).colorScheme.onPrimary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Colors.greenAccent,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Active',
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.onPrimary.withOpacity(0.8),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
+          // Wallet Selection
+          _WalletSelectionTile(
+            onWalletChanged: () {
+              setState(() => _walletChangeKey++);
+            },
+          ),
+          const Divider(),
           // Events Log
           ListTile(
             leading: const Icon(Icons.event_note),
@@ -285,17 +345,128 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  void _showAddTransactionDialog() {
-    showScreenAsBottomSheet(
+  Future<void> _showAddTransactionDialog() async {
+    final walletId = await Api.getCurrentWalletId();
+    if (walletId == null) {
+      final list = await Api.getWallets();
+      final wallets = list.map((m) => Wallet.fromJson(m)).toList();
+      if (wallets.isEmpty) {
+        if (!mounted) return;
+        ToastService.showInfoFromContext(context, 'Create a wallet first to add transactions.');
+        Navigator.pushNamed(context, '/create-wallet');
+        return;
+      }
+      await Api.setCurrentWalletId(wallets.first.id);
+      if (mounted) setState(() => _walletChangeKey++);
+    }
+    if (!mounted) return;
+    final result = await showScreenAsBottomSheet<dynamic>(
       context: context,
       screen: const AddTransactionScreen(),
     );
+    // Refresh dashboard/chart when returning (user may have added a transaction)
+    if (result != null && mounted) setState(() => _walletChangeKey++);
   }
 
-  void _showAddContactDialog() {
-    showScreenAsBottomSheet(
+  Future<void> _showAddContactDialog() async {
+    final walletId = await Api.getCurrentWalletId();
+    if (walletId == null) {
+      final list = await Api.getWallets();
+      final wallets = list.map((m) => Wallet.fromJson(m)).toList();
+      if (wallets.isEmpty) {
+        if (!mounted) return;
+        ToastService.showInfoFromContext(context, 'Create a wallet first to add contacts.');
+        Navigator.pushNamed(context, '/create-wallet');
+        return;
+      }
+      await Api.setCurrentWalletId(wallets.first.id);
+      if (mounted) setState(() => _walletChangeKey++);
+    }
+    if (!mounted) return;
+    final result = await showScreenAsBottomSheet<dynamic>(
       context: context,
       screen: const AddContactScreen(),
+    );
+    // Refresh dashboard/chart when returning (user may have added a contact)
+    if (result != null && mounted) setState(() => _walletChangeKey++);
+  }
+}
+
+// Wallet selection tile for drawer
+class _WalletSelectionTile extends ConsumerStatefulWidget {
+  const _WalletSelectionTile({this.onWalletChanged});
+
+  final VoidCallback? onWalletChanged;
+
+  @override
+  ConsumerState<_WalletSelectionTile> createState() => _WalletSelectionTileState();
+}
+
+class _WalletSelectionTileState extends ConsumerState<_WalletSelectionTile> {
+  Wallet? _currentWallet;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentWallet();
+  }
+
+  Future<void> _loadCurrentWallet() async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+    });
+    try {
+      final walletId = await Api.getCurrentWalletId();
+      if (!mounted) return;
+      final walletMap = walletId != null ? await Api.getWallet(walletId) : null;
+      if (!mounted) return;
+      final wallet = walletMap != null ? Wallet.fromJson(walletMap) : null;
+      if (mounted) {
+        setState(() {
+          _currentWallet = wallet;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.account_balance_wallet),
+      title: const Text('Wallet'),
+      subtitle: _loading
+          ? const Text('Loading...')
+          : Text(
+              _currentWallet?.name ?? 'No wallet selected',
+              style: TextStyle(
+                color: _currentWallet == null
+                    ? Theme.of(context).colorScheme.error
+                    : null,
+              ),
+            ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        // Show sheet first so we stay mounted when it returns (don't pop drawer yet)
+        final result = await showWalletSelectionSheet(context);
+        // Notify parent to refresh tabs/chart while still mounted, then close drawer
+        if (mounted && result == true) {
+          widget.onWalletChanged?.call();
+          _loadCurrentWallet();
+          try {
+            await Api.manualSync();
+          } catch (_) {}
+        }
+        if (mounted) Scaffold.maybeOf(context)?.closeDrawer();
+      },
     );
   }
 }
@@ -309,11 +480,10 @@ class _SettingsContent extends ConsumerStatefulWidget {
 }
 
 class _SettingsContentState extends ConsumerState<_SettingsContent> {
-  bool _darkMode = true;
   String _defaultDirection = 'give';
   int _defaultDueDateDays = 30;
   bool _defaultDueDateSwitch = false;
-  String _backendIp = '';
+  String _backendHost = '';
   int _backendPort = 8000;
 
   @override
@@ -323,20 +493,17 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
   }
 
   Future<void> _loadSettings() async {
-    final darkMode = await SettingsService.getDarkMode();
-    final defaultDir = await SettingsService.getDefaultDirection();
-    final defaultDays = await SettingsService.getDefaultDueDateDays();
-    final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
-    final backendIp = await BackendConfigService.getBackendIp();
-    final backendPort = await BackendConfigService.getBackendPort();
-    
+    final defaultDir = await Api.getDefaultDirection();
+    final defaultDays = await Api.getDefaultDueDateDays();
+    final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
+    final backendHost = await Api.getBackendHost();
+    final backendPort = await Api.getBackendPort();
     if (mounted) {
       setState(() {
-        _darkMode = darkMode;
         _defaultDirection = defaultDir;
         _defaultDueDateDays = defaultDays;
         _defaultDueDateSwitch = defaultDueDateSwitch;
-        _backendIp = backendIp;
+        _backendHost = backendHost;
         _backendPort = backendPort;
       });
     }
@@ -349,17 +516,16 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
       children: [
         // Appearance
         _buildSectionHeader('Appearance'),
-        SwitchListTile(
-          title: const Text('Dark Mode'),
-          value: _darkMode,
-          onChanged: (value) async {
-            await SettingsService.setDarkMode(value);
-            setState(() {
-              _darkMode = value;
-            });
-            if (mounted) {
-              (context as Element).markNeedsBuild();
-            }
+        Consumer(
+          builder: (context, ref, _) {
+            final darkMode = ref.watch(darkModeProvider);
+            return SwitchListTile(
+              title: const Text('Dark Mode'),
+              value: darkMode,
+              onChanged: (value) {
+                ref.read(darkModeProvider.notifier).setDarkMode(value);
+              },
+            );
           },
         ),
         
@@ -376,7 +542,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
             ],
             onChanged: (value) async {
               if (value != null) {
-                await SettingsService.setDefaultDirection(value);
+                await Api.setDefaultDirection(value);
                 setState(() {
                   _defaultDirection = value;
                 });
@@ -455,7 +621,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                     subtitle: const Text('Due date switch default state in transaction form'),
                     value: _defaultDueDateSwitch,
                     onChanged: (value) async {
-                      await SettingsService.setDefaultDueDateSwitch(value);
+                      await Api.setDefaultDueDateSwitch(value);
                       setState(() {
                         _defaultDueDateSwitch = value;
                       });
@@ -475,7 +641,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                         controller: TextEditingController(text: _defaultDueDateDays.toString()),
                         onSubmitted: (value) async {
                           final days = int.tryParse(value) ?? 30;
-                          await SettingsService.setDefaultDueDateDays(days);
+                          await Api.setDefaultDueDateDays(days);
                           setState(() {
                             _defaultDueDateDays = days;
                           });
@@ -505,14 +671,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           },
         ),
         FutureBuilder<String>(
-          future: SettingsService.getDashboardDefaultPeriod(),
+          future: Api.getDashboardDefaultPeriod(),
           builder: (context, snapshot) {
             final period = snapshot.data ?? 'month';
             // If period is 'day', reset to 'month'
             final safePeriod = period == 'day' ? 'month' : period;
             if (period == 'day') {
-              // Reset to month if day was selected
-              SettingsService.setDashboardDefaultPeriod('month');
+              Api.setDashboardDefaultPeriod('month');
             }
             return ListTile(
               title: const Text('Dashboard Default Period'),
@@ -536,14 +701,13 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
           },
         ),
         FutureBuilder<String>(
-          future: SettingsService.getGraphDefaultPeriod(),
+          future: Api.getGraphDefaultPeriod(),
           builder: (context, snapshot) {
             final period = snapshot.data ?? 'month';
             // If period is 'day', reset to 'month'
             final safePeriod = period == 'day' ? 'month' : period;
             if (period == 'day') {
-              // Reset to month if day was selected
-              SettingsService.setGraphDefaultPeriod('month');
+              Api.setGraphDefaultPeriod('month');
             }
             return ListTile(
               title: const Text('Graph Page Default Period'),
@@ -557,7 +721,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                 ],
                 onChanged: (value) async {
                   if (value != null) {
-                    await SettingsService.setGraphDefaultPeriod(value);
+                    await Api.setGraphDefaultPeriod(value);
                     setState(() {});
                   }
                 },
@@ -583,7 +747,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
         _buildSectionHeader('Backend Configuration'),
         ListTile(
           title: const Text('Change Backend Settings'),
-          subtitle: const Text('Update server IP and port'),
+          subtitle: const Text('Update server address and port'),
           leading: const Icon(Icons.settings_ethernet),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _navigateToBackendSetup(),
@@ -630,7 +794,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     showDialog(
       context: context,
       builder: (context) => _BackendConfigDialog(
-        currentIp: _backendIp,
+        currentHost: _backendHost,
         currentPort: _backendPort,
         onSaved: () async {
           await _loadSettings();
@@ -672,7 +836,7 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
     );
 
     if (confirm == true) {
-      await AuthService.logout();
+      await Api.logout();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -684,12 +848,12 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
 
 // Dialog for quick backend config edit
 class _BackendConfigDialog extends StatefulWidget {
-  final String currentIp;
+  final String currentHost;
   final int currentPort;
   final VoidCallback onSaved;
 
   const _BackendConfigDialog({
-    required this.currentIp,
+    required this.currentHost,
     required this.currentPort,
     required this.onSaved,
   });
@@ -700,20 +864,20 @@ class _BackendConfigDialog extends StatefulWidget {
 
 class _BackendConfigDialogState extends State<_BackendConfigDialog> {
   final _formKey = GlobalKey<FormState>();
-  late TextEditingController _ipController;
+  late TextEditingController _hostController;
   late TextEditingController _portController;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _ipController = TextEditingController(text: widget.currentIp);
+    _hostController = TextEditingController(text: widget.currentHost);
     _portController = TextEditingController(text: widget.currentPort.toString());
   }
 
   @override
   void dispose() {
-    _ipController.dispose();
+    _hostController.dispose();
     _portController.dispose();
     super.dispose();
   }
@@ -726,10 +890,10 @@ class _BackendConfigDialogState extends State<_BackendConfigDialog> {
     });
 
     try {
-      final ip = _ipController.text.trim();
+      final host = _hostController.text.trim();
       final port = int.parse(_portController.text.trim());
       
-      await BackendConfigService.setBackendConfig(ip, port);
+      await Api.setBackendConfig(host, port);
       
       if (mounted) {
         widget.onSaved();
@@ -757,15 +921,15 @@ class _BackendConfigDialogState extends State<_BackendConfigDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextFormField(
-              controller: _ipController,
+              controller: _hostController,
               decoration: const InputDecoration(
-                labelText: 'Server IP',
-                hintText: 'e.g., 192.168.1.100 or localhost',
+                labelText: 'Server Address',
+                hintText: 'e.g., 10.95.12.45 or example.com',
                 border: OutlineInputBorder(),
               ),
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
-                  return 'Please enter server IP';
+                  return 'Please enter server address';
                 }
                 return null;
               },

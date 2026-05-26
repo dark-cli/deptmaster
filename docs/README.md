@@ -8,6 +8,7 @@ Complete documentation for the Debt Tracker application.
 - **[API Reference](./API.md)** - Complete API endpoint documentation
 - **[Development Guide](./DEVELOPMENT.md)** - Development setup, testing, admin panel, database management
 - **[Deployment Guide](./DEPLOYMENT.md)** - Production deployment instructions
+- **[Integration test commands](./INTEGRATION_TEST_COMMANDS.md)** - Command/assert vocabulary for Rust client core integration tests (`run_commands`, `assert_commands`)
 
 ## Quick Links
 

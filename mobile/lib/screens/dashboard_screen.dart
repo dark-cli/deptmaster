@@ -1,21 +1,20 @@
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/realtime_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/sync_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:hive_flutter/hive_flutter.dart';
-import '../services/dummy_data_service.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/gradient_card.dart';
 import '../widgets/sync_status_icon.dart';
 import '../widgets/debt_chart_widget.dart';
+import '../widgets/animated_pixelated_text.dart';
 import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
 import 'debt_chart_detail_screen.dart';
@@ -31,105 +30,41 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
-  List<Contact>? _contacts;
-  List<Transaction>? _transactions;
-  bool _loading = true;
+  List<Contact> _lastValidContacts = [];
+  List<Transaction> _lastValidTransactions = [];
 
   @override
   void initState() {
     super.initState();
-    _loadData();
-    RealtimeService.addListener(_onRealtimeUpdate);
-    RealtimeService.connect();
-    _setupLocalListeners();
+    _ensureWallet();
+    Api.connectRealtime();
   }
 
-  void _setupLocalListeners() {
+  Future<void> _ensureWallet() async {
     if (kIsWeb) return;
-    
-    // Listen to local Hive box changes for offline updates
-    final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-    final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-    
-    contactsBox.listenable().addListener(_onLocalDataChanged);
-    transactionsBox.listenable().addListener(_onLocalDataChanged);
-  }
-
-  void _onLocalDataChanged() {
-    // Reload data when local database changes (works offline)
-    if (mounted) {
-      _loadData();
-    }
-  }
-
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    if (type == 'contact_created' || type == 'contact_updated' ||
-        type == 'transaction_created' || type == 'transaction_updated' ||
-        type == 'transaction_deleted') {
-      _loadData();
-    }
-  }
-
-  @override
-  void dispose() {
-    if (!kIsWeb) {
-      final contactsBox = Hive.box<Contact>(DummyDataService.contactsBoxName);
-      final transactionsBox = Hive.box<Transaction>(DummyDataService.transactionsBoxName);
-      contactsBox.listenable().removeListener(_onLocalDataChanged);
-      transactionsBox.listenable().removeListener(_onLocalDataChanged);
-    }
-    RealtimeService.removeListener(_onRealtimeUpdate);
-    super.dispose();
-  }
-
-  Future<void> _loadData({bool sync = false}) async {
-    setState(() {
-      _loading = true;
-    });
-
     try {
-      // Local-first: read from local database (instant, snappy)
-      List<Contact> contacts;
-      List<Transaction> transactions;
-      
-      // Always use local database - never call API from UI
-      contacts = await LocalDatabaseServiceV2.getContacts();
-      transactions = await LocalDatabaseServiceV2.getTransactions();
-      
-      // If sync requested, do full sync in background
-      if (sync && !kIsWeb) {
-        SyncServiceV2.onPullToRefresh(); // Reset backoff and start sync
+      // Ensure we have a current wallet when we have wallets (e.g. ensureCurrentWallet failed at startup)
+      if (await Api.getCurrentWalletId() == null) {
+        final list = await Api.getWallets();
+        if (list.isNotEmpty && list.first['id'] != null) {
+          await Api.setCurrentWalletId(list.first['id'] as String);
+          // Force sync to ensure data appears immediately after recovery
+          Api.manualSync().catchError((_) {});
+        }
       }
-      
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          _transactions = transactions;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
+    } catch (_) {}
   }
 
-  int _calculateTotalBalance() {
-    if (_contacts == null) return 0;
-    return _contacts!.fold<int>(0, (sum, contact) => sum + contact.balance);
+  int _calculateTotalBalance(List<Contact> contacts) {
+    return contacts.fold<int>(0, (sum, contact) => sum + contact.balance);
   }
 
-  List<Transaction> _getUpcomingDueDates() {
-    if (_transactions == null) return [];
+  List<Transaction> _getUpcomingDueDates(List<Transaction> transactions) {
     // Don't check _dueDateEnabled here - let the UI decide whether to show
     
     final now = DateTime.now();
     // Get all due dates: overdue or within next 30 days
-    final upcoming = _transactions!
+    final upcoming = transactions
         .where((t) => t.dueDate != null && 
                       (t.dueDate!.isBefore(now) || // Include overdue
                        (t.dueDate!.isAfter(now) && t.dueDate!.difference(now).inDays <= 30))) // Or within 30 days
@@ -151,22 +86,76 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final contactsAsync = ref.watch(contactsProvider);
+    final transactionsAsync = ref.watch(transactionsProvider);
+    
+    if (contactsAsync.hasValue) {
+      _lastValidContacts = contactsAsync.value!;
+    }
+    if (transactionsAsync.hasValue) {
+      _lastValidTransactions = transactionsAsync.value!;
+    }
+    
+    final contacts = contactsAsync.valueOrNull ?? _lastValidContacts;
+    final transactions = transactionsAsync.valueOrNull ?? _lastValidTransactions;
+
     // Watch due date enabled setting
     final dueDateEnabled = ref.watch(dueDateEnabledProvider);
     
-    if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+    final loading = (contactsAsync.isLoading || transactionsAsync.isLoading) &&
+        (contacts.isEmpty && transactions.isEmpty); // Only show loader if we have NO data at all
+    if (loading) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
-    final totalBalance = _calculateTotalBalance();
-    final upcomingDueDates = _getUpcomingDueDates();
-    final contactMap = _contacts != null
-        ? Map.fromEntries(_contacts!.map((c) => MapEntry(c.id, c)))
-        : <String, Contact>{};
+    final totalBalance = _calculateTotalBalance(contacts);
+    final upcomingDueDates = _getUpcomingDueDates(transactions);
+    final contactMap = contacts.isNotEmpty ? Map.fromEntries(contacts.map((c) => MapEntry(c.id, c))) : <String, Contact>{};
+
+    if (contacts.isEmpty && transactions.isEmpty) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Dashboard'),
+          leading: widget.onOpenDrawer != null
+              ? IconButton(
+                  icon: const Icon(Icons.menu),
+                  onPressed: widget.onOpenDrawer,
+                )
+              : null,
+          actions: const [
+            Padding(
+              padding: EdgeInsets.only(left: 24.0, right: 20.0),
+              child: SyncStatusIcon(),
+            ),
+          ],
+        ),
+        body: RefreshIndicator(
+          onRefresh: () async {
+            await Api.refreshConnectionAndSync();
+            ref.invalidate(contactsProvider);
+            ref.invalidate(transactionsProvider);
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.75,
+              child: const EmptyState(
+                icon: Icons.dashboard_outlined,
+                title: 'Nothing here yet',
+                subtitle: 'Add contacts and transactions to see your dashboard.',
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: const Text('Dashboard'),
         leading: widget.onOpenDrawer != null
@@ -183,12 +172,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => _loadData(sync: true),
+        onRefresh: () async {
+          await Api.refreshConnectionAndSync();
+          ref.invalidate(contactsProvider);
+          ref.invalidate(transactionsProvider);
+        },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
             // Stats Cards
-            _buildStatsCard(context, totalBalance),
+            _buildStatsCard(
+              context,
+              totalBalance,
+              contactCount: contacts.length,
+              transactionCount: transactions.length,
+            ),
             const SizedBox(height: 16),
             
             // Debt Over Time Chart (Simple) - only show if enabled
@@ -217,8 +215,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
             
             // Balance Chart
-            if (_contacts != null && _contacts!.isNotEmpty) ...[
-              _buildBalanceChart(context),
+            if (contacts.isNotEmpty) ...[
+              _buildBalanceChart(context, contacts),
               const SizedBox(height: 16),
             ],
             
@@ -230,6 +228,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ] else ...[
                 GradientCard(
                   padding: const EdgeInsets.all(16),
+                  variationSeed: 1,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -258,7 +257,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildStatsCard(BuildContext context, int totalBalance) {
+  Widget _buildStatsCard(
+    BuildContext context,
+    int totalBalance, {
+    required int contactCount,
+    required int transactionCount,
+  }) {
     return Consumer(
       builder: (context, ref, child) {
         final flipColors = ref.watch(flipColorsProvider);
@@ -275,6 +279,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         
         return GradientCard(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          variationSeed: 2,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -283,7 +288,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 style: Theme.of(context).textTheme.labelMedium,
               ),
               const SizedBox(height: 8),
-              Text(
+              AnimatedPixelatedText(
                 '$balanceText IQD',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
@@ -294,8 +299,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildStatItem(context, 'Contacts', _contacts?.length ?? 0),
-                  _buildStatItem(context, 'Transactions', _transactions?.length ?? 0),
+                  _buildStatItem(context, 'Contacts', contactCount),
+                  _buildStatItem(context, 'Transactions', transactionCount),
                 ],
               ),
             ],
@@ -322,14 +327,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     );
   }
 
-  Widget _buildBalanceChart(BuildContext context) {
-    if (_contacts == null || _contacts!.isEmpty) return const SizedBox.shrink();
+  Widget _buildBalanceChart(BuildContext context, List<Contact> contacts) {
+    if (contacts.isEmpty) return const SizedBox.shrink();
     
     return Consumer(
       builder: (context, ref, child) {
         final flipColors = ref.watch(flipColorsProvider);
-        final positiveBalances = _contacts!.where((c) => c.balance > 0).toList();
-        final negativeBalances = _contacts!.where((c) => c.balance < 0).toList();
+        final positiveBalances = contacts.where((c) => c.balance > 0).toList();
+        final negativeBalances = contacts.where((c) => c.balance < 0).toList();
         
         positiveBalances.sort((a, b) => b.balance.compareTo(a.balance));
         negativeBalances.sort((a, b) => a.balance.compareTo(b.balance));
@@ -344,6 +349,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         
         return GradientCard(
           padding: const EdgeInsets.all(16),
+          variationSeed: 3,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -468,17 +474,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      '$formatted IQD',
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        color: debtColor,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                    ),
-                                  ),
+                          Flexible(
+                            child: AnimatedPixelatedText(
+                              '$formatted IQD',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: debtColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
                                 ],
                               ),
                             ),
@@ -558,17 +564,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      '$formatted IQD',
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        color: creditColor,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                    ),
-                                  ),
+                          Flexible(
+                            child: AnimatedPixelatedText(
+                              '$formatted IQD',
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: creditColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
                                 ],
                               ),
                             ),
@@ -592,6 +598,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         
         return GradientCard(
           padding: const EdgeInsets.all(16),
+          variationSeed: title.hashCode,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -661,7 +668,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                   ),
                                 ],
                                 const SizedBox(height: 2),
-                                Text(
+                                AnimatedPixelatedText(
                                   '$formattedAmount • $formattedDate',
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: ThemeColors.gray(context, shade: 600),

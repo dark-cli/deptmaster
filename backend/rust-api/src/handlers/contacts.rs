@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Extension},
     http::{StatusCode, HeaderMap},
     response::Json,
 };
@@ -9,9 +9,12 @@ use uuid::Uuid;
 use chrono::Utc;
 use crate::AppState;
 use crate::websocket;
+use crate::middleware::auth::AuthUser;
+use crate::middleware::wallet_context::WalletContext;
+use crate::services::permission_service::{self, ResourceType};
 
-/// Calculate total debt (sum of all contact balances) at current time
-async fn calculate_total_debt(state: &AppState) -> i64 {
+/// Calculate total debt (sum of all contact balances) at current time for a wallet
+async fn calculate_total_debt(state: &AppState, wallet_id: Uuid) -> i64 {
     sqlx::query_scalar::<_, i64>(
         r#"
         SELECT COALESCE(SUM(
@@ -23,9 +26,10 @@ async fn calculate_total_debt(state: &AppState) -> i64 {
         )::BIGINT, 0)
         FROM contacts_projection c
         LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
-        WHERE c.is_deleted = false
+        WHERE c.is_deleted = false AND c.wallet_id = $1 AND (t.wallet_id = $1 OR t.wallet_id IS NULL)
         "#
     )
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .unwrap_or(0)
@@ -39,6 +43,8 @@ pub struct CreateContactRequest {
     pub email: Option<String>,
     pub notes: Option<String>,
     pub comment: String, // Required: explanation for why this contact is being created
+    /// Optional contact group IDs to add the new contact to. If omitted, server uses user's default_contact_group_ids from wallet settings.
+    pub group_ids: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -98,9 +104,54 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for ContactResponse {
 
 pub async fn create_contact(
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     headers: HeaderMap,
     Json(payload): Json<CreateContactRequest>,
 ) -> Result<(StatusCode, Json<CreateContactResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
+    // Resolve group_ids first: request body or user's default contact groups
+    let group_ids: Vec<Uuid> = if let Some(ids) = &payload.group_ids {
+        ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect()
+    } else {
+        sqlx::query_scalar::<_, Vec<Uuid>>(
+            "SELECT COALESCE(default_contact_group_ids, '{}') FROM user_wallet_settings WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(auth_user.user_id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+    };
+    // Owner/admin can create without specifying groups (contact goes to all_contacts). Members must assign to at least one group they have contact:create in.
+    if group_ids.is_empty() && wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Contact must be assigned to at least one group you have create permission in"})),
+        ));
+    }
+    if wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
+        for cg_id in &group_ids {
+            let can_create = permission_service::can_perform_action_on_contact_group(
+                &*state.db_pool,
+                wallet_id,
+                auth_user.user_id,
+                &wallet_context.user_role,
+                *cg_id,
+                "contact:create",
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("Permission check error: {:?}", e);
+                permission_service::insufficient_permission_response()
+            })?;
+            if !can_create {
+                return Err(permission_service::insufficient_permission_response());
+            }
+        }
+    }
     // Validate name
     if payload.name.trim().is_empty() {
         return Err((
@@ -117,19 +168,7 @@ pub async fn create_contact(
         ));
     }
 
-    // Get user ID
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user_id = auth_user.user_id;
 
     // Generate contact ID
     let contact_id = Uuid::new_v4();
@@ -143,6 +182,7 @@ pub async fn create_contact(
 
     // Create event data with full audit trail information (without total_debt initially)
     let mut event_data = serde_json::json!({
+        "wallet_id": wallet_id.to_string(),
         "user_id": user_id.to_string(),
         "name": payload.name,
         "username": payload.username,
@@ -177,9 +217,10 @@ pub async fn create_contact(
         tracing::info!("Idempotent request detected, returning existing contact");
         // Read existing contact from projection
         let contact = sqlx::query_as::<_, (Uuid, String, i64)>(
-            "SELECT id, name, COALESCE((SELECT SUM(CASE WHEN direction = 'lent' THEN amount ELSE -amount END) FROM transactions_projection WHERE contact_id = contacts_projection.id AND is_deleted = false), 0) as balance FROM contacts_projection WHERE id = $1"
+            "SELECT id, name, COALESCE((SELECT SUM(CASE WHEN direction = 'lent' THEN amount ELSE -amount END) FROM transactions_projection WHERE contact_id = contacts_projection.id AND is_deleted = false AND wallet_id = $2), 0) as balance FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
         )
         .bind(existing_contact_id)
+        .bind(wallet_id)
         .fetch_optional(&*state.db_pool)
         .await
         .map_err(|e| {
@@ -206,12 +247,13 @@ pub async fn create_contact(
     sqlx::query(
         r#"
         INSERT INTO contacts_projection 
-        (id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW(), NOW(), 0)
+        (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, NOW(), NOW(), 0)
         "#
     )
     .bind(contact_id)
     .bind(user_id)
+    .bind(wallet_id)
     .bind(payload.name.trim())
     .bind(payload.username.as_deref())
     .bind(payload.phone.as_deref())
@@ -228,18 +270,19 @@ pub async fn create_contact(
         })?;
 
     // Calculate total debt AFTER creating the contact (contact creation doesn't change debt, but we record the state AFTER the action)
-    let total_debt_after = calculate_total_debt(&state).await;
+    let total_debt_after = calculate_total_debt(&state, wallet_id).await;
     event_data["total_debt"] = serde_json::json!(total_debt_after);
     
     // Write to PostgreSQL events table with total_debt included (AFTER the action)
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, idempotency_key, created_at)
-        VALUES ($1, 'contact', $2, 'CONTACT_CREATED', 1, $3, $4, NOW())
+        INSERT INTO events (user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, idempotency_key, created_at)
+        VALUES ($1, $2, 'contact', $3, 'CONTACT_CREATED', 1, $4, $5, NOW())
         RETURNING id
         "#
     )
     .bind(user_id)
+    .bind(wallet_id)
     .bind(contact_id)
     .bind(&event_data)
     .bind(idempotency_key.to_string())
@@ -255,13 +298,53 @@ pub async fn create_contact(
 
     // Update projection with event_id
     sqlx::query(
-        "UPDATE contacts_projection SET last_event_id = $1 WHERE id = $2"
+        "UPDATE contacts_projection SET last_event_id = $1 WHERE id = $2 AND wallet_id = $3"
     )
     .bind(event_id)
     .bind(contact_id)
+    .bind(wallet_id)
     .execute(&*state.db_pool)
     .await
     .ok(); // Non-blocking update
+
+    // All contacts are in all_contacts (system group)
+    let all_contacts_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
+    )
+    .bind(wallet_id)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .ok()
+    .flatten();
+    if let Some(ac_id) = all_contacts_id {
+        let _ = sqlx::query(
+            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(contact_id)
+        .bind(ac_id)
+        .execute(&*state.db_pool)
+        .await;
+    }
+    // Add contact to chosen groups (already validated)
+    for cg_id in &group_ids {
+        let same_wallet = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
+        )
+        .bind(cg_id)
+        .bind(wallet_id)
+        .fetch_one(&*state.db_pool)
+        .await
+        .unwrap_or(false);
+        if same_wallet {
+            let _ = sqlx::query(
+                "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            )
+            .bind(contact_id)
+            .bind(cg_id)
+            .execute(&*state.db_pool)
+            .await;
+        }
+    }
 
     let response = CreateContactResponse {
         id: contact_id.to_string(),
@@ -270,11 +353,13 @@ pub async fn create_contact(
     };
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "contact_created",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "contact");
 
     Ok((
         StatusCode::CREATED,
@@ -285,8 +370,11 @@ pub async fn create_contact(
 pub async fn update_contact(
     Path(contact_id): Path<String>,
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<UpdateContactRequest>,
 ) -> Result<(StatusCode, Json<UpdateContactResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
     let contact_uuid = Uuid::parse_str(&contact_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -315,25 +403,28 @@ pub async fn update_contact(
             Json(serde_json::json!({"error": "Contact not found"})),
         ));
     }
-
-    let _user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "contact:update",
+        ResourceType::Contact,
+        Some(contact_uuid),
     )
-    .fetch_one(&*state.db_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
+    let _user_id = auth_user.user_id;
 
     // Get current contact data
     let current = sqlx::query(
-        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1"
+        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -359,6 +450,7 @@ pub async fn update_contact(
 
     // Create event data with full audit trail
     let event_data = serde_json::json!({
+        "wallet_id": wallet_id.to_string(),
         "name": new_name,
         "username": new_username,
         "phone": new_phone,
@@ -377,9 +469,10 @@ pub async fn update_contact(
 
     // Get current version for optimistic concurrency
     let current_version = sqlx::query_scalar::<_, i32>(
-        "SELECT version FROM contacts_projection WHERE id = $1"
+        "SELECT version FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .fetch_optional(&*state.db_pool)
         .await
         .map_err(|e| {
@@ -398,7 +491,7 @@ pub async fn update_contact(
         r#"
         UPDATE contacts_projection 
         SET name = $1, username = $2, phone = $3, email = $4, notes = $5, updated_at = NOW(), version = $6
-        WHERE id = $7 AND version = $8
+        WHERE id = $7 AND wallet_id = $8 AND version = $9
         "#
     )
     .bind(new_name)
@@ -408,6 +501,7 @@ pub async fn update_contact(
     .bind(new_notes)
     .bind(new_version)
     .bind(contact_uuid)
+    .bind(wallet_id)
     .bind(current_version)
     .execute(&*state.db_pool)
     .await
@@ -421,9 +515,10 @@ pub async fn update_contact(
 
     // Check if update actually happened (optimistic locking)
     let rows_affected = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM contacts_projection WHERE id = $1 AND version = $2"
+        "SELECT COUNT(*) FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND version = $3"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .bind(new_version)
     .fetch_one(&*state.db_pool)
     .await
@@ -443,18 +538,19 @@ pub async fn update_contact(
     }
 
     // Calculate total debt AFTER updating the contact (contact update doesn't change debt, but we record the state AFTER the action)
-    let total_debt_after = calculate_total_debt(&state).await;
+    let total_debt_after = calculate_total_debt(&state, wallet_id).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
     // Write to PostgreSQL events table
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_UPDATED', $2, $3, NOW())
+        INSERT INTO events (user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ((SELECT id FROM users_projection LIMIT 1), $1, 'contact', $2, 'CONTACT_UPDATED', $3, $4, NOW())
         RETURNING id
         "#
     )
+    .bind(wallet_id)
     .bind(contact_uuid)
     .bind(new_version)
     .bind(&event_data_with_debt)
@@ -484,11 +580,13 @@ pub async fn update_contact(
     };
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "contact_updated",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "contact");
 
     Ok((
         StatusCode::OK,
@@ -499,8 +597,11 @@ pub async fn update_contact(
 pub async fn delete_contact(
     Path(contact_id): Path<String>,
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<DeleteContactRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
     let contact_uuid = Uuid::parse_str(&contact_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -508,11 +609,12 @@ pub async fn delete_contact(
         )
     })?;
 
-    // Check if contact exists
+    // Check if contact exists in this wallet
     let contact_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND is_deleted = false)"
+        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .fetch_one(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -529,25 +631,27 @@ pub async fn delete_contact(
             Json(serde_json::json!({"error": "Contact not found"})),
         ));
     }
-
-    let _user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "contact:delete",
+        ResourceType::Contact,
+        Some(contact_uuid),
     )
-    .fetch_one(&*state.db_pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
 
     // Get contact data before deletion for audit trail
     let contact_data = sqlx::query(
-        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1"
+        "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .fetch_optional(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -560,6 +664,7 @@ pub async fn delete_contact(
     
     // Prepare delete event data with full audit trail
     let event_data = serde_json::json!({
+        "wallet_id": wallet_id.to_string(),
         "comment": payload.comment,
         "timestamp": Utc::now().to_rfc3339(),
         "deleted_contact": contact_data.map(|row| serde_json::json!({
@@ -573,9 +678,10 @@ pub async fn delete_contact(
 
     // Get current version for optimistic concurrency
     let current_version = sqlx::query_scalar::<_, i32>(
-        "SELECT version FROM contacts_projection WHERE id = $1"
+        "SELECT version FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .fetch_optional(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -594,11 +700,12 @@ pub async fn delete_contact(
         r#"
         UPDATE contacts_projection 
         SET is_deleted = true, updated_at = NOW(), version = $1
-        WHERE id = $2 AND version = $3
+        WHERE id = $2 AND wallet_id = $3 AND version = $4
         "#
     )
     .bind(new_version)
     .bind(contact_uuid)
+    .bind(wallet_id)
     .bind(current_version)
     .execute(&*state.db_pool)
     .await
@@ -612,9 +719,10 @@ pub async fn delete_contact(
 
     // Check if delete actually happened (optimistic locking)
     let rows_affected = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM contacts_projection WHERE id = $1 AND version = $2"
+        "SELECT COUNT(*) FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND version = $3"
     )
     .bind(contact_uuid)
+    .bind(wallet_id)
     .bind(new_version)
     .fetch_one(&*state.db_pool)
             .await
@@ -634,18 +742,19 @@ pub async fn delete_contact(
     }
 
     // Calculate total debt AFTER deleting the contact (contact deletion doesn't change debt if balance is 0, but we record the state AFTER the action)
-    let total_debt_after = calculate_total_debt(&state).await;
+    let total_debt_after = calculate_total_debt(&state, wallet_id).await;
     let mut event_data_with_debt = event_data.clone();
     event_data_with_debt["total_debt"] = serde_json::json!(total_debt_after);
     
     // Write to PostgreSQL events table
     let event_id = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-        VALUES ((SELECT id FROM users_projection LIMIT 1), 'contact', $1, 'CONTACT_DELETED', $2, $3, NOW())
+        INSERT INTO events (user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
+        VALUES ((SELECT id FROM users_projection LIMIT 1), $1, 'contact', $2, 'CONTACT_DELETED', $3, $4, NOW())
         RETURNING id
         "#
     )
+    .bind(wallet_id)
     .bind(contact_uuid)
     .bind(new_version)
     .bind(&event_data_with_debt)
@@ -675,11 +784,13 @@ pub async fn delete_contact(
     });
 
     // Broadcast change via WebSocket
-    websocket::broadcast_change(
+    websocket::broadcast_wallet_change(
         &state.broadcast_tx,
+        wallet_id,
         "contact_deleted",
         &serde_json::to_string(&response).unwrap_or_default(),
     );
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "contact");
 
     Ok((
         StatusCode::OK,
@@ -689,7 +800,24 @@ pub async fn delete_contact(
 
 pub async fn get_contacts(
     State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<ContactResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
+    let can = permission_service::can_perform(
+        &*state.db_pool,
+        wallet_id,
+        auth_user.user_id,
+        &wallet_context.user_role,
+        "contact:read",
+        ResourceType::Contact,
+        None,
+    )
+    .await
+    .map_err(|_| permission_service::insufficient_permission_response())?;
+    if !can {
+        return Err(permission_service::insufficient_permission_response());
+    }
     let contacts = sqlx::query_as::<_, ContactResponse>(
         r#"
         SELECT 
@@ -708,12 +836,13 @@ pub async fn get_contacts(
             c.is_deleted,
             c.created_at
         FROM contacts_projection c
-        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false
-        WHERE c.is_deleted = false
+        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = $1
+        WHERE c.is_deleted = false AND c.wallet_id = $1
         GROUP BY c.id, c.name, c.username, c.email, c.phone, c.is_deleted, c.created_at
         ORDER BY c.name
         "#
     )
+    .bind(wallet_id)
     .fetch_all(&*state.db_pool)
     .await
     .map_err(|e| {

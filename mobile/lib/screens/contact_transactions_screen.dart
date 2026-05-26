@@ -1,16 +1,16 @@
 // ignore_for_file: unused_import, unused_local_variable
 
-import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/contact.dart';
 import '../models/transaction.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/realtime_service.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
@@ -19,6 +19,11 @@ import 'edit_transaction_screen.dart';
 import 'edit_contact_screen.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
+import '../widgets/avatar_with_selection.dart';
+import '../widgets/diff_animated_list.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/animated_pixelated_text.dart';
+import '../widgets/glitch_transition.dart';
 import '../utils/bottom_sheet_helper.dart';
 
 class ContactTransactionsScreen extends ConsumerStatefulWidget {
@@ -34,65 +39,28 @@ class ContactTransactionsScreen extends ConsumerStatefulWidget {
 }
 
 class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsScreen> {
-  List<Transaction>? _transactions;
-  bool _loading = true;
-  String? _error;
+  bool _loading = false; // local busy state for UI actions (delete/bulk delete)
   Set<String> _selectedTransactions = {}; // For multi-select
   bool _selectionMode = false;
+  List<Transaction> _lastValidTransactions = []; // Cache to prevent flash on refresh
 
   @override
   void initState() {
     super.initState();
-    _loadTransactions();
-    
-    // Listen for real-time updates
-    RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Connect WebSocket if not connected
-    RealtimeService.connect();
+    Api.connectRealtime();
   }
 
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    if (type == 'transaction_created' || type == 'transaction_updated' || type == 'transaction_deleted') {
-      // Reload transactions when real-time update received
-      _loadTransactions();
-    }
-  }
-
-  @override
-  void dispose() {
-    RealtimeService.removeListener(_onRealtimeUpdate);
-    super.dispose();
-  }
-
-  Future<void> _loadTransactions() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    
+  Future<void> _refresh({bool sync = false}) async {
+    if (_loading) return;
+    setState(() => _loading = true);
     try {
-      // Always use local database - never call API from UI
-      final allTransactions = await LocalDatabaseServiceV2.getTransactions();
-      // Filter transactions for this contact
-      final contactTransactions = allTransactions
-          .where((t) => t.contactId == widget.contact.id)
-          .toList();
-      
-      if (mounted) {
-        setState(() {
-          _transactions = contactTransactions;
-          _loading = false;
-        });
+      if (sync && !kIsWeb) {
+        await Api.manualSync().catchError((_) {});
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
+      ref.invalidate(transactionsProvider);
+      ref.invalidate(contactsProvider);
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -172,14 +140,16 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                             final deletedIds = _selectedTransactions.toList();
                             
                             // Delete from local database (creates events, rebuilds state)
-                            await LocalDatabaseServiceV2.bulkDeleteTransactions(deletedIds);
+                            await Api.bulkDeleteTransactions(deletedIds);
                             
                             if (!mounted) return;
                             setState(() {
                               _selectedTransactions.clear();
                               _selectionMode = false;
+                              _loading = false;
                             });
-                            _loadTransactions();
+                            ref.invalidate(transactionsProvider);
+                            ref.invalidate(contactsProvider);
                             if (!mounted) return;
                             
                             // Show undo toast for all deletes (single or bulk)
@@ -187,12 +157,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
                               context: context,
                               message: '✅ $deletedCount transaction(s) deleted',
                               onUndo: () async {
-                                if (deletedIds.length == 1) {
-                                  await LocalDatabaseServiceV2.undoTransactionAction(deletedIds.first);
-                                } else {
-                                  await LocalDatabaseServiceV2.undoBulkTransactionActions(deletedIds);
+                                for (final id in deletedIds) {
+                                  await Api.undoTransactionAction(id);
                                 }
-                                _loadTransactions();
+                                ref.invalidate(transactionsProvider);
+                                ref.invalidate(contactsProvider);
                               },
                               successMessage: '${deletedIds.length} transaction(s) deletion undone',
                             );
@@ -210,9 +179,11 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           IconButton(
             icon: const Icon(Icons.edit),
             onPressed: () async {
+              final walletId = await ref.read(activeWalletIdProvider.future);
+              if (!context.mounted) return;
               final result = await showScreenAsBottomSheet(
                 context: context,
-                screen: EditContactScreen(contact: widget.contact),
+                screen: EditContactScreen(contact: widget.contact, initialWalletId: walletId),
               );
               if (result == true) {
                 if (!mounted) return;
@@ -226,35 +197,48 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
           ],
         ],
       ),
-      floatingActionButton: Tooltip(
-        message: 'Add Transaction',
-        child: FloatingActionButton(
-          onPressed: () async {
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 24.0),
+        child: Tooltip(
+          message: 'Add Transaction',
+          child: FloatingActionButton(
+            onPressed: () async {
             final result = await showScreenAsBottomSheet(
               context: context,
               screen: AddTransactionScreen(contact: widget.contact),
             );
             if (result == true && mounted) {
-              _loadTransactions();
+              ref.invalidate(transactionsProvider);
+              ref.invalidate(contactsProvider);
             }
           },
           child: const Icon(Icons.add),
         ),
+        ),
       ),
       body: Builder(
         builder: (context) {
-          if (_loading) {
-            return const Center(child: CircularProgressIndicator());
+          // if (_loading) {
+          //   return const Center(child: CircularProgressIndicator());
+          // }
+
+          final txAsync = ref.watch(transactionsProvider);
+          // Update cache if we have a value
+          if (txAsync.hasValue) {
+            _lastValidTransactions = txAsync.value!;
           }
-          
-          if (_error != null) {
+          final baseTx = txAsync.valueOrNull ?? _lastValidTransactions;
+
+          if (txAsync.hasError && baseTx.isEmpty) {
+            final e = txAsync.error;
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('Error: $_error'),
+                  Text('Error: $e'),
+                  const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: _loadTransactions,
+                    onPressed: () => _refresh(),
                     child: const Text('Retry'),
                   ),
                 ],
@@ -262,231 +246,240 @@ class _ContactTransactionsScreenState extends ConsumerState<ContactTransactionsS
             );
           }
 
-          if (_transactions == null || _transactions!.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.receipt_long, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No transactions with ${widget.contact.name}',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Tap + to add a transaction',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
-            );
-          }
+          final transactions = baseTx.where((t) => t.contactId == widget.contact.id).toList()
+            ..sort((a, b) {
+              final c = b.createdAt.compareTo(a.createdAt);
+              if (c != 0) return c;
+              return b.id.compareTo(a.id);
+            });
+
+          final emptyState = EmptyState(
+            icon: Icons.receipt_long_outlined,
+            title: 'No transactions with ${widget.contact.name}',
+            subtitle: 'Tap + to add a transaction',
+          );
 
           // Calculate total balance for this contact
-          final totalBalance = _transactions!.fold<int>(
+          final totalBalance = transactions.fold<int>(
             0,
             (sum, t) => sum + (t.direction == TransactionDirection.lent ? t.amount : -t.amount),
           );
 
-          final transactions = _transactions!..sort((a, b) => b.transactionDate.compareTo(a.transactionDate));
-
-          return Column(
-            children: [
-              // Balance Summary
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                child: GradientCard(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'BALANCE',
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: Colors.grey,
+          // Balance card (same style as dashboard Total balance) – scrolls with the list
+          final balanceCard = Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: Consumer(
+                builder: (context, ref, child) {
+                  final flipColors = ref.watch(flipColorsProvider);
+                  final isDark = Theme.of(context).brightness == Brightness.dark;
+                  final balanceColor = totalBalance >= 0
+                      ? AppColors.getGiveColor(flipColors, isDark)
+                      : AppColors.getReceivedColor(flipColors, isDark);
+                  return GradientCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                    variationSeed: widget.contact.id.hashCode,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'BALANCE',
+                          style: Theme.of(context).textTheme.labelMedium,
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Consumer(
-                        builder: (context, ref, child) {
-                          final flipColors = ref.watch(flipColorsProvider);
-                          final isDark = Theme.of(context).brightness == Brightness.dark;
-                          // Standardized: Positive balance = Gave (green), Negative balance = Received (red)
-                          final balanceColor = totalBalance >= 0
-                              ? AppColors.getGiveColor(flipColors, isDark) // Positive = Gave = green
-                              : AppColors.getReceivedColor(flipColors, isDark); // Negative = Received = red
-                          return Text(
-                            _formatBalance(totalBalance),
-                            style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: balanceColor,
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
+                        const SizedBox(height: 8),
+                        AnimatedPixelatedText(
+                          _formatBalance(totalBalance),
+                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: balanceColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
-              // Transactions List with pull-to-refresh
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: _loadTransactions,
-                  child: ListView.builder(
-                    itemCount: transactions.length,
-                    cacheExtent: 200, // Cache more items for smoother scrolling
-                    itemBuilder: (context, index) {
-                      final transaction = transactions[index];
-                      final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
-                      
-                      Widget transactionItem = Container(
-                        color: isSelected ? Colors.blue.withOpacity(0.1) : null,
-                        child: _TransactionListItem(
-                          transaction: transaction,
-                          isSelected: _selectionMode ? isSelected : null,
-                          selectionMode: _selectionMode,
-                          onSelectionChanged: _selectionMode
-                              ? () {
-                                  setState(() {
-                                    if (_selectedTransactions.contains(transaction.id)) {
-                                      _selectedTransactions.remove(transaction.id);
-                                    } else {
-                                      _selectedTransactions.add(transaction.id);
-                                    }
-                                  });
-                                }
-                              : () {
-                                  // Long press starts selection mode
-                                  setState(() {
-                                    _selectionMode = true;
-                                    _selectedTransactions.add(transaction.id);
-                                  });
-                                },
-                          onEdit: () async {
-                            final result = await showScreenAsBottomSheet(
-                              context: context,
-                              screen: EditTransactionScreen(
-                                transaction: transaction,
-                                contact: widget.contact,
-                              ),
-                            );
-                            if (result == true && mounted) {
-                              _loadTransactions();
-                            }
-                          },
-                          onDelete: () async {
-                            final confirm = await showDialog<bool>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Delete Transaction'),
-                                content: const Text('Are you sure you want to delete this transaction?'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(context).pop(false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () => Navigator.of(context).pop(true),
-                                    style: TextButton.styleFrom(foregroundColor: Colors.red),
-                                    child: const Text('Delete'),
-                                  ),
-                                ],
-                              ),
-                            );
+            ),
+          );
 
-                            if (confirm == true && mounted) {
-                              try {
-                                // Delete from local database (creates event, rebuilds state)
-                                await LocalDatabaseServiceV2.deleteTransaction(transaction.id);
-                                
-                                if (!mounted) return;
-                                _loadTransactions();
-                                if (!mounted) return;
-                                
-                                // Show undo toast
-                                ToastService.showUndoWithErrorHandlingFromContext(
-                                  context: context,
-                                  message: '✅ Transaction deleted!',
-                                  onUndo: () async {
-                                    await LocalDatabaseServiceV2.undoTransactionAction(transaction.id);
-                                    _loadTransactions();
+          return RefreshIndicator(
+            onRefresh: () async {
+              await Api.refreshConnectionAndSync();
+              await _refresh(sync: true);
+            },
+            child: transactions.isEmpty
+                ? CustomScrollView(
+                    slivers: [
+                      SliverToBoxAdapter(child: balanceCard),
+                      SliverFillRemaining(hasScrollBody: false, child: emptyState),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      balanceCard,
+                      Expanded(
+                        child: DiffAnimatedList<Transaction>(
+                          items: transactions,
+                          itemId: (t) => t.id,
+                          duration: const Duration(milliseconds: 800),
+                          padding: const EdgeInsets.only(bottom: 24),
+                          itemBuilder: (context, transaction, animation) {
+                            final isSelected = _selectionMode && _selectedTransactions.contains(transaction.id);
+                            final isRemoving = animation.status == AnimationStatus.reverse;
+                            // Same intervals as transactions_screen / contacts_screen for glitch effect.
+                            final glitchAnimation = CurvedAnimation(
+                              parent: animation,
+                              curve: isRemoving
+                                  ? const Interval(0.625, 1.0, curve: Curves.easeOut)
+                                  : const Interval(0.75, 1.0, curve: Curves.easeOut),
+                            );
+                            Widget tile = AnimatedBuilder(
+                              animation: animation,
+                              builder: (context, _) {
+                                final showScrambleForInsert = !isRemoving && animation.value < 0.75;
+                                return _TransactionListItem(
+                                  transaction: transaction,
+                                  isSelected: _selectionMode ? isSelected : null,
+                                  selectionMode: _selectionMode,
+                                  isRemoving: isRemoving,
+                                  glitchAnimation: glitchAnimation,
+                                  showScrambleForInsert: showScrambleForInsert,
+                                  onSelectionChanged: _selectionMode
+                                      ? () {
+                                          setState(() {
+                                            if (_selectedTransactions.contains(transaction.id)) {
+                                              _selectedTransactions.remove(transaction.id);
+                                            } else {
+                                              _selectedTransactions.add(transaction.id);
+                                            }
+                                          });
+                                        }
+                                      : () {
+                                          setState(() {
+                                            _selectionMode = true;
+                                            _selectedTransactions.add(transaction.id);
+                                          });
+                                        },
+                                  onEdit: () async {
+                                    final result = await showScreenAsBottomSheet(
+                                      context: context,
+                                      screen: EditTransactionScreen(
+                                        transaction: transaction,
+                                        contact: widget.contact,
+                                      ),
+                                    );
+                                    if (result == true && mounted) {
+                                      ref.invalidate(transactionsProvider);
+                                      ref.invalidate(contactsProvider);
+                                    }
                                   },
-                                  successMessage: 'Transaction deletion undone',
+                                  onDelete: () async {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        title: const Text('Delete Transaction'),
+                                        content: const Text(
+                                            'Are you sure you want to delete this transaction?'),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(context).pop(false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => Navigator.of(context).pop(true),
+                                            style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true && mounted) {
+                                      try {
+                                        await Api.deleteTransaction(transaction.id);
+                                        if (!mounted) return;
+                                        ref.invalidate(transactionsProvider);
+                                        ref.invalidate(contactsProvider);
+                                        ToastService.showUndoWithErrorHandlingFromContext(
+                                          context: context,
+                                          message: '✅ Transaction deleted!',
+                                          onUndo: () async {
+                                            await Api.undoTransactionAction(transaction.id);
+                                            ref.invalidate(transactionsProvider);
+                                            ref.invalidate(contactsProvider);
+                                          },
+                                          successMessage: 'Transaction deletion undone',
+                                        );
+                                      } catch (e) {
+                                        if (!mounted) return;
+                                        ToastService.showErrorFromContext(
+                                            context, 'Error deleting: $e');
+                                      }
+                                    }
+                                  },
                                 );
-                              } catch (e) {
-                                if (!mounted) return;
-                                ToastService.showErrorFromContext(context, 'Error deleting: $e');
-                              }
-                            }
-                          },
-                        ),
-                      );
-                      
-                      // Wrap with Dismissible for swipe actions (only when not in selection mode)
-                      if (!_selectionMode) {
-                        return Dismissible(
-                          key: Key(transaction.id),
-                          direction: DismissDirection.startToEnd, // Only swipe right (LTR)
-                          dismissThresholds: const {
-                            DismissDirection.startToEnd: 0.7, // Require 70% swipe for close
-                          },
-                          movementDuration: const Duration(milliseconds: 300), // Slower animation
-                          background: Container(
-                            alignment: Alignment.centerLeft,
-                            padding: const EdgeInsets.only(left: 20),
-                            color: Colors.green,
-                            child: const Row(
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              children: [
-                                Icon(Icons.check_circle, color: Colors.white),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Close',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
+                              },
+                            );
+                            if (!_selectionMode) {
+                              tile = Dismissible(
+                                key: Key(transaction.id),
+                                direction: DismissDirection.startToEnd,
+                                dismissThresholds: const {DismissDirection.startToEnd: 0.7},
+                                movementDuration: const Duration(milliseconds: 300),
+                                background: Container(
+                                  alignment: Alignment.centerLeft,
+                                  padding: const EdgeInsets.only(left: 20),
+                                  color: Colors.green,
+                                  child: const Row(
+                                    mainAxisAlignment: MainAxisAlignment.start,
+                                    children: [
+                                      Icon(Icons.check_circle, color: Colors.white),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Close',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ],
-                            ),
-                          ),
-                          confirmDismiss: (direction) async {
-                            // Open reverse transaction to close/settle (swipe right)
-                            final reverseDirection = transaction.direction == TransactionDirection.owed
-                                ? TransactionDirection.lent
-                                : TransactionDirection.owed;
-                            final result = await showScreenAsBottomSheet(
-                              context: context,
-                              screen: AddTransactionScreenWithData(
-                                contact: widget.contact,
-                                amount: transaction.amount,
-                                direction: reverseDirection,
-                                description: transaction.description != null
-                                    ? 'Close: ${transaction.description}'
-                                    : 'Close transaction',
-                              ),
-                            );
-                            if (result == true && mounted) {
-                              _loadTransactions();
+                                confirmDismiss: (direction) async {
+                                  final reverseDirection =
+                                      transaction.direction == TransactionDirection.owed
+                                          ? TransactionDirection.lent
+                                          : TransactionDirection.owed;
+                                  final result = await showScreenAsBottomSheet(
+                                    context: context,
+                                    screen: AddTransactionScreenWithData(
+                                      contact: widget.contact,
+                                      amount: transaction.amount,
+                                      direction: reverseDirection,
+                                      description: transaction.description != null
+                                          ? 'Close: ${transaction.description}'
+                                          : 'Close transaction',
+                                    ),
+                                  );
+                                  if (result == true && mounted) {
+                                    ref.invalidate(transactionsProvider);
+                                    ref.invalidate(contactsProvider);
+                                  }
+                                  return false;
+                                },
+                                child: tile,
+                              );
                             }
-                            return false; // Don't dismiss
+                            return tile;
                           },
-                          child: transactionItem,
-                        );
-                      }
-                      
-                      return transactionItem;
-                    },
-                  ),
-                ),
-              ),
-            ],
-          );
+                        ),
+                      ),
+                    ],
+                  )
+                  );
         },
       ),
       ),
@@ -513,6 +506,9 @@ class _TransactionListItem extends StatelessWidget {
   final bool? isSelected;
   final VoidCallback? onSelectionChanged;
   final bool selectionMode; // Track if we're in selection mode
+  final Animation<double>? glitchAnimation;
+  final bool isRemoving;
+  final bool showScrambleForInsert;
 
   const _TransactionListItem({
     required this.transaction,
@@ -521,6 +517,9 @@ class _TransactionListItem extends StatelessWidget {
     this.isSelected,
     this.onSelectionChanged,
     this.selectionMode = false,
+    this.glitchAnimation,
+    this.isRemoving = false,
+    this.showScrambleForInsert = false,
   });
 
   @override
@@ -559,12 +558,43 @@ class _TransactionListItem extends StatelessWidget {
     }
   }
 
+  Widget _glitchText(
+    String text,
+    TextStyle style, {
+    TextAlign? textAlign,
+    TextOverflow? overflow,
+    int? maxLines,
+  }) {
+    final shouldScramble = (isRemoving || showScrambleForInsert) && text.trim().isNotEmpty;
+    final hasArabic = TextUtils.hasArabic(text);
+    final base = AnimatedPixelatedText(
+      text,
+      style: style,
+      textAlign: textAlign,
+      textDirection: hasArabic ? ui.TextDirection.rtl : ui.TextDirection.ltr,
+      overflow: overflow,
+      maxLines: maxLines,
+      forceScramble: shouldScramble,
+    );
+    final animation = glitchAnimation;
+    if (animation == null) return base;
+    return GlitchTransition(
+      animation: animation,
+      child: base,
+      showScramble: true,
+      maxX: 10,
+      maxY: 5,
+      flickerChance: 0.35,
+    );
+  }
+
   Widget _buildTransactionItem(BuildContext context, DateFormat dateFormat, Color color) {
     final amount = transaction.amount;
     final status = _getStatus(transaction.direction);
 
-    return Card(
+    return GradientCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      variationSeed: transaction.id.hashCode,
       child: InkWell(
         onTap: selectionMode ? onSelectionChanged : onEdit,
         onLongPress: onSelectionChanged != null ? () {
@@ -575,21 +605,20 @@ class _TransactionListItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
-              // Left side: Avatar (or Checkbox in selection mode)
-              isSelected != null && isSelected == true
-                  ? Checkbox(
-                      value: true,
-                      onChanged: (value) => onSelectionChanged?.call(),
-                    )
-                  : CircleAvatar(
-                      backgroundColor: color.withOpacity(0.2),
-                      radius: 20,
-                      child: Icon(
-                        Icons.attach_money,
-                        color: color,
-                        size: 16,
-                      ),
-                    ),
+              // Left side: Avatar with optional selection checkmark (same as transaction card)
+              AvatarWithSelection(
+                radius: 20,
+                isSelected: isSelected == true,
+                avatar: CircleAvatar(
+                  backgroundColor: color.withOpacity(0.2),
+                  radius: 20,
+                  child: Icon(
+                    Icons.attach_money,
+                    color: color,
+                    size: 16,
+                  ),
+                ),
+              ),
               const SizedBox(width: 12),
               // Description and Date
               Expanded(
@@ -599,14 +628,14 @@ class _TransactionListItem extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (transaction.description != null && transaction.description!.isNotEmpty) ...[
-                      Text(
+                      _glitchText(
                         transaction.description!,
-                        style: const TextStyle(
+                        const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
                         ),
-                        overflow: TextOverflow.ellipsis,
                         maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 16),
                     ] else ...[
@@ -625,29 +654,29 @@ class _TransactionListItem extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Flexible(
-                            child: Text(
+                            child: _glitchText(
                               dateFormat.format(transaction.dueDate!),
-                              style: TextStyle(
+                              TextStyle(
                                 fontSize: 11,
                                 color: transaction.dueDate!.isBefore(DateTime.now())
                                     ? ThemeColors.error(context)
                                     : ThemeColors.warning(context),
                               ),
-                              overflow: TextOverflow.ellipsis,
                               maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
                       ),
                     ] else ...[
-                      Text(
+                      _glitchText(
                         dateFormat.format(transaction.transactionDate),
-                        style: TextStyle(
+                        TextStyle(
                           fontSize: 11,
                           color: ThemeColors.gray(context, shade: 500),
                         ),
-                        overflow: TextOverflow.ellipsis,
                         maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],
@@ -661,9 +690,9 @@ class _TransactionListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
+                    _glitchText(
                       '${_formatAmount(amount)} IQD',
-                      style: TextStyle(
+                      TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                         color: color,
@@ -673,9 +702,9 @@ class _TransactionListItem extends StatelessWidget {
                       maxLines: 1,
                     ),
                     const SizedBox(height: 2),
-                    Text(
+                    _glitchText(
                       status,
-                      style: TextStyle(
+                      TextStyle(
                         fontSize: 10,
                         color: ThemeColors.gray(context, shade: 600),
                       ),

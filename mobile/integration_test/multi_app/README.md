@@ -61,6 +61,17 @@ cd /home/max/dev/debitum/mobile
 flutter test integration_test/multi_app/scenarios/ -d linux
 ```
 
+**Run full integration suite (all files under `integration_test/`) on Linux:**  
+On Linux, switching between test files can trigger "Error waiting for a debug connection" (log reader stops). To avoid that, either run only scenario tests (command above) or exclude standalone tests and run them separately:
+
+```bash
+# Main suite (excludes performance/standalone tests)
+flutter test integration_test/ -d linux --exclude-tags standalone
+
+# Run performance test alone
+flutter test integration_test/multi_app/performance_test.dart -d linux
+```
+
 **Run Specific Test Suite:**
 ```bash
 # Basic sync scenarios
@@ -389,6 +400,8 @@ cargo run --bin reset_password -- max 12345678
 **Workaround**: Tests acknowledge this limitation and verify sync behavior rather than strict offline behavior.
 
 **Future Fix**: Create a custom `http.Client` that uses the interceptor and pass it to all services.
+
+**Note**: `_isServerReachable()` now uses GET `/health` (no auth or wallet required), so the app correctly reports the server as reachable in integration tests even before a wallet is set.
 
 ## Quick Reference
 

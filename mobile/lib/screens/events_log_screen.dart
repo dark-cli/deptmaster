@@ -1,19 +1,20 @@
 // ignore_for_file: unused_element
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
+import '../api.dart';
+import '../models/contact.dart';
 import '../models/event.dart';
-import '../services/event_store_service.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/state_builder.dart';
-import '../services/realtime_service.dart';
-import '../utils/app_colors.dart';
+import '../models/wallet.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
+import '../utils/state_builder.dart';
+import '../widgets/empty_state.dart';
+import '../widgets/gradient_background.dart';
 
 class EventsLogScreen extends ConsumerStatefulWidget {
   final DateTime? initialDateFrom;
@@ -36,6 +37,11 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   bool _showFilters = false; // Collapsible filters for mobile
   bool _isReloading = false; // Guard to prevent infinite loops
   
+  // Wallet selection (events are scoped to selected wallet)
+  List<Wallet> _wallets = [];
+  String? _selectedWalletId;
+  bool _walletsLoading = true;
+  
   // Filters
   String _searchQuery = '';
   String _eventTypeFilter = 'all';
@@ -46,40 +52,89 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   @override
   void initState() {
     super.initState();
-    // Set initial date filters if provided
     _dateFrom = widget.initialDateFrom;
     _dateTo = widget.initialDateTo;
-    _loadEvents();
-    
-    // Listen for real-time updates
-    RealtimeService.addListener(_onRealtimeUpdate);
-    
-    // Connect WebSocket if not connected
-    RealtimeService.connect();
-    
-    // Listen to local event store changes for sync state updates
-    _setupLocalListeners();
+    _loadWalletsThenEvents();
+    Api.connectRealtime();
+
+    // Keep the existing filtering/pagination logic, but source events reactively.
+    _eventsSub = ref.listenManual<AsyncValue<List<Event>>>(eventsProvider, (previous, next) async {
+      if (!mounted) return;
+
+      // Keep showing existing list while loading.
+      if (next.isLoading && (next.valueOrNull == null || next.valueOrNull!.isEmpty)) {
+        if (_allEvents.isEmpty) {
+          setState(() => _loading = true);
+        }
+        return;
+      }
+
+      final events = next.valueOrNull;
+      if (events == null) return;
+
+      // Sort newest first for consistent ordering
+      final sorted = List<Event>.from(events)..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+      // Build caches
+      await _preloadUndoneEvents(sorted);
+      // Contact caches can be built from provider data (fast), plus fallback to CREATED events.
+      final contacts = ref.read(contactsProvider).valueOrNull ?? const <Contact>[];
+      _contactNameCache = {for (final c in contacts) c.id: c.name};
+      _contactUsernameCache = {
+        for (final c in contacts)
+          if (c.username != null && c.username!.isNotEmpty) c.id: c.username!,
+      };
+      for (final event in sorted) {
+        if (event.aggregateType == 'contact' &&
+            (event.eventType == 'CREATED' || event.eventType.contains('CREATE'))) {
+          final name = event.eventData['name']?.toString();
+          final username = event.eventData['username']?.toString();
+          if (name != null && name.isNotEmpty) {
+            _contactNameCache[event.aggregateId] = name;
+          }
+          if (username != null && username.isNotEmpty) {
+            _contactUsernameCache[event.aggregateId] = username;
+          }
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _allEvents = sorted;
+        _loading = false;
+      });
+      _applyFilters();
+    }, fireImmediately: true);
   }
 
-  void _setupLocalListeners() {
-    if (kIsWeb) return;
-    
-    // Listen to local event store changes (for sync state updates)
-    // When events are marked as synced locally, this will trigger a reload
+  Future<void> _loadWalletsThenEvents() async {
+    setState(() {
+      _walletsLoading = true;
+    });
     try {
-      final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-      eventsBox.listenable().addListener(_onLocalEventsChanged);
+      final list = await Api.getWallets();
+      final wallets = list.map((m) => Wallet.fromJson(m)).toList();
+      final currentId = await Api.getCurrentWalletId();
+      final validId = currentId != null && wallets.any((w) => w.id == currentId);
+      final newSelected = wallets.isNotEmpty ? (validId ? currentId : wallets.first.id) : null;
+      if (!validId && newSelected != null) {
+        await Api.setCurrentWalletId(newSelected);
+      }
+      if (mounted) {
+        setState(() {
+          _wallets = wallets;
+          _walletsLoading = false;
+          _selectedWalletId = newSelected;
+        });
+        await _loadEvents();
+      }
     } catch (e) {
-      // Box might not be initialized yet, will be set up when events are loaded
-      print('Note: Events box not yet initialized, will listen after first load');
-    }
-  }
-
-  void _onLocalEventsChanged() {
-    // Reload events when local event store changes (e.g., when events are marked as synced)
-    // This ensures sync state updates are reflected immediately
-    if (mounted && !_isReloading) {
-      _loadEvents();
+      if (mounted) {
+        setState(() {
+          _walletsLoading = false;
+        });
+        await _loadEvents();
+      }
     }
   }
   
@@ -93,95 +148,34 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
   Map<String, String> _contactNameCache = {};
   Map<String, String> _contactUsernameCache = {}; // Cache for contact usernames
   Map<String, Event> _undoneEventsCache = {};
+  ProviderSubscription<AsyncValue<List<Event>>>? _eventsSub;
 
-
-  void _onRealtimeUpdate(Map<String, dynamic> data) {
-    final type = data['type'] as String?;
-    // Reload events when any data changes (contacts, transactions, etc.)
-    // This ensures the event log stays up-to-date with all changes
-    if (type == 'contact_created' || 
-        type == 'contact_updated' || 
-        type == 'contact_deleted' ||
-        type == 'transaction_created' || 
-        type == 'transaction_updated' || 
-        type == 'transaction_deleted') {
-      // Reload events when real-time update received
-      _loadEvents();
-    }
-  }
 
   @override
   void dispose() {
-    RealtimeService.removeListener(_onRealtimeUpdate);
-    if (!kIsWeb) {
-      try {
-        final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-        eventsBox.listenable().removeListener(_onLocalEventsChanged);
-      } catch (e) {
-        // Box might not be initialized, ignore
-      }
-    }
+    _eventsSub?.close();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadEvents() async {
-    if (!mounted || _isReloading) return;
-    
-    _isReloading = true;
+  Future<void> _onWalletSelected(String? walletId) async {
+    if (walletId == null || walletId == _selectedWalletId) return;
     setState(() {
-      _loading = true;
+      _selectedWalletId = walletId;
     });
-
-    try {
-      // Ensure event store is initialized before loading
-      await EventStoreService.initialize();
-      
-      // Set up local listeners if not already set up (events box is now initialized)
-      if (!kIsWeb) {
-        try {
-          final eventsBox = Hive.box<Event>(EventStoreService.eventsBoxName);
-          // Add listener (it's safe to add multiple times, but we'll track it)
-          eventsBox.listenable().addListener(_onLocalEventsChanged);
-        } catch (e) {
-          // Ignore if box not available
-        }
-      }
-      
-      final events = await EventStoreService.getAllEvents();
-      
-      if (!mounted) return;
-      
-      // Sort by timestamp (newest first) for consistent ordering
-      events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      
-      // Pre-load undone events cache
-      await _preloadUndoneEvents(events);
-      
-      if (!mounted) return;
-      
-      // Pre-load contact names cache
-      await _preloadContactNames(events);
-      
-      if (!mounted) return;
-      
-      setState(() {
-        _allEvents = events;
-        _loading = false;
-        _isReloading = false;
-      });
-      // Apply filters (including initial date filters if provided)
-      _applyFilters();
-    } catch (e) {
-      print('Error loading events: $e');
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _isReloading = false;
-        });
-      }
+    await Api.setCurrentWalletId(walletId);
+    if (mounted) await _loadEvents();
+    if (!kIsWeb) {
+      Api.manualSync().catchError((_) {});
     }
+  }
+
+  Future<void> _loadEvents() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+    // Trigger reactive reload.
+    ref.invalidate(eventsProvider);
   }
   
   Future<void> _preloadContactNames(List<Event> events) async {
@@ -204,12 +198,12 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       }
     }
     
-    // Load contact names and usernames from database
     for (final contactId in contactIds) {
       if (!mounted) return;
       try {
-        final contact = await LocalDatabaseServiceV2.getContact(contactId);
-        if (contact != null && mounted) {
+        final jsonStr = await Api.getContact(contactId);
+        if (jsonStr != null && mounted) {
+          final contact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
           _contactNameCache[contactId] = contact.name;
           if (contact.username != null && contact.username!.isNotEmpty) {
             _contactUsernameCache[contactId] = contact.username!;
@@ -434,14 +428,15 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final dateFormat = DateFormat('M/d/yyyy, h:mm:ss a');
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Events Log'),
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Events Log'),
         actions: [
           IconButton(
             icon: const Icon(Icons.filter_list),
@@ -461,6 +456,65 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
       ),
       body: Column(
         children: [
+          // Wallet selector
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).dividerColor,
+                  width: 1,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.account_balance_wallet, size: 20, color: ThemeColors.gray(context)),
+                const SizedBox(width: 8),
+                Text(
+                  'Wallet:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: ThemeColors.gray(context),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _walletsLoading
+                      ? const SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : _wallets.isEmpty
+                          ? Text(
+                              'No wallets',
+                              style: TextStyle(
+                                color: ThemeColors.gray(context),
+                                fontStyle: FontStyle.italic,
+                              ),
+                            )
+                          : DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _selectedWalletId,
+                                isExpanded: true,
+                                items: _wallets.map((w) {
+                                  return DropdownMenuItem<String>(
+                                    value: w.id,
+                                    child: Text(
+                                      w.name,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: _onWalletSelected,
+                              ),
+                            ),
+                ),
+              ],
+            ),
+          ),
           // Search Bar (always visible)
           Container(
             padding: const EdgeInsets.all(16),
@@ -503,9 +557,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       )
                     : null,
                 filled: true,
-                fillColor: isDark
-                    ? AppColors.darkSurfaceVariant
-                    : AppColors.lightSurfaceVariant,
+                fillColor: ThemeColors.surfaceVariant(context),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(
@@ -521,7 +573,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(
-                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                    color: ThemeColors.primary(context),
                     width: 2,
                   ),
                 ),
@@ -560,9 +612,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       decoration: InputDecoration(
                         labelText: 'Event Type',
                         filled: true,
-                        fillColor: isDark
-                            ? AppColors.darkSurfaceVariant
-                            : AppColors.lightSurfaceVariant,
+                        fillColor: ThemeColors.surfaceVariant(context),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide(
@@ -578,7 +628,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide(
-                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            color: ThemeColors.primary(context),
                             width: 2,
                           ),
                         ),
@@ -608,9 +658,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       decoration: InputDecoration(
                         labelText: 'Type',
                         filled: true,
-                        fillColor: isDark
-                            ? AppColors.darkSurfaceVariant
-                            : AppColors.lightSurfaceVariant,
+                        fillColor: ThemeColors.surfaceVariant(context),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide(
@@ -626,7 +674,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide(
-                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            color: ThemeColors.primary(context),
                             width: 2,
                           ),
                         ),
@@ -668,9 +716,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         decoration: InputDecoration(
                           labelText: 'Date From',
                           filled: true,
-                          fillColor: isDark
-                              ? AppColors.darkSurfaceVariant
-                              : AppColors.lightSurfaceVariant,
+                          fillColor: ThemeColors.surfaceVariant(context),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
@@ -686,7 +732,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
-                              color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                              color: ThemeColors.primary(context),
                               width: 2,
                             ),
                           ),
@@ -732,9 +778,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         decoration: InputDecoration(
                           labelText: 'Date To',
                           filled: true,
-                          fillColor: isDark
-                              ? AppColors.darkSurfaceVariant
-                              : AppColors.lightSurfaceVariant,
+                          fillColor: ThemeColors.surfaceVariant(context),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
@@ -750,7 +794,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
-                              color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                              color: ThemeColors.primary(context),
                               width: 2,
                             ),
                           ),
@@ -788,9 +832,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                             decoration: InputDecoration(
                               labelText: 'Event Type',
                               filled: true,
-                              fillColor: isDark
-                                  ? AppColors.darkSurfaceVariant
-                                  : AppColors.lightSurfaceVariant,
+                              fillColor: ThemeColors.surfaceVariant(context),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
@@ -806,7 +848,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
-                                  color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                  color: ThemeColors.primary(context),
                                   width: 2,
                                 ),
                               ),
@@ -837,9 +879,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                             decoration: InputDecoration(
                               labelText: 'Type',
                               filled: true,
-                              fillColor: isDark
-                                  ? AppColors.darkSurfaceVariant
-                                  : AppColors.lightSurfaceVariant,
+                              fillColor: ThemeColors.surfaceVariant(context),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
@@ -855,7 +895,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
                                 borderSide: BorderSide(
-                                  color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                  color: ThemeColors.primary(context),
                                   width: 2,
                                 ),
                               ),
@@ -898,9 +938,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                               decoration: InputDecoration(
                                 labelText: 'Date From',
                                 filled: true,
-                                fillColor: isDark
-                                    ? AppColors.darkSurfaceVariant
-                                    : AppColors.lightSurfaceVariant,
+                                fillColor: ThemeColors.surfaceVariant(context),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
@@ -916,7 +954,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
-                                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                    color: ThemeColors.primary(context),
                                     width: 2,
                                   ),
                                 ),
@@ -963,9 +1001,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                               decoration: InputDecoration(
                                 labelText: 'Date To',
                                 filled: true,
-                                fillColor: isDark
-                                    ? AppColors.darkSurfaceVariant
-                                    : AppColors.lightSurfaceVariant,
+                                fillColor: ThemeColors.surfaceVariant(context),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
@@ -981,7 +1017,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
-                                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                    color: ThemeColors.primary(context),
                                     width: 2,
                                   ),
                                 ),
@@ -1020,8 +1056,8 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         icon: const Icon(Icons.filter_list),
                         label: const Text('Apply Filters'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
-                          foregroundColor: isDark ? AppColors.darkOnPrimary : AppColors.lightOnPrimary,
+                          backgroundColor: ThemeColors.primary(context),
+                          foregroundColor: ThemeColors.onPrimary(context),
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -1037,9 +1073,9 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                         icon: const Icon(Icons.clear),
                         label: const Text('Clear Filters'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                          foregroundColor: ThemeColors.primary(context),
                           side: BorderSide(
-                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            color: ThemeColors.primary(context),
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
@@ -1056,8 +1092,8 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                           icon: const Icon(Icons.filter_list),
                           label: const Text('Apply'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
-                            foregroundColor: isDark ? AppColors.darkOnPrimary : AppColors.lightOnPrimary,
+                            backgroundColor: ThemeColors.primary(context),
+                            foregroundColor: ThemeColors.onPrimary(context),
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -1070,9 +1106,9 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                           icon: const Icon(Icons.clear),
                           label: const Text('Clear'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            foregroundColor: ThemeColors.primary(context),
                             side: BorderSide(
-                              color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                              color: ThemeColors.primary(context),
                             ),
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             shape: RoundedRectangleBorder(
@@ -1091,12 +1127,10 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: isDark
-                  ? AppColors.darkSurfaceVariant
-                  : AppColors.lightSurfaceVariant,
+              color: ThemeColors.surfaceVariant(context),
               border: Border(
                 bottom: BorderSide(
-                  color: isDark ? AppColors.darkGray : AppColors.lightGray,
+                  color: ThemeColors.gray(context),
                 ),
               ),
             ),
@@ -1140,12 +1174,10 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: isDark
-                  ? AppColors.darkSurfaceVariant
-                  : AppColors.lightSurfaceVariant,
+              color: ThemeColors.surfaceVariant(context),
               border: Border(
                 bottom: BorderSide(
-                  color: isDark ? AppColors.darkGray : AppColors.lightGray,
+                  color: ThemeColors.gray(context),
                 ),
               ),
             ),
@@ -1172,7 +1204,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       color: _currentPage > 0
-                          ? (isDark ? AppColors.darkPrimary : AppColors.lightPrimary)
+                          ? (ThemeColors.primary(context))
                           : ThemeColors.gray(context),
                     ),
                     const SizedBox(width: 8),
@@ -1184,7 +1216,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       color: _currentPage < _totalPages - 1
-                          ? (isDark ? AppColors.darkPrimary : AppColors.lightPrimary)
+                          ? (ThemeColors.primary(context))
                           : ThemeColors.gray(context),
                     ),
                   ],
@@ -1198,22 +1230,10 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _paginatedEvents.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.event_note,
-                              size: 64,
-                              color: ThemeColors.gray(context),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'No events found',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ],
-                        ),
+                    ? const EmptyState(
+                        icon: Icons.event_note_outlined,
+                        title: 'No events found',
+                        subtitle: 'Events will appear here as you add and edit transactions.',
                       )
                     : ListView.builder(
                         controller: _scrollController,
@@ -1234,6 +1254,7 @@ class _EventsLogScreenState extends ConsumerState<EventsLogScreen> {
                       ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -1317,13 +1338,12 @@ class _EventTableRowState extends State<EventTableRow> {
     if (totalDebtFromEvent != null) {
       totalDebt = (totalDebtFromEvent as num?)?.toInt();
     } else {
-      // Fallback: Calculate total debt at the time of this event
       try {
-        totalDebt = await StateBuilder.calculateTotalDebtAtTime(widget.event.timestamp);
-    } catch (e) {
-      print('Error calculating total debt: $e');
+        totalDebt = StateBuilder.calculateTotalDebtFromEvents(widget.allEvents, widget.event.timestamp);
+      } catch (e) {
+        print('Error calculating total debt: $e');
         totalDebt = 0;
-        }
+      }
     }
     
         if (mounted) {
@@ -1337,23 +1357,21 @@ class _EventTableRowState extends State<EventTableRow> {
     }
   }
 
-  Color _getEventBadgeColor(String eventType, bool isDark) {
+  Color _getEventBadgeColor(String eventType) {
     final eventTypeUpper = eventType.toUpperCase();
     if (eventTypeUpper.contains('CREATED') || eventTypeUpper.contains('CREATE')) {
-        return isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
+        return ThemeColors.success(context);
     } else if (eventTypeUpper.contains('UPDATED') || eventTypeUpper.contains('UPDATE') || 
                eventTypeUpper == 'UNDO') {
-        return isDark ? AppColors.darkWarning : AppColors.lightWarning;
+        return ThemeColors.warning(context);
     } else if (eventTypeUpper.contains('DELETED') || eventTypeUpper.contains('DELETE')) {
-      return isDark ? AppColors.darkWarning : AppColors.lightWarning; // Same as UPDATE
+      return ThemeColors.warning(context); // Same as UPDATE
     }
-        return isDark ? AppColors.darkGray : AppColors.lightGray;
+        return ThemeColors.gray(context);
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
     if (widget.isMobile) {
       // Mobile: Card-like row with all columns stacked
     return Card(
@@ -1388,12 +1406,8 @@ class _EventTableRowState extends State<EventTableRow> {
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                       decoration: BoxDecoration(
                         color: widget.event.synced
-                            ? (isDark 
-                                ? AppColors.darkSuccess.withOpacity(0.2)
-                                : AppColors.lightSuccess.withOpacity(0.2))
-                            : (isDark
-                                ? AppColors.darkWarning.withOpacity(0.2)
-                                : AppColors.lightWarning.withOpacity(0.2)),
+                            ? ThemeColors.success(context).withOpacity(0.2)
+                            : ThemeColors.warning(context).withOpacity(0.2),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Row(
@@ -1403,8 +1417,8 @@ class _EventTableRowState extends State<EventTableRow> {
                             widget.event.synced ? Icons.cloud_done : Icons.cloud_upload,
                             size: 12,
                             color: widget.event.synced
-                                ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
-                                : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                                ? ThemeColors.success(context)
+                                : ThemeColors.warning(context),
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -1413,8 +1427,8 @@ class _EventTableRowState extends State<EventTableRow> {
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
                               color: widget.event.synced
-                                  ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
-                                  : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                                  ? ThemeColors.success(context)
+                                  : ThemeColors.warning(context),
                             ),
                           ),
                         ],
@@ -1424,7 +1438,7 @@ class _EventTableRowState extends State<EventTableRow> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-                        color: _getEventBadgeColor(widget.event.eventType, isDark).withOpacity(0.2),
+                        color: _getEventBadgeColor(widget.event.eventType).withOpacity(0.2),
                         borderRadius: BorderRadius.circular(4),
           ),
             child: Text(
@@ -1432,7 +1446,7 @@ class _EventTableRowState extends State<EventTableRow> {
               style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: _getEventBadgeColor(widget.event.eventType, isDark),
+                          color: _getEventBadgeColor(widget.event.eventType),
               ),
             ),
           ),
@@ -1463,13 +1477,13 @@ class _EventTableRowState extends State<EventTableRow> {
                                   margin: const EdgeInsets.only(right: 6),
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isDark
-                                        ? AppColors.darkPrimary.withOpacity(0.3) // Light purple with opacity for dark mode
-                                        : const Color(0xFFE8E0EC), // Light purple background for light mode
+                    color: Theme.of(context).brightness == Brightness.dark
+                                        ? ThemeColors.primary(context).withOpacity(0.3)
+                                        : ThemeColors.surfaceVariant(context),
                                     borderRadius: BorderRadius.circular(4),
-                                    border: isDark
+                                    border: Theme.of(context).brightness == Brightness.dark
                                         ? Border.all(
-                                            color: AppColors.darkPrimary.withOpacity(0.5),
+                                            color: ThemeColors.primary(context).withOpacity(0.5),
                                             width: 1,
                                           )
                                         : null,
@@ -1479,9 +1493,7 @@ class _EventTableRowState extends State<EventTableRow> {
                                     style: TextStyle(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w500,
-                                      color: isDark
-                                          ? AppColors.darkPrimary // Light purple text for dark mode
-                                          : AppColors.lightPrimary, // Dark purple text for light mode
+                                      color: ThemeColors.primary(context),
                                     ),
                                   ),
                                 ),
@@ -1522,9 +1534,9 @@ class _EventTableRowState extends State<EventTableRow> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: _amount!.isPositive 
-                                      ? AppColors.darkSuccess 
-                                      : AppColors.darkError,
+                                  color: _amount!.isPositive
+                                      ? ThemeColors.success(context)
+                                      : ThemeColors.error(context),
                                 ),
                               )
                             : (!_loading
@@ -1559,7 +1571,7 @@ class _EventTableRowState extends State<EventTableRow> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                  color: ThemeColors.primary(context),
                                 ),
                               )
                             : (!_loading
@@ -1635,12 +1647,8 @@ class _EventTableRowState extends State<EventTableRow> {
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                         decoration: BoxDecoration(
                           color: widget.event.synced
-                              ? (isDark 
-                                  ? AppColors.darkSuccess.withOpacity(0.2)
-                                  : AppColors.lightSuccess.withOpacity(0.2))
-                              : (isDark
-                                  ? AppColors.darkWarning.withOpacity(0.2)
-                                  : AppColors.lightWarning.withOpacity(0.2)),
+                              ? ThemeColors.success(context).withOpacity(0.2)
+                              : ThemeColors.warning(context).withOpacity(0.2),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Row(
@@ -1650,8 +1658,8 @@ class _EventTableRowState extends State<EventTableRow> {
                               widget.event.synced ? Icons.cloud_done : Icons.cloud_upload,
                               size: 12,
                               color: widget.event.synced
-                                  ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
-                                  : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                                  ? ThemeColors.success(context)
+                                  : ThemeColors.warning(context),
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -1660,8 +1668,8 @@ class _EventTableRowState extends State<EventTableRow> {
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
                                 color: widget.event.synced
-                                    ? (isDark ? AppColors.darkSuccess : AppColors.lightSuccess)
-                                    : (isDark ? AppColors.darkWarning : AppColors.lightWarning),
+                                    ? ThemeColors.success(context)
+                                    : ThemeColors.warning(context),
                               ),
                             ),
                           ],
@@ -1672,7 +1680,7 @@ class _EventTableRowState extends State<EventTableRow> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _getEventBadgeColor(widget.event.eventType, isDark).withOpacity(0.2),
+                            color: _getEventBadgeColor(widget.event.eventType).withOpacity(0.2),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -1680,7 +1688,7 @@ class _EventTableRowState extends State<EventTableRow> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: _getEventBadgeColor(widget.event.eventType, isDark),
+                              color: _getEventBadgeColor(widget.event.eventType),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1701,14 +1709,14 @@ class _EventTableRowState extends State<EventTableRow> {
                                 margin: const EdgeInsets.only(right: 6),
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isDark
-                                      ? AppColors.darkPrimary.withOpacity(0.3) // Light purple with opacity for dark mode
-                                      : const Color(0xFFE8E0EC), // Light purple background for light mode
+                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? ThemeColors.primary(context).withOpacity(0.3)
+                                      : ThemeColors.surfaceVariant(context),
                   borderRadius: BorderRadius.circular(4),
-                                  border: isDark
+border: Theme.of(context).brightness == Brightness.dark
                                       ? Border.all(
-                                          color: AppColors.darkPrimary.withOpacity(0.5),
-                    width: 1,
+                                          color: ThemeColors.primary(context).withOpacity(0.5),
+                                          width: 1,
                                         )
                                       : null,
                 ),
@@ -1717,9 +1725,7 @@ class _EventTableRowState extends State<EventTableRow> {
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w500,
-                      color: isDark
-                                        ? AppColors.darkPrimary // Light purple text for dark mode
-                                        : AppColors.lightPrimary, // Dark purple text for light mode
+                      color: ThemeColors.primary(context),
                                   ),
                                 ),
                               ),
@@ -1743,9 +1749,9 @@ class _EventTableRowState extends State<EventTableRow> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
-                                color: _amount!.isPositive 
-                                    ? AppColors.darkSuccess 
-                                    : AppColors.darkError,
+                                color: _amount!.isPositive
+                                    ? ThemeColors.success(context)
+                                    : ThemeColors.error(context),
                               ),
                             )
                           : const Text('-', style: TextStyle(fontSize: 12)),
@@ -1761,7 +1767,7 @@ class _EventTableRowState extends State<EventTableRow> {
                             style: TextStyle(
                                 fontSize: 12,
                               fontWeight: FontWeight.w600,
-                                color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                color: ThemeColors.primary(context),
                               ),
                             )
                           : const Text('N/A', style: TextStyle(fontSize: 12)),
@@ -1841,7 +1847,6 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final eventData = widget.event.eventData;
     
     return Dialog(
@@ -1857,7 +1862,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                color: ThemeColors.surfaceVariant(context),
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
@@ -1874,7 +1879,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                     style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? AppColors.darkOnSurface : AppColors.lightOnSurface,
+                            color: ThemeColors.onSurface(context),
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -1914,13 +1919,13 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                                 margin: const EdgeInsets.only(right: 8),
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: isDark
-                                      ? AppColors.darkPrimary.withOpacity(0.3)
-                                      : const Color(0xFFE8E0EC),
+                    color: Theme.of(context).brightness == Brightness.dark
+                                      ? ThemeColors.primary(context).withOpacity(0.3)
+                                      : ThemeColors.surfaceVariant(context),
                                   borderRadius: BorderRadius.circular(4),
-                                  border: isDark
+border: Theme.of(context).brightness == Brightness.dark
                                       ? Border.all(
-                                          color: AppColors.darkPrimary.withOpacity(0.5),
+                                          color: ThemeColors.primary(context).withOpacity(0.5),
                                           width: 1,
                                         )
                                       : null,
@@ -1930,7 +1935,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w500,
-                                    color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                                    color: ThemeColors.primary(context),
                       ),
                                 ),
                               ),
@@ -1956,9 +1961,9 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: widget.amount!.isPositive 
-                                ? AppColors.darkSuccess 
-                                : AppColors.darkError,
+                            color: widget.amount!.isPositive
+                                ? ThemeColors.success(context)
+                                : ThemeColors.error(context),
                   ),
                         ),
                       ),
@@ -1972,7 +1977,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? AppColors.darkPrimary : AppColors.lightPrimary,
+                            color: ThemeColors.primary(context),
                           ),
                         ),
                       ),
@@ -2015,10 +2020,10 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                       child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                          color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                          color: ThemeColors.surfaceVariant(context),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: isDark ? AppColors.darkGray : AppColors.lightGray,
+                            color: ThemeColors.gray(context),
                             width: 1,
                           ),
                         ),
@@ -2050,7 +2055,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                         child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: isDark ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                            color: ThemeColors.surfaceVariant(context),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: SelectableText(
@@ -2058,7 +2063,7 @@ class _EventDetailsDialogState extends State<_EventDetailsDialog> {
                             style: TextStyle(
                           fontFamily: 'monospace',
                           fontSize: 11,
-                              color: isDark ? AppColors.darkOnSurface : AppColors.lightOnSurface,
+                              color: ThemeColors.onSurface(context),
                             ),
                         ),
                       ),

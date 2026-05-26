@@ -1,0 +1,13 @@
+#!/bin/sh
+# Wrapper so that when dx serve runs "cargo", RUSTFLAGS is set for the wasm build.
+# Use: PATH="$PWD/cargo-wrap:$PATH" dx serve   (from frontend dir)
+export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-feature=-reference-types"
+# Avoid recursion: call cargo from a path that is NOT our directory
+_real_cargo="${CARGO_REAL:-$HOME/.cargo/bin/cargo}"
+if [ -x "$_real_cargo" ]; then
+  exec "$_real_cargo" "$@"
+fi
+# Fallback: search PATH but skip this script's directory
+_skip="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v "^$_skip$" | tr '\n' ':' | sed 's/:$//')"
+exec cargo "$@"

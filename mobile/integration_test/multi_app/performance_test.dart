@@ -13,28 +13,31 @@ import '../helpers/multi_app_helpers.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   
-  test('Performance Test - Time Each Step', () async {
+  test(
+    'Performance Test - Time Each Step',
+    () async {
     print('\n⏱️ Performance Test - Timing Each Step\n');
     
     final timings = <String, Duration>{};
     Stopwatch stopwatch = Stopwatch();
+    Map<String, String>? creds;
     
-    // Step 1: Server Reset
+    // Step 1: Server Ready Check
     stopwatch.start();
-    print('📊 Step 1: Server Reset...');
-    await resetServer();
+    print('📊 Step 1: Server Ready Check...');
     await waitForServerReady();
     stopwatch.stop();
-    timings['Server Reset'] = stopwatch.elapsed;
+    timings['Server Ready'] = stopwatch.elapsed;
     print('   ⏱️  ${stopwatch.elapsedMilliseconds}ms');
     stopwatch.reset();
     
-    // Step 2: Ensure Test User
+    // Step 2: Create unique test user and wallet
     stopwatch.start();
-    print('📊 Step 2: Ensure Test User...');
+    print('📊 Step 2: Create unique test user and wallet...');
     await ensureTestUserExists();
+    creds = await createUniqueTestUserAndWallet();
     stopwatch.stop();
-    timings['Ensure Test User'] = stopwatch.elapsed;
+    timings['Create Test User & Wallet'] = stopwatch.elapsed;
     print('   ⏱️  ${stopwatch.elapsedMilliseconds}ms');
     stopwatch.reset();
     
@@ -70,7 +73,13 @@ void main() {
     // Step 5: Create App Instance
     stopwatch.start();
     print('📊 Step 5: Create App Instance...');
-    final app = await AppInstance.create(id: 'perf_test', serverUrl: 'http://localhost:8000');
+    final app = await AppInstance.create(
+      id: 'perf_test',
+      serverUrl: 'http://localhost:8000',
+      username: creds!['email']!,
+      password: creds['password']!,
+      walletId: creds['walletId'],
+    );
     stopwatch.stop();
     timings['Create Instance'] = stopwatch.elapsed;
     print('   ⏱️  ${stopwatch.elapsedMilliseconds}ms');
@@ -172,5 +181,7 @@ void main() {
       final percentage = (entry.value.inMilliseconds / total.inMilliseconds * 100).toStringAsFixed(1);
       print('   ${i + 1}. ${entry.key}: ${entry.value.inMilliseconds}ms (${percentage}%)');
     }
-  });
+  },
+    tags: ['standalone'],
+  );
 }

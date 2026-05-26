@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
@@ -5,6 +6,10 @@ import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/text_utils.dart';
+import 'animated_pixelated_text.dart';
+import 'avatar_with_selection.dart';
+import 'glitch_transition.dart';
+import 'gradient_card.dart';
 
 class ContactListItem extends StatelessWidget {
   final Contact contact;
@@ -12,6 +17,9 @@ class ContactListItem extends StatelessWidget {
   final bool? isSelected;
   final VoidCallback? onSelectionChanged;
   final bool flipColors;
+  final Animation<double>? glitchAnimation;
+  final bool isRemoving;
+  final bool showScrambleForInsert;
 
   const ContactListItem({
     super.key,
@@ -20,6 +28,9 @@ class ContactListItem extends StatelessWidget {
     this.isSelected,
     this.onSelectionChanged,
     this.flipColors = false,
+    this.glitchAnimation,
+    this.isRemoving = false,
+    this.showScrambleForInsert = false,
   });
 
   String _getStatus(int balance, bool flipColors) {
@@ -55,6 +66,36 @@ class ContactListItem extends StatelessWidget {
     );
   }
 
+  Widget _glitchText(
+    String text,
+    TextStyle style, {
+    TextAlign? textAlign,
+    TextOverflow? overflow,
+    int? maxLines,
+  }) {
+    final shouldScramble = (isRemoving || showScrambleForInsert) && text.trim().isNotEmpty;
+    final hasArabic = TextUtils.hasArabic(text);
+    final base = AnimatedPixelatedText(
+      text,
+      style: style,
+      textAlign: textAlign,
+      textDirection: hasArabic ? ui.TextDirection.rtl : ui.TextDirection.ltr,
+      overflow: overflow,
+      maxLines: maxLines,
+      forceScramble: shouldScramble,
+    );
+    final animation = glitchAnimation;
+    if (animation == null) return base;
+    return GlitchTransition(
+      animation: animation,
+      child: base,
+      showScramble: true,
+      maxX: 10,
+      maxY: 5,
+      flickerChance: 0.35,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Always use provider for reactive updates
@@ -77,8 +118,9 @@ class ContactListItem extends StatelessWidget {
     // Width calculated to fit "1000,000 IQD" (approximately 110-120 pixels)
     const double amountSectionWidth = 120.0;
 
-    return Card(
+    return GradientCard(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      variationSeed: contact.id.hashCode,
       child: InkWell(
         onTap: onTap,
         onLongPress: onSelectionChanged != null ? () {
@@ -87,7 +129,7 @@ class ContactListItem extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
-            textDirection: TextDirection.rtl, // RTL layout: start from right
+            textDirection: ui.TextDirection.rtl, // RTL layout: start from right
             children: [
               // Right side: Amount and Status (fixed width)
               SizedBox(
@@ -97,27 +139,33 @@ class ContactListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (balance != 0)
-                      Text(
-                        '${_formatAmount(balance)} IQD',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: avatarColor,
+                    SizedBox(
+                      height: 22, // Reserve space when balance is 0
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: _glitchText(
+                          balance == 0 ? '' : '${_formatAmount(balance)} IQD',
+                          TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: avatarColor,
+                          ),
+                          textAlign: TextAlign.right,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
-                        textAlign: TextAlign.right,
-                        overflow: TextOverflow.ellipsis,
-                      )
-                    else
-                      const SizedBox(height: 18), // Reserve space when balance is 0
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(
+                    _glitchText(
                       status,
-                      style: TextStyle(
+                      TextStyle(
                         fontSize: 11,
                         color: ThemeColors.gray(context, shade: 600),
                       ),
                       textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -130,48 +178,52 @@ class ContactListItem extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      TextUtils.forceLtr(contact.name), // Force LTR for mixed Arabic/English text
-                      style: const TextStyle(
+                    _glitchText(
+                      TextUtils.hasArabic(contact.name)
+                          ? contact.name
+                          : TextUtils.forceLtr(contact.name),
+                      const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.right,
-                      semanticsLabel: 'Contact ${contact.name}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (contact.username != null && contact.username!.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Text(
+                      _glitchText(
                         '@${contact.username}',
-                        style: TextStyle(
+                        TextStyle(
                           color: ThemeColors.gray(context, shade: 500),
                           fontSize: 12,
                         ),
                         textAlign: TextAlign.right,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ],
                 ),
               ),
               const SizedBox(width: 16),
-              // Left side: Avatar (or Checkbox in selection mode)
-              isSelected
-                  ? Checkbox(
-                      value: true,
-                      onChanged: (value) => onSelectionChanged?.call(),
-                    )
-                  : CircleAvatar(
-                      backgroundColor: avatarColor.withOpacity(0.2),
-                      radius: 24,
-                      child: Text(
-                        contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
-                        style: TextStyle(
-                          color: avatarColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
+              // Left side: Avatar with optional selection checkmark
+              AvatarWithSelection(
+                avatar: CircleAvatar(
+                  backgroundColor: avatarColor.withOpacity(0.2),
+                  radius: 24,
+                  child: Text(
+                    contact.name.isNotEmpty ? contact.name[0].toUpperCase() : '?',
+                    style: TextStyle(
+                      color: avatarColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
                     ),
+                  ),
+                ),
+                radius: 24,
+                isSelected: isSelected,
+              ),
             ],
           ),
         ),

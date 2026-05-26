@@ -1,13 +1,18 @@
 use axum::{
+    body::Body,
+    http::{Request, Response},
     Router,
     routing::{get, post, put, delete},
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::signal;
-use tracing::{info, error};
+use tower_http::trace::TraceLayer;
+use tracing::{info, error, Span};
 
 mod config;
 mod handlers;
+mod models;
 mod services;
 mod background;
 mod database;
@@ -22,6 +27,7 @@ use websocket::BroadcastChannel;
 use handlers::admin::rebuild_projections;
 use middleware::auth::auth_middleware;
 use middleware::rate_limit::{RateLimiter, rate_limit_middleware};
+use middleware::wallet_context::wallet_context_middleware;
 
 // Define AppState in main.rs (not in shared app_state.rs to avoid library build issues)
 #[derive(Clone)]
@@ -32,7 +38,6 @@ pub struct AppState {
     pub rate_limiter: RateLimiter,
 }
 
-//noinspection RsTypeCheck
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load environment variables
@@ -57,6 +62,38 @@ async fn main() -> anyhow::Result<()> {
     let db_pool = database::new_pool(&config.database_url).await?;
     info!("Database connection pool created");
 
+    // Run pending migrations (baseline 1–13 if DB was created without sqlx so only 014+ run)
+    let migrator = sqlx::migrate!("./migrations");
+    if let Err(e) = migrator.run(&*db_pool).await {
+        let msg = e.to_string();
+        if msg.contains("already exists") {
+            info!("Database has existing schema; baselining migrations 1–13 and retrying...");
+            for m in migrator.iter() {
+                if m.version <= 13 {
+                    sqlx::query(
+                        "INSERT INTO _sqlx_migrations (version, description, installed_on, success, checksum, execution_time) VALUES ($1, $2, now(), true, $3, 0)",
+                    )
+                    .bind(m.version)
+                    .bind(m.description.as_ref())
+                    .bind(m.checksum.as_ref())
+                    .execute(&*db_pool)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to baseline migrations: {}", e))?;
+                }
+            }
+            migrator
+                .run(&*db_pool)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to run migrations after baseline: {}", e))?;
+        } else {
+            return Err(anyhow::anyhow!("Failed to run migrations: {}", e));
+        }
+    }
+    info!("Migrations applied");
+
+    // Seed dummy data if database is empty
+    services::seed_data::seed_dummy_data(&db_pool).await?;
+
     // Initialize background scheduler (starts automatically)
     let scheduler = Arc::new(
         background::scheduler::BackgroundScheduler::new(
@@ -75,7 +112,11 @@ async fn main() -> anyhow::Result<()> {
         config.rate_limit_requests,
         config.rate_limit_window,
     );
-    info!("Rate limiter initialized: {} requests per {} seconds", config.rate_limit_requests, config.rate_limit_window);
+    if config.rate_limit_requests == 0 {
+        info!("Rate limiter disabled (RATE_LIMIT_REQUESTS=0)");
+    } else {
+        info!("Rate limiter initialized: {} requests per {} seconds", config.rate_limit_requests, config.rate_limit_window);
+    }
 
     // Build application state
     let app_state = AppState {
@@ -89,14 +130,15 @@ async fn main() -> anyhow::Result<()> {
     let public_routes = Router::new()
         .route("/health", get(health_check))
         .route("/api/auth/login", post(handlers::login)) // Regular user login
+        .route("/api/auth/register", axum::routing::post(handlers::register)) // Sign up
         .route("/api/auth/admin/login", post(handlers::admin_login)) // Admin login
         .route("/admin", get(handlers::admin_panel)) // Admin page HTML is public (login form)
         .route("/config.js", get(handlers::config_js)) // Admin config.js (optional, returns empty if not exists)
         .route("/favicon.ico", get(handlers::favicon)) // Favicon
         .route("/api/dev/clear-database", axum::routing::post(handlers::dev_clear_database)); // Dev-only: clears database (checks ENVIRONMENT internally)
 
-    // Protected API routes (require authentication)
-    let protected_api_routes = Router::new()
+    // Protected API routes that require wallet context
+    let wallet_protected_routes = Router::new()
         .route("/api/contacts", get(handlers::get_contacts))
         .route("/api/contacts", post(handlers::create_contact))
         .route("/api/contacts/:id", put(handlers::update_contact))
@@ -105,12 +147,42 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/transactions", post(handlers::create_transaction))
         .route("/api/transactions/:id", put(handlers::update_transaction))
         .route("/api/transactions/:id", delete(handlers::delete_transaction))
-        .route("/api/settings", get(handlers::get_settings))
-        .route("/api/settings/:key", axum::routing::put(handlers::update_setting))
         .route("/api/sync/hash", get(handlers::get_sync_hash))
         .route("/api/sync/events", get(handlers::get_sync_events))
         .route("/api/sync/events", post(handlers::post_sync_events))
+        .route("/api/wallets/:wallet_id/me/permissions", get(handlers::get_my_permissions))
+        .route("/api/wallets/:wallet_id/me/settings", get(handlers::get_my_wallet_settings).put(handlers::put_my_wallet_settings))
+        .route("/api/wallets/:wallet_id/users", get(handlers::list_wallet_users).post(handlers::add_user_to_wallet))
+        .route("/api/wallets/:wallet_id/users/search", get(handlers::search_wallet_users))
+        .route("/api/wallets/:wallet_id/invite", axum::routing::post(handlers::create_wallet_invite))
+        .route("/api/wallets/:wallet_id/users/:user_id", axum::routing::put(handlers::update_wallet_user).delete(handlers::remove_user_from_wallet))
+        .route("/api/wallets/:wallet_id/user-groups", get(handlers::list_user_groups).post(handlers::create_user_group))
+        .route("/api/wallets/:wallet_id/user-groups/:group_id", axum::routing::put(handlers::update_user_group).delete(handlers::delete_user_group))
+        .route("/api/wallets/:wallet_id/user-groups/:group_id/members", get(handlers::list_user_group_members).post(handlers::add_user_group_member))
+        .route("/api/wallets/:wallet_id/user-groups/:group_id/members/:user_id", axum::routing::delete(handlers::remove_user_group_member))
+        .route("/api/wallets/:wallet_id/contact-groups", get(handlers::list_contact_groups).post(handlers::create_contact_group))
+        .route("/api/wallets/:wallet_id/contact-groups/:group_id", axum::routing::put(handlers::update_contact_group).delete(handlers::delete_contact_group))
+        .route("/api/wallets/:wallet_id/contact-groups/:group_id/members", get(handlers::list_contact_group_members).post(handlers::add_contact_group_member))
+        .route("/api/wallets/:wallet_id/contact-groups/:group_id/members/:contact_id", axum::routing::delete(handlers::remove_contact_group_member))
+        .route("/api/wallets/:wallet_id/permission-actions", get(handlers::list_permission_actions))
+        .route("/api/wallets/:wallet_id/permission-matrix", get(handlers::get_permission_matrix).put(handlers::put_permission_matrix))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            wallet_context_middleware,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ));
+
+    // Protected API routes that don't require wallet context
+    let protected_api_routes = Router::new()
+        .route("/api/settings", get(handlers::get_settings))
+        .route("/api/settings/:key", axum::routing::put(handlers::update_setting))
         .route("/api/auth/change-password", axum::routing::put(handlers::change_password))
+        .route("/api/wallets", get(handlers::list_user_wallets).post(handlers::create_my_wallet))
+        .route("/api/wallets/join", axum::routing::post(handlers::join_wallet_by_code))
+        .route("/api/wallets/:id", get(handlers::get_wallet))
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth_middleware,
@@ -132,6 +204,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/users/:id/password", axum::routing::put(handlers::admin_change_password))
         .route("/api/admin/users/:id/login-logs", get(handlers::get_user_login_logs))
         .route("/api/admin/users/:id/backup", get(handlers::backup_user_data))
+        .route("/api/admin/wallets", get(handlers::list_wallets))
+        .route("/api/admin/wallets", post(handlers::create_wallet))
+        .route("/api/admin/wallets/:id", get(handlers::get_wallet))
+        .route("/api/admin/wallets/:id", axum::routing::put(handlers::update_wallet))
+        .route("/api/admin/wallets/:id", axum::routing::delete(handlers::delete_wallet))
+        .route("/api/admin/wallets/:id/users", get(handlers::list_wallet_users))
+        .route("/api/admin/wallets/:id/users", post(handlers::add_user_to_wallet))
+        .route("/api/admin/wallets/:id/users/:user_id", axum::routing::put(handlers::update_wallet_user))
+        .route("/api/admin/wallets/:id/users/:user_id", axum::routing::delete(handlers::remove_user_from_wallet))
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth_middleware,
@@ -145,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(|| async { axum::response::Redirect::permanent("/admin") }))
         .merge(public_routes)
+        .merge(wallet_protected_routes)
         .merge(protected_api_routes)
         .merge(admin_routes)
         .merge(ws_routes)
@@ -154,7 +236,7 @@ async fn main() -> anyhow::Result<()> {
             rate_limit_middleware,
         ))
         .layer(axum::middleware::from_fn(middleware::security_headers::security_headers_middleware))
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(compact_trace_layer())
         .with_state(app_state);
 
     // Start server
@@ -243,6 +325,29 @@ async fn main() -> anyhow::Result<()> {
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+/// One compact log line per request: method, path (no query), status, latency.
+/// Avoids logging tokens in /ws?token=... and reduces noise.
+fn compact_trace_layer() -> TraceLayer<
+    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>,
+    impl Fn(&Request<Body>) -> Span + Clone + Send + Sync + 'static,
+    impl Fn(&Request<Body>, &Span) + Clone + Send + Sync + 'static,
+    impl Fn(&Response<Body>, Duration, &Span) + Clone + Send + Sync + 'static,
+    tower_http::trace::DefaultOnBodyChunk,
+    tower_http::trace::DefaultOnEos,
+    tower_http::trace::DefaultOnFailure,
+> {
+    TraceLayer::new_for_http()
+        .make_span_with(|req: &Request<Body>| {
+            let method = req.method().clone();
+            let path = req.uri().path().to_string();
+            tracing::info_span!("http", method = %method, path = %path)
+        })
+        .on_request(|_req: &Request<Body>, _span: &Span| {})
+        .on_response(|res: &Response<Body>, latency: Duration, _span: &Span| {
+            tracing::debug!(status = %res.status(), latency_ms = latency.as_millis());
+        })
 }
 
 fn create_cors_layer(config: &Config) -> tower_http::cors::CorsLayer {

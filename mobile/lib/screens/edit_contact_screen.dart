@@ -2,17 +2,22 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api.dart';
 import '../models/contact.dart';
-import '../services/local_database_service_v2.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import '../providers/wallet_data_providers.dart';
 import '../utils/toast_service.dart';
+import '../widgets/gradient_background.dart';
 
 class EditContactScreen extends ConsumerStatefulWidget {
   final Contact contact;
+  /// Wallet context when opening from contact list/transactions (ensures group load/save works for members).
+  final String? initialWalletId;
 
   const EditContactScreen({
     super.key,
     required this.contact,
+    this.initialWalletId,
   });
 
   @override
@@ -26,6 +31,12 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
   final _emailController = TextEditingController();
   final _notesController = TextEditingController();
   bool _saving = false;
+  String? _walletId;
+  List<Map<String, dynamic>> _contactGroups = [];
+  Set<String> _contactGroupIds = {};
+  Set<String> _initialGroupIds = {};
+  bool _groupsLoading = true;
+  String? _groupsError;
 
   @override
   void initState() {
@@ -34,6 +45,41 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     _phoneController.text = widget.contact.phone ?? '';
     _emailController.text = widget.contact.email ?? '';
     _notesController.text = widget.contact.notes ?? '';
+    if (widget.initialWalletId != null && widget.initialWalletId!.isNotEmpty) {
+      _walletId = widget.initialWalletId;
+    }
+    _loadGroups();
+  }
+
+  Future<void> _loadGroups() async {
+    if (kIsWeb) return;
+    final currentWalletId = await Api.getCurrentWalletId();
+    final walletId = currentWalletId ?? widget.initialWalletId ?? widget.contact.walletId;
+    if (walletId == null || walletId.isEmpty || !mounted) return;
+    setState(() {
+      _walletId = walletId;
+      _groupsLoading = true;
+      _groupsError = null;
+    });
+    try {
+      final groups = await Api.getWalletContactGroups(walletId);
+      final ids = await Api.getContactGroupIdsForContact(walletId, widget.contact.id);
+      if (mounted) {
+        setState(() {
+          _contactGroups = groups;
+          _contactGroupIds = ids.toSet();
+          _initialGroupIds = ids.toSet();
+          _groupsLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _groupsError = e.toString();
+          _groupsLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -45,6 +91,17 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     super.dispose();
   }
 
+  void _toggleContactGroup(String groupId, bool isSystem) {
+    if (isSystem) return;
+    setState(() {
+      if (_contactGroupIds.contains(groupId)) {
+        _contactGroupIds.remove(groupId);
+      } else {
+        _contactGroupIds.add(groupId);
+      }
+    });
+  }
+
   Future<void> _saveContact() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -53,22 +110,18 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
     });
 
     try {
-      final contact = Contact(
+      await Api.updateContact(
         id: widget.contact.id,
         name: _nameController.text.trim(),
-        username: widget.contact.username, // Preserve username
+        username: widget.contact.username,
         phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         email: _emailController.text.trim().isEmpty ? null : _emailController.text.trim(),
         notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-        createdAt: widget.contact.createdAt,
-        updatedAt: DateTime.now(),
-        isSynced: false, // Mark as unsynced since we're updating locally
-        balance: widget.contact.balance,
+        groupIds: !kIsWeb ? _contactGroupIds.toList() : null,
       );
 
-      // Update local database (creates event, rebuilds state)
-      // Background sync service will handle server communication
-      await LocalDatabaseServiceV2.updateContact(contact);
+      ref.invalidate(contactsProvider);
+      ref.invalidate(transactionsProvider);
 
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -89,9 +142,11 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Edit Contact'),
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Edit Contact'),
         actions: [
           IconButton(
             icon: _saving
@@ -159,8 +214,44 @@ class _EditContactScreenState extends ConsumerState<EditContactScreen> {
               ),
               maxLines: 3,
             ),
+            if (!kIsWeb) ...[
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text(
+                'Contact groups',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              if (_groupsLoading)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_groupsError != null)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(_groupsError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                )
+              else
+                ..._contactGroups.map((g) {
+                  final groupId = g['id'] as String?;
+                  final name = g['name'] as String? ?? '';
+                  final isSystem = g['is_system'] as bool? ?? false;
+                  if (groupId == null) return const SizedBox.shrink();
+                  final inGroup = _contactGroupIds.contains(groupId);
+                  return CheckboxListTile(
+                    value: inGroup,
+                    onChanged: isSystem ? null : (v) => _toggleContactGroup(groupId, isSystem),
+                    title: Text(name),
+                    subtitle: isSystem ? const Text('All contacts (system)', style: TextStyle(fontSize: 12)) : null,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  );
+                }),
+            ],
           ],
         ),
+      ),
       ),
     );
   }

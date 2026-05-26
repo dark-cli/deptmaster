@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Fast migration using sync endpoints - batches all events and uploads at once
-This is much faster than individual API calls
+This is much faster than individual API calls.
+
+Requires username and wallet; if the wallet does not exist it will be created.
 """
 
 import sys
@@ -18,34 +20,65 @@ from pathlib import Path
 
 API_BASE_URL = "http://localhost:8000"
 
-def login():
-    """Login and get auth token."""
-    # Try multiple common default credentials
-    credentials = [
-        {"username": "max", "password": "max"},
-        {"username": "max", "password": "1234"},  # Default password from seed_data.rs
-        {"username": "max", "password": "admin123456"},
-        {"username": "admin", "password": "admin123456"},
-    ]
-    
-    for creds in credentials:
-        try:
-            response = requests.post(
-                f"{API_BASE_URL}/api/auth/login",
-                json=creds,
-                timeout=10
-            )
-            if response.status_code == 200:
-                data = response.json()
-                token = data.get('token')
-                if token:
-                    return token
-        except requests.exceptions.RequestException:
-            continue
-    
-    # If all failed, try to get user info from database directly
-    print("⚠️  Login failed with default credentials")
-    print("💡 Trying to find user in database...")
+def login(username, password):
+    """Login with given credentials and return auth token."""
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/api/auth/login",
+            json={"username": username, "password": password},
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            token = data.get('token')
+            if token:
+                return token
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️  Login request failed: {e}")
+    return None
+
+def ensure_wallet(auth_headers, wallet_name):
+    """
+    Get wallet ID by name; if the wallet does not exist, create it.
+    Returns wallet_id (UUID string) or None on failure.
+    """
+    # List user's wallets
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/api/wallets",
+            headers=auth_headers,
+            timeout=10
+        )
+        if response.status_code != 200:
+            print(f"❌ Failed to list wallets: HTTP {response.status_code}")
+            return None
+        data = response.json()
+        wallets = data.get("wallets", [])
+        for w in wallets:
+            if w.get("name") == wallet_name:
+                return w.get("id")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error listing wallets: {e}")
+        return None
+
+    # Create wallet if not found
+    print(f"📁 Wallet '{wallet_name}' not found; creating...")
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/api/wallets",
+            headers=auth_headers,
+            json={"name": wallet_name, "description": None},
+            timeout=10
+        )
+        if response.status_code in (200, 201):
+            data = response.json()
+            wallet_id = data.get("id")
+            if wallet_id:
+                print(f"✅ Created wallet '{wallet_name}' ({wallet_id})")
+                return wallet_id
+        print(f"❌ Failed to create wallet: HTTP {response.status_code} - {response.text[:200]}")
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error creating wallet: {e}")
     return None
 
 def extract_username(name):
@@ -117,8 +150,8 @@ def extract_db_from_zip(zip_path):
     else:
         return zip_path, None
 
-def migrate_debitum(debitum_db_path):
-    """Migrate Debitum data to Debt Tracker via sync endpoints (fast batch upload)"""
+def migrate_debitum(debitum_db_path, username, wallet_name, password):
+    """Migrate Debitum data to Debt Tracker via sync endpoints (fast batch upload)."""
     
     # Extract from zip if needed
     db_path, temp_dir = extract_db_from_zip(debitum_db_path)
@@ -132,17 +165,15 @@ def migrate_debitum(debitum_db_path):
             shutil.rmtree(temp_dir)
         sys.exit(1)
     
-    # Login to get auth token
-    print("🔐 Authenticating...")
-    # Wait a moment for database migrations to complete
+    # Login with required username/password
+    print(f"🔐 Authenticating as '{username}'...")
     import time
     time.sleep(2)
     
-    auth_token = login()
+    auth_token = login(username, password)
     if not auth_token:
         print("❌ Failed to authenticate")
-        print("💡 Make sure default user 'max' exists with password 'max'")
-        print("💡 The user should be created by migration 005")
+        print(f"💡 Check that user '{username}' exists and the password is correct")
         if temp_dir:
             import shutil
             shutil.rmtree(temp_dir)
@@ -153,6 +184,15 @@ def migrate_debitum(debitum_db_path):
         "Content-Type": "application/json",
         "Authorization": f"Bearer {auth_token}"
     }
+    
+    # Ensure wallet exists (create if not) and get wallet_id for sync requests
+    wallet_id = ensure_wallet(auth_headers, wallet_name)
+    if not wallet_id:
+        if temp_dir:
+            import shutil
+            shutil.rmtree(temp_dir)
+        sys.exit(1)
+    auth_headers["X-Wallet-Id"] = wallet_id
     
     debitum_conn = None
     try:
@@ -362,13 +402,24 @@ def migrate_debitum(debitum_db_path):
                 pass
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 migrate_debitum_via_api_fast.py <path-to-debitum.db>")
+    if len(sys.argv) < 4:
+        print("Usage: python3 migrate_debitum_via_api_fast.py <path-to-backup.zip> <username> <wallet> [password]")
+        print("  username  User to import as (must exist)")
+        print("  wallet    Wallet name to import into (created if it does not exist)")
+        print("  password  Optional; defaults to common defaults if omitted")
         sys.exit(1)
     
     debitum_db = sys.argv[1]
+    username = sys.argv[2]
+    wallet_name = sys.argv[3]
+    password = sys.argv[4] if len(sys.argv) > 4 else None
+    
     if not Path(debitum_db).exists():
         print(f"Error: File not found: {debitum_db}")
         sys.exit(1)
     
-    migrate_debitum(debitum_db)
+    # Default password if not given (matches manage.sh reset: user "max" gets password 12345678)
+    if not password:
+        password = "12345678"
+    
+    migrate_debitum(debitum_db, username, wallet_name, password)

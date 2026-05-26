@@ -1,0 +1,8 @@
+# Flutter Rust Bridge codegen - paths relative to this file's directory (mobile/)
+# Run from mobile/: flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
+rust_input: crate
+rust_root: ../crates/debitum_client_core
+dart_output: lib/src
+# Relative to rust_root
+rust_output: src/frb_generated.rs
+c_output: src/frb_generated.c

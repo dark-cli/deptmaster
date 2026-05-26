@@ -10,48 +10,55 @@ use uuid::Uuid;
 async fn test_update_transaction() {
     // TODO: Set up test database and server
     // This test should:
-    // 1. Create a transaction
-    // 2. Update the transaction
-    // 3. Verify the update in the database
-    // 4. Verify WebSocket broadcast was sent
-    // 5. Verify contact balance was recalculated
+    // 1. Create a wallet and add user to it
+    // 2. Create a contact in the wallet
+    // 3. Create a transaction in the wallet
+    // 4. Update the transaction (include wallet_id in request)
+    // 5. Verify the update in the database
+    // 6. Verify WebSocket broadcast was sent
+    // 7. Verify contact balance was recalculated
 }
 
 #[tokio::test]
 async fn test_delete_transaction() {
     // TODO: Set up test database and server
     // This test should:
-    // 1. Create a transaction
-    // 2. Delete the transaction
-    // 3. Verify soft delete in the database
-    // 4. Verify WebSocket broadcast was sent
-    // 5. Verify contact balance was recalculated
+    // 1. Create a wallet and add user to it
+    // 2. Create a contact in the wallet
+    // 3. Create a transaction in the wallet
+    // 4. Delete the transaction (include wallet_id in request)
+    // 5. Verify soft delete in the database
+    // 6. Verify WebSocket broadcast was sent
+    // 7. Verify contact balance was recalculated
 }
 
 #[tokio::test]
 async fn test_contact_balance_recalculation() {
     // TODO: Set up test database and server
     // This test should:
-    // 1. Create a contact
-    // 2. Create multiple transactions
-    // 3. Update/delete transactions
-    // 4. Verify contact balance is correctly recalculated
+    // 1. Create a wallet and add user to it
+    // 2. Create a contact in the wallet
+    // 3. Create multiple transactions in the wallet
+    // 4. Update/delete transactions (include wallet_id in requests)
+    // 5. Verify contact balance is correctly recalculated
 }
 
 #[tokio::test]
 async fn test_websocket_broadcast_on_update() {
     // TODO: Set up test database and server with WebSocket
     // This test should:
-    // 1. Connect a WebSocket client
-    // 2. Update a transaction
-    // 3. Verify the WebSocket message was received
+    // 1. Create a wallet and add user to it
+    // 2. Connect a WebSocket client
+    // 3. Update a transaction (include wallet_id in request)
+    // 4. Verify the WebSocket message was received
 }
 
 #[tokio::test]
 async fn test_websocket_broadcast_on_delete() {
     // TODO: Set up test database and server with WebSocket
     // This test should:
-    // 1. Connect a WebSocket client
-    // 2. Delete a transaction
-    // 3. Verify the WebSocket message was received
+    // 1. Create a wallet and add user to it
+    // 2. Connect a WebSocket client
+    // 3. Delete a transaction (include wallet_id in request)
+    // 4. Verify the WebSocket message was received
 }

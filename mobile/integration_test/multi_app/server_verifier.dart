@@ -1,23 +1,20 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:debt_tracker_mobile/services/auth_service.dart';
-import 'package:debt_tracker_mobile/services/backend_config_service.dart';
+import 'package:debt_tracker_mobile/api.dart';
 
 /// Server verification utilities for testing
 class ServerVerifier {
   final String serverUrl;
   String? _authToken;
-  
+
   ServerVerifier({required this.serverUrl});
-  
-  /// Set auth token
+
   Future<void> setAuthToken() async {
-    _authToken = await AuthService.getToken();
+    _authToken = await Api.getToken();
   }
-  
-  /// Get auth headers
+
   Future<Map<String, String>> _getHeaders() async {
-    final headers = {'Content-Type': 'application/json'};
+    final headers = <String, String>{'Content-Type': 'application/json'};
     if (_authToken != null) {
       headers['Authorization'] = 'Bearer $_authToken';
     } else {
@@ -26,22 +23,25 @@ class ServerVerifier {
         headers['Authorization'] = 'Bearer $_authToken';
       }
     }
+    final walletId = await Api.getCurrentWalletId();
+    if (walletId != null && walletId.isNotEmpty) {
+      headers['X-Wallet-Id'] = walletId;
+    }
     return headers;
   }
-  
-  /// Get server events
+
   Future<List<Map<String, dynamic>>> getServerEvents({DateTime? since}) async {
     try {
-      final baseUrl = await BackendConfigService.getBaseUrl();
+      final baseUrl = await Api.getBaseUrl();
       var url = '$baseUrl/api/sync/events';
-      
+      final walletId = await Api.getCurrentWalletId();
+      if (walletId != null) url += '?wallet_id=$walletId';
       if (since != null) {
-        url += '?since=${since.toIso8601String()}';
+        url += walletId != null ? '&' : '?';
+        url += 'since=${since.toIso8601String()}';
       }
-      
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(url), headers: headers);
-      
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         return data.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -53,16 +53,15 @@ class ServerVerifier {
       rethrow;
     }
   }
-  
-  /// Get server sync hash
+
   Future<String> getServerHash() async {
     try {
-      final baseUrl = await BackendConfigService.getBaseUrl();
-      final url = '$baseUrl/api/sync/hash';
-      
+      final baseUrl = await Api.getBaseUrl();
+      final walletId = await Api.getCurrentWalletId();
+      var url = '$baseUrl/api/sync/hash';
+      if (walletId != null) url += '?wallet_id=$walletId';
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(url), headers: headers);
-      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['hash'] as String;
@@ -74,22 +73,18 @@ class ServerVerifier {
       rethrow;
     }
   }
-  
-  /// Get server event count
+
   Future<int> getServerEventCount() async {
     final events = await getServerEvents();
     return events.length;
   }
-  
-  /// Get server contact
+
   Future<Map<String, dynamic>?> getServerContact(String id) async {
     try {
-      final baseUrl = await BackendConfigService.getApiBaseUrl();
-      final url = '$baseUrl/contacts/$id';
-      
+      final baseUrl = await Api.getBaseUrl();
+      final url = '$baseUrl/api/contacts/$id';
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(url), headers: headers);
-      
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       } else if (response.statusCode == 404) {
@@ -102,16 +97,13 @@ class ServerVerifier {
       rethrow;
     }
   }
-  
-  /// Get server transaction
+
   Future<Map<String, dynamic>?> getServerTransaction(String id) async {
     try {
-      final baseUrl = await BackendConfigService.getApiBaseUrl();
-      final url = '$baseUrl/transactions/$id';
-      
+      final baseUrl = await Api.getBaseUrl();
+      final url = '$baseUrl/api/transactions/$id';
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(url), headers: headers);
-      
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       } else if (response.statusCode == 404) {
@@ -124,8 +116,7 @@ class ServerVerifier {
       rethrow;
     }
   }
-  
-  /// Verify event exists in database (via API)
+
   Future<bool> verifyEventInDatabase(String eventId) async {
     try {
       final events = await getServerEvents();
@@ -135,16 +126,13 @@ class ServerVerifier {
       return false;
     }
   }
-  
-  /// Get all server contacts
+
   Future<List<Map<String, dynamic>>> getServerContacts() async {
     try {
-      final baseUrl = await BackendConfigService.getApiBaseUrl();
-      final url = '$baseUrl/contacts';
-      
+      final baseUrl = await Api.getBaseUrl();
+      final url = '$baseUrl/api/contacts';
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(url), headers: headers);
-      
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         return data.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -156,16 +144,13 @@ class ServerVerifier {
       rethrow;
     }
   }
-  
-  /// Get all server transactions
+
   Future<List<Map<String, dynamic>>> getServerTransactions() async {
     try {
-      final baseUrl = await BackendConfigService.getApiBaseUrl();
-      final url = '$baseUrl/transactions';
-      
+      final baseUrl = await Api.getBaseUrl();
+      final url = '$baseUrl/api/transactions';
       final headers = await _getHeaders();
       final response = await http.get(Uri.parse(url), headers: headers);
-      
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         return data.map((e) => Map<String, dynamic>.from(e)).toList();

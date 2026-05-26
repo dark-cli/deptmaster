@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import '../widgets/gradient_background.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/settings_service.dart';
+import '../api.dart';
 import '../providers/settings_provider.dart';
 import '../utils/app_colors.dart';
 
@@ -12,7 +13,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  bool _darkMode = true; // Default to dark mode
   String _defaultDirection = 'give';
   // ignore: unused_field
   bool _dueDateEnabled = false;
@@ -26,16 +26,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final darkMode = await SettingsService.getDarkMode();
-    final defaultDir = await SettingsService.getDefaultDirection();
-    await SettingsService.getFlipColors();
-    final dueDateEnabled = await SettingsService.getDueDateEnabled();
-    final defaultDays = await SettingsService.getDefaultDueDateDays();
-    final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
-    
+    final defaultDir = await Api.getDefaultDirection();
+    await Api.getFlipColors();
+    final dueDateEnabled = await Api.getDueDateEnabled();
+    final defaultDays = await Api.getDefaultDueDateDays();
+    final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
     if (mounted) {
       setState(() {
-        _darkMode = darkMode;
         _defaultDirection = defaultDir;
         _dueDateEnabled = dueDateEnabled;
         _defaultDueDateDays = defaultDays;
@@ -46,26 +43,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: ListView(
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Settings'),
+        ),
+        body: ListView(
         children: [
           // Appearance
           _buildSectionHeader('Appearance'),
-          SwitchListTile(
-            title: const Text('Dark Mode'),
-            value: _darkMode,
-            onChanged: (value) async {
-              await SettingsService.setDarkMode(value);
-              setState(() {
-                _darkMode = value;
-              });
-              // Trigger theme rebuild
-              if (mounted) {
-                (context as Element).markNeedsBuild();
-              }
+          Consumer(
+            builder: (context, ref, _) {
+              final darkMode = ref.watch(darkModeProvider);
+              return SwitchListTile(
+                title: const Text('Dark Mode'),
+                value: darkMode,
+                onChanged: (value) {
+                  ref.read(darkModeProvider.notifier).setDarkMode(value);
+                },
+              );
             },
           ),
           
@@ -295,6 +292,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
         ],
+      ),
       ),
     );
   }

@@ -1,17 +1,18 @@
 // ignore_for_file: unused_import
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../utils/text_utils.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../models/transaction.dart';
 import '../models/contact.dart';
-import '../services/local_database_service_v2.dart';
-import '../services/dummy_data_service.dart';
+import '../models/wallet.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../services/settings_service.dart';
 import '../providers/settings_provider.dart';
+import '../providers/wallet_data_providers.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
@@ -67,11 +68,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   List<Contact> _filteredContacts = [];
   bool _showContactSuggestions = false;
   bool _loadingContacts = true; // Track loading state
+  ProviderSubscription<AsyncValue<List<Contact>>>? _contactsSub;
+  String? _contactsLoadError;
 
   @override
   void initState() {
     super.initState();
-    _loadContacts();
     _loadSettings();
     _prefillData();
     _contactSearchController.addListener(_onContactSearchChanged);
@@ -79,6 +81,54 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     _descriptionController.addListener(_onDescriptionChanged);
     _amountHasText = _amountController.text.isNotEmpty;
     _isClosingTransaction = _descriptionController.text.startsWith('Close:');
+    WidgetsBinding.instance.addPostFrameCallback((_) => _requireWallet());
+
+    // Keep local suggestion lists in sync with provider (no direct refetch loops).
+    _contactsSub = ref.listenManual<AsyncValue<List<Contact>>>(contactsProvider, (previous, next) {
+      if (!mounted) return;
+      if (next.hasError) {
+        setState(() {
+          _contactsLoadError = next.error.toString();
+          _loadingContacts = false;
+        });
+        return;
+      }
+      final contacts = next.valueOrNull;
+      if (contacts == null) return;
+
+      setState(() {
+        _contacts = contacts;
+        _loadingContacts = next.isLoading && contacts.isEmpty;
+        _contactsLoadError = null;
+
+        // If contact is provided, keep it selected (but update instance from latest list if possible).
+        if (widget.contact != null && _contacts.isNotEmpty) {
+          _selectedContact = _contacts.firstWhere(
+            (c) => c.id == widget.contact!.id,
+            orElse: () => widget.contact!,
+          );
+          _contactSearchController.text = _selectedContact?.name ?? '';
+          _showContactSuggestions = false;
+          _filteredContacts = [];
+        }
+      });
+
+      // Update suggestions if user is searching.
+      _onContactSearchChanged();
+    }, fireImmediately: true);
+  }
+
+  Future<void> _requireWallet() async {
+    if (await Api.getCurrentWalletId() != null) return;
+    final list = await Api.getWallets();
+    final wallets = list.map((m) => Wallet.fromJson(m)).toList();
+    if (wallets.isEmpty && mounted) {
+      ToastService.showInfoFromContext(context, 'Create a wallet first to add transactions.');
+      Navigator.of(context).pop();
+      Navigator.of(context).pushNamed('/create-wallet');
+    } else if (wallets.isNotEmpty && mounted) {
+      await Api.setCurrentWalletId(wallets.first.id);
+    }
   }
 
   void _onAmountChanged() {
@@ -164,9 +214,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final defaultDir = await SettingsService.getDefaultDirection();
-    final defaultDueDateSwitch = await SettingsService.getDefaultDueDateSwitch();
-    final defaultDays = await SettingsService.getDefaultDueDateDays();
+    final defaultDir = await Api.getDefaultDirection();
+    final defaultDueDateSwitch = await Api.getDefaultDueDateSwitch();
+    final defaultDays = await Api.getDefaultDueDateDays();
     
     if (mounted) {
       setState(() {
@@ -186,37 +236,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     }
   }
 
-  Future<void> _loadContacts() async {
-    setState(() {
-      _loadingContacts = true;
-    });
-    
-    try {
-      // Always use local database - never call API from UI
-      final contacts = await LocalDatabaseServiceV2.getContacts();
-      if (mounted) {
-        setState(() {
-          _contacts = contacts;
-          _loadingContacts = false;
-          // If contact is provided, find it in the loaded list by ID
-          if (widget.contact != null && _contacts.isNotEmpty) {
-            _selectedContact = _contacts.firstWhere(
-              (c) => c.id == widget.contact!.id,
-              orElse: () => _contacts.first,
-            );
-            _contactSearchController.text = _selectedContact?.name ?? '';
-          }
-        });
-      }
-    } catch (e) {
-      print('Error loading contacts: $e');
-      if (mounted) {
-        setState(() {
-          _loadingContacts = false;
-        });
-        ToastService.showErrorFromContext(context, 'Error loading contacts: $e');
-      }
-    }
+  void _requestContactsRefresh() {
+    ref.invalidate(contactsProvider);
   }
 
   Future<void> _selectDate() async {
@@ -273,37 +294,24 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
       final amountText = _amountController.text.trim();
       final amount = _parseNumber(amountText);
 
-      // Generate UUID for local ID (server expects UUID format)
-      final transactionId = DummyDataService.uuid.v4();
-
-      final transaction = Transaction(
-        id: transactionId,
+      final jsonStr = await Api.createTransaction(
         contactId: _selectedContact!.id,
-        type: TransactionType.money, // Always money (items removed)
-        direction: _direction,
+        type: 'money',
+        direction: _direction == TransactionDirection.owed ? 'owed' : 'lent',
         amount: amount,
         currency: 'IQD',
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        transactionDate: _selectedDate,
-        dueDate: _dueDateSwitchEnabled ? _dueDate : null,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
+        description: _descriptionController.text.trim().isEmpty ? null : _descriptionController.text.trim(),
+        transactionDate: _selectedDate.toIso8601String().split('T')[0],
+        dueDate: _dueDateSwitchEnabled && _dueDate != null ? _dueDate!.toIso8601String().split('T')[0] : null,
       );
-
-      // Save to local database (creates event, rebuilds state)
-      // Background sync service will handle server communication
-      await LocalDatabaseServiceV2.createTransaction(transaction);
+      final created = Transaction.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
 
       if (mounted) {
-        Navigator.of(context).pop(true); // Return true to indicate success
-        
-        // Show undo toast
+        Navigator.of(context).pop(true);
         ToastService.showUndoWithErrorHandlingFromContext(
           context: context,
           message: '✅ Transaction created!',
-          onUndo: () => LocalDatabaseServiceV2.undoTransactionAction(transactionId),
+          onUndo: () => Api.undoTransactionAction(created.id),
           successMessage: 'Transaction undone',
         );
       }
@@ -332,6 +340,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
 
   @override
   void dispose() {
+    _contactsSub?.close();
     _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     _descriptionController.removeListener(_onDescriptionChanged);
@@ -378,7 +387,19 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
             // Contact search field
             _loadingContacts
                 ? const Center(child: CircularProgressIndicator())
-                : Column(
+                : _contactsLoadError != null
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text('Error loading contacts: $_contactsLoadError', style: const TextStyle(color: Colors.red)),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: _requestContactsRefresh,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       TextFormField(
@@ -452,19 +473,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                       ),
                                     );
                                     if (result != null && result is Contact && mounted) {
-                                      // Reload contacts to get the new one
-                                      await _loadContacts();
-                                      // Find and select the new contact
-                                      final newContact = _contacts.firstWhere(
-                                        (c) => c.id == result.id,
-                                        orElse: () => result,
-                                      );
                                       setState(() {
-                                        _selectedContact = newContact;
-                                        _contactSearchController.text = newContact.name;
+                                        _selectedContact = result;
+                                        _contactSearchController.text = result.name;
                                         _filteredContacts = [];
                                         _showContactSuggestions = false;
                                       });
+                                      _requestContactsRefresh();
                                     }
                                   },
                                 );
@@ -696,7 +711,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                       });
                       if (value && _dueDate == null) {
                         // Set default due date when switch is turned on
-                        final defaultDays = await SettingsService.getDefaultDueDateDays();
+                        final defaultDays = await Api.getDefaultDueDateDays();
                         if (mounted) {
                           setState(() {
                             _dueDate = DateTime.now().add(Duration(days: defaultDays));

@@ -37,11 +37,13 @@ pub async fn save_snapshot(
     event_count: i64,
     contacts_snapshot: serde_json::Value,
     transactions_snapshot: serde_json::Value,
+    wallet_id: uuid::Uuid,
 ) -> Result<(), sqlx::Error> {
-    // Get next snapshot index
+    // Get next snapshot index for this wallet
     let next_index = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT COALESCE(MAX(snapshot_index), -1) + 1 FROM projection_snapshots"
+        "SELECT COALESCE(MAX(snapshot_index), -1) + 1 FROM projection_snapshots WHERE wallet_id = $1"
     )
+    .bind(wallet_id)
     .fetch_one(pool)
     .await?;
 
@@ -51,8 +53,8 @@ pub async fn save_snapshot(
     sqlx::query(
         r#"
         INSERT INTO projection_snapshots 
-        (snapshot_index, last_event_id, event_count, contacts_snapshot, transactions_snapshot)
-        VALUES ($1, $2, $3, $4, $5)
+        (snapshot_index, last_event_id, event_count, contacts_snapshot, transactions_snapshot, wallet_id)
+        VALUES ($1, $2, $3, $4, $5, $6)
         "#
     )
     .bind(next_index)
@@ -60,13 +62,14 @@ pub async fn save_snapshot(
     .bind(event_count)
     .bind(contacts_snapshot)
     .bind(transactions_snapshot)
+    .bind(wallet_id)
     .execute(pool)
     .await?;
 
     tracing::info!("Saved projection snapshot #{} (event count: {})", next_index, event_count);
 
-    // Cleanup old snapshots
-    cleanup_old_snapshots(pool).await?;
+    // Cleanup old snapshots for this wallet
+    cleanup_old_snapshots(pool, wallet_id).await?;
 
     Ok(())
 }
@@ -76,48 +79,54 @@ pub async fn save_snapshot(
 pub async fn get_snapshot_before_event(
     pool: &PgPool,
     event_id: i64,
+    wallet_id: uuid::Uuid,
 ) -> Result<Option<ProjectionSnapshot>, sqlx::Error> {
     let snapshot = sqlx::query_as::<_, ProjectionSnapshot>(
         r#"
         SELECT id, snapshot_index, last_event_id, event_count, 
                contacts_snapshot, transactions_snapshot, created_at
         FROM projection_snapshots
-        WHERE last_event_id < $1
+        WHERE last_event_id < $1 AND wallet_id = $2
         ORDER BY snapshot_index DESC
         LIMIT 1
         "#
     )
     .bind(event_id)
+    .bind(wallet_id)
     .fetch_optional(pool)
     .await?;
 
     Ok(snapshot)
 }
 
-/// Get the latest snapshot
+/// Get the latest snapshot for a wallet
 #[allow(dead_code)] // Reserved for future snapshot functionality
 pub async fn get_latest_snapshot(
     pool: &PgPool,
+    wallet_id: uuid::Uuid,
 ) -> Result<Option<ProjectionSnapshot>, sqlx::Error> {
     let snapshot = sqlx::query_as::<_, ProjectionSnapshot>(
         r#"
         SELECT id, snapshot_index, last_event_id, event_count,
                contacts_snapshot, transactions_snapshot, created_at
         FROM projection_snapshots
+        WHERE wallet_id = $1
         ORDER BY snapshot_index DESC
         LIMIT 1
         "#
     )
+    .bind(wallet_id)
     .fetch_optional(pool)
     .await?;
 
     Ok(snapshot)
 }
 
-/// Cleanup old snapshots, keeping only the last MAX_SNAPSHOTS
-pub async fn cleanup_old_snapshots(pool: &PgPool) -> Result<(), sqlx::Error> {
-    // Get count of snapshots
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots")
+/// Cleanup old snapshots, keeping only the last MAX_SNAPSHOTS for a wallet
+pub async fn cleanup_old_snapshots(pool: &PgPool, wallet_id: uuid::Uuid) -> Result<(), sqlx::Error> {
+    // Get count of snapshots for this wallet
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+        .bind(wallet_id)
         .fetch_one(pool)
         .await?;
 
@@ -125,19 +134,21 @@ pub async fn cleanup_old_snapshots(pool: &PgPool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    // Delete oldest snapshots, keeping only the last MAX_SNAPSHOTS
+    // Delete oldest snapshots, keeping only the last MAX_SNAPSHOTS for this wallet
     let to_delete = count - MAX_SNAPSHOTS;
     sqlx::query(
         r#"
         DELETE FROM projection_snapshots
-        WHERE snapshot_index IN (
+        WHERE wallet_id = $1 AND snapshot_index IN (
             SELECT snapshot_index
             FROM projection_snapshots
+            WHERE wallet_id = $1
             ORDER BY snapshot_index ASC
-            LIMIT $1
+            LIMIT $2
         )
         "#
     )
+    .bind(wallet_id)
     .bind(to_delete)
     .execute(pool)
     .await?;
@@ -173,18 +184,20 @@ pub async fn get_event_db_id(
 pub async fn get_snapshot_before_event_count(
     pool: &PgPool,
     target_count: i64,
+    wallet_id: uuid::Uuid,
 ) -> Result<Option<ProjectionSnapshot>, sqlx::Error> {
     let snapshot = sqlx::query_as::<_, ProjectionSnapshot>(
         r#"
         SELECT id, snapshot_index, last_event_id, event_count, 
                contacts_snapshot, transactions_snapshot, created_at
         FROM projection_snapshots
-        WHERE event_count < $1
+        WHERE event_count < $1 AND wallet_id = $2
         ORDER BY snapshot_index DESC
         LIMIT 1
         "#
     )
     .bind(target_count)
+    .bind(wallet_id)
     .fetch_optional(pool)
     .await?;
 

@@ -1,5 +1,5 @@
 // Utility to reset user password or create admin user
-// Usage: cargo run --bin reset_password -- <email> <new_password>
+// Usage: cargo run --bin reset_password -- <username> <new_password>
 
 use bcrypt::{hash, DEFAULT_COST};
 use std::env;
@@ -9,12 +9,12 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     
     if args.len() < 3 {
-        eprintln!("Usage: cargo run --bin reset_password -- <email> <new_password>");
-        eprintln!("Example: cargo run --bin reset_password -- admin@debitum.local admin123");
+        eprintln!("Usage: cargo run --bin reset_password -- <username> <new_password>");
+        eprintln!("Example: cargo run --bin reset_password -- admin admin123");
         std::process::exit(1);
     }
 
-    let email = &args[1];
+    let username = &args[1];
     let password = &args[2];
 
     if password.len() < 8 {
@@ -35,21 +35,21 @@ async fn main() -> anyhow::Result<()> {
 
     // Check if user exists
     let user_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE email = $1)"
+        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE username = $1)"
     )
-    .bind(email)
+    .bind(username)
     .fetch_one(&pool)
     .await?;
 
     if user_exists {
         // Update existing user
-        sqlx::query("UPDATE users_projection SET password_hash = $1 WHERE email = $2")
+        sqlx::query("UPDATE users_projection SET password_hash = $1 WHERE username = $2")
             .bind(&password_hash)
-            .bind(email)
+            .bind(username)
             .execute(&pool)
             .await?;
         
-        println!("✅ Password updated for user: {}", email);
+        println!("✅ Password updated for user: {}", username);
     } else {
         // Create new user
         use uuid::Uuid;
@@ -57,20 +57,20 @@ async fn main() -> anyhow::Result<()> {
         
         let user_id = Uuid::new_v4();
         sqlx::query(
-            "INSERT INTO users_projection (id, email, password_hash, created_at, last_event_id) 
+            "INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id) 
              VALUES ($1, $2, $3, $4, 0)"
         )
         .bind(&user_id)
-        .bind(email)
+        .bind(username)
         .bind(&password_hash)
         .bind(Utc::now())
         .execute(&pool)
         .await?;
         
-        println!("✅ User created: {}", email);
+        println!("✅ User created: {}", username);
     }
 
-    println!("📧 Email: {}", email);
+    println!("📧 Username: {}", username);
     println!("🔑 Password: {}", password);
     println!("\nYou can now login with these credentials.");
 

@@ -1,12 +1,11 @@
-// ignore_for_file: unused_local_variable
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../services/sync_service_v2.dart';
+import '../api.dart';
 import '../utils/theme_colors.dart';
 
-/// Simple sync status icon widget
-/// Shows: synced (cloud done), unsynced/syncing (sync icon), offline (cloud-off), error (warning)
+/// Sync/connection status icon. Updates immediately when connection or sync error state changes.
+/// Shows: synced (cloud done), offline (cloud-off), error (warning), or syncing (sync icon).
 class SyncStatusIcon extends StatefulWidget {
   const SyncStatusIcon({super.key});
 
@@ -15,43 +14,43 @@ class SyncStatusIcon extends StatefulWidget {
 }
 
 class _SyncStatusIconState extends State<SyncStatusIcon> {
-  SyncStatus _status = SyncStatus.synced;
-  bool _hasError = false;
+  Timer? _periodicTimer;
 
   @override
   void initState() {
     super.initState();
     if (!kIsWeb) {
-      _updateStatus();
-      // Update status every 2 seconds
-      _startPeriodicUpdate();
+      Api.connectionStateRevision.addListener(_onConnectionStateChanged);
+      _scheduleNextCheck();
     }
   }
 
-  void _startPeriodicUpdate() {
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        _updateStatus();
-        _startPeriodicUpdate();
-      }
+  void _scheduleNextCheck() {
+    _periodicTimer?.cancel();
+    if (!mounted) return;
+    const interval = Duration(seconds: 3);
+    _periodicTimer = Timer(interval, () {
+      if (mounted) _refresh();
     });
   }
 
-  Future<void> _updateStatus() async {
-    if (kIsWeb) return;
-
-    try {
-      final status = await SyncServiceV2.getSyncStatusForUI();
-      final hasError = SyncServiceV2.hasSyncError;
-      if (mounted && (_status != status || _hasError != hasError)) {
-        setState(() {
-          _status = status;
-          _hasError = hasError;
-        });
-      }
-    } catch (e) {
-      // Ignore errors
+  @override
+  void dispose() {
+    if (!kIsWeb) {
+      Api.connectionStateRevision.removeListener(_onConnectionStateChanged);
     }
+    _periodicTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onConnectionStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _refresh() {
+    if (!mounted) return;
+    setState(() {});
+    _scheduleNextCheck();
   }
 
   @override
@@ -59,51 +58,98 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
     if (kIsWeb) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final state = Api.connectionState;
+    final hasWalletSelected = Api.hasWalletSelected;
+    if (!hasWalletSelected) {
+      return Tooltip(
+        message: 'Select a wallet to sync',
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            Icons.account_balance_wallet_outlined,
+            size: 20,
+            color: ThemeColors.gray(context, shade: 600),
+          ),
+        ),
+      );
+    }
+    final isOffline = !state.isOnline;
+    final hasError = state.hasSyncError;
+    final hasAuthIssue = state.hasAuthIssue;
+    final isSynced = state.isOnline && !state.hasSyncError;
 
-    // Determine icon and color based on status
     IconData icon;
     Color color;
-
-    if (_hasError && _status == SyncStatus.unsynced) {
-      // Show warning only if there's an actual error AND unsynced
+    if (hasAuthIssue) {
+      icon = Icons.warning_amber_rounded;
+      color = ThemeColors.warning(context);
+    } else if (isOffline) {
+      icon = Icons.cloud_off_outlined;
+      color = ThemeColors.gray(context, shade: 600);
+    } else if (hasError) {
       icon = Icons.error_outline;
       color = ThemeColors.warning(context);
-    } else if (_status == SyncStatus.synced) {
+    } else if (isSynced) {
       icon = Icons.cloud_done_outlined;
       color = ThemeColors.success(context);
-    } else if (_status == SyncStatus.offline) {
-      icon = Icons.cloud_off_outlined;
-      color = ThemeColors.gray(context, shade: 500);
     } else {
-      // For syncing or unsynced (without error), show sync icon
       icon = Icons.sync;
       color = theme.colorScheme.primary;
     }
 
-    // Get tooltip text based on status
-    String tooltipText;
-    switch (_status) {
-      case SyncStatus.synced:
-        tooltipText = 'Synced';
-        break;
-      case SyncStatus.unsynced:
-        tooltipText = _hasError ? 'Sync error - tap to retry' : 'Syncing...';
-        break;
-      case SyncStatus.syncing:
-        tooltipText = 'Syncing...';
-        break;
-      case SyncStatus.offline:
-        tooltipText = 'Offline';
-        break;
-    }
+    final String tooltipText = hasAuthIssue
+        ? 'Authorization issue - tap for details'
+        : (isOffline
+            ? 'Offline - tap to check'
+            : (isSynced
+                ? 'Synced - tap to refresh'
+                : (hasError ? 'Sync error - tap to retry' : 'Syncing...')));
 
     return Tooltip(
       message: tooltipText,
-      child: Icon(
-        icon,
-        size: 20,
-        color: color,
+      child: InkWell(
+        onTap: () async {
+          if (kIsWeb) return;
+          if (hasAuthIssue) {
+            if (!mounted) return;
+            await showDialog<void>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Authorization required'),
+                content: const Text(
+                  'Your session is no longer valid. The app will keep working offline, '
+                  'but syncing is paused until you log in again.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await Api.refreshConnectionAndSync();
+                      _refresh();
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
+            return;
+          }
+          await Api.refreshConnectionAndSync();
+          _refresh();
+        },
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(
+            icon,
+            size: 20,
+            color: color,
+          ),
+        ),
       ),
     );
   }

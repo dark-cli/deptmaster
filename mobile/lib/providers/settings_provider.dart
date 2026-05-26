@@ -1,5 +1,30 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/settings_service.dart';
+import '../api.dart';
+
+// Provider for dark mode – single source of truth; no polling
+final darkModeProvider = StateNotifierProvider<DarkModeNotifier, bool>((ref) {
+  return DarkModeNotifier();
+});
+
+class DarkModeNotifier extends StateNotifier<bool> {
+  DarkModeNotifier() : super(true) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final value = await Api.getDarkMode();
+      if (state != value) state = value;
+    } catch (_) {}
+  }
+
+  Future<void> setDarkMode(bool value) async {
+    await Api.setDarkMode(value);
+    state = value;
+  }
+
+  Future<void> refresh() async => _load();
+}
 
 // Provider for flip colors that can be watched and updated
 final flipColorsProvider = StateNotifierProvider<FlipColorsNotifier, bool>((ref) {
@@ -14,7 +39,7 @@ class FlipColorsNotifier extends StateNotifier<bool> {
 
   Future<void> _loadFlipColors() async {
     try {
-      final flipColors = await SettingsService.getFlipColors();
+      final flipColors = await Api.getFlipColors();
       if (state != flipColors) {
         state = flipColors;
       }
@@ -25,7 +50,7 @@ class FlipColorsNotifier extends StateNotifier<bool> {
   }
 
   Future<void> setFlipColors(bool value) async {
-    await SettingsService.setFlipColors(value);
+    await Api.setFlipColors(value);
     state = value;
   }
 
@@ -47,7 +72,7 @@ class DueDateEnabledNotifier extends StateNotifier<bool> {
 
   Future<void> _loadDueDateEnabled() async {
     try {
-      final enabled = await SettingsService.getDueDateEnabled();
+      final enabled = await Api.getDueDateEnabled();
       if (state != enabled) {
         state = enabled;
       }
@@ -58,7 +83,7 @@ class DueDateEnabledNotifier extends StateNotifier<bool> {
   }
 
   Future<void> setDueDateEnabled(bool value) async {
-    await SettingsService.setDueDateEnabled(value);
+    await Api.setDueDateEnabled(value);
     state = value;
   }
 
@@ -79,7 +104,7 @@ class ShowDashboardChartNotifier extends StateNotifier<bool> {
 
   Future<void> _loadShowDashboardChart() async {
     try {
-      final enabled = await SettingsService.getShowDashboardChart();
+      final enabled = await Api.getShowDashboardChart();
       if (state != enabled) {
         state = enabled;
       }
@@ -89,7 +114,7 @@ class ShowDashboardChartNotifier extends StateNotifier<bool> {
   }
 
   Future<void> setShowDashboardChart(bool value) async {
-    await SettingsService.setShowDashboardChart(value);
+    await Api.setShowDashboardChart(value);
     state = value;
   }
 
@@ -110,7 +135,7 @@ class InvertYAxisNotifier extends StateNotifier<bool> {
 
   Future<void> _loadInvertYAxis() async {
     try {
-      final invert = await SettingsService.getInvertYAxis();
+      final invert = await Api.getInvertYAxis();
       if (state != invert) {
         state = invert;
       }
@@ -120,7 +145,7 @@ class InvertYAxisNotifier extends StateNotifier<bool> {
   }
 
   Future<void> setInvertYAxis(bool value) async {
-    await SettingsService.setInvertYAxis(value);
+    await Api.setInvertYAxis(value);
     state = value;
   }
 
@@ -141,7 +166,7 @@ class DashboardDefaultPeriodNotifier extends StateNotifier<String> {
 
   Future<void> _loadDashboardDefaultPeriod() async {
     try {
-      final period = await SettingsService.getDashboardDefaultPeriod();
+      final period = await Api.getDashboardDefaultPeriod();
       if (state != period) {
         state = period;
       }
@@ -151,7 +176,7 @@ class DashboardDefaultPeriodNotifier extends StateNotifier<String> {
   }
 
   Future<void> setDashboardDefaultPeriod(String period) async {
-    await SettingsService.setDashboardDefaultPeriod(period);
+    await Api.setDashboardDefaultPeriod(period);
     state = period;
   }
 

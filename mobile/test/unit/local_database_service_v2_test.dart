@@ -2,11 +2,14 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:debt_tracker_mobile/services/local_database_service_v2.dart';
 import 'package:debt_tracker_mobile/services/event_store_service.dart';
+import 'package:debt_tracker_mobile/services/wallet_service.dart';
 import 'package:debt_tracker_mobile/models/contact.dart';
 import 'package:debt_tracker_mobile/models/transaction.dart';
 import 'package:debt_tracker_mobile/models/event.dart';
+import 'package:debt_tracker_mobile/models/wallet.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -21,11 +24,13 @@ void main() {
       Hive.registerAdapter(TransactionTypeAdapter());
       Hive.registerAdapter(TransactionDirectionAdapter());
       Hive.registerAdapter(EventAdapter());
+      Hive.registerAdapter(WalletAdapter());
     });
 
     setUp(() async {
-      // Initialize services
+      SharedPreferences.setMockInitialValues({'current_wallet_id': 'test-wallet-id'});
       await EventStoreService.initialize();
+      await WalletService.initialize();
       
       // Open Hive boxes if not already open
       try {
@@ -35,6 +40,11 @@ void main() {
       }
       try {
         await Hive.openBox<Transaction>('transactions');
+      } catch (e) {
+        // Box already open
+      }
+      try {
+        await Hive.openBox<Wallet>('wallets');
       } catch (e) {
         // Box already open
       }

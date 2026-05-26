@@ -29,4 +29,10 @@ class TextUtils {
     // Left-to-Right Mark (LRM) - invisible character that forces LTR
     return '\u200E$text\u200E';
   }
+
+  /// Returns true if text contains Arabic characters.
+  static bool hasArabic(String text) {
+    if (text.isEmpty) return false;
+    return text.contains(RegExp(r'[\u0600-\u06FF]'));
+  }
 }

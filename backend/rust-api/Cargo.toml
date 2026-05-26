@@ -19,6 +19,11 @@ path = "src/bin/reset_password.rs"
 name = "set_admin_password"
 path = "src/bin/set_admin_password.rs"
 
+# [[bin]]
+# name = "manage"
+# path = "src/bin/manage.rs"
+# Commented out - file doesn't exist
+
 [dependencies]
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
@@ -70,6 +75,9 @@ chrono = { version = "0.4.38", features = ["serde"] }
 # Error handling
 anyhow = "1"
 thiserror = "1"
+
+# CLI parsing
+clap = { version = "4.5", features = ["derive"] }
 
 
 # Hashing for sync
