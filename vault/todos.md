@@ -1,55 +1,88 @@
 # TODOs & Incomplete Features
 
-## 📌 ADVANCED FEATURES IN SEPARATE BRANCHES
+## ✅ COMPLETED - MERGED FROM feature/advanced-permissions-system
 
-**feature/advanced-permissions-system** (55 commits, 3 months in development)
-- ✓ Multi-wallet system (wallets as top-level containers)
-- ✓ Advanced permission matrix (user_group × contact_group → actions)
-- ✓ Fine-grained permission actions (contact:read, transaction:update, wallet:manage_members, etc.)
-- ✓ User groups & contact groups (per wallet)
-- ✓ Wallet isolation + access control tests
-- ✓ Client-core permissions module with full test coverage
-- Status: Ready for integration review - consider merging or cherry-picking
+**Merged**: May 26, 2026 (55 commits, 3+ months of development)
 
-**feature/multi-wallet-system** (19 commits, 3 months in development)
-- ✓ Reactive wallet-scoped data providers
-- ✓ Multi-wallet UI with animations
-- Status: Mobile UI complete
+### Multi-Wallet System
+- ✅ Wallets as top-level containers (per-wallet data isolation)
+- ✅ Wallet membership with roles (owner, admin, member)
+- ✅ Database migrations (011, 012, 013)
+- ✅ Wallet handlers (create, read, update, delete, list)
+- ✅ Wallet context middleware
+
+### Advanced Permission System (Discord/Telegram Style)
+- ✅ 13+ permission actions (contact:*, transaction:*, wallet:*, events:read)
+- ✅ User groups & contact groups (per wallet)
+- ✅ Permission matrix (user_group × contact_group → actions)
+- ✅ Permission service with `can_perform()` and `resolve_allowed_actions()`
+- ✅ Database migrations (014, 017, 018, 020, 021)
+- ✅ Permission enforcement in handlers (contacts, transactions, sync)
+- ✅ APIs: `/api/wallets/:wallet_id/me/permissions`, `/api/wallets/:wallet_id/me/settings`
+
+### Testing & Validation
+- ✅ Wallet isolation tests
+- ✅ Permission enforcement tests
+- ✅ Wallet context middleware tests
+- ✅ Comprehensive integration tests
+- ✅ Client-core permissions module with full test suite
+
+### Mobile & Frontend
+- ✅ Wallet model and data providers
+- ✅ Wallet screens (selection, creation, management)
+- ✅ Mobile animations (glitch, scramble, pixelated text)
+- ✅ Flutter Rust Bridge client-core library
+- ✅ Rust/Leptos frontend
+
+### Documentation
+- ✅ ADVANCED_PERMISSIONS_PLAN.md
+- ✅ LAYERED_PERMISSION_SYSTEM_DESIGN.md
+- ✅ MERGED_FEATURES.md
 
 ---
 
-## 🚨 CRITICAL - BLOCKS PRODUCTION
+## 🚨 CRITICAL - RESOLVED BY MERGE
 
-### Data Isolation Bug (All Users Can Access Each Other's Data)
-- [ ] **URGENT: Add user_id filtering to ALL handlers** - ANY authenticated user can see/modify ALL other users' data
-  - Issue: Handlers query projections with NO WHERE user_id filter
-  - Examples: `get_contacts`, `get_transactions`, `get_settings` all return ALL data
-  - User A sees User B's contacts, transactions, settings
-  - User A can modify User B's data
-  - This completely breaks the multi-user system
-  - Solution: Every CRUD handler needs `WHERE user_id = $1` in SQL queries
-  - Affected tables: contacts_projection, transactions_projection, users_projection, settings_projection
-  - Estimated scope: ~20+ handlers need modification
+### Data Isolation (FIXED)
+- ✅ Multi-wallet system solves data isolation
+- ✅ All data now scoped to wallet_id
+- ✅ User A cannot access User B's data (different wallets/groups)
+- ✅ Permission matrix enforces access control
+- Status: RESOLVED - No longer global user_id access issue
 
-### Permission System (Admin Endpoints Accessible by Regular Users)
-- [ ] Add `is_admin` field to AuthUser struct - required for role-based access control
-- [ ] Add handler-level role checks to `/api/admin/*` endpoints - currently protected by routing only, not logic
+### Permission System (UPGRADED)
+- ✅ Replaced two-tier admin/user system with granular group-based permissions
+- ✅ Handlers now enforce permissions at code level (not just routing)
+- ✅ Support for custom user groups and contact groups
+- Status: RESOLVED - Much more sophisticated than original plan
 
 ---
 
-## Backend (Rust)
+## Backend (Rust) - Next Phase
 
-### Authentication & Authorization
-- [ ] JWT token implementation (planned)
-- [ ] Multi-user support (single user currently)
-- [ ] Role-based access control
-- [ ] Rate limiting (middleware exists, needs configuration)
+### Wallet & Permission UX (Next Priority)
+- [ ] Group management UI for admins (create/edit/delete user groups and contact groups)
+- [ ] Permission matrix UI (view/edit what each user group can do)
+- [ ] Default group selection in mobile (settings for default contact/transaction groups)
+- [ ] Dynamic contact groups (overdue, we_owe, they_owe, contacts_we_own, etc.)
+- [ ] Dynamic transaction groups (over_limit, under_limit)
+- [ ] Allow/deny permission matrix (currently allow-only)
+- [ ] Transaction groups implementation (currently placeholders)
 
-### Integration Tests
-- [ ] Complete integration_test.rs stubs (marked with TODO)
-- [ ] Transaction handler tests (test_helpers needed)
-- [ ] WebSocket integration tests
-- [ ] Database setup for test suite
+### Authentication & Authorization (COMPLETED/UPDATED)
+- ✅ JWT token implementation (done)
+- ✅ Multi-wallet support (done)
+- ✅ Role-based access control upgraded to group-based (done)
+- ✅ Rate limiting (middleware exists, configured in config.rs)
+
+### Integration Tests (UPDATED)
+- ✅ Wallet isolation tests (new)
+- ✅ Permission enforcement tests (new)
+- ✅ Wallet context middleware tests (new)
+- ✅ Comprehensive integration tests for multi-wallet sync (new)
+- [ ] WebSocket integration tests (still needed)
+- [ ] Dynamic group evaluation tests
+- [ ] Allow/deny matrix tests (future feature)
 
 ### Background Scheduler
 - [ ] Implement cleanup logic in scheduler.rs (TODO comment)
@@ -63,17 +96,38 @@
 
 ---
 
-## Mobile (Flutter)
+## Mobile (Flutter) - Client-Core Migration & Features
+
+### Client-Core Integration (NEW ARCHITECTURE)
+- ✅ Flutter Rust Bridge setup (done)
+- ✅ Debitum client-core library (done - crates/debitum_client_core)
+- ✅ Permissions module in client-core (done with full tests)
+- ✅ Wallet-scoped providers (done - wallet_data_providers.dart)
+- [ ] Migrate all mobile screens to use client-core instead of old services
+- [ ] Remove old service files (sync_service_v2.dart, projection_service.dart, etc.)
+- [ ] Use client-core for sync, CRUD, permissions
+
+### Permissions & Groups (New Functionality)
+- [ ] Display user permissions for current wallet
+- [ ] Show which actions are available based on permissions
+- [ ] Group management UI for admins (create/edit user groups, contact groups)
+- [ ] Permission matrix viewer for admins
+- [ ] Default group selection in settings screen
+- [ ] Show/hide create/edit/delete buttons based on permissions
 
 ### Sync & Conflict Resolution
-- [ ] Implement merge strategy for conflicts (SyncServiceV2, TODO comment)
+- ✅ Offline-first architecture (done in client-core)
+- ✅ Retry backoff logic (done in client-core)
+- [ ] Implement merge strategy for conflicts (client-core conflict.rs module exists)
 - [ ] Handle conflict resolution UI
-- [ ] Retry logic refinement for failed syncs
-- [ ] **Implement proper idempotency keys on client** (HIGH)
+- [ ] Display sync status and conflicts to user
+
+### Idempotency Keys (HIGH PRIORITY)
+- [ ] **Implement proper idempotency keys on client**
   - Generate UUID when form/page loads (not on submit)
-  - Store UUID in form state
+  - Store UUID in form state (or use transaction ID)
   - Send same UUID for all submit attempts
-  - Currently: Not sending Idempotency-Key header at all
+  - Currently: Not sending Idempotency-Key header
   - This prevents duplicates from network retries, UI glitches, or button re-enabling
 
 ### Features
@@ -82,16 +136,18 @@
 - [ ] Data export/import UI
 - [ ] Transaction filtering and search
 - [ ] Contact search by name/phone
+- [ ] Wallet switching notifications
 
 ### Testing
-- [ ] Unit tests for services
-- [ ] Integration tests with mock server
-- [ ] Widget tests for screens
+- ✅ Comprehensive test suite in client-core (permissions, sync, conflict, integration, stress)
+- [ ] Widget tests for new permission-aware screens
+- [ ] Integration tests with mock wallet setup
 
 ### UI Polish
 - [ ] Theme consistency across screens
-- [ ] Loading states for network requests
+- [ ] Loading states for network requests (show sync in progress)
 - [ ] Error handling UI improvements
+- [ ] Permission denied error messages (show which action user lacks permission for)
 
 ---
 
