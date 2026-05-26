@@ -167,10 +167,22 @@
   - Prevents wasted CPU/bandwidth on database server
 
 ### Configuration & Documentation
+- [ ] Review and document production defaults (backend/rust-api/src/config.rs:19-56)
+  - **CRITICAL**: JWT_SECRET default (line 36) - must be changed, less than 32 chars
+  - **CRITICAL**: DATABASE_URL default (line 28) - uses dev_password, no sslmode
+  - **CRITICAL**: ALLOWED_ORIGINS default (line 21) - allows all origins (*)
+  - **CRITICAL**: ENABLE_TLS default (line 42-45) - disabled by default
+  - RATE_LIMIT_REQUESTS default (line 48-51) - 100/60s, needs reconsideration
+  - RATE_LIMIT_WINDOW default (line 52-55) - 60s, needs reconsideration
+  - REDIS_URL default (line 30) - points to localhost
+  - Create `.env.production.example` with proper values and clear warnings
+  - Document which values MUST be changed before production deployment
+
 - [ ] Create DEPLOYMENT.md documenting secure setup
   - TLS certificate configuration
   - Database connection security
   - HTTPS/WSS requirements
+  - Production environment variables checklist
 
 - [ ] Document unimplemented features in README
   - Email support (Lettre added but unused)
