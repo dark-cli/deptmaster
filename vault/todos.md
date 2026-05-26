@@ -150,6 +150,16 @@
   - Solution: Implement per-user limits for authenticated requests + per-IP for unauthenticated
   - Consider: Is 100/60s and 500/60s appropriate for real usage patterns?
 
+### Users Architecture (Event-Sourced with Per-User Tables)
+- [ ] Convert users to event-sourced system with separate tables per user
+  - Create USER_CREATED, USER_UPDATED, USER_DELETED events
+  - Each user gets their own events table partition/shard
+  - No mixing of user data (complete isolation)
+  - Update handlers to create events before mutations
+  - Update handlers to filter queries by authenticated user_id
+  - Ensure permission checks: users can only see their own data
+  - Add permission logic for cross-user access if needed (shared transactions, etc.)
+
 ### Permissions System
 - [ ] Add `is_admin` field to AuthUser struct
   - Enable handler-level role verification
