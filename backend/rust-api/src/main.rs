@@ -8,7 +8,6 @@ use tracing::{info, error};
 
 mod config;
 mod handlers;
-mod models;
 mod services;
 mod background;
 mod database;
@@ -33,6 +32,7 @@ pub struct AppState {
     pub rate_limiter: RateLimiter,
 }
 
+//noinspection RsTypeCheck
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load environment variables
