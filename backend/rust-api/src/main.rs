@@ -57,9 +57,6 @@ async fn main() -> anyhow::Result<()> {
     let db_pool = database::new_pool(&config.database_url).await?;
     info!("Database connection pool created");
 
-    // Seed dummy data if database is empty
-    services::seed_data::seed_dummy_data(&db_pool).await?;
-
     // Initialize background scheduler (starts automatically)
     let scheduler = Arc::new(
         background::scheduler::BackgroundScheduler::new(
