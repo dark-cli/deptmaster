@@ -1,5 +1,23 @@
 # TODOs & Incomplete Features
 
+## 📌 ADVANCED FEATURES IN SEPARATE BRANCHES
+
+**feature/advanced-permissions-system** (55 commits, 3 months in development)
+- ✓ Multi-wallet system (wallets as top-level containers)
+- ✓ Advanced permission matrix (user_group × contact_group → actions)
+- ✓ Fine-grained permission actions (contact:read, transaction:update, wallet:manage_members, etc.)
+- ✓ User groups & contact groups (per wallet)
+- ✓ Wallet isolation + access control tests
+- ✓ Client-core permissions module with full test coverage
+- Status: Ready for integration review - consider merging or cherry-picking
+
+**feature/multi-wallet-system** (19 commits, 3 months in development)
+- ✓ Reactive wallet-scoped data providers
+- ✓ Multi-wallet UI with animations
+- Status: Mobile UI complete
+
+---
+
 ## 🚨 CRITICAL - BLOCKS PRODUCTION
 
 ### Data Isolation Bug (All Users Can Access Each Other's Data)
