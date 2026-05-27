@@ -224,6 +224,18 @@ tags:
 
 ## Code Cleanup & Technical Debt
 
+### Dead Code - Direct Contact/Transaction Handlers (LEGACY)
+- [ ] Remove unused direct REST endpoints for contacts/transactions
+  - **Discovery**: Mobile client uses ONLY sync API (`POST /api/sync/events`), NOT direct handlers
+  - Files affected:
+    - `backend/rust-api/src/handlers/contacts.rs` - create_contact, update_contact, delete_contact, get_contacts
+    - `backend/rust-api/src/handlers/transactions.rs` - all CRUD endpoints
+    - `backend/rust-api/src/main.rs:139-142` - route registrations
+  - **Why kept?**: Legacy from pre-sync architecture, never removed after sync API added
+  - **Impact**: Unnecessary code complexity, confusing API surface, maintenance burden
+  - **Action**: Remove handlers, routes, and verify tests still pass
+  - **Note**: Discovered May 27, 2026 - these endpoints have been dead for ~1 year, contributing to codebase bloat (~1000+ lines of unused code)
+
 ### Unused Dependencies
 - [ ] Remove Lettre (email library) — Declared in Cargo.toml, never used
   - Remove from `Cargo.toml`
