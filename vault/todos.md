@@ -536,6 +536,31 @@ if user_role != "owner" && user_role != "admin" {
   - Queries filtering by primary key (id) or using aggregates (EXISTS, COUNT) are fine
   - Prevents wasted CPU/bandwidth on database server
 
+### Database Migrations & Schema
+
+#### Documentation (COMPLETE)
+- ✅ Migration guide explaining all 21 current migrations
+  - Organized by phase (Infrastructure, Features, Security, Optimization)
+  - Each migration documented with purpose, impact, key insights
+  - See: vault/migration-guide.md
+  
+- ✅ Migration guidelines for future migrations
+  - Template with required comments (phase, purpose, impact, rollback, dependencies)
+  - Checklist before committing
+  - Common patterns and anti-patterns
+  - Phase selection guide
+  - Testing strategy
+  - See: vault/migration-guidelines.md
+
+#### Future Migrations
+- [ ] Follow migration guidelines when creating new migrations
+  - Use provided template with header comments
+  - Choose correct phase (Infrastructure, Features, Security, Optimization, Refactoring)
+  - Include purpose, impact, rollback, and dependencies
+  - Add column/table comments (COMMENT ON)
+  - Test on fresh database + test rollback
+  - See: vault/migration-guidelines.md for checklist
+
 ### Configuration & Documentation
 - [ ] Review and document production defaults (backend/rust-api/src/config.rs:19-56)
   - **CRITICAL**: JWT_SECRET default (line 36) - must be changed, less than 32 chars
