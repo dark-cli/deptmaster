@@ -299,6 +299,24 @@ tags:
   - Ensure permission checks: users can only see their own data
   - Add permission logic for cross-user access if needed (shared transactions, etc.)
 
+### Sync Hash Performance (CRITICAL)
+- [ ] Fix get_sync_hash() to use incremental calculation, not full recalc
+  - **Current**: Loads ALL events from DB, filters by permission, hashes from zero
+    - For 100K events: loads 100MB from DB, filters in app, recalculates every request
+    - Mobile calls this frequently (before every pull to detect changes)
+    - Would sink in production (DB → app traffic, memory, CPU)
+  - **Solution**: Incremental hash = previous_hash + hash(new_events_since_last_hash)
+    - Store: (wallet_id, last_hash, last_event_timestamp)
+    - On request: fetch only events since last_event_timestamp
+    - Calculate: new_hash = combine(last_hash, hash(new_events))
+    - Return: new_hash with new timestamp
+  - **Implementation**:
+    - Add `sync_hash_cache` table: (wallet_id, hash, last_event_id, last_event_timestamp)
+    - Update on every POST /api/sync/events (when events accepted)
+    - Query on GET /api/sync/hash (fetch only new events since cache)
+  - **Result**: O(new_events) instead of O(total_events)
+  - **File**: `backend/rust-api/src/handlers/sync.rs` - get_sync_hash()
+
 ### Sync Permission Failure Recovery (BACKEND)
 - [ ] Enhanced error response for sync permission failures
   - **Current**: Batch rejected with generic 403 "DEBITUM_INSUFFICIENT_PERMISSION"
