@@ -345,24 +345,58 @@ tags:
     - Alternative "accept partial": breaks atomicity, causes inconsistent state
     - With detailed errors: client can recover by removing unpermitted events and retrying
 
-### Sync Handler Refactoring (LARGE TASK)
-- [ ] Split sync.rs (2400 lines) into focused modules
-  - **Current**: Monolithic file handles push, pull, hash, projections, snapshots, validation
-  - **Issue**: Impossible to read/maintain, mixes concerns
-  - **Split into**:
-    - `sync_pull.rs` — GET /api/sync/events, get_sync_hash (pull logic)
-    - `sync_push.rs` — POST /api/sync/events (push logic, ~300 lines)
-    - `event_validator.rs` — Validate events, check permissions, check idempotency
-    - `projection_applier.rs` — Apply events to projections (contacts, transactions, permissions)
-    - `snapshot_manager.rs` — Create/restore snapshots for fast rebuilds
-    - `group_manager.rs` — Sync contact/transaction group memberships
-    - `sync_utils.rs` — Shared helpers (calculate_total_debt, event_read_allowed, etc.)
-  - **Files affected**: 
-    - Split `backend/rust-api/src/handlers/sync.rs` → new modules
-    - Update `backend/rust-api/src/handlers/mod.rs` to export submodules
-    - Update imports in `main.rs`
-  - **Testing**: Run existing sync tests after split to verify no behavior change
-  - **Note**: This is a large refactoring, estimated ~2-3 hours, but greatly improves code readability
+### Sync Handler Refactoring (PHASED APPROACH)
+
+**Strategy**: Fix bugs first (Phase 1) → Split incrementally (Phase 2) → Optimize/refactor modules (Phase 3)  
+**Rationale**: Current code works + tested. Fix critical issues first, then improve structure without full rewrite.  
+**See**: [[sync-refactoring-plan.md]] for detailed plan
+
+#### Phase 1: Critical Bug Fixes (WEEK 1)
+- [ ] Fix hash performance with incremental calculation
+  - **Current**: Loads ALL events from DB for every request (100K events = 100MB)
+  - **Fix**: Hash = previous_hash + hash(new_events_since_timestamp)
+  - **Implementation**: Add sync_hash_cache table, update on POST, query on GET
+  - **Effort**: 1-2 hours
+  - **Risk**: Low (isolated change)
+  - **File**: `backend/rust-api/src/handlers/sync.rs` - get_sync_hash()
+
+- [ ] Fix error handling for permission failures (per-event feedback)
+  - **Current**: Batch rejected with generic "DEBITUM_INSUFFICIENT_PERMISSION"
+  - **Fix**: Return detailed failed_events list with reasons
+  - **Result**: Enables client-side recovery (remove bad events, retry)
+  - **Effort**: 30-60 minutes
+  - **Risk**: Low (just error detail)
+  - **File**: `backend/rust-api/src/handlers/sync.rs` - post_sync_events()
+
+#### Phase 2: Modularization (WEEK 2-3)
+- [ ] Extract trait definitions
+  - EventValidator, EventApplier, PermissionChecker
+  - **Effort**: 1 hour
+  - **Risk**: None (just type definitions)
+
+- [ ] Split sync.rs into focused modules (SAME logic, just organized)
+  - `sync_pull.rs` — GET /api/sync/events, get_sync_hash
+  - `sync_push.rs` — POST /api/sync/events
+  - `sync_validator.rs` — Validate events, permissions, idempotency
+  - `sync_applier.rs` — Apply events to projections
+  - `sync_permission.rs` — Permission checks
+  - `sync_snapshot.rs` — Snapshot management
+  - `sync_group.rs` — Contact group sync
+  - `sync_utils.rs` — Shared helpers
+  - **Effort**: 6-8 hours (careful refactoring, test after each move)
+  - **Risk**: Medium (mitigated by tests)
+  - **Process**: Move functions → test → commit → repeat
+  - **Result**: Code is readable, same behavior, all tests pass
+
+#### Phase 3: Optimization & Cleanup (FUTURE)
+- [ ] Refactor individual modules with traits
+  - After Phase 2, make modules implement EventValidator, EventApplier traits
+  - Can do one module at a time, low risk
+  - **When**: After Phase 2 is complete and working
+
+- [ ] Further optimizations as needed
+  - Batch permission checks, use snapshots, etc.
+  - Only after modules are separated and readable
 
 ### Database & Repository Architecture
 - [ ] Implement Repository pattern with abstracted SQL queries (CODE ARCHITECTURE)
