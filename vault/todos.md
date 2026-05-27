@@ -284,6 +284,25 @@ tags:
   - Ensure permission checks: users can only see their own data
   - Add permission logic for cross-user access if needed (shared transactions, etc.)
 
+### Sync Handler Refactoring (LARGE TASK)
+- [ ] Split sync.rs (2400 lines) into focused modules
+  - **Current**: Monolithic file handles push, pull, hash, projections, snapshots, validation
+  - **Issue**: Impossible to read/maintain, mixes concerns
+  - **Split into**:
+    - `sync_pull.rs` — GET /api/sync/events, get_sync_hash (pull logic)
+    - `sync_push.rs` — POST /api/sync/events (push logic, ~300 lines)
+    - `event_validator.rs` — Validate events, check permissions, check idempotency
+    - `projection_applier.rs` — Apply events to projections (contacts, transactions, permissions)
+    - `snapshot_manager.rs` — Create/restore snapshots for fast rebuilds
+    - `group_manager.rs` — Sync contact/transaction group memberships
+    - `sync_utils.rs` — Shared helpers (calculate_total_debt, event_read_allowed, etc.)
+  - **Files affected**: 
+    - Split `backend/rust-api/src/handlers/sync.rs` → new modules
+    - Update `backend/rust-api/src/handlers/mod.rs` to export submodules
+    - Update imports in `main.rs`
+  - **Testing**: Run existing sync tests after split to verify no behavior change
+  - **Note**: This is a large refactoring, estimated ~2-3 hours, but greatly improves code readability
+
 ### Database & Repository Architecture
 - [ ] Implement Repository pattern with abstracted SQL queries (CODE ARCHITECTURE)
   - Goal: Single data access layer, all SQL in one place, handlers don't touch database
