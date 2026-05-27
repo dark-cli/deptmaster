@@ -363,6 +363,22 @@ if user_role != "owner" && user_role != "admin" {
   - Verify user is admin before executing
   - Add tests for permission boundaries
 
+- [ ] Refactor events to use trait-based permission declarations (ARCHITECTURE)
+  - Goal: Make permission requirements part of event definition, not separate mapping logic
+  - Current: Scattered match statements, separate `map_event_to_permission_action()` function
+  - Better: Each event struct implements `Event` trait with `required_permission()` method
+  - Implementation:
+    ```rust
+    pub trait Event {
+        fn required_permission(&self) -> Option<PermissionAction>;
+        fn aggregate_type(&self) -> AggregateType;
+        fn resource_type(&self) -> ResourceType;
+    }
+    ```
+  - Benefits: Single source of truth, impossible to create event without declaring permission, self-documenting
+  - Also enables: Removing hardcoded owner/admin bypass (always check permission matrix)
+  - Files: `backend/rust-api/src/handlers/sync.rs`, event definitions, sync handler
+
 - [ ] Consolidate contact:update and contact:edit aliases (PERMISSION SYSTEM)
   - Issue: Both `contact:update` and `contact:edit` refer to same action, creates confusion
   - Fix: Use single canonical action name throughout permission matrix
@@ -391,11 +407,12 @@ if user_role != "owner" && user_role != "admin" {
   - File: backend/rust-api/src/services/permission_service.rs - resolve_allowed_actions()
   - Test: Verify single query returns same permissions as current two-query approach
 
-- [ ] Normalize hardcoded owner/admin bypass to permission matrix (FUTURE REFACTORING)
-  - Current: Owner and Admin roles bypass all permission checks with hardcoded logic
-  - Better approach: Normalize to use permission matrix like other users (with "full permissions" group or similar)
-  - Benefit: Unified permission model, easier to audit/test, enables fine-grained admin permissions
-  - Note: Lower priority - current hardcoded approach is secure, but refactoring would improve consistencyif user_role != "owner" && user_role != "admin" {
+- [ ] Normalize hardcoded owner/admin bypass to permission matrix (REFACTORING WITH ENUM CONVERSION)
+  - Current: Owner and Admin roles bypass all permission checks with hardcoded logic in sync handler
+  - Better approach: Owner/Admin still have permissions in matrix (unrestricted group or "all actions"), but everyone goes through same `can_perform()` check
+  - Implementation: When converting to Event traits (required_permission on each event), ALWAYS call permission_service::can_perform() for every user including owner/admin
+  - Benefit: Unified permission model, single source of truth, impossible for owner/admin to bypass permissions by accident, easier to audit/test
+  - Related: This refactoring pairs with Event struct trait approach (event declares required_permission)if user_role != "owner" && user_role != "admin" {
         for contact_group_id in &group_id
 
 ### Database Query Performance
