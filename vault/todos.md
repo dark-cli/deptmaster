@@ -1,4 +1,18 @@
+---
+tags:
+  - planning
+---
+
 # TODOs & Incomplete Features
+
+**Quick Navigation**:
+- ✅ [Completed Work](#completed---merged-from-feature-advanced-permissions-system) (55 commits merged)
+- 🔴 [HIGH PRIORITY](#high-priority-items) (Critical bugs, missing auth)
+- 🟡 [MEDIUM PRIORITY](#medium-priority-items) (Important features, refactoring)
+- 🟢 [LOW PRIORITY](#low-priority-items) (Nice-to-have, optimizations)
+- 📋 [External Checklists](#external-checklists-deployment--security) (Deployment, security hardening)
+
+---
 
 ## ✅ COMPLETED - MERGED FROM feature/advanced-permissions-system
 
@@ -35,9 +49,9 @@
 - ✅ Rust/Leptos frontend
 
 ### Documentation
-- ✅ ADVANCED_PERMISSIONS_PLAN.md
+- ✅ advanced-permissions-plan.md
 - ✅ LAYERED_PERMISSION_SYSTEM_DESIGN.md
-- ✅ MERGED_FEATURES.md
+- ✅ merged-features.md
 
 ---
 
@@ -58,9 +72,31 @@
 
 ---
 
-## Backend (Rust) - Next Phase
+## 🔴 HIGH PRIORITY ITEMS
 
-### Wallet & Permission UX (Next Priority)
+### Authentication & Authorization Fixes (CRITICAL)
+- [ ] Fix create_wallet handler missing AuthUser extraction (CODE TODO)
+  - File: `backend/rust-api/src/handlers/wallets.rs`
+  - Issue: Uses `SELECT id FROM users_projection LIMIT 1` instead of extracting user from auth
+  - Fix: Extract AuthUser from middleware, use authenticated user_id
+  - Test: Verify wallet creation is attributed to correct user
+
+- [ ] Enforce TLS encryption for database connections (CRITICAL)
+  - Make `sslmode=require` mandatory for production
+  - Update `docker-compose.yml` to include `?sslmode=require`
+  - Update `config.rs` to ERROR (not warn) in production
+
+- [ ] Enforce HTTPS for client-to-backend connection (CRITICAL)
+  - Make `ENABLE_TLS=true` default for backend
+  - Make `useHttps()=true` default for mobile client
+
+---
+
+## 🟡 MEDIUM PRIORITY ITEMS
+
+### Backend (Rust) - Next Phase
+
+### Wallet & Permission UX
 - [ ] Group management UI for admins (create/edit/delete user groups and contact groups)
 - [ ] Permission matrix UI (view/edit what each user group can do)
 - [ ] Default group selection in mobile (settings for default contact/transaction groups)
@@ -103,9 +139,9 @@
 - ✅ Debitum client-core library (done - crates/debitum_client_core)
 - ✅ Permissions module in client-core (done with full tests)
 - ✅ Wallet-scoped providers (done - wallet_data_providers.dart)
-- [ ] Migrate all mobile screens to use client-core instead of old services
-- [ ] Remove old service files (sync_service_v2.dart, projection_service.dart, etc.)
-- [ ] Use client-core for sync, CRUD, permissions
+- ✅ Migrate all mobile screens to use client-core (DONE - all screens use Api FFI wrapper)
+- ✅ Remove old service files (DONE - no old services found in codebase)
+- ✅ Use client-core for sync, CRUD, permissions (DONE - api.dart is thin FFI wrapper)
 
 ### Permissions & Groups (New Functionality)
 - [ ] Display user permissions for current wallet
@@ -151,9 +187,11 @@
 
 ---
 
-## General Architecture
+## 🟢 LOW PRIORITY ITEMS
 
-### Security
+### General Architecture
+
+### Security (Hardening - See docs/SECURITY.md for checklist)
 - [ ] Production deployment security hardening
 - [ ] HTTPS/TLS enforcement
 - [ ] Secure session management
@@ -234,7 +272,77 @@
   - Ensure permission checks: users can only see their own data
   - Add permission logic for cross-user access if needed (shared transactions, etc.)
 
-### Permissions System
+### Database & Repository Architecture
+- [ ] Implement Repository pattern with abstracted SQL queries (CODE ARCHITECTURE)
+  - Goal: Single data access layer, all SQL in one place, handlers don't touch database
+  - Create: `backend/rust-api/src/database/queries.rs` - all SQL strings as constants
+  - Create: `backend/rust-api/src/database/repository.rs` - DatabaseRepository trait + Database impl
+  - Structure:
+    ```
+    database/
+    ├── queries.rs          ← ALL SQL (Queries::LIST_CONTACTS, Queries::CREATE_CONTACT, etc.)
+    └── repository.rs       ← DatabaseRepository trait + Database impl (functions call queries)
+    ```
+  - Rules: Only `Database` struct calls `sqlx::query()`, handlers call `db.list_contacts()` etc.
+  - Benefits: Single point of DB access, all SQL auditable in one file, testable, no SQL in handlers
+  - Refactor: Move all inline SQL from handlers/middleware into `queries.rs`
+
+### Middleware & Routing Cleanup
+- [ ] Standardize wallet_id extraction to path parameters only (CODE CLEANUP)
+  - File: `backend/rust-api/src/middleware/wallet_context.rs`
+  - Issue: Supports 3 methods with unclear precedence: query param (`?wallet_id=`), header (`X-Wallet-Id`), path (`/api/wallets/:id/`)
+  - Fix: Extract wallet_id ONLY from path (REST standard) - `/api/wallets/:id/...`
+  - Remove: Query param and header extraction fallbacks
+  - Reason: Single source of truth, clearer intent, easier debugging, better security
+  - Test: Verify all endpoints still extract wallet_id correctly
+
+- [ ] Optimize wallet_context middleware to eliminate double-fetch (PERFORMANCE)
+  - Issue: Middleware fetches wallet to validate existence, then handler fetches same wallet again
+  - Fix: Cache wallet info in request extension, handlers reuse from middleware
+  - File: backend/rust-api/src/middleware/wallet_context.rs
+  - Benefit: Reduce database queries by 1 per request to wallet endpoints
+  - Audit: Check entire codebase for similar double-fetch patterns
+
+- [ ] Audit codebase for double-fetch patterns (CODE OPTIMIZATION)
+  - Search for: Middleware fetching data that handlers also fetch
+  - Example: wallet_context fetching wallet info, handlers fetching same wallet
+  - Document: All instances found and optimize them
+  - Pattern: Cache in request extensions when middleware already has the data
+
+### Missing Middleware (Future)
+- [ ] Permission enforcement middleware (NICE-TO-HAVE)
+  - Currently: Permission checks scattered in handlers (contacts.rs, transactions.rs, etc.)
+  - Idea: Create middleware that checks permissions before handler runs
+  - Requires: Resource type/id in request, permission service integration
+  - Benefit: Centralized permission logic, consistent enforcement, testable
+
+- [ ] Audit logging middleware (MEDIUM PRIORITY)
+  - Log all database mutations (INSERT, UPDATE, DELETE)
+  - Include: who (user_id), what (operation), when (timestamp), where (wallet_id)
+  - Purpose: Compliance, debugging, security audit trail
+  - Store: In events table or separate audit_log table
+
+- [ ] Request ID correlation middleware (LOW PRIORITY)
+  - Generate/extract request ID for all requests
+  - Inject into logs and responses (X-Request-ID header)
+  - Purpose: Trace requests across logs, helpful for debugging distributed issues
+if user_role != "owner" && user_role != "admin" {
+        for contact_group_id in &group_id
+- [ ] Caching headers middleware (LOW PRIORITY)
+  - Add appropriate Cache-Control headers based on endpoint
+  - GET endpoints: cacheable, POST/PUT/DELETE: no-cache
+  - Purpose: Improve mobile app performance, reduce bandwidth
+
+### Permissions System (Architecture)
+- [ ] Separate admin/user auth into distinct route groups and middleware
+  - Currently: middleware checks `if path.starts_with("/api/admin/")` and admin token restrictions
+  - Target: Create `admin_routes` (admin_auth_middleware), `user_routes` (user_auth_middleware), `shared_routes` (auth_middleware)
+  - Admin routes require `is_admin=true`
+  - User routes require `is_admin=false` (deny admin tokens)
+  - Shared routes allow both
+  - Test: Verify each group enforces its constraints
+  - Reason: Separate concerns, routing defines authorization intent, middleware only validates
+
 - [ ] Add `is_admin` field to AuthUser struct
   - Enable handler-level role verification
   - Move from route-only protection to logic-level protection
@@ -242,6 +350,41 @@
 - [ ] Add handler-level role checks to `/api/admin/*` endpoints
   - Verify user is admin before executing
   - Add tests for permission boundaries
+
+- [ ] Consolidate contact:update and contact:edit aliases (PERMISSION SYSTEM)
+  - Issue: Both `contact:update` and `contact:edit` refer to same action, creates confusion
+  - Fix: Use single canonical action name throughout permission matrix
+  - Update: Handlers, permission service, permission matrix resolution
+  - Reason: Cleaner permission model, no ambiguity in matrix
+
+- [ ] Define clear wallet role semantics (PERMISSION SYSTEM)
+  - **OWNER**: Immovable role, cannot be removed, has all permissions, bypasses all checks
+  - **ADMIN**: Conditional permission manager, manages other users' permissions BUT cannot modify own permissions
+  - **MEMBER**: Group-based permissions, resolved via permission matrix
+  - Add: Role semantics documentation to permission system deep dive
+  - Enforce: Admin cannot change own permissions (prevent privilege escalation)
+  - Test: Verify owner immovability, admin self-permission protection
+
+- [ ] Optimize events:read permission enforcement (PERMISSION SYSTEM - FUTURE)
+  - Current: events:read permission currently not enforced at API level (all users can GET /api/sync/events)
+  - Optimization: For users without events:read permission, send projections instead of full event history
+  - Benefit: Allows fine-grained event access control while maintaining performance
+  - Implementation: Send contact/transaction projections to non-permitted users, full events to permitted users
+  - Note: Document this approach for future implementation after refactoring event API
+
+- [ ] Optimize permission matrix resolution to single SQL query (PERMISSION SYSTEM)
+  - Current approach: Fetch user_group + contact_group contexts, then query permission matrix separately
+  - Better approach: Single SQL JOIN query resolving user groups + contact groups + permissions in one call
+  - Benefit: Reduced database round-trips, cleaner code, better performance
+  - File: backend/rust-api/src/services/permission_service.rs - resolve_allowed_actions()
+  - Test: Verify single query returns same permissions as current two-query approach
+
+- [ ] Normalize hardcoded owner/admin bypass to permission matrix (FUTURE REFACTORING)
+  - Current: Owner and Admin roles bypass all permission checks with hardcoded logic
+  - Better approach: Normalize to use permission matrix like other users (with "full permissions" group or similar)
+  - Benefit: Unified permission model, easier to audit/test, enables fine-grained admin permissions
+  - Note: Lower priority - current hardcoded approach is secure, but refactoring would improve consistencyif user_role != "owner" && user_role != "admin" {
+        for contact_group_id in &group_id
 
 ### Database Query Performance
 - [ ] Add LIMIT 1 to all queries that aren't filtered by unique columns
@@ -286,6 +429,21 @@
 
 ---
 
+---
+
+## External Checklists (Deployment & Security)
+
+These are detailed checklists in separate documents, not development tasks:
+- **docs/DEPLOYMENT.md** — Deployment checklist for production (TLS, passwords, CORS, rate limiting, etc.)
+- **docs/SECURITY.md** — Security hardening checklist (JWT_SECRET, ALLOWED_ORIGINS, HTTPS, monitoring, backups, etc.)
+- **vault/code-cleanup.md** — Explanatory document for cleanup issues (see Unused Dependencies section above)
+
+**Note**: MULTI_WALLET_SYSTEM_PLAN.md and BRANCH_FOLLOW_UPS.md are completed planning documents from the merged feature branch and are kept for historical reference only.
+
+---
+
 ## Related Notes
 - [[architecture.md]] - Context for these TODOs
 - [[decisions.md]] - Design decisions that affect these items
+- [[reading-guide.md]] - Navigation guide for vault documentation
+- [[permission-system-deep-dive.md]] - Current permission system implementation details
