@@ -158,6 +158,21 @@ tags:
 - [ ] Handle conflict resolution UI
 - [ ] Display sync status and conflicts to user
 
+### Sync Permission Failure Recovery (CLIENT - FUTURE)
+- [ ] Client-side sync failure recovery system (DEPENDS ON: enhanced backend error response)
+  - **What**: Detect permission failures, remove unpermitted events, retry sync
+  - **Why**: When batch rejected due to permission, user needs way to recover
+  - **Flow**:
+    1. Sync batch rejected (backend returns detailed error per event)
+    2. Client parses failed_events list
+    3. Option A: Auto-remove unpermitted events, retry
+    4. Option B: Show "X operations blocked" dialog, let user confirm removal
+    5. Retry sync with cleaned batch
+    6. User unblocked
+  - **Files**: crates/debitum_client_core/src/sync.rs (push_unsynced)
+  - **Note**: Only implement after backend returns detailed error response
+  - Related: WebSocket migration should include this recovery from start
+
 ### Idempotency Keys (HIGH PRIORITY)
 - [ ] **Implement proper idempotency keys on client**
   - Generate UUID when form/page loads (not on submit)
@@ -283,6 +298,34 @@ tags:
   - Update handlers to filter queries by authenticated user_id
   - Ensure permission checks: users can only see their own data
   - Add permission logic for cross-user access if needed (shared transactions, etc.)
+
+### Sync Permission Failure Recovery (BACKEND)
+- [ ] Enhanced error response for sync permission failures
+  - **Current**: Batch rejected with generic 403 "DEBITUM_INSUFFICIENT_PERMISSION"
+  - **Issue**: User doesn't know which event failed or why, can't recover
+  - **Solution**: Return detailed failure information per event
+  - Implementation:
+    ```json
+    {
+      "error": "DEBITUM_SYNC_PERMISSION_DENIED",
+      "failed_events": [
+        {
+          "event_id": "uuid-3",
+          "aggregate_type": "contact",
+          "event_type": "CREATED",
+          "required_permission": "contact:create",
+          "reason": "User lacks permission"
+        }
+      ],
+      "accepted_count": 0,
+      "total_count": 3
+    }
+    ```
+  - File: `backend/rust-api/src/handlers/sync.rs` - post_sync_events error response
+  - Benefit: Enables client-side recovery (remove failed events, retry batch)
+  - Note: Architecture decision: reject entire batch (atomic) + detailed error (recovery-friendly) is correct
+    - Alternative "accept partial": breaks atomicity, causes inconsistent state
+    - With detailed errors: client can recover by removing unpermitted events and retrying
 
 ### Sync Handler Refactoring (LARGE TASK)
 - [ ] Split sync.rs (2400 lines) into focused modules
