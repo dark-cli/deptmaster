@@ -158,7 +158,7 @@ async fn test_granting_permission_allows_create_contact() {
         email: None,
         notes: None,
         comment: "I have power now".to_string(),
-        group_ids: None,
+        group_ids: Some(vec![cg_id.to_string()]),
     };
 
     let result = create_contact(

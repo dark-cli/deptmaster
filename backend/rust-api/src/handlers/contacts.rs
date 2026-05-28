@@ -127,10 +127,7 @@ pub async fn create_contact(
     };
     // Owner/admin can create without specifying groups (contact goes to all_contacts). Members must assign to at least one group they have contact:create in.
     if group_ids.is_empty() && wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Contact must be assigned to at least one group you have create permission in"})),
-        ));
+        return Err(permission_service::insufficient_permission_response());
     }
     if wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
         for cg_id in &group_ids {
