@@ -682,3 +682,88 @@ async fn test_undo_event_with_snapshot_rebuild() {
     .unwrap();
     assert!(contact_exists, "Contact should exist after rebuild");
 }
+
+#[tokio::test]
+#[ignore] // Ignore by default - requires test database
+async fn test_undo_synced_at_window_validation() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    let config = Arc::new(Config::from_env().unwrap());
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    let contact_id = Uuid::new_v4();
+
+    // 1. Create and sync an event
+    let event_id = Uuid::new_v4();
+    let create_event = SyncEventRequest {
+        id: event_id.to_string(),
+        aggregate_type: "contact".to_string(),
+        aggregate_id: contact_id.to_string(),
+        event_type: "CREATED".to_string(),
+        event_data: json!({
+            "name": "Test Contact",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let response = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
+        axum::Json(vec![create_event]),
+    ).await.unwrap().0;
+
+    assert!(response.accepted.contains(&event_id.to_string()), "Event should be accepted");
+
+    // 2. Verify event is in database with synced_at set (should be now)
+    let synced_at: chrono::NaiveDateTime = sqlx::query_scalar(
+        "SELECT synced_at FROM events WHERE event_id = $1 AND wallet_id = $2"
+    )
+    .bind(event_id)
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let now = chrono::Utc::now().naive_utc();
+    let time_diff = now.signed_duration_since(synced_at);
+    assert!(time_diff.num_seconds() <= 2, "synced_at should be very recent (within 2 seconds)");
+
+    // 3. Create UNDO event shortly after (should be accepted - within 5 second window)
+    let undo_event_id = Uuid::new_v4();
+    let undo_event = SyncEventRequest {
+        id: undo_event_id.to_string(),
+        aggregate_type: "contact".to_string(),
+        aggregate_id: contact_id.to_string(),
+        event_type: "UNDO".to_string(),
+        event_data: json!({
+            "undone_event_id": event_id.to_string(),
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let response = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
+        axum::Json(vec![undo_event]),
+    ).await.unwrap().0;
+
+    assert!(
+        response.accepted.contains(&undo_event_id.to_string()),
+        "UNDO event should be accepted (within 5 second window from synced_at)"
+    );
+}
