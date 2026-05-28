@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     http::{Request, Response},
     Router,
-    routing::{get, post, put, delete},
+    routing::{get, post},
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -136,14 +136,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Protected API routes that require wallet context
     let wallet_protected_routes = Router::new()
-        .route("/api/contacts", get(handlers::get_contacts))
-        .route("/api/contacts", post(handlers::create_contact))
-        .route("/api/contacts/:id", put(handlers::update_contact))
-        .route("/api/contacts/:id", delete(handlers::delete_contact))
-        .route("/api/transactions", get(handlers::get_transactions))
-        .route("/api/transactions", post(handlers::create_transaction))
-        .route("/api/transactions/:id", put(handlers::update_transaction))
-        .route("/api/transactions/:id", delete(handlers::delete_transaction))
         .route("/api/sync/hash", get(handlers::get_sync_hash))
         .route("/api/sync/events", get(handlers::get_sync_events))
         .route("/api/sync/events", post(handlers::post_sync_events))
@@ -190,8 +182,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/admin/events", get(handlers::get_events))
         .route("/api/admin/events/latest", get(handlers::get_latest_event_id))
         .route("/api/admin/events/backfill-transactions", post(handlers::backfill_transaction_events))
-        .route("/api/admin/contacts", get(handlers::get_admin_contacts))
-        .route("/api/admin/transactions", get(handlers::get_admin_transactions))
         .route("/api/admin/projections/status", get(handlers::get_projection_status))
         .route("/api/admin/total-debt", get(handlers::get_total_debt))
         .route("/api/admin/projections/rebuild", axum::routing::post(rebuild_projections))

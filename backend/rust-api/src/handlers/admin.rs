@@ -56,66 +56,6 @@ impl<'r> FromRow<'r, PgRow> for EventResponse {
 }
 
 #[derive(Serialize)]
-pub struct ContactResponse {
-    pub id: String,
-    pub name: String,
-    pub username: Option<String>,
-    pub email: Option<String>,
-    pub phone: Option<String>,
-    pub balance: i64,  // Net balance: positive = they owe you, negative = you owe them
-    pub is_deleted: bool,
-    pub created_at: chrono::NaiveDateTime,
-}
-
-impl<'r> FromRow<'r, PgRow> for ContactResponse {
-    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            id: row.try_get::<uuid::Uuid, _>("id")?.to_string(),
-            name: row.try_get("name")?,
-            username: row.try_get("username").ok(),
-            email: row.try_get("email")?,
-            phone: row.try_get("phone")?,
-            balance: row.try_get("balance")?,
-            is_deleted: row.try_get("is_deleted")?,
-            created_at: row.try_get("created_at")?,
-        })
-    }
-}
-
-#[derive(Serialize)]
-pub struct TransactionResponse {
-    pub id: String,
-    pub contact_id: String,
-    pub r#type: String,
-    pub direction: String,
-    pub amount: i64,
-    pub currency: Option<String>,
-    pub description: Option<String>,
-    pub transaction_date: chrono::NaiveDate,
-    pub due_date: Option<chrono::NaiveDate>,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
-}
-
-impl<'r> FromRow<'r, PgRow> for TransactionResponse {
-    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
-        Ok(Self {
-            id: row.try_get::<uuid::Uuid, _>("id")?.to_string(),
-            contact_id: row.try_get::<uuid::Uuid, _>("contact_id")?.to_string(),
-            r#type: row.try_get("type")?,
-            direction: row.try_get("direction")?,
-            amount: row.try_get("amount")?,
-            currency: row.try_get("currency").ok(),
-            description: row.try_get("description").ok(),
-            transaction_date: row.try_get("transaction_date")?,
-            due_date: row.try_get("due_date").ok(),
-            created_at: row.try_get("created_at")?,
-            updated_at: row.try_get("updated_at")?,
-        })
-    }
-}
-
-#[derive(Serialize)]
 pub struct ProjectionStatus {
     pub last_event_id: Option<i64>,
     pub projections_updated: Option<bool>,
@@ -506,67 +446,6 @@ pub async fn backfill_transaction_events(
         "errors": error_count,
         "total_processed": total_count
     })))
-}
-
-pub async fn get_contacts(
-    Query(params): Query<AdminListQuery>,
-    State(state): State<AppState>,
-) -> Result<Json<Vec<ContactResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    // Optional wallet filter: when wallet_id is None or empty, show all; otherwise filter.
-    let contacts = sqlx::query_as::<_, ContactResponse>(
-        r#"
-        SELECT 
-            c.id, c.name, c.username, c.email, c.phone,
-            COALESCE(SUM(CASE WHEN t.direction = 'lent' THEN t.amount WHEN t.direction = 'owed' THEN -t.amount ELSE 0 END)::BIGINT, 0) as balance,
-            c.is_deleted, c.created_at
-        FROM contacts_projection c
-        LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = c.wallet_id
-        WHERE c.is_deleted = false AND ($1::text IS NULL OR $1 = '' OR c.wallet_id::text = $1)
-        GROUP BY c.id, c.name, c.username, c.email, c.phone, c.is_deleted, c.created_at, c.wallet_id
-        ORDER BY ABS(COALESCE(SUM(CASE WHEN t.direction = 'lent' THEN t.amount WHEN t.direction = 'owed' THEN -t.amount ELSE 0 END)::BIGINT, 0)) DESC, c.name
-        "#
-    )
-    .bind(params.wallet_id.as_deref())
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching contacts: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-        )
-    })?;
-
-    Ok(Json(contacts))
-}
-
-#[allow(dead_code)]
-pub async fn get_transactions(
-    Query(params): Query<AdminListQuery>,
-    State(state): State<AppState>,
-) -> Result<Json<Vec<TransactionResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    let transactions = sqlx::query_as::<_, TransactionResponse>(
-        r#"
-        SELECT t.id, t.contact_id, t.type, t.direction, t.amount, t.currency, t.description,
-            t.transaction_date, t.due_date, t.created_at, t.updated_at
-        FROM transactions_projection t
-        INNER JOIN contacts_projection c ON c.id = t.contact_id AND c.wallet_id = t.wallet_id
-        WHERE t.is_deleted = false AND c.is_deleted = false AND ($1::text IS NULL OR $1 = '' OR t.wallet_id::text = $1)
-        ORDER BY t.transaction_date DESC
-        "#
-    )
-    .bind(params.wallet_id.as_deref())
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching transactions: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-        )
-    })?;
-
-    Ok(Json(transactions))
 }
 
 pub async fn get_projection_status(

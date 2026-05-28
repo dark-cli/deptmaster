@@ -55,8 +55,8 @@ async fn test_sync_read_permission_filter_and_full_pull() {
     let pool = setup_test_db().await;
 
     // Users: owner (full access), member (limited contact:read via group "Limited")
-    let owner_id = create_test_user_with_email(&pool, "owner@test.local").await;
-    let member_id = create_test_user_with_email(&pool, "member@test.local").await;
+    let owner_id = create_test_user_with_email(&pool, &format!("owner-{}@test.local", Uuid::new_v4())).await;
+    let member_id = create_test_user_with_email(&pool, &format!("member-{}@test.local", Uuid::new_v4())).await;
 
     let wallet_id = create_test_wallet(&pool, "Shared Wallet").await;
     add_user_to_wallet(&pool, owner_id, wallet_id, "owner").await;
