@@ -141,5 +141,5 @@ Database:
 
 ## Related Documentation
 - [[auth.md]] - JWT authentication and middleware
-- [[permissions.md]] - Detailed permissions system analysis
+- [[permission-system-deep-dive.md]] - Detailed permissions system analysis
 - [[architecture.md]] - System architecture overview

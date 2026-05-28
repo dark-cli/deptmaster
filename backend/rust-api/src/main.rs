@@ -91,9 +91,6 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("Migrations applied");
 
-    // Seed dummy data if database is empty
-    services::seed_data::seed_dummy_data(&db_pool).await?;
-
     // Initialize background scheduler (starts automatically)
     let scheduler = Arc::new(
         background::scheduler::BackgroundScheduler::new(

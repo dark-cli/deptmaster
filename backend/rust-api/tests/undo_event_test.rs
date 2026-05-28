@@ -42,6 +42,7 @@ async fn test_undo_event_validation() {
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![invalid_undo.clone()]),
     ).await;
 
@@ -66,6 +67,7 @@ async fn test_undo_event_validation() {
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![invalid_uuid_undo.clone()]),
     ).await;
 
@@ -91,6 +93,7 @@ async fn test_undo_event_validation() {
     let result = post_sync_events(
         axum::extract::State(app_state),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![valid_undo.clone()]),
     ).await;
 
@@ -136,6 +139,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![created_event.clone()]),
     ).await;
 
@@ -157,6 +161,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![updated_event.clone()]),
     ).await;
 
@@ -189,6 +194,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![undo_event.clone()]),
     ).await;
 
@@ -244,6 +250,7 @@ async fn test_undo_event_syncs_correctly() {
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![original_event.clone()]),
     ).await;
 
@@ -266,6 +273,7 @@ async fn test_undo_event_syncs_correctly() {
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
+        auth_user_extension(user_id, None),
         axum::Json(vec![undo_event.clone()]),
     ).await;
 
@@ -335,6 +343,7 @@ async fn test_undo_event_creates_snapshot() {
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
     }
@@ -363,6 +372,7 @@ async fn test_undo_event_creates_snapshot() {
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(vec![undo_event]),
     ).await;
 
@@ -416,6 +426,7 @@ async fn test_event_validation_rejects_invalid_undo() {
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(vec![no_undone_id.clone()]),
     ).await;
     let response = result.unwrap().0;
@@ -437,6 +448,7 @@ async fn test_event_validation_rejects_invalid_undo() {
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(vec![invalid_uuid.clone()]),
     ).await;
     let response = result.unwrap().0;
@@ -458,6 +470,7 @@ async fn test_event_validation_rejects_invalid_undo() {
     let result = post_sync_events(
         axum::extract::State(app_state),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(vec![valid_structure.clone()]),
     ).await;
     let response = result.unwrap().0;

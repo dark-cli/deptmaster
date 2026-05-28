@@ -31,11 +31,7 @@ pub async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Allow health check and login endpoints without auth
     let path = req.uri().path();
-    if path == "/health" || path == "/api/auth/login" || path == "/api/auth/admin/login" {
-        return Ok(next.run(req).await);
-    }
 
     /// 401 with clear code so client only logs out when server explicitly says auth declined (not on network errors).
     fn auth_declined_response() -> Response {

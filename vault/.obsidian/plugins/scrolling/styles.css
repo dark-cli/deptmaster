@@ -1,0 +1,154 @@
+/*
+ *
+ * name: Scrolling
+ * id: scrolling
+ *
+ */
+
+/* --- Scrollbar --- */
+/* hide specific scrollbars in files */
+body.scrolling-visibility-hide *::-webkit-scrollbar {
+    display: none;
+}
+
+/* hide scrollbar temporarily */
+body.scrolling-visibility-scroll *:not(.scrolling-show-temporary)::-webkit-scrollbar:not(:hover),
+body.scrolling-visibility-scroll *:not(.scrolling-show-temporary)::-webkit-scrollbar-thumb:not(:hover),
+body.scrolling-visibility-scroll *:not(.scrolling-show-temporary)::-webkit-scrollbar-track:not(:hover) {
+    background: transparent !important;
+}
+
+/* scrollbar width */
+body.scrolling-scrollbar-width *::-webkit-scrollbar {
+    width: var(--scrolling-scrollbar-width) !important;
+    height: var(--scrolling-scrollbar-width) !important;
+}
+
+/* --- Code blocks --- */
+/* source view */
+body.scrolling-horizontal-code-blocks .markdown-source-view .HyperMD-codeblock.cm-line:not(.HyperMD-codeblock-begin):not(.HyperMD-codeblock-end) {
+    overflow-x: hidden;
+    white-space: nowrap;
+    position: relative;
+    will-change: scroll-position;
+    touch-action: pan-y pinch-zoom;
+}
+
+body.scrolling-horizontal-code-blocks .markdown-source-view .HyperMD-codeblock.cm-line:not(.HyperMD-codeblock-begin):not(.HyperMD-codeblock-end)::after {
+    content: '';
+    display: inline-block;
+    width: calc(var(--scrolling-extra-line-length) + var(--size-4-4));
+    height: 0;
+    cursor: text;
+}
+
+body.scrolling-horizontal-code-blocks .markdown-source-view .HyperMD-codeblock.cm-line:not(.HyperMD-codeblock-begin):not(.HyperMD-codeblock-end):has(br):not(:has(span)) {
+    max-height: calc(1em * var(--line-height-normal));
+}
+
+.HyperMD-codeblock .cm-line>.cm-hmd-codeblock {
+    display: inline-block;
+    vertical-align: top;
+}
+
+body.scrolling-horizontal-code-blocks .markdown-source-view .cm-indent::before {
+    cursor: text;
+}
+
+body.scrolling-horizontal-code-blocks .markdown-source-view .HyperMD-codeblock.cm-line::-webkit-scrollbar {
+    display: none;
+}
+
+body.scrolling-horizontal-code-blocks .markdown-source-view .HyperMD-codeblock.cm-line br {
+    height: 0px;
+    content: "";
+}
+
+body.scrolling-horizontal-code-blocks .markdown-source-view .HyperMD-codeblock.HyperMD-codeblock-begin.cm-line {
+    padding-bottom: 0.3rem;
+}
+
+/* preview view */
+body.scrolling-horizontal-code-blocks .markdown-preview-view pre>code {
+    white-space: pre;
+    overflow-x: auto;
+    display: block;
+    cursor: text;
+}
+
+/* --- Mathjax --- */
+/* scrollable inline mathjax if exceeding view */
+body.scrolling-horizontal-mathjax span.math {
+    overflow: auto;
+    max-width: 100%;
+    display: inline-block;
+    vertical-align: top;
+}
+
+/* --- File tree --- */
+body.scrolling-horizontal-filetree .nav-files-container {
+    overflow: auto;
+}
+
+body.scrolling-horizontal-filetree .nav-files-container>div {
+    min-width: max-content;
+    min-height: max-content;
+}
+
+body.scrolling-horizontal-filetree .tree-item-self.nav-file-title,
+body.scrolling-horizontal-filetree .tree-item-self.nav-folder-title {
+    flex-shrink: 0;
+}
+
+/* --- Image zoom --- */
+body.scrolling-image-zoom-enabled img:not(.cm-widgetBuffer) {
+    transform-origin: top left;
+}
+
+/* prevent overflow for images in tables in source view (overflow: hidden) */
+/* prevent overflow for images in tables in preview view (display: inline-block) */
+body.scrolling-image-zoom-enabled .cm-content div.image-embed,
+body.scrolling-image-zoom-enabled .cm-content div.image-embed div.image-wrapper,
+body.scrolling-image-zoom-enabled .cm-content span.image-embed {
+    overflow: hidden;
+    display: inline-block;
+}
+
+/* prevent overflow for images in tables in preview view */
+body.scrolling-image-zoom-enabled .el-p:has(img:not(.cm-widgetBuffer)) {
+    overflow: hidden;
+}
+
+body.scrolling-image-zoom-enabled div.image-container {
+    display: block;
+    overflow: hidden;
+}
+
+/* --- Scroll buttons --- */
+#scrolling-overlay-button {
+    position: absolute;
+    bottom: 40px;
+    right: 20px;
+    z-index: 9999;
+}
+
+#scrolling-overlay-button svg {
+    width: 100%;
+    height: 100%;
+}
+
+#scrolling-overlay-button > button {
+    width: 30px;
+    height: 30px;
+
+    margin: 5px;
+    padding: 15%;
+
+    color: var(--text-color);
+    background-color: var(--background-primary-alt);
+}
+
+#scrolling-overlay-button > button:hover {
+    color: var(--text-on-accent);
+    background-color: var(--interactive-accent-hover);
+}

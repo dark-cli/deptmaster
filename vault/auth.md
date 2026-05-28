@@ -1,3 +1,9 @@
+---
+tags:
+  - auth
+  - middleware
+---
+
 # Authentication Middleware
 
 ## Overview
@@ -146,4 +152,4 @@ pub struct AuthResponse {
 ```
 
 ## Related Notes
-- [[permissions.md]] - User roles, admin vs regular user distinction, access control
+- [[permission-system-deep-dive.md]] - Group-based permissions and access control

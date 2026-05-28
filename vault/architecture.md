@@ -1,8 +1,14 @@
+---
+tags:
+  - architecture
+  - design
+---
+
 # Architecture
 
-## Project Overview
-
 **Debt Tracker** is an offline-first debt management app with event-sourced architecture, real-time sync, and cross-platform support (iOS, Android, Web, Linux Desktop).
+
+## Project Overview
 
 ## Tech Stack
 
@@ -83,7 +89,8 @@ Both services share PostgreSQL, broadcast channel, and event sourcing layer.
 ## Related Notes
 - [[backend-reader-guide.md]] - Step-by-step guide to reading the backend code
 - [[auth.md]] - JWT authentication and middleware
-- [[permissions.md]] - User roles and access control
+- [[middleware-architecture.md]] - Complete middleware chain, responsibilities, and issues
+- [[permission-system-deep-dive.md]] - Group-based permissions and access control
 - [[idempotency-keys.md]] - How duplicate operations are prevented
 - [[sync-architecture.md]] - REST vs WebSocket sync design analysis
 - [[client-backend-security.md]] - Client-to-backend connection security analysis

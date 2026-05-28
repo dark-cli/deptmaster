@@ -68,7 +68,7 @@
 - ✅ State management and event store
 
 ### Documentation
-- ✅ ADVANCED_PERMISSIONS_PLAN.md - Complete design plan
+- ✅ advanced-permissions-plan.md - Complete design plan
 - ✅ LAYERED_PERMISSION_SYSTEM_DESIGN.md - Permission layering details
 - ✅ PERMISSION_LAYERING_ANALYSIS.md - Deep analysis
 - ✅ FLUTTER_RUST_ARCHITECTURE.md - Client-core architecture

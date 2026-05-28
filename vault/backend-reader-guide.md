@@ -137,23 +137,35 @@ Response
 **Questions to Answer**:
 - What paths bypass authentication?
 - What happens if token is invalid?
-- How does middleware know if user is admin? (Spoiler: it doesn't - see permissions.md)
+- How is user role determined?
 
-### 3.3 Permissions System
-**File**: `vault/permissions.md`
+### 3.3 Wallet Context Middleware
+**File**: `backend/rust-api/src/middleware/wallet_context.rs`
+**Time**: 15 minutes
+**Goal**: How are wallets extracted and validated?
+
+**What to Look For**:
+- Wallet ID extraction (from query param, header, or URL path)
+- User wallet membership validation
+- User role within wallet (owner/admin/member)
+- Error response for unauthorized wallets
+
+### 3.4 Permissions System (GROUP-BASED)
+**File**: `vault/permission-system-deep-dive.md`
 **Time**: 30 minutes
-**Goal**: How are admin vs regular users distinguished?
+**Goal**: How do group-based permissions work?
 
-**Key Sections**:
-- User Role Definition & Storage
-- How System Distinguishes Admin vs Regular User
-- Handler-Level Permission Checks
-- Database Differences (users_projection vs admin_users)
+**Key Concepts**:
+- User groups (all_users, custom groups)
+- Contact groups (all_contacts, custom groups)
+- Permission matrix (user_group × contact_group → allowed actions)
+- Handler-level permission enforcement with `can_perform()`
 
-**Critical Finding**:
-- Admin endpoints have NO handler-level role checks
-- Only protected by routing layer
-- Regular users can access admin endpoints if they have valid JWT
+**Critical Understanding**:
+- Owners/admins bypass all permission checks
+- Members go through matrix resolution
+- 403 Forbidden if action not allowed (DEBITUM_INSUFFICIENT_WALLET_PERMISSION)
+- Permissions enforced in every handler (contacts, transactions, sync)
 
 ---
 
@@ -374,7 +386,8 @@ pub async fn handler_name(
 - [ ] config.rs
 - [ ] vault/auth.md
 - [ ] middleware/auth.rs
-- [ ] vault/permissions.md
+- [ ] middleware/wallet_context.rs
+- [ ] vault/permission-system-deep-dive.md
 - [ ] migrations/001_initial_schema.sql
 - [ ] database/mod.rs
 

@@ -103,7 +103,7 @@
 3. Feature branch discovery (advanced-permissions-system)
 4. Full merge of advanced permissions system
 5. Vault documentation updated
-6. MERGED_FEATURES.md created
+6. merged-features.md created
 7. Architecture documented
 
 ### 🚀 NEXT PHASE
@@ -161,9 +161,10 @@ mobile/
 
 vault/
   ├── todos.md                         (Updated)
-  ├── MERGED_FEATURES.md              (NEW)
-  ├── CURRENT_STATE.md                (THIS FILE - NEW)
-  ├── permissions.md                  (Existing)
+  ├── merged-features.md              (NEW)
+  ├── current-state.md                (THIS FILE - NEW)
+  ├── permission-system-deep-dive.md  (NEW)
+  ├── reading-guide.md                (NEW)
   └── ...
 ```
 
