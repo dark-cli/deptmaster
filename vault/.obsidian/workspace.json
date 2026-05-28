@@ -196,6 +196,11 @@
   },
   "active": "cd2b8a1db33004c8",
   "lastOpenFiles": [
+    "database-setup.md.tmp.449427.0bf174872741",
+    "MEMORY.md",
+    "MEMORY.md.tmp.449427.61b5013b5552",
+    "database-setup.md",
+    "database-setup.md.tmp.449427.0df92e41dfcd",
     "todos.md.tmp.449427.49dc031bbf46",
     "migration-guidelines.md",
     "migration-guidelines.md.tmp.449427.9d4810d3bb9c",
@@ -212,9 +217,6 @@
     "todos.md.tmp.449427.71f311139688",
     "todos.md.tmp.449427.ce1348e2adfb",
     "sync-architecture.md",
-    "todos.md.tmp.449427.0655b3937e1e",
-    "sync-handler-deep-dive.md.tmp.449427.514637d90f29",
-    "todos.md.tmp.449427.a46af44d115b",
     "backend-reader-guide.md",
     "wiki-links.md",
     "advanced-permissions-plan.md",
@@ -229,8 +231,6 @@
     "PERMISSION_SYSTEM_DEEP_DIVE.md",
     "auth.md",
     "permissions.md",
-    "CURRENT_STATE.md",
-    "MERGED_FEATURES.md",
-    "idempotency-keys.md"
+    "CURRENT_STATE.md"
   ]
 }
