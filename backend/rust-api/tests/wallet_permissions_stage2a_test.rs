@@ -42,7 +42,7 @@ async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     let ok = wallets::update_wallet(
         axum::extract::Path(wallet_a.to_string()),
         axum::extract::State(app_state.clone()),
-        axum::extract::Extension(AuthUser { user_id: user_a, email: "user_a@example.com".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser { user_id: user_a, username: "user_a".to_string(), is_admin: false }),
         axum::Json(update_request),
     )
     .await;
@@ -65,7 +65,7 @@ async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     let denied = wallets::update_wallet(
         axum::extract::Path(wallet_b.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: user_a, email: "user_a@example.com".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser { user_id: user_a, username: "user_a".to_string(), is_admin: false }),
         axum::Json(update_other),
     )
     .await;

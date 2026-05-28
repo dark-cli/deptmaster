@@ -176,6 +176,7 @@ async fn test_full_rebuild_used_when_undo_events_present() {
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
         axum::Json(vec![undo_event]),
     ).await;
 
