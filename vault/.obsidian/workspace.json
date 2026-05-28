@@ -200,6 +200,11 @@
   },
   "active": "cd2b8a1db33004c8",
   "lastOpenFiles": [
+    "todos.md.tmp.449427.e2cc2a472d3b",
+    "MEMORY.md.tmp.449427.632f89f06951",
+    "todos.md.tmp.449427.e788ab5e1857",
+    "client-todos.md",
+    "client-todos.md.tmp.449427.638a12a7c9b4",
     "MEMORY.md.tmp.449427.423dca3ccd36",
     "undo_event-client-optimization.md",
     "undo_event-client-optimization.md.tmp.449427.f26fe649fc38",
@@ -212,15 +217,11 @@
     "migration-guidelines.md",
     "migration-guidelines.md.tmp.449427.9d4810d3bb9c",
     "migration-guide.md",
-    "migration-guide.md.tmp.449427.3234391e6a06",
     "sync-handler-deep-dive.md",
     "architecture.md",
     "todos.md",
     "permission-system-deep-dive.md",
-    "todos.md.tmp.449427.995c32ab791a",
     "sync-refactoring-plan.md",
-    "sync-refactoring-plan.md.tmp.449427.9d3acf022492",
-    "todos.md.tmp.449427.62e39babfeb1",
     "sync-architecture.md",
     "backend-reader-guide.md",
     "wiki-links.md",
@@ -234,7 +235,6 @@
     "current-state.md",
     "merged-features.md",
     "PERMISSION_SYSTEM_DEEP_DIVE.md",
-    "auth.md",
-    "permissions.md"
+    "auth.md"
   ]
 }

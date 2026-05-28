@@ -132,73 +132,22 @@ tags:
 
 ---
 
-## Mobile (Flutter) - Client-Core Migration & Features
+---
 
-### Client-Core Integration (NEW ARCHITECTURE)
-- ✅ Flutter Rust Bridge setup (done)
-- ✅ Debitum client-core library (done - crates/debitum_client_core)
-- ✅ Permissions module in client-core (done with full tests)
-- ✅ Wallet-scoped providers (done - wallet_data_providers.dart)
-- ✅ Migrate all mobile screens to use client-core (DONE - all screens use Api FFI wrapper)
-- ✅ Remove old service files (DONE - no old services found in codebase)
-- ✅ Use client-core for sync, CRUD, permissions (DONE - api.dart is thin FFI wrapper)
+## 📱 CLIENT TODOs (SEPARATE DOCUMENT)
 
-### Permissions & Groups (New Functionality)
-- [ ] Display user permissions for current wallet
-- [ ] Show which actions are available based on permissions
-- [ ] Group management UI for admins (create/edit user groups, contact groups)
-- [ ] Permission matrix viewer for admins
-- [ ] Default group selection in settings screen
-- [ ] Show/hide create/edit/delete buttons based on permissions
+**See [[client-todos.md]] for all Flutter/Dart and Rust Bridge client work**
 
-### Sync & Conflict Resolution
-- ✅ Offline-first architecture (done in client-core)
-- ✅ Retry backoff logic (done in client-core)
-- [ ] Implement merge strategy for conflicts (client-core conflict.rs module exists)
-- [ ] Handle conflict resolution UI
-- [ ] Display sync status and conflicts to user
+Mobile (Flutter) TODOs have been split into a separate document for clarity:
+- ✅ Completed client work (architecture, testing)
+- 🔴 High priority (idempotency keys, hash caching, sync recovery)
+- 🟡 Medium priority (permissions UI, conflict resolution, features)
+- 🟢 Low priority (security hardening, performance, data management)
 
-### Sync Permission Failure Recovery (CLIENT - FUTURE)
-- [ ] Client-side sync failure recovery system (DEPENDS ON: enhanced backend error response)
-  - **What**: Detect permission failures, remove unpermitted events, retry sync
-  - **Why**: When batch rejected due to permission, user needs way to recover
-  - **Flow**:
-    1. Sync batch rejected (backend returns detailed error per event)
-    2. Client parses failed_events list
-    3. Option A: Auto-remove unpermitted events, retry
-    4. Option B: Show "X operations blocked" dialog, let user confirm removal
-    5. Retry sync with cleaned batch
-    6. User unblocked
-  - **Files**: crates/debitum_client_core/src/sync.rs (push_unsynced)
-  - **Note**: Only implement after backend returns detailed error response
-  - Related: WebSocket migration should include this recovery from start
-
-### Idempotency Keys (HIGH PRIORITY)
-- [ ] **Implement proper idempotency keys on client**
-  - Generate UUID when form/page loads (not on submit)
-  - Store UUID in form state (or use transaction ID)
-  - Send same UUID for all submit attempts
-  - Currently: Not sending Idempotency-Key header
-  - This prevents duplicates from network retries, UI glitches, or button re-enabling
-
-### Features
-- [ ] Biometric authentication (library added, not integrated)
-- [ ] Offline notifications (background sync status)
-- [ ] Data export/import UI
-- [ ] Transaction filtering and search
-- [ ] Contact search by name/phone
-- [ ] Wallet switching notifications
-
-### Testing
-- ✅ Comprehensive test suite in client-core (permissions, sync, conflict, integration, stress)
-- [ ] Widget tests for new permission-aware screens
-- [ ] Integration tests with mock wallet setup
-
-### UI Polish
-- [ ] Theme consistency across screens
-- [ ] Loading states for network requests (show sync in progress)
-- [ ] Error handling UI improvements
-- [ ] Permission denied error messages (show which action user lacks permission for)
+**Key client work that pairs with backend tasks**:
+- Client hash caching ← Server incremental hash calculation
+- Client sync recovery ← Backend detailed error response
+- Client permissions UI ← Backend permission APIs (done)
 
 ---
 
@@ -310,6 +259,11 @@ tags:
     - On request: fetch only events since last_event_timestamp
     - Calculate: new_hash = combine(last_hash, hash(new_events))
     - Return: new_hash with new timestamp
+  - **Client Compatibility**: ✅ **NO CHANGES NEEDED TO CLIENT**
+    - Key insight: As long as algorithm is consistent, result is equivalent
+    - Client doesn't care if server calculates hash incrementally or from scratch
+    - Final hash value will be identical (same events, same algorithm = same hash)
+    - Client hash caching works with either approach
   - **Implementation**:
     - Add `sync_hash_cache` table: (wallet_id, hash, last_event_id, last_event_timestamp)
     - Update on every POST /api/sync/events (when events accepted)
