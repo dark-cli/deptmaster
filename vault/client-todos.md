@@ -41,17 +41,20 @@ tags:
   - Files: frontend/src/screens/*.dart
 
 ### Sync Hash Optimization (PERFORMANCE)
-- [ ] Implement client-side hash caching
-  - **Current**: Calls get_sync_hash() frequently to detect changes
-  - **Optimization**: Cache hash + timestamp, only call if time elapsed > interval OR user initiates sync
-  - **Key insight**: Server hash calculation doesn't matter - as long as algorithm is consistent
+- [ ] Implement client-side hash caching with get_sync_hash endpoint
+  - **Current State**: Client calls `GET /api/sync/events?since=<timestamp>` which returns ALL events since timestamp
+  - **Problem**: Fetches full event list even when nothing changed (wasteful network round trip)
+  - **Solution**: Use get_sync_hash endpoint to detect changes before pulling events
   - **Implementation**:
-    - Store last_hash, last_event_timestamp in local storage
-    - Only call server if: (time_now - last_call_time) > 30s OR user refreshes
-    - Compare returned hash with cached hash to detect changes
+    1. Store last_hash + last_sync_timestamp in local storage
+    2. Call `GET /api/sync/hash` (backend/rust-api/src/handlers/sync.rs:193)
+    3. If returned hash == cached hash → skip get_sync_events (save network)
+    4. If hash differs → call get_sync_events to pull changes
+    5. Update cached hash + timestamp
+  - **Server Endpoint**: GET /api/sync/hash returns { hash: String, event_count: i32, last_event_timestamp: String }
   - **Effort**: 1-2 hours
-  - **Impact**: Reduces sync calls by ~90%, saves battery and network
-  - **Files**: crates/debitum_client_core/src/sync.rs, frontend/src/providers/sync_provider.dart
+  - **Impact**: Eliminates network round trip when no changes (especially for frequent sync polling)
+  - **Files**: crates/debitum_client_core/src/sync.rs (pull_and_merge function), mobile/lib/providers/sync_provider.dart
 
 ### Sync Permission Failure Recovery (CLIENT - Dependent on Backend)
 - [ ] Client-side sync failure recovery system (DEPENDS ON: backend returning detailed error per event)

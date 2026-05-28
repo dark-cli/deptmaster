@@ -22,6 +22,7 @@ Quick links to project documentation and references.
 
 ## Implementation Plans
 
+- [Database Crate Separation](database-crate-separation.md) — Extract database into `crates/debitum_db`
 - [Sync Refactoring Plan](sync-refactoring-plan.md) — Phase 1-3 plan for modularizing sync.rs
 
 ## Status & Tracking

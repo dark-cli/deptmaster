@@ -180,6 +180,24 @@ vault/
 | **Mobile** | Old services | Client-core library |
 | **Frontend** | Minimal | Full Leptos app |
 
+## Sync Architecture
+
+### Current Implementation
+- **Client pulls** via `GET /api/sync/events?since=<timestamp>` 
+- Server returns **all events** since the timestamp (filtered by user permissions)
+- Client merges events into local storage
+- Change detection is implicit: empty response = no changes, non-empty = has changes
+- **Hash endpoint exists** (`GET /api/sync/hash`) but is **not currently called** by any client
+
+### Optimization Opportunity (Deferred)
+The `get_sync_hash` endpoint was implemented but is not integrated. Could optimize sync by:
+1. Client caches last_hash + timestamp in local storage
+2. Client calls get_sync_hash before get_sync_events
+3. If hash matches → skip get_sync_events (save network round trip)
+4. If hash differs → call get_sync_events as usual
+
+**Status**: Documented for future client-side optimization work. Current approach is simple and works; optimization is nice-to-have for battery/network savings.
+
 ## Known Limitations
 
 1. Dynamic groups not yet evaluated (static membership only)
@@ -187,6 +205,7 @@ vault/
 3. Transaction groups are placeholders
 4. Mobile client-core not yet fully integrated with UI
 5. Idempotency keys not sent from mobile client
+6. Sync hash optimization not implemented (client doesn't use get_sync_hash endpoint)
 
 ## Deployment Considerations
 

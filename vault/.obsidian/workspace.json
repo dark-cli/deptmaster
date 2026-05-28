@@ -27,12 +27,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "todos.md",
+                "file": "database-crate-separation.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "todos"
+              "title": "database-crate-separation"
             }
           }
         ],
@@ -200,6 +200,12 @@
   },
   "active": "cd2b8a1db33004c8",
   "lastOpenFiles": [
+    "todos.md",
+    "MEMORY.md.tmp.449427.6848baea79b8",
+    "database-crate-separation.md",
+    "database-crate-separation.md.tmp.449427.7755579ba9fb",
+    "client-todos.md.tmp.449427.c2e54f46d9ec",
+    "current-state.md.tmp.449427.ebd555c920b8",
     "todos.md.tmp.449427.e2cc2a472d3b",
     "MEMORY.md.tmp.449427.632f89f06951",
     "todos.md.tmp.449427.e788ab5e1857",
@@ -208,18 +214,12 @@
     "MEMORY.md.tmp.449427.423dca3ccd36",
     "undo_event-client-optimization.md",
     "undo_event-client-optimization.md.tmp.449427.f26fe649fc38",
-    "database-setup.md.tmp.449427.0bf174872741",
     "MEMORY.md",
-    "MEMORY.md.tmp.449427.61b5013b5552",
     "database-setup.md",
-    "database-setup.md.tmp.449427.0df92e41dfcd",
-    "todos.md.tmp.449427.49dc031bbf46",
     "migration-guidelines.md",
-    "migration-guidelines.md.tmp.449427.9d4810d3bb9c",
     "migration-guide.md",
     "sync-handler-deep-dive.md",
     "architecture.md",
-    "todos.md",
     "permission-system-deep-dive.md",
     "sync-refactoring-plan.md",
     "sync-architecture.md",
@@ -234,7 +234,6 @@
     "MIDDLEWARE_ARCHITECTURE.md",
     "current-state.md",
     "merged-features.md",
-    "PERMISSION_SYSTEM_DEEP_DIVE.md",
-    "auth.md"
+    "PERMISSION_SYSTEM_DEEP_DIVE.md"
   ]
 }

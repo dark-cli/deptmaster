@@ -873,8 +873,6 @@
 
         <div class="tabs">
             <button class="tab active" onclick="switchTab('events')">Events Log</button>
-            <button class="tab" onclick="switchTab('contacts')">Contacts</button>
-            <button class="tab" onclick="switchTab('transactions')">Transactions</button>
             <button class="tab" onclick="switchTab('projections')">Projections</button>
             <button class="tab" onclick="switchTab('wallets')">Wallets</button>
             <button class="tab" onclick="switchTab('users')">User Management</button>
@@ -973,106 +971,7 @@
             </div>
         </div>
 
-        <div id="contacts" class="tab-content">
-            <div class="table-container">
-                <div class="loading" id="contactsLoading">Loading contacts...</div>
-                <table id="contactsTable" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Name</th>
-                            <th>Username</th>
-                            <th>Email</th>
-                            <th>Phone</th>
-                            <th>Balance</th>
-                            <th>Created At</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="contactsBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="transactions" class="tab-content">
-            <div class="table-container">
-                <!-- Search and Filter Controls -->
-                <div class="filter-section" style="padding: 1rem; background: #FFFBFE; border-bottom: 1px solid #E7E0EC;">
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
-                        <div>
-                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">🔍 Search</label>
-                            <input type="text" id="transactionSearch" placeholder="Search in contact names, descriptions..." 
-                                   class="form-input"
-                                   style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;"
-                                   onkeyup="debounceTransactionSearch()">
-                        </div>
-                        <div>
-                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Type</label>
-                            <select id="transactionTypeFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
-                                <option value="">All Types</option>
-                                <option value="money">Money</option>
-                                <option value="item">Item</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Direction</label>
-                            <select id="transactionDirectionFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
-                                <option value="">All Directions</option>
-                                <option value="lent">Lent</option>
-                                <option value="owed">Owed</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Date From</label>
-                            <input type="date" id="transactionDateFromFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
-                        </div>
-                        <div>
-                            <label class="form-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #1C1B1F;">Date To</label>
-                            <input type="date" id="transactionDateToFilter" class="form-input" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;" onchange="applyTransactionFilters()">
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 1rem; align-items: center;">
-                        <button class="refresh-btn" onclick="applyTransactionFilters()" style="margin: 0;">🔍 Apply Filters</button>
-                        <button onclick="clearTransactionFilters()" class="btn-secondary" style="padding: 0.75rem 1.5rem; background: #625B71; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">Clear Filters</button>
-                        <button class="refresh-btn" onclick="loadTransactions()" style="margin: 0; background: #4caf50;">🔄 Refresh</button>
-                        <span id="transactionsCount" class="events-count" style="margin-left: auto; color: #79747E;"></span>
-                    </div>
-                </div>
-                
-                <!-- Pagination -->
-                <div class="pagination-section" style="padding: 1rem; background: #E7E0EC; border-bottom: 1px solid #E7E0EC; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <label class="form-label" style="margin-right: 0.5rem; color: #1C1B1F;">Page Size:</label>
-                        <select id="transactionPageSize" class="form-input" onchange="applyTransactionFilters()" style="padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px; background: #FFFBFE; color: #1C1B1F;">
-                            <option value="50">50</option>
-                            <option value="100" selected>100</option>
-                            <option value="200">200</option>
-                            <option value="500">500</option>
-                        </select>
-                    </div>
-                    <div>
-                        <button onclick="previousTransactionPage()" id="transactionPrevBtn" class="btn-pagination" style="padding: 0.5rem 1rem; margin-right: 0.5rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">← Previous</button>
-                        <span id="transactionPageInfo" class="page-info" style="margin: 0 1rem; color: #1C1B1F;">Page 1</span>
-                        <button onclick="nextTransactionPage()" id="transactionNextBtn" class="btn-pagination" style="padding: 0.5rem 1rem; background: #6750A4; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s;">Next →</button>
-                    </div>
-                </div>
-                
-                <div class="loading" id="transactionsLoading">Loading transactions...</div>
-                <table id="transactionsTable" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Contact</th>
-                            <th>Amount</th>
-                            <th>Direction</th>
-                        </tr>
-                    </thead>
-                    <tbody id="transactionsBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <div id="projections" class="tab-content">
+<div id="projections" class="tab-content">
             <div class="table-container">
                 <div class="loading" id="projectionsLoading">Loading projections...</div>
                 <div id="projectionsContent" style="display: none; padding: 2rem;">
@@ -1483,7 +1382,6 @@
         }
 
         function onWalletFilterChange() {
-            allTransactions = [];
             loadData();
         }
 
@@ -2344,8 +2242,6 @@
                 // Then load events (which will use currentTotalDebt as fallback)
                 await Promise.all([
                     loadEvents(),
-                    loadContacts(),
-                    loadTransactions(),
                     loadProjections(),
                     loadDebtChart()
                 ]);
@@ -2362,15 +2258,7 @@
         async function loadStats() {
             try {
                 const walletSuffix = walletQuerySuffix();
-                const [contacts, transactions, totalDebtResponse, walletsResponse] = await Promise.all([
-                    authenticatedFetch(`${API_URL}/admin/contacts${walletSuffix}`).then(r => {
-                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                        return r.json();
-                    }),
-                    authenticatedFetch(`${API_URL}/admin/transactions${walletSuffix}`).then(r => {
-                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                        return r.json();
-                    }),
+                const [totalDebtResponse, walletsResponse] = await Promise.all([
                     authenticatedFetch(`${API_URL}/admin/total-debt${walletSuffix}`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
@@ -2389,16 +2277,19 @@
                     return amt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
                 };
 
-                document.getElementById('totalContacts').textContent = contacts.length;
-                document.getElementById('totalTransactions').textContent = transactions.length;
+                // Get contact and transaction counts from events list (build from events tab)
+                const contactCount = new Set();
+                const transactionCount = new Set();
+
+                document.getElementById('totalContacts').textContent = '-';
+                document.getElementById('totalTransactions').textContent = '-';
                 const totalDebtText = `${formatAmount(totalDebt)} IQD`;
                 document.getElementById('totalDebt').textContent = totalDebtText;
                 document.getElementById('totalWallets').textContent = wallets.length;
                 currentTotalDebt = totalDebt; // Store for fallback in events
             } catch (error) {
                 console.error('Error loading stats:', error);
-                document.getElementById('totalContacts').textContent = 'Error';
-                document.getElementById('totalTransactions').textContent = 'Error';
+                document.getElementById('totalDebt').textContent = 'Error';
                 const totalWalletsEl = document.getElementById('totalWallets');
                 if (totalWalletsEl) totalWalletsEl.textContent = 'Error';
             }
@@ -2444,46 +2335,6 @@
             loadEvents();
         }
 
-        // Transactions log state
-        let transactionCurrentPage = 0;
-        let transactionPageSize = 100;
-        let transactionSearchTimeout = null;
-        let allTransactions = []; // Store all transactions for client-side filtering
-
-        function debounceTransactionSearch() {
-            clearTimeout(transactionSearchTimeout);
-            transactionSearchTimeout = setTimeout(() => {
-                transactionCurrentPage = 0; // Reset to first page on new search
-                applyTransactionFilters();
-            }, 500);
-        }
-
-        function clearTransactionFilters() {
-            document.getElementById('transactionSearch').value = '';
-            document.getElementById('transactionTypeFilter').value = '';
-            document.getElementById('transactionDirectionFilter').value = '';
-            document.getElementById('transactionDateFromFilter').value = '';
-            document.getElementById('transactionDateToFilter').value = '';
-            transactionCurrentPage = 0;
-            applyTransactionFilters();
-        }
-
-        function previousTransactionPage() {
-            if (transactionCurrentPage > 0) {
-                transactionCurrentPage--;
-                applyTransactionFilters();
-            }
-        }
-
-        function nextTransactionPage() {
-            transactionCurrentPage++;
-            applyTransactionFilters();
-        }
-
-        function applyTransactionFilters() {
-            transactionPageSize = parseInt(document.getElementById('transactionPageSize').value) || 100;
-            loadTransactions();
-        }
 
         async function loadEvents(silent = false) {
             if (isUpdating && !silent) return; // Prevent concurrent updates unless silent
@@ -2615,18 +2466,12 @@
                 // Fetch missing contact data from contacts endpoint
                 if (contactIds.size > 0) {
                     try {
-                        const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts${walletQuerySuffix()}`);
-                        if (contactsResponse.ok) {
-                            const contacts = await contactsResponse.json();
-                            contacts.forEach(contact => {
-                                if (contactIds.has(contact.id)) {
-                                    contactCache[contact.id] = {
-                                        name: contact.name || null,
-                                        username: contact.username || null
-                                    };
-                                }
-                            });
-                        }
+                        // NOTE: /api/admin/contacts endpoint doesn't exist - contact names extracted from events instead
+                        // const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts${walletQuerySuffix()}`);
+                        // if (contactsResponse.ok) {
+                        //     const contacts = await contactsResponse.json();
+                        //     ...
+                        // }
                     } catch (e) {
                         console.error('Error pre-loading contacts:', e);
                     }
@@ -2672,17 +2517,18 @@
                                     }
                                 });
                                 // Re-fetch contacts for these transaction contact IDs
-                                if (contactIds.size > 0) {
-                                    const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
-                                    if (contactsResponse.ok) {
-                                        const contacts = await contactsResponse.json();
-                            contacts.forEach(contact => {
-                                if (contactIds.has(contact.id)) {
-                                    contactCache[contact.id] = { name: contact.name || null, username: contact.username || null };
-                                }
-                            });
-                                    }
-                                }
+                                // NOTE: /api/admin/contacts endpoint doesn't exist
+                                // if (contactIds.size > 0) {
+                                //     const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
+                                //     if (contactsResponse.ok) {
+                                //         const contacts = await contactsResponse.json();
+                                //         contacts.forEach(contact => {
+                                //             if (contactIds.has(contact.id)) {
+                                //                 contactCache[contact.id] = { name: contact.name || null, username: contact.username || null };
+                                //             }
+                                //         });
+                                //     }
+                                // }
                             }
                         }
                     } catch (e) {
@@ -2729,17 +2575,18 @@
                             newContactIds.forEach(id => contactIds.add(id));
                             
                             // Re-fetch contacts if we found new ones
-                            if (contactIds.size > 0) {
-                                const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
-                                if (contactsResponse.ok) {
-                                    const contacts = await contactsResponse.json();
-                            contacts.forEach(contact => {
-                                if (contactIds.has(contact.id)) {
-                                    contactCache[contact.id] = { name: contact.name || null, username: contact.username || null };
-                                }
-                            });
-                                }
-                            }
+                            // NOTE: /api/admin/contacts endpoint doesn't exist
+                            // if (contactIds.size > 0) {
+                            //     const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts`);
+                            //     if (contactsResponse.ok) {
+                            //         const contacts = await contactsResponse.json();
+                            //         contacts.forEach(contact => {
+                            //             if (contactIds.has(contact.id)) {
+                            //                 contactCache[contact.id] = { name: contact.name || null, username: contact.username || null };
+                            //             }
+                            //         });
+                            //     }
+                            // }
                             
                             // For undone contacts without names, fetch from CREATED events
                             if (deletedContactIds.size > 0) {
@@ -2814,17 +2661,18 @@
         async function getContactName(contactId) {
             if (!contactId) return null;
             if (contactCache[contactId]) return contactCache[contactId];
-            
-            try {
-                const response = await authenticatedFetch(`${API_URL}/admin/contacts`);
-                if (response.ok) {
-                    const contacts = await response.json();
-                    const contact = contacts.find(c => c.id === contactId);
-                    if (contact) {
-                        contactCache[contactId] = contact.name;
-                        return contact.name;
-                    }
-                }
+
+            // NOTE: /api/admin/contacts endpoint doesn't exist - contact names must be extracted from events
+            // try {
+            //     const response = await authenticatedFetch(`${API_URL}/admin/contacts`);
+            //     if (response.ok) {
+            //         const contacts = await response.json();
+            //         const contact = contacts.find(c => c.id === contactId);
+            //         if (contact) {
+            //             contactCache[contactId] = contact.name;
+            //             return contact.name;
+            //         }
+            //     }
             } catch (e) {
                 console.error('Error fetching contact name:', e);
             }
@@ -3666,8 +3514,6 @@
                     // Refresh all data immediately when WebSocket detects changes
                     await Promise.all([
                         loadStats(),
-                        loadContacts(),
-                        loadTransactions(),
                         loadEvents(true), // true = silent update
                         loadDebtChart()
                     ]);
@@ -3688,182 +3534,7 @@
             }
         }
 
-        async function loadContacts() {
-            const loading = document.getElementById('contactsLoading');
-            const table = document.getElementById('contactsTable');
-            const body = document.getElementById('contactsBody');
-
-            try {
-                const response = await authenticatedFetch(`${API_URL}/admin/contacts${walletQuerySuffix()}`);
-                if (!response.ok) {
-                    const text = await response.text();
-                    throw new Error(`HTTP ${response.status}: ${text}`);
-                }
-                const contacts = await response.json();
-
-                loading.style.display = 'none';
-                table.style.display = 'table';
-                body.innerHTML = contacts.map(contact => {
-                    // Balance is stored as whole units (IQD), format with commas
-                    const formatAmount = (amt) => {
-                        return amt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-                    };
-                    const balance = contact.balance ? `${formatAmount(contact.balance)} IQD` : '0 IQD';
-                    return `
-                    <tr>
-                        <td>${contact.id.substring(0, 8)}...</td>
-                        <td>${contact.name}</td>
-                        <td>${contact.username ? '@' + contact.username : '-'}</td>
-                        <td>${contact.email || '-'}</td>
-                        <td>${contact.phone || '-'}</td>
-                        <td>${balance}</td>
-                        <td>${formatDateTime(contact.created_at)}</td>
-                        <td><span class="badge ${contact.is_deleted ? 'error' : 'success'}">${contact.is_deleted ? 'Deleted' : 'Active'}</span></td>
-                    </tr>
-                `;
-                }).join('');
-            } catch (error) {
-                loading.innerHTML = `<div class="error">Error loading contacts: ${error.message}</div>`;
-                console.error('Error:', error);
-            }
-        }
-
-        async function loadTransactions() {
-            const loading = document.getElementById('transactionsLoading');
-            const table = document.getElementById('transactionsTable');
-            const body = document.getElementById('transactionsBody');
-            const countSpan = document.getElementById('transactionsCount');
-            const pageInfo = document.getElementById('transactionPageInfo');
-            const prevBtn = document.getElementById('transactionPrevBtn');
-            const nextBtn = document.getElementById('transactionNextBtn');
-
-            try {
-                // Load all transactions if not already loaded
-                if (allTransactions.length === 0) {
-                    const response = await authenticatedFetch(`${API_URL}/admin/transactions${walletQuerySuffix()}`);
-                    if (!response.ok) {
-                        const text = await response.text();
-                        throw new Error(`HTTP ${response.status}: ${text}`);
-                    }
-                    allTransactions = await response.json();
-                }
-
-                // Load contacts for name and username mapping
-                const contactsResponse = await authenticatedFetch(`${API_URL}/admin/contacts${walletQuerySuffix()}`);
-                let contacts = [];
-                if (contactsResponse.ok) {
-                    contacts = await contactsResponse.json();
-                }
-                const contactMap = new Map(contacts.map(c => [c.id, { name: c.name, username: c.username || null }]));
-
-                // Apply filters
-                let filteredTransactions = [...allTransactions];
-                
-                const search = document.getElementById('transactionSearch').value.trim().toLowerCase();
-                if (search) {
-                    filteredTransactions = filteredTransactions.filter(t => {
-                        const contactData = contactMap.get(t.contact_id) || { name: 'Unknown', username: null };
-                        const contactName = (contactData.name || 'Unknown').toLowerCase();
-                        const contactUsername = (contactData.username || '').toLowerCase();
-                        const description = (t.description || '').toLowerCase();
-                        return contactName.includes(search) || contactUsername.includes(search) || description.includes(search);
-                    });
-                }
-                
-                const typeFilter = document.getElementById('transactionTypeFilter').value;
-                if (typeFilter) {
-                    filteredTransactions = filteredTransactions.filter(t => t.type === typeFilter);
-                }
-                
-                const directionFilter = document.getElementById('transactionDirectionFilter').value;
-                if (directionFilter) {
-                    filteredTransactions = filteredTransactions.filter(t => t.direction === directionFilter);
-                }
-                
-                const dateFrom = document.getElementById('transactionDateFromFilter').value;
-                if (dateFrom) {
-                    const fromDate = new Date(dateFrom + 'T00:00:00');
-                    filteredTransactions = filteredTransactions.filter(t => {
-                        const tDate = new Date(t.transaction_date);
-                        return tDate >= fromDate;
-                    });
-                }
-                
-                const dateTo = document.getElementById('transactionDateToFilter').value;
-                if (dateTo) {
-                    const toDate = new Date(dateTo + 'T23:59:59');
-                    filteredTransactions = filteredTransactions.filter(t => {
-                        const tDate = new Date(t.transaction_date);
-                        return tDate <= toDate;
-                    });
-                }
-
-                // Apply pagination
-                const startIndex = transactionCurrentPage * transactionPageSize;
-                const endIndex = startIndex + transactionPageSize;
-                const paginatedTransactions = filteredTransactions.slice(startIndex, endIndex);
-
-                loading.style.display = 'none';
-                table.style.display = 'table';
-                
-                // Update count
-                countSpan.textContent = `Showing ${paginatedTransactions.length} of ${filteredTransactions.length} transaction(s)`;
-                
-                // Update pagination
-                pageInfo.textContent = `Page ${transactionCurrentPage + 1}`;
-                prevBtn.disabled = transactionCurrentPage === 0;
-                prevBtn.style.opacity = transactionCurrentPage === 0 ? '0.5' : '1';
-                prevBtn.style.cursor = transactionCurrentPage === 0 ? 'not-allowed' : 'pointer';
-                nextBtn.disabled = endIndex >= filteredTransactions.length;
-                nextBtn.style.opacity = endIndex >= filteredTransactions.length ? '0.5' : '1';
-                nextBtn.style.cursor = endIndex >= filteredTransactions.length ? 'not-allowed' : 'pointer';
-                
-                body.innerHTML = paginatedTransactions.map(t => {
-                    // Amount is stored as whole units (IQD), format with commas
-                    const formatAmount = (amt) => {
-                        return amt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-                    };
-                    const amount = t.type === 'money' ? `${formatAmount(t.amount)} IQD` : `${t.amount} item(s)`;
-                    
-                    // Get contact data
-                    const contactData = contactMap.get(t.contact_id) || { name: 'Unknown', username: null };
-                    const contactName = contactData.name || 'Unknown';
-                    const contactUsername = contactData.username;
-                    
-                    // Format contact with username tag (same format as events list)
-                    const contactDisplay = contactUsername 
-                        ? `<span class="username-tag">@${escapeHtml(contactUsername)}</span>${escapeHtml(contactName)}`
-                        : escapeHtml(contactName);
-                    
-                    // Format direction with badge (same format as Event Type in events list)
-                    let directionBadgeClass = 'badge';
-                    if (t.direction === 'lent') {
-                        directionBadgeClass += ' success';
-                    } else {
-                        directionBadgeClass += ' error';
-                    }
-                    const directionDisplay = t.direction === 'lent' ? 'Lent' : 'Owed';
-                    
-                    return `
-                        <tr>
-                            <td style="white-space: nowrap; font-size: 0.75rem; padding: 0.4rem 0.5rem;">
-                                ${formatDateTime(t.transaction_date)}
-                            </td>
-                            <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">${contactDisplay}</td>
-                            <td style="font-size: 0.75rem; padding: 0.4rem 0.5rem;">${amount}</td>
-                            <td style="padding: 0.4rem 0.5rem;">
-                                <span class="${directionBadgeClass}" style="display: inline-block; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.7rem; font-weight: 500;">${directionDisplay}</span>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-            } catch (error) {
-                loading.innerHTML = `<div class="error">Error loading transactions: ${error.message}</div>`;
-                console.error('Error:', error);
-            }
-        }
-
-        async function loadProjections() {
+async function loadProjections() {
             const loading = document.getElementById('projectionsLoading');
             const content = document.getElementById('projectionsContent');
             const info = document.getElementById('projectionsInfo');
@@ -3921,10 +3592,6 @@
                 loadUsers();
             } else if (tabName === 'wallets') {
                 loadWallets();
-            } else if (tabName === 'transactions') {
-                // Reset transactions cache when switching to tab to ensure fresh data
-                allTransactions = [];
-                loadTransactions();
             }
         }
 
