@@ -270,7 +270,7 @@ async fn initialize_wallet_permissions(
     .await?;
 
     // Get the actual ID (in case of conflict)
-    let ug_id: Uuid = sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
+    let ug_id: Uuid = sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users' LIMIT 1")
         .bind(wallet_id)
         .fetch_one(db_pool)
         .await?;
@@ -286,7 +286,7 @@ async fn initialize_wallet_permissions(
     .await?;
 
     // Get the actual ID
-    let cg_id: Uuid = sqlx::query_scalar("SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'")
+    let cg_id: Uuid = sqlx::query_scalar("SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1")
         .bind(wallet_id)
         .fetch_one(db_pool)
         .await?;

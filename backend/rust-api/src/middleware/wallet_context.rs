@@ -1,13 +1,13 @@
 use axum::{
-    extract::{Query, Request, State},
+    extract::Request,
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
     async_trait,
+    extract::State,
 };
 use axum::extract::FromRequestParts;
-use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
 use crate::AppState;
@@ -27,19 +27,10 @@ impl WalletContext {
     }
 }
 
-#[derive(Deserialize)]
-pub struct WalletQuery {
-    pub wallet_id: Option<String>,
-}
-
 /// Middleware to extract and validate wallet context
-/// Extracts wallet_id from:
-/// 1. Query parameter: ?wallet_id=...
-/// 2. Header: X-Wallet-Id
-/// 3. Request extensions (if set by previous middleware)
+/// Extracts wallet_id from path parameter (/:wallet_id or /:id)
 pub async fn wallet_context_middleware(
     State(state): State<AppState>,
-    Query(query): Query<WalletQuery>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -50,29 +41,13 @@ pub async fn wallet_context_middleware(
         .cloned()
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    // Extract wallet_id from various sources
-    let wallet_id_str = query.wallet_id
-        .or_else(|| {
-            // Try to get from header
-            req.headers()
-                .get("X-Wallet-Id")
-                .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_string())
-        })
-        .or_else(|| {
-            // Try to get from path (if route has :wallet_id)
-            req.uri().path()
-                .split('/')
-                .find(|s| s.starts_with("wallets"))
-                .and_then(|_| {
-                    // Extract wallet_id from path segments
-                    let segments: Vec<&str> = req.uri().path().split('/').collect();
-                    segments.iter()
-                        .position(|&s| s == "wallets")
-                        .and_then(|pos| segments.get(pos + 1))
-                        .map(|s| s.to_string())
-                })
-        });
+    // Extract wallet_id from path parameter
+    let wallet_id_str = {
+        let segments: Vec<&str> = req.uri().path().split('/').collect();
+        segments.iter()
+            .position(|&s| s == "wallets")
+            .and_then(|pos| segments.get(pos + 1).map(|s| s.to_string()))
+    };
 
     let wallet_id_str = wallet_id_str.ok_or_else(|| {
         tracing::warn!("No wallet_id provided in request");
