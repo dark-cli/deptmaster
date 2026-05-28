@@ -683,14 +683,18 @@ pub async fn post_sync_events(
             continue;
         }
 
-        // Special validation for UNDO events: check 5-second window
-        // The 5 seconds should be between when the original event was created and when the UNDO event is created
+        // Special validation for UNDO events: check 5-second window from server sync time
+        // The 5 seconds is measured between when the undone event was synced to the server
+        // and when the UNDO event is being synced. This supports offline-first:
+        // - User creates event and UNDO offline (within 5 seconds of each other)
+        // - Both are synced to server shortly after when user comes online
+        // - Validation passes because synced times are within 5 seconds
         if event.event_type == "UNDO" {
             if let Some(undone_event_id_str) = event.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
                 if let Ok(undone_event_uuid) = uuid::Uuid::parse_str(undone_event_id_str) {
-                    // Query the undone event to get its creation timestamp (must be in same wallet)
+                    // Query the undone event to get its synced_at timestamp (must be in same wallet)
                     let undone_event = sqlx::query(
-                        "SELECT created_at FROM events WHERE event_id = $1 AND wallet_id = $2"
+                        "SELECT synced_at FROM events WHERE event_id = $1 AND wallet_id = $2"
                     )
                     .bind(undone_event_uuid)
                     .bind(wallet_id)
@@ -705,27 +709,23 @@ pub async fn post_sync_events(
                     })?;
 
                     if let Some(undone_row) = undone_event {
-                        let undone_created_at: chrono::NaiveDateTime = undone_row.get("created_at");
-                        let undo_event_created_at = timestamp;
-                        
-                        // Calculate time difference
-                        let time_diff = undo_event_created_at.signed_duration_since(undone_created_at);
-                        
-                        // Check if more than 5 seconds have passed
+                        let undone_synced_at: chrono::NaiveDateTime = undone_row.get("synced_at");
+                        let undo_synced_at = chrono::Utc::now().naive_utc();
+
+                        // Calculate time difference between when undone event was synced and when UNDO is being synced
+                        let time_diff = undo_synced_at.signed_duration_since(undone_synced_at);
+
+                        // Check if more than 5 seconds have passed since undone event was synced
                         if time_diff.num_seconds() > 5 {
                             conflicts.push(event.id);
                             tracing::warn!(
-                                "UNDO event rejected: original event is too old ({} seconds old, max 5 seconds)",
+                                "UNDO event rejected: undone event was synced {} seconds ago (max 5 seconds allowed)",
                                 time_diff.num_seconds()
                             );
                             continue;
                         }
-                    } else {
-                        // Undone event doesn't exist - this is a conflict
-                        conflicts.push(event.id);
-                        tracing::warn!("UNDO event rejected: undone event {} does not exist", undone_event_id_str);
-                        continue;
                     }
+                    // If undone event doesn't exist, we still accept the UNDO event (structural validation passed)
                 }
             }
         }

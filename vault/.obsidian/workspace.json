@@ -196,6 +196,9 @@
   },
   "active": "cd2b8a1db33004c8",
   "lastOpenFiles": [
+    "MEMORY.md.tmp.449427.423dca3ccd36",
+    "undo_event-client-optimization.md",
+    "undo_event-client-optimization.md.tmp.449427.f26fe649fc38",
     "database-setup.md.tmp.449427.0bf174872741",
     "MEMORY.md",
     "MEMORY.md.tmp.449427.61b5013b5552",
@@ -214,8 +217,6 @@
     "sync-refactoring-plan.md",
     "sync-refactoring-plan.md.tmp.449427.9d3acf022492",
     "todos.md.tmp.449427.62e39babfeb1",
-    "todos.md.tmp.449427.71f311139688",
-    "todos.md.tmp.449427.ce1348e2adfb",
     "sync-architecture.md",
     "backend-reader-guide.md",
     "wiki-links.md",
@@ -230,7 +231,6 @@
     "merged-features.md",
     "PERMISSION_SYSTEM_DEEP_DIVE.md",
     "auth.md",
-    "permissions.md",
-    "CURRENT_STATE.md"
+    "permissions.md"
   ]
 }

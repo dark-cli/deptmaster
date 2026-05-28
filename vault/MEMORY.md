@@ -11,6 +11,7 @@ Quick links to project documentation and references.
 
 - [Architecture](architecture.md) — High-level system design, event sourcing, sync protocol
 - [Sync Architecture Deep Dive](sync-handler-deep-dive.md) — Detailed sync API implementation
+- [UNDO Event Client Optimization](undo_event-client-optimization.md) — Delete unsync'd events instead of undoing
 - [Permission System](permission-system-deep-dive.md) — User groups, contact groups, permission matrix
 - [Middleware Architecture](middleware-architecture.md) — Auth, wallet context, rate limiting
 
