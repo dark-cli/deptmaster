@@ -323,22 +323,10 @@ async fn initialize_wallet_permissions(
 /// Create a new wallet (Admin only)
 pub async fn create_wallet(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<CreateWalletRequest>,
 ) -> Result<(StatusCode, Json<CreateWalletResponse>), (StatusCode, Json<serde_json::Value>)> {
-    // TODO: Get user_id from auth middleware
-    // For now, we'll use a placeholder - this will be replaced with actual auth
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user_id = auth_user.user_id;
 
     let wallet_id = Uuid::new_v4();
     let now = Utc::now();

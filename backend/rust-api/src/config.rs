@@ -3,7 +3,6 @@ use std::env;
 #[derive(Clone)]
 pub struct Config {
     pub database_url: String,
-    pub redis_url: String,
     pub port: u16,
     pub jwt_secret: String,
     pub jwt_expiration: u64,
@@ -26,8 +25,6 @@ impl Config {
         Ok(Self {
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker".to_string()),
-            redis_url: env::var("REDIS_URL")
-                .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
             port: env::var("PORT")
                 .unwrap_or_else(|_| "8000".to_string())
                 .parse()
