@@ -9,7 +9,7 @@ pub mod utility;
 
 use async_trait::async_trait;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};
 use serde_json::Value;
 use crate::database::models::*;
 use crate::database::error::DbError;
@@ -122,11 +122,19 @@ pub trait DatabaseRepository: Send + Sync {
     // ============ WALLETS ============
     async fn get_wallet(&self, wallet_id: Uuid) -> Result<Option<Wallet>, DbError>;
 
-    async fn create_wallet(&self, id: Uuid, name: String) -> Result<(), DbError>;
+    async fn create_wallet(
+        &self,
+        id: Uuid,
+        name: String,
+        description: Option<String>,
+        created_by: Option<Uuid>,
+    ) -> Result<(), DbError>;
 
     async fn get_user_wallets(&self, user_id: Uuid) -> Result<Vec<Wallet>, DbError>;
 
     async fn list_wallet_users(&self, wallet_id: Uuid) -> Result<Vec<WalletUser>, DbError>;
+
+    async fn list_wallet_users_with_username(&self, wallet_id: Uuid) -> Result<Vec<WalletUserWithUsername>, DbError>;
 
     async fn add_wallet_user(
         &self,
@@ -141,6 +149,52 @@ pub trait DatabaseRepository: Send + Sync {
         user_id: Uuid,
         role: String,
     ) -> Result<bool, DbError>;
+
+    async fn get_wallet_user_role(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<String>, DbError>;
+
+    async fn get_all_active_wallets(&self) -> Result<Vec<Wallet>, DbError>;
+
+    async fn wallet_exists(&self, wallet_id: Uuid) -> Result<bool, DbError>;
+
+    async fn delete_wallet(&self, wallet_id: Uuid) -> Result<bool, DbError>;
+
+    async fn update_wallet(
+        &self,
+        wallet_id: Uuid,
+        name: Option<&str>,
+        description: Option<&str>,
+        is_active: Option<bool>,
+    ) -> Result<bool, DbError>;
+
+    async fn search_users(&self, pattern: &str, limit: i64) -> Result<Vec<(Uuid, String)>, DbError>;
+
+    async fn count_wallet_owners(&self, wallet_id: Uuid) -> Result<i64, DbError>;
+
+    async fn get_wallet_user_settings(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<(Vec<Uuid>, Vec<Uuid>)>, DbError>;
+
+    async fn upsert_wallet_user_settings(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        contact_group_ids: &[Uuid],
+        transaction_group_ids: &[Uuid],
+    ) -> Result<(), DbError>;
+
+    async fn upsert_invite_code(&self, wallet_id: Uuid, code: &str, created_by: Uuid) -> Result<(), DbError>;
+
+    async fn get_wallet_by_invite_code(&self, code: &str) -> Result<Option<Uuid>, DbError>;
+
+    async fn delete_invite_code(&self, wallet_id: Uuid, code: &str) -> Result<(), DbError>;
+
+    async fn wallet_user_exists(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError>;
 
     // ============ PERMISSIONS ============
     async fn get_user_groups(&self, wallet_id: Uuid) -> Result<Vec<UserGroup>, DbError>;
@@ -170,10 +224,12 @@ pub trait DatabaseRepository: Send + Sync {
 
     async fn get_user_by_id(&self, user_id: Uuid) -> Result<Option<User>, DbError>;
 
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, DbError>;
+
     async fn create_user(
         &self,
         id: Uuid,
-        email: String,
+        username: String,
         password_hash: String,
     ) -> Result<(), DbError>;
 
@@ -192,6 +248,29 @@ pub trait DatabaseRepository: Send + Sync {
         contact_group_id: Option<Uuid>,
         transaction_group_id: Option<Uuid>,
     ) -> Result<(), DbError>;
+
+    async fn insert_login_log(
+        &self,
+        user_id: Option<Uuid>,
+        ip_address: &str,
+        user_agent: &str,
+        success: bool,
+        failure_reason: Option<&str>,
+    ) -> Result<(), DbError>;
+
+    async fn get_all_users(&self) -> Result<Vec<(Uuid, Option<String>, NaiveDateTime)>, DbError>;
+
+    async fn delete_user(&self, user_id: Uuid) -> Result<bool, DbError>;
+
+    async fn get_login_logs(&self, user_id: Uuid, limit: i64) -> Result<Vec<(i64, Uuid, NaiveDateTime, Option<String>, Option<String>, bool, Option<String>)>, DbError>;
+
+    async fn get_user_settings_all(&self, user_id: Uuid) -> Result<Vec<(String, Option<String>)>, DbError>;
+
+    async fn upsert_user_setting(&self, user_id: Uuid, setting_key: &str, setting_value: &str) -> Result<(), DbError>;
+
+    async fn get_admin_by_username(&self, username: &str) -> Result<Option<(Uuid, String, String, bool)>, DbError>;
+
+    async fn update_admin_last_login(&self, admin_id: Uuid) -> Result<(), DbError>;
 
     // ============ SNAPSHOTS ============
     async fn create_projection_snapshot(
@@ -312,8 +391,8 @@ impl DatabaseRepository for Database {
         self.get_wallet_impl(wallet_id).await
     }
 
-    async fn create_wallet(&self, id: Uuid, name: String) -> Result<(), DbError> {
-        self.create_wallet_impl(id, name).await
+    async fn create_wallet(&self, id: Uuid, name: String, description: Option<String>, created_by: Option<Uuid>) -> Result<(), DbError> {
+        self.create_wallet_impl(id, name, description, created_by).await
     }
 
     async fn get_user_wallets(&self, user_id: Uuid) -> Result<Vec<Wallet>, DbError> {
@@ -324,12 +403,42 @@ impl DatabaseRepository for Database {
         self.list_wallet_users_impl(wallet_id).await
     }
 
+    async fn list_wallet_users_with_username(&self, wallet_id: Uuid) -> Result<Vec<WalletUserWithUsername>, DbError> {
+        self.list_wallet_users_with_username_impl(wallet_id).await
+    }
+
     async fn add_wallet_user(&self, wallet_id: Uuid, user_id: Uuid, role: String) -> Result<(), DbError> {
         self.add_wallet_user_impl(wallet_id, user_id, role).await
     }
 
     async fn update_wallet_user_role(&self, wallet_id: Uuid, user_id: Uuid, role: String) -> Result<bool, DbError> {
         self.update_wallet_user_role_impl(wallet_id, user_id, role).await
+    }
+
+    async fn get_wallet_user_role(&self, wallet_id: Uuid, user_id: Uuid) -> Result<Option<String>, DbError> {
+        self.get_wallet_user_role_impl(wallet_id, user_id).await
+    }
+
+    async fn get_all_active_wallets(&self) -> Result<Vec<Wallet>, DbError> {
+        self.get_all_active_wallets_impl().await
+    }
+
+    async fn wallet_exists(&self, wallet_id: Uuid) -> Result<bool, DbError> {
+        self.wallet_exists_impl(wallet_id).await
+    }
+
+    async fn delete_wallet(&self, wallet_id: Uuid) -> Result<bool, DbError> {
+        self.delete_wallet_impl(wallet_id).await
+    }
+
+    async fn update_wallet(
+        &self,
+        wallet_id: Uuid,
+        name: Option<&str>,
+        description: Option<&str>,
+        is_active: Option<bool>,
+    ) -> Result<bool, DbError> {
+        self.update_wallet_impl(wallet_id, name, description, is_active).await
     }
 
     async fn get_user_groups(&self, wallet_id: Uuid) -> Result<Vec<UserGroup>, DbError> {
@@ -364,6 +473,10 @@ impl DatabaseRepository for Database {
         self.get_user_by_id_impl(user_id).await
     }
 
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, DbError> {
+        self.get_user_by_username_impl(username).await
+    }
+
     async fn create_user(&self, id: Uuid, email: String, password_hash: String) -> Result<(), DbError> {
         self.create_user_impl(id, email, password_hash).await
     }
@@ -378,6 +491,80 @@ impl DatabaseRepository for Database {
 
     async fn set_default_groups(&self, user_id: Uuid, wallet_id: Uuid, contact_group_id: Option<Uuid>, transaction_group_id: Option<Uuid>) -> Result<(), DbError> {
         self.set_default_groups_impl(user_id, wallet_id, contact_group_id, transaction_group_id).await
+    }
+
+    async fn insert_login_log(&self, user_id: Option<Uuid>, ip_address: &str, user_agent: &str, success: bool, failure_reason: Option<&str>) -> Result<(), DbError> {
+        self.insert_login_log_impl(user_id, ip_address, user_agent, success, failure_reason).await
+    }
+
+    async fn get_all_users(&self) -> Result<Vec<(Uuid, Option<String>, NaiveDateTime)>, DbError> {
+        self.get_all_users_impl().await
+    }
+
+    async fn delete_user(&self, user_id: Uuid) -> Result<bool, DbError> {
+        self.delete_user_impl(user_id).await
+    }
+
+    async fn get_login_logs(&self, user_id: Uuid, limit: i64) -> Result<Vec<(i64, Uuid, NaiveDateTime, Option<String>, Option<String>, bool, Option<String>)>, DbError> {
+        self.get_login_logs_impl(user_id, limit).await
+    }
+
+    async fn get_user_settings_all(&self, user_id: Uuid) -> Result<Vec<(String, Option<String>)>, DbError> {
+        self.get_user_settings_all_impl(user_id).await
+    }
+
+    async fn upsert_user_setting(&self, user_id: Uuid, setting_key: &str, setting_value: &str) -> Result<(), DbError> {
+        self.upsert_user_setting_impl(user_id, setting_key, setting_value).await
+    }
+
+    async fn get_admin_by_username(&self, username: &str) -> Result<Option<(Uuid, String, String, bool)>, DbError> {
+        self.get_admin_by_username_impl(username).await
+    }
+
+    async fn update_admin_last_login(&self, admin_id: Uuid) -> Result<(), DbError> {
+        self.update_admin_last_login_impl(admin_id).await
+    }
+
+    async fn search_users(&self, pattern: &str, limit: i64) -> Result<Vec<(Uuid, String)>, DbError> {
+        self.search_users_impl(pattern, limit).await
+    }
+
+    async fn count_wallet_owners(&self, wallet_id: Uuid) -> Result<i64, DbError> {
+        self.count_wallet_owners_impl(wallet_id).await
+    }
+
+    async fn get_wallet_user_settings(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Option<(Vec<Uuid>, Vec<Uuid>)>, DbError> {
+        self.get_wallet_user_settings_impl(wallet_id, user_id).await
+    }
+
+    async fn upsert_wallet_user_settings(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        contact_group_ids: &[Uuid],
+        transaction_group_ids: &[Uuid],
+    ) -> Result<(), DbError> {
+        self.upsert_wallet_user_settings_impl(wallet_id, user_id, contact_group_ids, transaction_group_ids).await
+    }
+
+    async fn upsert_invite_code(&self, wallet_id: Uuid, code: &str, created_by: Uuid) -> Result<(), DbError> {
+        self.upsert_invite_code_impl(wallet_id, code, created_by).await
+    }
+
+    async fn get_wallet_by_invite_code(&self, code: &str) -> Result<Option<Uuid>, DbError> {
+        self.get_wallet_by_invite_code_impl(code).await
+    }
+
+    async fn delete_invite_code(&self, wallet_id: Uuid, code: &str) -> Result<(), DbError> {
+        self.delete_invite_code_impl(wallet_id, code).await
+    }
+
+    async fn wallet_user_exists(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {
+        self.wallet_user_exists_impl(wallet_id, user_id).await
     }
 
     async fn create_projection_snapshot(&self, wallet_id: Uuid, contacts_data: Value, transactions_data: Value) -> Result<(), DbError> {

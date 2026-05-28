@@ -13,6 +13,7 @@ use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::services::permission_service::{self, ResourceType, insufficient_permission_response};
 use crate::websocket;
+use crate::database::repository::{DatabaseRepository, Database};
 
 /// Validate permission dependencies (e.g., Write implies Read)
 fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
@@ -59,33 +60,26 @@ async fn require_wallet_role_at_least(
     if auth_user.is_admin {
         return Ok("admin".to_string());
     }
-    let role = sqlx::query_scalar::<_, String>(
-        r#"
-        SELECT role
-        FROM wallet_users
-        WHERE wallet_id = $1 AND user_id = $2
-        "#
-    )
-    .bind(wallet_id)
-    .bind(auth_user.user_id)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking wallet role: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?
-    .ok_or_else(|| {
-        (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({
-                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
-                "message": "You do not have access to this wallet"
-            })),
-        )
-    })?;
+
+    let db = Database::new((*state.db_pool).clone());
+    let role = db.get_wallet_user_role(wallet_id, auth_user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error checking wallet role: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                    "message": "You do not have access to this wallet"
+                })),
+            )
+        })?;
 
     // member < admin < owner
     let role_hierarchy = ["member", "admin", "owner"];
@@ -184,51 +178,28 @@ pub async fn create_my_wallet(
 ) -> Result<(StatusCode, Json<CreateWalletResponse>), (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
     let wallet_id = Uuid::new_v4();
-    let now = Utc::now();
 
-    sqlx::query(
-        r#"
-        INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#
-    )
-    .bind(wallet_id)
-    .bind(&payload.name)
-    .bind(&payload.description)
-    .bind(user_id)
-    .bind(now)
-    .bind(now)
-    .bind(true)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error creating wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create wallet"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
 
-    sqlx::query(
-        r#"
-        INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (wallet_id, user_id) DO NOTHING
-        "#
-    )
-    .bind(wallet_id)
-    .bind(user_id)
-    .bind("owner")
-    .bind(now)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error adding user to wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to add user to wallet"})),
-        )
-    })?;
+    db.create_wallet(wallet_id, payload.name.clone(), payload.description.clone(), Some(user_id))
+        .await
+        .map_err(|e| {
+            tracing::error!("Error creating wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create wallet"})),
+            )
+        })?;
+
+    db.add_wallet_user(wallet_id, user_id, "owner".to_string())
+        .await
+        .map_err(|e| {
+            tracing::error!("Error adding user to wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to add user to wallet"})),
+            )
+        })?;
 
     let response = CreateWalletResponse {
         id: wallet_id.to_string(),
@@ -327,59 +298,33 @@ pub async fn create_wallet(
     Json(payload): Json<CreateWalletRequest>,
 ) -> Result<(StatusCode, Json<CreateWalletResponse>), (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
-
     let wallet_id = Uuid::new_v4();
-    let now = Utc::now();
 
-    // Create wallet
-    sqlx::query(
-        r#"
-        INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#
-    )
-    .bind(wallet_id)
-    .bind(&payload.name)
-    .bind(&payload.description)
-    .bind(user_id)
-    .bind(now)
-    .bind(now)
-    .bind(true)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error creating wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create wallet"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
 
-    // Add creator as owner
-    sqlx::query(
-        r#"
-        INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (wallet_id, user_id) DO NOTHING
-        "#
-    )
-    .bind(wallet_id)
-    .bind(user_id)
-    .bind("owner")
-    .bind(now)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error adding user to wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to add user to wallet"})),
-        )
-    })?;
+    db.create_wallet(wallet_id, payload.name.clone(), payload.description.clone(), Some(user_id))
+        .await
+        .map_err(|e| {
+            tracing::error!("Error creating wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create wallet"})),
+            )
+        })?;
+
+    db.add_wallet_user(wallet_id, user_id, "owner".to_string())
+        .await
+        .map_err(|e| {
+            tracing::error!("Error adding user to wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to add user to wallet"})),
+            )
+        })?;
 
     let response = CreateWalletResponse {
         id: wallet_id.to_string(),
-        name: payload.name,
+        name: payload.name.clone(),
         message: "Wallet created successfully".to_string(),
     };
 
@@ -406,32 +351,30 @@ pub async fn create_wallet(
 pub async fn list_wallets(
     State(state): State<AppState>,
 ) -> Result<Json<WalletListResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let wallets = sqlx::query(
-        r#"
-        SELECT id, name, description, created_at, updated_at, created_by, is_active
-        FROM wallets
-        WHERE is_active = true
-        ORDER BY created_at DESC
-        "#
-    )
-    .map(|row: sqlx::postgres::PgRow| Wallet {
-        id: row.get::<Uuid, _>("id").to_string(),
-        name: row.get("name"),
-        description: row.get("description"),
-        created_at: row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
-        updated_at: row.get::<chrono::NaiveDateTime, _>("updated_at").to_string(),
-        created_by: row.get::<Option<Uuid>, _>("created_by").map(|u| u.to_string()),
-        is_active: row.get("is_active"),
-    })
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching wallets: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to fetch wallets"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    let wallets_db = db.get_all_active_wallets()
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching wallets: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to fetch wallets"})),
+            )
+        })?;
+
+    let wallets = wallets_db
+        .into_iter()
+        .map(|w| Wallet {
+            id: w.id.to_string(),
+            name: w.name,
+            description: w.description,
+            created_at: w.created_at.to_rfc3339(),
+            updated_at: w.updated_at.to_rfc3339(),
+            created_by: w.created_by.map(|u| u.to_string()),
+            is_active: w.is_active,
+        })
+        .collect();
 
     Ok(Json(WalletListResponse { wallets }))
 }
@@ -448,36 +391,29 @@ pub async fn get_wallet(
         )
     })?;
 
-    let wallet = sqlx::query(
-        r#"
-        SELECT id, name, description, created_at, updated_at, created_by, is_active
-        FROM wallets
-        WHERE id = $1 AND is_active = true
-        "#
-    )
-    .bind(wallet_uuid)
-    .map(|row: sqlx::postgres::PgRow| Wallet {
-        id: row.get::<Uuid, _>("id").to_string(),
-        name: row.get("name"),
-        description: row.get("description"),
-        created_at: row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
-        updated_at: row.get::<chrono::NaiveDateTime, _>("updated_at").to_string(),
-        created_by: row.get::<Option<Uuid>, _>("created_by").map(|u| u.to_string()),
-        is_active: row.get("is_active"),
-    })
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    let wallet = db.get_wallet(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     match wallet {
-        Some(w) => Ok(Json(w)),
-        None => Err((
+        Some(w) if w.is_active => Ok(Json(Wallet {
+            id: w.id.to_string(),
+            name: w.name,
+            description: w.description,
+            created_at: w.created_at.to_rfc3339(),
+            updated_at: w.updated_at.to_rfc3339(),
+            created_by: w.created_by.map(|u| u.to_string()),
+            is_active: w.is_active,
+        })),
+        _ => Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Wallet not found"})),
         )),
@@ -501,20 +437,18 @@ pub async fn update_wallet(
     // Enforce permissions: only wallet admins/owners may edit wallet details.
     let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Check if wallet exists
-    let wallet_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)"
-    )
-    .bind(wallet_uuid)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let wallet_exists = db.wallet_exists(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error checking wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     if !wallet_exists {
         return Err((
@@ -523,62 +457,34 @@ pub async fn update_wallet(
         ));
     }
 
-    // Build update query dynamically
-    let mut updates = Vec::new();
-    let mut bind_index = 1;
-
-    if payload.name.is_some() {
-        updates.push(format!("name = ${}", bind_index));
-        bind_index += 1;
-    }
-    if payload.description.is_some() {
-        updates.push(format!("description = ${}", bind_index));
-        bind_index += 1;
-    }
-    if payload.is_active.is_some() {
-        updates.push(format!("is_active = ${}", bind_index));
-        bind_index += 1;
-    }
-
-    if updates.is_empty() {
+    if payload.name.is_none() && payload.description.is_none() && payload.is_active.is_none() {
         return Ok((
             StatusCode::OK,
             Json(serde_json::json!({"message": "No changes provided"})),
         ));
     }
 
-    updates.push(format!("updated_at = ${}", bind_index));
+    let updated = db.update_wallet(
+        wallet_uuid,
+        payload.name.as_deref(),
+        payload.description.as_deref(),
+        payload.is_active,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error updating wallet: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to update wallet"})),
+        )
+    })?;
 
-    let query = format!(
-        "UPDATE wallets SET {} WHERE id = ${}",
-        updates.join(", "),
-        bind_index + 1
-    );
-
-    let mut query_builder = sqlx::query(&query);
-
-    if let Some(name) = &payload.name {
-        query_builder = query_builder.bind(name);
+    if !updated {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Wallet not found"})),
+        ));
     }
-    if let Some(description) = &payload.description {
-        query_builder = query_builder.bind(description);
-    }
-    if let Some(is_active) = payload.is_active {
-        query_builder = query_builder.bind(is_active);
-    }
-    query_builder = query_builder.bind(Utc::now());
-    query_builder = query_builder.bind(wallet_uuid);
-
-    query_builder
-        .execute(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error updating wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to update wallet"})),
-            )
-        })?;
 
     // Broadcast change via WebSocket
     websocket::broadcast_wallet_change(
@@ -610,21 +516,18 @@ pub async fn delete_wallet(
     // Enforce permissions: only wallet owners may delete a wallet.
     let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "owner").await?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Soft delete by setting is_active = false
-    sqlx::query(
-        "UPDATE wallets SET is_active = false, updated_at = $1 WHERE id = $2"
-    )
-    .bind(Utc::now())
-    .bind(wallet_uuid)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error deleting wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to delete wallet"})),
-        )
-    })?;
+    db.delete_wallet(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error deleting wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to delete wallet"})),
+            )
+        })?;
 
     // Broadcast change via WebSocket
     websocket::broadcast_wallet_change(
@@ -665,46 +568,40 @@ pub async fn add_user_to_wallet(
         ));
     }
 
-    // Look up user by username
-    let user_uuid: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM users_projection WHERE username = $1 LIMIT 1",
-    )
-    .bind(username)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error looking up user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
 
-    let user_uuid = user_uuid.ok_or_else(|| {
+    // Look up user by username
+    let user = db.get_user_by_username(username)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error looking up user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+    let user_uuid = user.ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "User not found."})),
         )
-    })?;
+    })?.id;
 
     // New members get role 'member' (read-only by default). Change role later on the member.
     // POLICY: New invited users MUST start as 'member', never 'owner' or 'admin'.
     let role = "member";
 
     // Check if wallet exists
-    let wallet_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)"
-    )
-    .bind(wallet_uuid)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let wallet_exists = db.wallet_exists(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error checking wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     if !wallet_exists {
         return Err((
@@ -771,26 +668,24 @@ pub async fn search_wallet_users(
         return Ok(Json(vec![]));
     }
 
+    let db = Database::new((*state.db_pool).clone());
     let pattern = format!("%{}%", q);
-    let rows = sqlx::query(
-        "SELECT id, username FROM users_projection WHERE LOWER(username) LIKE LOWER($1) ORDER BY username LIMIT 20",
-    )
-    .bind(&pattern)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("search_wallet_users: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Search failed"})),
-        )
-    })?;
 
-    let list: Vec<UserSearchResult> = rows
+    let users = db.search_users(&pattern, 20)
+        .await
+        .map_err(|e| {
+            tracing::error!("search_wallet_users: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Search failed"})),
+            )
+        })?;
+
+    let list: Vec<UserSearchResult> = users
         .into_iter()
-        .map(|row: sqlx::postgres::PgRow| UserSearchResult {
-            id: row.get::<Uuid, _>("id").to_string(),
-            username: row.get::<String, _>("username"),
+        .map(|(id, username)| UserSearchResult {
+            id: id.to_string(),
+            username,
         })
         .collect();
     Ok(Json(list))
@@ -825,29 +720,17 @@ pub async fn create_wallet_invite(
     // 4-digit numeric code (0000–9999)
     let code = format!("{:04}", (Uuid::new_v4().as_u128() % 10000) as u32);
 
-    // Create invite code with 5 minute expiration
-    sqlx::query(
-        r#"
-        INSERT INTO wallet_invite_codes (wallet_id, code, created_by, created_at)
-        VALUES ($1, $2, $3, NOW())
-        ON CONFLICT (wallet_id) DO UPDATE 
-        SET code = EXCLUDED.code, 
-            created_at = NOW(), 
-            created_by = EXCLUDED.created_by
-        "#
-    )
-    .bind(wallet_uuid)
-    .bind(&code)
-    .bind(auth_user.user_id)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("create_wallet_invite: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create invite code"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    db.upsert_invite_code(wallet_uuid, &code, auth_user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("create_wallet_invite: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create invite code"})),
+            )
+        })?;
 
     Ok((
         StatusCode::CREATED,
@@ -875,62 +758,37 @@ pub async fn join_wallet_by_code(
         ));
     }
 
-    let wallet_id_row: Option<(Uuid,)> = sqlx::query_as(
-        r#"
-        SELECT wallet_id 
-        FROM wallet_invite_codes 
-        WHERE code = $1 
-          AND created_at > NOW() - INTERVAL '5 minutes'
-        "#
-    )
-    .bind(code)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("join_wallet_by_code lookup: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
 
-    let (wallet_uuid,) = wallet_id_row.ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST, // Changed from NOT_FOUND to BAD_REQUEST to ensure frontend shows it as an input error
-            Json(serde_json::json!({"error": "Invalid or expired invite code"})),
-        )
-    })?;
-
-    // One-time use: Delete code after successful lookup (but before joining to prevent race conditions slightly)
-    // Actually, safer to delete AFTER joining? Or before?
-    // If we delete before and join fails, code is lost.
-    // If we delete after and race happens, two people might join.
-    // Given "one time use", let's try to delete it atomically.
-    // We can't easily do "select and delete" returning data in one generic query step with the existing structure easily without a transaction.
-    // Let's rely on the previous SELECT for validation and issue a DELETE now.
-    // A race condition is acceptable for now (two people joining within milliseconds).
-    sqlx::query("DELETE FROM wallet_invite_codes WHERE wallet_id = $1 AND code = $2")
-        .bind(wallet_uuid)
-        .bind(code)
-        .execute(&*state.db_pool)
+    let wallet_uuid = db.get_wallet_by_invite_code(code)
         .await
-        .ok(); // Ignore delete errors (e.g. already deleted)
+        .map_err(|e| {
+            tracing::error!("join_wallet_by_code lookup: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid or expired invite code"})),
+            )
+        })?;
+
+    // One-time use: Delete code after successful lookup
+    let _ = db.delete_invite_code(wallet_uuid, code).await;
 
     // Check if already a member
-    let already: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
-    )
-    .bind(wallet_uuid)
-    .bind(auth_user.user_id)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("join_wallet_by_code check: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let already = db.wallet_user_exists(wallet_uuid, auth_user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("join_wallet_by_code check: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     if already {
         return Ok((
@@ -992,33 +850,29 @@ pub async fn list_wallet_users(
     // When called from user-facing API, require admin. Admin panel callers have is_admin and bypass.
     let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
 
-    let users = sqlx::query(
-        r#"
-        SELECT wu.id, wu.wallet_id, wu.user_id, u.username, wu.role, wu.subscribed_at
-        FROM wallet_users wu
-        LEFT JOIN users_projection u ON u.id = wu.user_id
-        WHERE wu.wallet_id = $1
-        ORDER BY wu.subscribed_at DESC
-        "#
-    )
-    .bind(wallet_uuid)
-    .map(|row: sqlx::postgres::PgRow| WalletUser {
-        id: row.get::<Uuid, _>("id").to_string(),
-        wallet_id: row.get::<Uuid, _>("wallet_id").to_string(),
-        user_id: row.get::<Uuid, _>("user_id").to_string(),
-        username: row.try_get::<String, _>("username").ok(),
-        role: row.get("role"),
-        subscribed_at: row.get::<chrono::NaiveDateTime, _>("subscribed_at").to_string(),
-    })
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching wallet users: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to fetch wallet users"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    let users_db = db.list_wallet_users_with_username(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching wallet users: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to fetch wallet users"})),
+            )
+        })?;
+
+    let users = users_db
+        .into_iter()
+        .map(|u| WalletUser {
+            id: u.id.to_string(),
+            wallet_id: u.wallet_id.to_string(),
+            user_id: u.user_id.to_string(),
+            username: u.username,
+            role: u.role,
+            subscribed_at: u.created_at.to_rfc3339(),
+        })
+        .collect();
 
     Ok(Json(WalletUsersResponse { users }))
 }
@@ -1117,34 +971,28 @@ pub async fn remove_user_from_wallet(
 
     // Owner may remove themselves only if there is at least one other owner.
     if auth_user.user_id == user_uuid {
-        let role: Option<String> = sqlx::query_scalar(
-            "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
-        )
-        .bind(wallet_uuid)
-        .bind(user_uuid)
-        .fetch_optional(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("remove_user_from_wallet role check: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
-            )
-        })?;
-        if role.as_deref() == Some("owner") {
-            let owner_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1 AND role = 'owner'",
-            )
-            .bind(wallet_uuid)
-            .fetch_one(&*state.db_pool)
+        let db = Database::new((*state.db_pool).clone());
+
+        let role = db.get_wallet_user_role(wallet_uuid, user_uuid)
             .await
             .map_err(|e| {
-                tracing::error!("remove_user_from_wallet owner count: {:?}", e);
+                tracing::error!("remove_user_from_wallet role check: {:?}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
                 )
             })?;
+
+        if role.as_deref() == Some("owner") {
+            let owner_count = db.count_wallet_owners(wallet_uuid)
+                .await
+                .map_err(|e| {
+                    tracing::error!("remove_user_from_wallet owner count: {:?}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
+                    )
+                })?;
             if owner_count <= 1 {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -1199,34 +1047,30 @@ pub async fn list_user_wallets(
 ) -> Result<Json<WalletListResponse>, (StatusCode, Json<serde_json::Value>)> {
     let user_id = auth_user.user_id;
 
-    let wallets = sqlx::query(
-        r#"
-        SELECT w.id, w.name, w.description, w.created_at, w.updated_at, w.created_by, w.is_active
-        FROM wallets w
-        INNER JOIN wallet_users wu ON wu.wallet_id = w.id
-        WHERE wu.user_id = $1 AND w.is_active = true
-        ORDER BY wu.subscribed_at DESC
-        "#
-    )
-    .bind(user_id)
-    .map(|row: sqlx::postgres::PgRow| Wallet {
-        id: row.get::<Uuid, _>("id").to_string(),
-        name: row.get("name"),
-        description: row.get("description"),
-        created_at: row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
-        updated_at: row.get::<chrono::NaiveDateTime, _>("updated_at").to_string(),
-        created_by: row.get::<Option<Uuid>, _>("created_by").map(|u| u.to_string()),
-        is_active: row.get("is_active"),
-    })
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user wallets: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to fetch wallets"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    let wallets_db = db.get_user_wallets(user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching user wallets: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to fetch wallets"})),
+            )
+        })?;
+
+    let wallets = wallets_db
+        .into_iter()
+        .map(|w| Wallet {
+            id: w.id.to_string(),
+            name: w.name,
+            description: w.description,
+            created_at: w.created_at.to_rfc3339(),
+            updated_at: w.updated_at.to_rfc3339(),
+            created_by: w.created_by.map(|u| u.to_string()),
+            is_active: w.is_active,
+        })
+        .collect();
 
     Ok(Json(WalletListResponse { wallets }))
 }
@@ -1299,27 +1143,26 @@ pub async fn get_my_wallet_settings(
     Extension(wallet_context): Extension<WalletContext>,
     Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<MyWalletSettingsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let row = sqlx::query(
-        "SELECT default_contact_group_ids, default_transaction_group_ids FROM user_wallet_settings WHERE wallet_id = $1 AND user_id = $2",
-    )
-    .bind(wallet_context.wallet_id)
-    .bind(auth_user.user_id)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching wallet settings: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
-    let (contact_ids, transaction_ids) = if let Some(r) = row {
-        let c: Vec<Uuid> = r.get("default_contact_group_ids");
-        let t: Vec<Uuid> = r.get("default_transaction_group_ids");
-        (c.into_iter().map(|u| u.to_string()).collect(), t.into_iter().map(|u| u.to_string()).collect())
-    } else {
-        (Vec::new(), Vec::new())
+    let db = Database::new((*state.db_pool).clone());
+
+    let settings = db.get_wallet_user_settings(wallet_context.wallet_id, auth_user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching wallet settings: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+    let (contact_ids, transaction_ids) = match settings {
+        Some((contact, transaction)) => (
+            contact.into_iter().map(|u| u.to_string()).collect(),
+            transaction.into_iter().map(|u| u.to_string()).collect(),
+        ),
+        None => (Vec::new(), Vec::new()),
     };
+
     Ok(Json(MyWalletSettingsResponse {
         default_contact_group_ids: contact_ids,
         default_transaction_group_ids: transaction_ids,
@@ -1351,20 +1194,15 @@ pub async fn put_my_wallet_settings(
         .into_iter()
         .filter_map(|s| Uuid::parse_str(&s).ok())
         .collect();
-    sqlx::query(
-        r#"
-        INSERT INTO user_wallet_settings (wallet_id, user_id, default_contact_group_ids, default_transaction_group_ids)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (wallet_id, user_id) DO UPDATE SET
-            default_contact_group_ids = $3,
-            default_transaction_group_ids = $4
-        "#,
+
+    let db = Database::new((*state.db_pool).clone());
+
+    db.upsert_wallet_user_settings(
+        wallet_context.wallet_id,
+        auth_user.user_id,
+        &contact_ids,
+        &transaction_ids,
     )
-    .bind(wallet_context.wallet_id)
-    .bind(auth_user.user_id)
-    .bind(&contact_ids)
-    .bind(&transaction_ids)
-    .execute(&*state.db_pool)
     .await
     .map_err(|e| {
         tracing::error!("Error upserting wallet settings: {:?}", e);
@@ -1373,6 +1211,7 @@ pub async fn put_my_wallet_settings(
             Json(serde_json::json!({"error": "Database error"})),
         )
     })?;
+
     Ok(Json(MyWalletSettingsResponse {
         default_contact_group_ids: contact_ids.into_iter().map(|u| u.to_string()).collect(),
         default_transaction_group_ids: transaction_ids.into_iter().map(|u| u.to_string()).collect(),

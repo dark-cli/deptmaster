@@ -1,4 +1,5 @@
 use uuid::Uuid;
+use chrono::NaiveDateTime;
 use crate::database::models::*;
 use crate::database::error::DbError;
 use crate::database::repository::Database;
@@ -38,18 +39,19 @@ impl Database {
     pub async fn create_user_impl(
         &self,
         id: Uuid,
-        email: String,
+        username: String,
         password_hash: String,
     ) -> Result<(), DbError> {
         sqlx::query(
             r#"
-            INSERT INTO users_projection (id, email, password_hash, is_admin, created_at, updated_at)
-            VALUES ($1, $2, $3, false, NOW(), NOW())
+            INSERT INTO users_projection (id, username, email, password_hash, is_admin, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, false, NOW(), NOW())
             ON CONFLICT (id) DO NOTHING
             "#
         )
         .bind(id)
-        .bind(&email)
+        .bind(&username)
+        .bind(&username)
         .bind(&password_hash)
         .execute(&self.pool)
         .await?;
@@ -112,6 +114,170 @@ impl Database {
         .await?;
 
         Ok(())
+    }
+
+    pub async fn get_user_by_username_impl(&self, username: &str) -> Result<Option<User>, DbError> {
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            SELECT id, email, username, password_hash, is_admin, created_at, updated_at
+            FROM users_projection
+            WHERE username = $1
+            LIMIT 1
+            "#
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(user)
+    }
+
+    pub async fn insert_login_log_impl(
+        &self,
+        user_id: Option<Uuid>,
+        ip_address: &str,
+        user_agent: &str,
+        success: bool,
+        failure_reason: Option<&str>,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO login_logs (user_id, login_at, ip_address, user_agent, success, failure_reason)
+            VALUES ($1, NOW(), $2, $3, $4, $5)
+            "#
+        )
+        .bind(user_id)
+        .bind(ip_address)
+        .bind(user_agent)
+        .bind(success)
+        .bind(failure_reason)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_all_users_impl(&self) -> Result<Vec<(Uuid, Option<String>, NaiveDateTime)>, DbError> {
+        let rows = sqlx::query_as::<_, (Uuid, Option<String>, NaiveDateTime)>(
+            r#"
+            SELECT id, username, created_at
+            FROM users_projection
+            ORDER BY created_at DESC
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn delete_user_impl(&self, user_id: Uuid) -> Result<bool, DbError> {
+        let result = sqlx::query("DELETE FROM users_projection WHERE id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn get_login_logs_impl(
+        &self,
+        user_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<(i64, Uuid, NaiveDateTime, Option<String>, Option<String>, bool, Option<String>)>, DbError> {
+        let rows = sqlx::query_as::<_, (i64, Uuid, NaiveDateTime, Option<String>, Option<String>, bool, Option<String>)>(
+            r#"
+            SELECT id, user_id, login_at, ip_address, user_agent, success, failure_reason
+            FROM login_logs
+            WHERE user_id = $1
+            ORDER BY login_at DESC
+            LIMIT $2
+            "#
+        )
+        .bind(user_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn get_user_settings_all_impl(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<(String, Option<String>)>, DbError> {
+        let rows = sqlx::query_as::<_, (String, Option<String>)>(
+            r#"
+            SELECT setting_key, setting_value
+            FROM user_settings
+            WHERE user_id = $1
+            "#
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn upsert_user_setting_impl(
+        &self,
+        user_id: Uuid,
+        setting_key: &str,
+        setting_value: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_settings (user_id, setting_key, setting_value, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (user_id, setting_key)
+            DO UPDATE SET setting_value = $3, updated_at = NOW()
+            "#
+        )
+        .bind(user_id)
+        .bind(setting_key)
+        .bind(setting_value)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_admin_by_username_impl(&self, username: &str) -> Result<Option<(Uuid, String, String, bool)>, DbError> {
+        let row = sqlx::query_as::<_, (Uuid, String, String, bool)>(
+            r#"
+            SELECT id, username, password_hash, is_active
+            FROM admin_users
+            WHERE username = $1
+            LIMIT 1
+            "#
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn update_admin_last_login_impl(&self, admin_id: Uuid) -> Result<(), DbError> {
+        sqlx::query("UPDATE admin_users SET last_login_at = NOW() WHERE id = $1")
+            .bind(admin_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn search_users_impl(&self, pattern: &str, limit: i64) -> Result<Vec<(Uuid, String)>, DbError> {
+        let rows = sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT id, username FROM users_projection WHERE LOWER(username) LIKE LOWER($1) ORDER BY username LIMIT $2"
+        )
+        .bind(pattern)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
     }
 }
 
