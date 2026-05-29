@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 use crate::database::error::DbError;
+use std::collections::HashSet;
 
 use super::action::Action;
 use super::context::PermissionContext;
@@ -42,6 +43,33 @@ impl PermissionModel {
     /// if allowed[0] { /* can create */ }
     /// if allowed[1] { /* can read */ }
     /// ```
+    /// Resolve all allowed actions for a user on a specific resource
+    ///
+    /// Returns the set of actions the user can perform on the resource.
+    /// Owner/Admin bypass and have all actions available.
+    ///
+    /// # Arguments
+    /// * `ctx` - Permission context (who, what wallet, what role)
+    /// * `resource` - The resource to check permissions for
+    ///
+    /// # Returns
+    /// HashSet of all allowed actions on this resource
+    ///
+    /// # Example
+    /// ```ignore
+    /// let actions = model.resolve_actions(&ctx, &Resource::Contact(contact_id)).await?;
+    /// if actions.contains(&Action::ContactUpdate) {
+    ///     // User can update this contact
+    /// }
+    /// ```
+    pub async fn resolve_actions(
+        &self,
+        ctx: &PermissionContext,
+        resource: &Resource,
+    ) -> Result<HashSet<Action>, DbError> {
+        resolver::resolve_actions(&self.pool, ctx, resource).await
+    }
+
     pub async fn check_permissions(
         &self,
         ctx: &PermissionContext,

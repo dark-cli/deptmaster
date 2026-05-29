@@ -10,6 +10,7 @@ use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::services::permission_service::{self, ResourceType, insufficient_permission_response};
+use crate::permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole};
 use crate::websocket;
 use crate::database::repository::{DatabaseRepository, Database};
 use crate::database::error::DbError;
@@ -102,6 +103,38 @@ async fn require_wallet_role_at_least(
     }
 
     Ok(role)
+}
+
+/// Check if user can perform an action on a resource using PermissionModel
+async fn check_permission_matrix(
+    state: &AppState,
+    wallet_id: Uuid,
+    auth_user: &AuthUser,
+    wallet_role: &str,
+    action: Action,
+    resource: Resource,
+) -> Result<bool, (StatusCode, Json<serde_json::Value>)> {
+    // Owner/Admin bypass all checks
+    if wallet_role == "owner" || wallet_role == "admin" {
+        return Ok(true);
+    }
+
+    let user_role = WalletRole::Member;
+    let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
+    let perm_model = PermissionModel::new((*state.db_pool).clone());
+
+    let allowed = perm_model
+        .check_permissions(&perm_ctx, vec![(action, resource)])
+        .await
+        .map_err(|e| {
+            tracing::error!("Permission check error: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
+
+    Ok(allowed.first().copied().unwrap_or(false))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1048,45 +1081,71 @@ pub async fn get_my_permissions(
     Extension(auth_user): Extension<AuthUser>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<MyPermissionsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let mut actions: Vec<String> = if wallet_context.user_role == "owner" || wallet_context.user_role == "admin" {
+    let wallet_id = wallet_context.wallet_id;
+
+    // Owner/admin have all actions
+    let actions: Vec<String> = if wallet_context.user_role == "owner" || wallet_context.user_role == "admin" {
         vec![
             "contact:create".into(), "contact:read".into(), "contact:update".into(), "contact:delete".into(),
             "transaction:create".into(), "transaction:read".into(), "transaction:update".into(), "transaction:delete".into(), "transaction:close".into(),
             "wallet:read".into(), "wallet:update".into(), "wallet:delete".into(), "wallet:manage_members".into(),
+            "events:read".into(),
         ]
     } else {
-        let wallet_id = wallet_context.wallet_id;
-        let resource_type = match params.get("resource_type").map(|s| s.as_str()) {
-            Some("contact") => ResourceType::Contact,
-            Some("transaction") => ResourceType::Transaction,
-            Some("wallet") => ResourceType::Wallet,
-            _ => ResourceType::Contact,
+        // Use PermissionModel to resolve allowed actions for member role
+        let user_role = WalletRole::Member;
+        let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
+        let perm_model = PermissionModel::new((*state.db_pool).clone());
+
+        // Get resource from query params
+        let resource = match params.get("resource_type").map(|s| s.as_str()) {
+            Some("contact") => {
+                let resource_id = params
+                    .get("resource_id")
+                    .and_then(|s| Uuid::parse_str(s).ok());
+                match resource_id {
+                    Some(id) => Resource::Contact(id),
+                    None => Resource::AllContacts,
+                }
+            }
+            Some("transaction") => {
+                let resource_id = params
+                    .get("resource_id")
+                    .and_then(|s| Uuid::parse_str(s).ok());
+                match resource_id {
+                    Some(id) => Resource::Transaction(id),
+                    None => Resource::AllTransactions,
+                }
+            }
+            Some("wallet") => Resource::Wallet(wallet_id),
+            _ => Resource::AllContacts,
         };
-        let resource_id = params
-            .get("resource_id")
-            .and_then(|s| Uuid::parse_str(s).ok());
-        permission_service::resolve_allowed_actions(
-            &*state.db_pool,
-            wallet_id,
-            auth_user.user_id,
-            resource_type,
-            resource_id,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("resolve_allowed_actions error: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to resolve permissions"})),
-            )
-        })?
-        .into_iter()
-        .collect()
+
+        // Resolve allowed actions using PermissionModel
+        let allowed_actions = perm_model
+            .resolve_actions(&perm_ctx, &resource)
+            .await
+            .map_err(|e| {
+                tracing::error!("resolve_actions error: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to resolve permissions"})),
+                )
+            })?;
+
+        let mut action_strs: Vec<String> = allowed_actions
+            .iter()
+            .map(|a| a.as_str().to_string())
+            .collect();
+
+        // Events are always viewable (no permission check).
+        if !action_strs.contains(&"events:read".to_string()) {
+            action_strs.push("events:read".into());
+        }
+
+        action_strs
     };
-    // Events are always viewable (no permission check).
-    if !actions.contains(&"events:read".to_string()) {
-        actions.push("events:read".into());
-    }
+
     Ok(Json(MyPermissionsResponse { actions }))
 }
 
@@ -2023,39 +2082,26 @@ pub async fn add_contact_group_member(
     })?;
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
     if role != "owner" && role != "admin" {
-        let can_edit_contact = permission_service::can_perform(
-            &*state.db_pool,
+        let can_edit_contact = check_permission_matrix(
+            &state,
             wallet_uuid,
-            auth_user.user_id,
+            &auth_user,
             &role,
-            "contact:edit",
-            ResourceType::Contact,
-            Some(contact_uuid),
+            Action::ContactUpdate,
+            Resource::Contact(contact_uuid),
         )
-        .await
-        .map_err(|e| {
-            tracing::error!("add_contact_group_member can_perform: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
-        let can_edit_group = permission_service::can_perform_action_on_contact_group(
-            &*state.db_pool,
+        .await?;
+
+        let can_edit_group = check_permission_matrix(
+            &state,
             wallet_uuid,
-            auth_user.user_id,
+            &auth_user,
             &role,
-            group_uuid,
-            "contact:edit",
+            Action::ContactUpdate,
+            Resource::AllContacts,  // Check on group means checking all_contacts
         )
-        .await
-        .map_err(|e| {
-            tracing::error!("add_contact_group_member can_perform_action_on_contact_group: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
+        .await?;
+
         if !can_edit_contact && !can_edit_group {
             tracing::warn!(
                 contact_id = %payload.contact_id,
