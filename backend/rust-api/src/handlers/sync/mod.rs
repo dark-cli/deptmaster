@@ -14,6 +14,9 @@ use crate::middleware::wallet_context::WalletContext;
 use crate::{permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole}};
 use sha2::{Sha256, Digest};
 
+pub mod request;
+pub use request::ValidatedSyncEventRequest;
+
 /// Sync contact_group_members for a contact from event_data.group_ids (contact UPDATED).
 /// Desired set is all_contacts + group_ids from event. Clears wallet's group memberships for this contact then inserts desired.
 async fn apply_contact_group_ids_from_event_data(
