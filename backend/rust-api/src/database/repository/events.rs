@@ -388,13 +388,13 @@ impl Database {
                                 "#
                             )
                             .bind(aggregate_id)
-                            .bind(wallet_id)
                             .bind(name)
                             .bind(username)
                             .bind(phone)
                             .bind(email)
                             .bind(notes)
                             .bind(created_at)
+                            .bind(wallet_id)
                             .execute(&self.pool)
                             .await?;
                         }

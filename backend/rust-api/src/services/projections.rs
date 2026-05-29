@@ -162,11 +162,13 @@ impl Projections {
         } else {
             // No UNDO events - use snapshot optimization if available
             if let Some(last_id) = last_event_db_id {
+                tracing::info!("Attempting snapshot optimization: last_event_db_id={:?}", last_id);
                 if let Ok(Some(snapshot)) = snapshots::get_snapshot_before_event(
                     &*state.db_pool,
                     last_id,
                     wallet_id,
                 ).await {
+                    tracing::info!("Found snapshot: last_event_id={}, event_count={}", snapshot.last_event_id, snapshot.event_count);
                     // Get events after the snapshot
                     let snapshot_last_db_id = snapshot.last_event_id;
                     let events_after_snapshot: Vec<_> = events.iter()
@@ -226,15 +228,18 @@ impl Projections {
                         db.restore_projections_from_snapshot(&snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok()
                     }
                 } else {
+                    tracing::info!("Snapshot not found or failed to restore");
                     false
                 }
             } else {
+                tracing::info!("No last_event_db_id, skipping snapshot optimization");
                 false
             }
         };
 
         // If snapshot optimization failed or not used, do full rebuild
         if !used_snapshot {
+            tracing::warn!("Snapshot optimization failed or not available, performing full rebuild");
             // Clear existing projections for this wallet (delete transactions first due to foreign key constraints)
             sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
                 .bind(wallet_id)
