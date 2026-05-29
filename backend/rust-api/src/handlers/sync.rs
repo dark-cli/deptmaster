@@ -11,6 +11,7 @@ use crate::services::projection_snapshot_service;
 use crate::services::permission_service::{self, ResourceType, SyncReadContext};
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
+use crate::{permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole}};
 use sha2::{Sha256, Digest};
 
 /// Sync contact_group_members for a contact from event_data.group_ids (contact UPDATED).
@@ -66,6 +67,55 @@ async fn apply_contact_group_ids_from_event_data(
         .await?;
     }
     Ok(())
+}
+
+/// Convert old permission system (string action + ResourceType) to new PermissionModel (Action + Resource)
+fn convert_to_new_permission_model(
+    action_str: &str,
+    resource_type: ResourceType,
+    resource_id: Option<uuid::Uuid>,
+) -> Option<(Action, Resource)> {
+    let action = match action_str {
+        "contact:create" => Action::ContactCreate,
+        "contact:read" => Action::ContactRead,
+        "contact:update" | "contact:edit" => Action::ContactUpdate,
+        "contact:delete" => Action::ContactDelete,
+        "transaction:create" => Action::TransactionCreate,
+        "transaction:read" => Action::TransactionRead,
+        "transaction:update" => Action::TransactionUpdate,
+        "transaction:close" => Action::TransactionClose,
+        "wallet:read" => Action::WalletRead,
+        "wallet:update" => Action::WalletUpdate,
+        "wallet:manage_members" => Action::WalletAddMember,
+        "events:read" => Action::EventsRead,
+        _ => return None,
+    };
+
+    let resource = match resource_type {
+        ResourceType::Contact => {
+            if let Some(id) = resource_id {
+                Resource::Contact(id)
+            } else {
+                Resource::AllContacts
+            }
+        }
+        ResourceType::Transaction => {
+            if let Some(id) = resource_id {
+                Resource::Transaction(id)
+            } else {
+                Resource::AllTransactions
+            }
+        }
+        ResourceType::Wallet => {
+            if let Some(id) = resource_id {
+                Resource::Wallet(id)
+            } else {
+                return None;
+            }
+        }
+    };
+
+    Some((action, resource))
 }
 
 fn map_event_to_permission_action(
@@ -598,7 +648,17 @@ pub async fn post_sync_events(
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
 
-    // Preflight permission checks to avoid partial writes in a batch.
+    // Preflight permission checks using batched API to avoid partial writes in a batch.
+    // Convert wallet role string to enum for PermissionContext
+    let user_role = match wallet_context.user_role.as_str() {
+        "owner" => WalletRole::Owner,
+        "admin" => WalletRole::Admin,
+        _ => WalletRole::Member,
+    };
+    let perm_ctx = PermissionContext::new(wallet_id, user_id, user_role);
+
+    // Collect all permission checks for batch verification
+    let mut permission_checks: Vec<(Action, Resource)> = Vec::new();
     for event in &events {
         let aggregate_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|e| {
             (
@@ -616,38 +676,31 @@ pub async fn post_sync_events(
         }
 
         if let Some((action, resource_type, resource_id)) = map_event_to_permission_action(event, aggregate_id) {
-            let can = permission_service::can_perform(
-                &*state.db_pool,
-                wallet_id,
-                auth_user.user_id,
-                &wallet_context.user_role,
-                &action,
-                resource_type,
-                resource_id,
-            )
-            .await
-            .map_err(|_| permission_service::insufficient_permission_response())?;
-            if !can {
-                return Err(permission_service::insufficient_permission_response());
+            if let Some((perm_action, perm_resource)) = convert_to_new_permission_model(&action, resource_type, resource_id) {
+                permission_checks.push((perm_action, perm_resource));
             }
 
             // Transactions require contact read (dependency safety).
             if event.aggregate_type == "transaction" {
-                let can_contact_read = permission_service::can_perform(
-                    &*state.db_pool,
-                    wallet_id,
-                    auth_user.user_id,
-                    &wallet_context.user_role,
-                    "contact:read",
-                    ResourceType::Contact,
-                    None,
-                )
-                .await
-                .map_err(|_| permission_service::insufficient_permission_response())?;
-                if !can_contact_read {
-                    return Err(permission_service::insufficient_permission_response());
+                if let Some((perm_action, perm_resource)) = convert_to_new_permission_model("contact:read", ResourceType::Contact, None) {
+                    permission_checks.push((perm_action, perm_resource));
                 }
             }
+        }
+    }
+
+    // Verify all permissions in batch using optimized single query
+    if !permission_checks.is_empty() {
+        let db_pool = (*state.db_pool).clone();
+        let perm_model = PermissionModel::new(db_pool);
+        let results: Vec<bool> = perm_model
+            .check_permissions(&perm_ctx, permission_checks)
+            .await
+            .map_err(|_| permission_service::insufficient_permission_response())?;
+
+        // Check that all permission checks passed
+        if !results.iter().all(|&allowed| allowed) {
+            return Err(permission_service::insufficient_permission_response());
         }
     }
 

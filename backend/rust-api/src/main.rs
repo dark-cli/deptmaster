@@ -19,6 +19,7 @@ mod database;
 mod utils;
 mod websocket;
 mod middleware;
+mod permissions;
 // app_state module removed - AppState defined directly in main.rs
 
 use config::Config;
