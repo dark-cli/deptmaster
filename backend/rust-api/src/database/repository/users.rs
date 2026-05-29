@@ -69,26 +69,6 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
-    pub async fn get_user_settings_impl(
-        &self,
-        user_id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<Option<UserSettings>, DbError> {
-        let settings = sqlx::query_as::<_, UserSettings>(
-            r#"
-            SELECT wallet_id, user_id, default_contact_group_ids, default_transaction_group_ids
-            FROM user_wallet_settings
-            WHERE user_id = $1 AND wallet_id = $2
-            "#
-        )
-        .bind(user_id)
-        .bind(wallet_id)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(settings)
-    }
-
     pub async fn set_default_groups_impl(
         &self,
         user_id: Uuid,
@@ -201,22 +181,89 @@ impl Database {
         Ok(rows)
     }
 
-    pub async fn get_user_settings_all_impl(
+    pub async fn get_user_settings_impl(
         &self,
         user_id: Uuid,
-    ) -> Result<Vec<(String, Option<String>)>, DbError> {
-        let rows = sqlx::query_as::<_, (String, Option<String>)>(
+    ) -> Result<Option<UserSettings>, DbError> {
+        let settings = sqlx::query_as::<_, UserSettings>(
             r#"
-            SELECT setting_key, setting_value
+            SELECT user_id, dark_mode, default_direction, flip_colors, due_date_enabled,
+                   default_due_date_days, default_due_date_switch, created_at, updated_at
             FROM user_settings
             WHERE user_id = $1
             "#
         )
         .bind(user_id)
-        .fetch_all(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
 
-        Ok(rows)
+        Ok(settings)
+    }
+
+    pub async fn upsert_user_settings_impl(
+        &self,
+        user_id: Uuid,
+        settings: &UserSettings,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_settings (user_id, dark_mode, default_direction, flip_colors,
+                                       due_date_enabled, default_due_date_days, default_due_date_switch,
+                                       created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+            ON CONFLICT (user_id)
+            DO UPDATE SET
+                dark_mode = $2,
+                default_direction = $3,
+                flip_colors = $4,
+                due_date_enabled = $5,
+                default_due_date_days = $6,
+                default_due_date_switch = $7,
+                updated_at = NOW()
+            "#
+        )
+        .bind(user_id)
+        .bind(settings.dark_mode)
+        .bind(&settings.default_direction)
+        .bind(settings.flip_colors)
+        .bind(settings.due_date_enabled)
+        .bind(settings.default_due_date_days)
+        .bind(settings.default_due_date_switch)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_user_settings_all_impl(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<(String, Option<String>)>, DbError> {
+        // For backwards compatibility, convert structured settings to key-value pairs
+        let settings = sqlx::query_as::<_, UserSettings>(
+            r#"
+            SELECT user_id, dark_mode, default_direction, flip_colors, due_date_enabled,
+                   default_due_date_days, default_due_date_switch, created_at, updated_at
+            FROM user_settings
+            WHERE user_id = $1
+            "#
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let pairs = settings.map(|s| {
+            vec![
+                ("dark_mode".to_string(), Some(s.dark_mode.to_string())),
+                ("default_direction".to_string(), Some(s.default_direction)),
+                ("flip_colors".to_string(), Some(s.flip_colors.to_string())),
+                ("due_date_enabled".to_string(), Some(s.due_date_enabled.to_string())),
+                ("default_due_date_days".to_string(), Some(s.default_due_date_days.to_string())),
+                ("default_due_date_switch".to_string(), Some(s.default_due_date_switch.to_string())),
+            ]
+        }).unwrap_or_default();
+
+        Ok(pairs)
     }
 
     pub async fn upsert_user_setting_impl(
@@ -225,21 +272,27 @@ impl Database {
         setting_key: &str,
         setting_value: &str,
     ) -> Result<(), DbError> {
-        sqlx::query(
-            r#"
-            INSERT INTO user_settings (user_id, setting_key, setting_value, updated_at)
-            VALUES ($1, $2, $3, NOW())
-            ON CONFLICT (user_id, setting_key)
-            DO UPDATE SET setting_value = $3, updated_at = NOW()
-            "#
-        )
-        .bind(user_id)
-        .bind(setting_key)
-        .bind(setting_value)
-        .execute(&self.pool)
-        .await?;
+        // Get existing settings or create defaults
+        let mut settings = self.get_user_settings_impl(user_id)
+            .await?
+            .unwrap_or_else(|| UserSettings {
+                user_id,
+                ..Default::default()
+            });
 
-        Ok(())
+        // Update the specific field
+        match setting_key {
+            "dark_mode" => settings.dark_mode = setting_value == "true",
+            "default_direction" => settings.default_direction = setting_value.to_string(),
+            "flip_colors" => settings.flip_colors = setting_value == "true",
+            "due_date_enabled" => settings.due_date_enabled = setting_value == "true",
+            "default_due_date_days" => settings.default_due_date_days = setting_value.parse().unwrap_or(30),
+            "default_due_date_switch" => settings.default_due_date_switch = setting_value == "true",
+            _ => {} // Ignore unknown keys
+        }
+
+        // Upsert the full settings
+        self.upsert_user_settings_impl(user_id, &settings).await
     }
 
     pub async fn get_admin_by_username_impl(&self, username: &str) -> Result<Option<(Uuid, String, String, bool)>, DbError> {

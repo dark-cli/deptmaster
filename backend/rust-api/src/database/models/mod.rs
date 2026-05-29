@@ -10,4 +10,4 @@ pub use contact::{Contact, ContactProjection};
 pub use transaction::{Transaction, TransactionProjection};
 pub use wallet::{Wallet, WalletUser, WalletUserWithUsername};
 pub use permission::{PermissionAction, UserGroup, ContactGroup};
-pub use user::{User, UserSettings};
+pub use user::{User, UserSettings, WalletUserSettings};

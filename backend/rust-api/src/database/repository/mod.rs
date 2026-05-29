@@ -279,11 +279,9 @@ pub trait DatabaseRepository: Send + Sync {
 
     async fn update_user_password(&self, user_id: Uuid, password_hash: String) -> Result<bool, DbError>;
 
-    async fn get_user_settings(
-        &self,
-        user_id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<Option<UserSettings>, DbError>;
+    async fn get_user_settings(&self, user_id: Uuid) -> Result<Option<UserSettings>, DbError>;
+
+    async fn upsert_user_settings(&self, user_id: Uuid, settings: &UserSettings) -> Result<(), DbError>;
 
     async fn set_default_groups(
         &self,
@@ -635,8 +633,12 @@ impl DatabaseRepository for Database {
         self.update_user_password_impl(user_id, password_hash).await
     }
 
-    async fn get_user_settings(&self, user_id: Uuid, wallet_id: Uuid) -> Result<Option<UserSettings>, DbError> {
-        self.get_user_settings_impl(user_id, wallet_id).await
+    async fn get_user_settings(&self, user_id: Uuid) -> Result<Option<UserSettings>, DbError> {
+        self.get_user_settings_impl(user_id).await
+    }
+
+    async fn upsert_user_settings(&self, user_id: Uuid, settings: &UserSettings) -> Result<(), DbError> {
+        self.upsert_user_settings_impl(user_id, settings).await
     }
 
     async fn set_default_groups(&self, user_id: Uuid, wallet_id: Uuid, contact_group_id: Option<Uuid>, transaction_group_id: Option<Uuid>) -> Result<(), DbError> {

@@ -2,11 +2,12 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::Json,
+    extract::Extension,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use crate::AppState;
 use crate::database::repository::{DatabaseRepository, Database};
+use crate::middleware::auth::AuthUser;
 
 #[derive(Deserialize)]
 pub struct UpdateSettingRequest {
@@ -31,26 +32,13 @@ pub struct SettingsResponse {
 
 // Get all settings for the current user
 pub async fn get_settings(
+    Extension(auth_user): Extension<AuthUser>,
     State(state): State<AppState>,
 ) -> Result<Json<SettingsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // TODO: This should use authenticated user context, not just first user
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
-
     let db = Database::new((*state.db_pool).clone());
 
     // Get all settings for this user
-    let settings = db.get_user_settings_all(user_id)
+    let settings = db.get_user_settings_all(auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("Error fetching settings: {:?}", e);
@@ -91,28 +79,15 @@ pub async fn get_settings(
 
 // Update a specific setting
 pub async fn update_setting(
+    Extension(auth_user): Extension<AuthUser>,
     axum::extract::Path(setting_key): axum::extract::Path<String>,
     State(state): State<AppState>,
     Json(payload): Json<UpdateSettingRequest>,
 ) -> Result<Json<SettingResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // TODO: This should use authenticated user context, not just first user
-    let user_id = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
-
     let db = Database::new((*state.db_pool).clone());
 
     // Upsert setting
-    db.upsert_user_setting(user_id, &setting_key, &payload.value)
+    db.upsert_user_setting(auth_user.user_id, &setting_key, &payload.value)
         .await
         .map_err(|e| {
             tracing::error!("Error updating setting: {:?}", e);

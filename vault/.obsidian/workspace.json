@@ -27,12 +27,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "database-crate-separation.md",
+                "file": "Projects/User Settings.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "database-crate-separation"
+              "title": "User Settings"
             }
           }
         ],
@@ -200,21 +200,25 @@
   },
   "active": "cd2b8a1db33004c8",
   "lastOpenFiles": [
+    "Projects/Permission System Decoupling.md.tmp.449427.7c8d92156e18",
+    "Projects/Permission System Decoupling.md",
+    "Projects/Permission System Decoupling.md.tmp.449427.99a15920e25b",
+    "Projects/Permission System Decoupling Plan.md",
+    "todos.md",
+    "Projects/User Settings.md",
+    "Projects/User Settings.md.tmp.449427.b399f4e962b3",
+    "undo_event-client-optimization.md",
+    "database-crate-separation.md",
+    "Projects",
     "code-statistics.md",
     "Deptmaster",
     "database-crate-separation.md.tmp.449427.8b3997024da8",
     "database-crate-separation.md.tmp.449427.f8138ce6e894",
-    "todos.md",
     "MEMORY.md.tmp.449427.6848baea79b8",
-    "database-crate-separation.md",
     "database-crate-separation.md.tmp.449427.7755579ba9fb",
     "client-todos.md.tmp.449427.c2e54f46d9ec",
     "current-state.md.tmp.449427.ebd555c920b8",
-    "todos.md.tmp.449427.e2cc2a472d3b",
-    "MEMORY.md.tmp.449427.632f89f06951",
-    "todos.md.tmp.449427.e788ab5e1857",
     "client-todos.md",
-    "undo_event-client-optimization.md",
     "MEMORY.md",
     "database-setup.md",
     "migration-guidelines.md",
@@ -231,10 +235,6 @@
     "INDEX.md",
     "READING_GUIDE.md",
     "middleware-architecture.md",
-    "security-fixes.md",
-    "MIDDLEWARE_ARCHITECTURE.md",
-    "current-state.md",
-    "merged-features.md",
-    "PERMISSION_SYSTEM_DEEP_DIVE.md"
+    "security-fixes.md"
   ]
 }
