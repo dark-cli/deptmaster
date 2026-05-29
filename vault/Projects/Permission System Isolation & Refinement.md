@@ -219,33 +219,19 @@ pub enum WalletRole {
 }
 ```
 
-#### 4. **Permission Model (Single Responsibility)**
+#### 4. **Permission Model (Batch-Only API)**
 ```rust
 pub struct PermissionModel {
     pool: PgPool,
-    // Cache for batch operations
-    context_cache: HashMap<(Uuid, Uuid), PermissionContext>,
-    action_cache: HashMap<(Uuid, Uuid), HashSet<Action>>,
 }
 
 impl PermissionModel {
-    /// Check if user can perform action on resource
-    pub async fn can_perform(
-        &self,
-        ctx: &PermissionContext,
-        action: Action,
-        resource: &Resource,
-    ) -> Result<bool, Error>;
-    
-    /// Get all allowed actions for user on resource
-    pub async fn resolve_permissions(
-        &self,
-        ctx: &PermissionContext,
-        resource: &Resource,
-    ) -> Result<HashSet<Action>, Error>;
-    
-    /// Batch permission check (optimized)
-    pub async fn can_perform_batch(
+    /// Check permissions for a batch of (action, resource) pairs
+    /// Even single checks pass as Vec with one item
+    /// 
+    /// Returns: Vec<bool> where true = allowed, false = denied
+    /// Order matches input checks order
+    pub async fn check_permissions(
         &self,
         ctx: &PermissionContext,
         checks: Vec<(Action, Resource)>,
@@ -256,47 +242,61 @@ impl PermissionModel {
 }
 ```
 
+**Key Design**:
+- **Single method**: `check_permissions()` - no per-item API
+- **Batch from start**: Forces efficient batch operations
+- **Simple list contract**: Input/output aligned by index
+- **Even singles use batch**: Single check still passes `vec![(action, resource)]`
+
 ### Integration Points
 
-#### Handler Layer (Current)
+#### Handler Layer (Simple Case)
 ```rust
 // Before: scattered checks
 if user_role == "owner" || user_role == "admin" {
     // ... do operation
 }
-let ctx = PermissionContext { ... };
-if permission_service::can_perform(...) {
-    // ... do operation
-}
 
-// After: single abstraction
+// After: single batch check (even for one item)
 let ctx = PermissionContext::new(wallet_id, user_id, user_role);
-if permission_model.can_perform(&ctx, Action::ContactCreate, &Resource::AllContacts).await? {
+let allowed = permission_model.check_permissions(&ctx, vec![
+    (Action::ContactCreate, Resource::AllContacts)
+]).await?;
+
+if allowed[0] {
     // ... do operation
 }
 ```
 
-#### Sync Handler (Current)
+#### Sync Handler (Batch Case - Most Common)
 ```rust
-// Before: mixed logic
+// Before: mixed logic + 3 queries per event
 for event in events {
     if let Some((action, resource_type, resource_id)) = map_event_to_permission_action(...) {
-        if !can_perform(...) {
+        if !can_perform(...) {  // 3 queries here
             return Err(insufficient_permission_response());
         }
     }
 }
+// Total: 300 queries for 100 events
 
-// After: clean, declarative
+// After: single batch query
 let ctx = PermissionContext::new(...);
-for event in events {
-    let action = event.required_action();  // From Event trait
-    let resource = event.required_resource();
-    
-    if !permission_model.can_perform(&ctx, action, &resource).await? {
-        return Err(PermissionError::Denied(event.id(), action));
+
+// Build checks list (1 query for entire batch)
+let checks: Vec<_> = events.iter().map(|event| {
+    (event.required_action(), event.required_resource())
+}).collect();
+
+let allowed = permission_model.check_permissions(&ctx, checks).await?;
+
+// Check results aligned by index
+for (i, event) in events.iter().enumerate() {
+    if !allowed[i] {
+        return Err(PermissionError::Denied(event.id(), event.required_action()));
     }
 }
+// Total: 1 query for entire batch
 ```
 
 ---
@@ -312,9 +312,10 @@ for event in events {
    - File: `src/permissions/context.rs` - PermissionContext
 
 2. **Create Permission Model**
-   - File: `src/permissions/model.rs` - PermissionModel struct with high-level API
-   - Implement: `can_perform()`, `resolve_permissions()`, `validate_dependencies()`
-   - No changes to database, just wrap existing queries more efficiently
+   - File: `src/permissions/model.rs` - PermissionModel struct with batch-only API
+   - Implement: `check_permissions()` (batch), `validate_dependencies()`
+   - Single query per batch, not per item
+   - No changes to database, just optimized query logic
 
 3. **Module Organization**
    ```
@@ -349,21 +350,19 @@ for event in events {
    - Verify existing behavior unchanged
    - No new functionality, just refactored API
 
-### Phase 3: Optimization (1-2 hours)
-**Goal**: Optimize permission resolution
+### Phase 3: Advanced Optimization (1-2 hours, OPTIONAL)
+**Goal**: Further optimize batch permission resolution
 
-1. **Batch Operation Support**
-   - Implement `can_perform_batch()` for checking 100+ events at once
-   - Single query instead of 300 queries per batch
-
-2. **Caching Strategy**
+1. **Caching Strategy** (optional)
    - Cache user groups per wallet per user
    - Cache permission matrix per wallet
    - Invalidate on permission changes
+   - Only if profiling shows cache benefit
 
-3. **Single SQL Query Optimization**
-   - Replace 3 separate queries with 1 JOIN in `resolve_allowed_actions()`
-   - Measure performance improvement
+2. **Query Batching** (already in Phase 1)
+   - Single JOIN query for entire batch
+   - No per-item queries
+   - Included in base `check_permissions()` implementation
 
 ### Phase 4: Event Trait Declarations (2-3 hours, FUTURE)
 **Goal**: Move permission requirements into event definitions
@@ -474,11 +473,11 @@ After:  100 events = ~10 queries, 0.1s
 
 | Phase | Duration | Deliverable |
 |-------|----------|-------------|
-| 1: Foundation | 2-3h | Permission model structure |
+| 1: Foundation | 2-3h | Permission model with batch-only API |
 | 2: Gradual Migration | 3-4h | Handlers migrated, tests passing |
-| 3: Optimization | 1-2h | Batch operations, caching |
-| 4: Event Traits | 2-3h | Event-based permission declarations |
-| **Total** | **8-12h** | **Complete permission isolation** |
+| 3: Optional Optimization | 0-2h | Caching if needed, performance profiling |
+| 4: Event Traits | 2-3h | Event-based permission declarations (FUTURE) |
+| **Total** | **7-11h** | **Complete permission isolation** |
 
 ---
 
