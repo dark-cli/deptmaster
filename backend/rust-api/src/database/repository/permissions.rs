@@ -1,4 +1,5 @@
 use uuid::Uuid;
+use sqlx::Row;
 use crate::database::models::*;
 use crate::database::error::DbError;
 use crate::database::repository::Database;
@@ -380,6 +381,38 @@ impl Database {
         .fetch_one(&self.pool)
         .await?;
         Ok(exists)
+    }
+
+    pub async fn get_permission_matrix_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Vec<(Uuid, Uuid, Vec<String>)>, DbError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT m.user_group_id, m.contact_group_id,
+                   array_agg(pa.name ORDER BY pa.name) as action_names
+            FROM group_permission_matrix m
+            JOIN permission_actions pa ON pa.id = m.permission_action_id
+            JOIN user_groups ug ON ug.id = m.user_group_id AND ug.wallet_id = $1
+            JOIN contact_groups cg ON cg.id = m.contact_group_id AND cg.wallet_id = $1
+            GROUP BY m.user_group_id, m.contact_group_id
+            "#
+        )
+        .bind(wallet_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let result = rows
+            .into_iter()
+            .map(|row| {
+                let user_group_id: Uuid = row.get("user_group_id");
+                let contact_group_id: Uuid = row.get("contact_group_id");
+                let action_names: Vec<String> = row.get("action_names");
+                (user_group_id, contact_group_id, action_names)
+            })
+            .collect();
+
+        Ok(result)
     }
 }
 

@@ -50,7 +50,6 @@ impl AppInstance {
 }
 
 #[tokio::test]
-#[ignore] // requires test DB: cargo test --ignored app_instances
 async fn test_sync_read_permission_filter_and_full_pull() {
     let pool = setup_test_db().await;
 

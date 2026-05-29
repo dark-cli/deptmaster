@@ -11,7 +11,6 @@ mod test_helpers;
 use test_helpers::*;
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_undo_event_validation() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -103,7 +102,6 @@ async fn test_undo_event_validation() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_undo_event_skips_undone_event_in_projections() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -214,7 +212,6 @@ async fn test_undo_event_skips_undone_event_in_projections() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_undo_event_syncs_correctly() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -308,7 +305,6 @@ async fn test_undo_event_syncs_correctly() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_event_validation_rejects_invalid_undo() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -390,7 +386,6 @@ async fn test_event_validation_rejects_invalid_undo() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_multiple_undo_events() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -505,7 +500,6 @@ async fn test_multiple_undo_events() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_undo_event_with_snapshot_rebuild() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -596,7 +590,6 @@ async fn test_undo_event_with_snapshot_rebuild() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_undo_synced_at_window_validation() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;

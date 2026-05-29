@@ -121,4 +121,14 @@ impl Database {
         let hash = format!("{:x}", hasher.finalize());
         Ok((hash, rows.len() as i64))
     }
+
+    pub async fn get_latest_event_id_impl(&self) -> Result<Option<i64>, DbError> {
+        let id = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(id) FROM events"
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(id)
+    }
 }

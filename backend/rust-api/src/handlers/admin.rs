@@ -296,18 +296,18 @@ pub async fn get_events(
 pub async fn get_latest_event_id(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let latest_id = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT MAX(id) FROM events"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching latest event ID: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-        )
-    })?;
+    use crate::database::repository::{Database, DatabaseRepository};
+
+    let db = Database::new((*state.db_pool).clone());
+    let latest_id = db.get_latest_event_id()
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching latest event ID: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
 
     Ok(Json(serde_json::json!({
         "latest_event_id": latest_id,
@@ -322,45 +322,37 @@ pub async fn get_latest_event_id(
 pub async fn backfill_transaction_events(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::database::repository::{Database, DatabaseRepository};
+
+    let db = Database::new((*state.db_pool).clone());
+
     // Get user ID
-    let user_id = sqlx::query_scalar::<_, uuid::Uuid>(
-        "SELECT id FROM users_projection LIMIT 1"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user_id = db.get_first_user_id()
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "No users found"})),
+            )
+        })?;
 
     // Get all transactions that don't have events
-    let transactions = sqlx::query(
-        r#"
-        SELECT t.id, t.user_id, t.contact_id, t.type, t.direction, t.amount, 
-               t.currency, t.description, t.transaction_date, t.due_date, t.created_at
-        FROM transactions_projection t
-        WHERE t.is_deleted = false
-        AND NOT EXISTS (
-            SELECT 1 FROM events e 
-            WHERE e.aggregate_type = 'transaction' 
-            AND e.aggregate_id = t.id
-            AND e.event_type = 'TRANSACTION_CREATED'
-        )
-        ORDER BY t.created_at
-        "#
-    )
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching transactions: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let transactions = db.get_transactions_without_events()
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching transactions: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     if transactions.is_empty() {
         return Ok(Json(serde_json::json!({
@@ -375,66 +367,32 @@ pub async fn backfill_transaction_events(
     let mut created_count = 0;
     let mut error_count = 0;
 
-    for row in transactions {
-        let txn_id: uuid::Uuid = row.get("id");
-        let contact_id: uuid::Uuid = row.get("contact_id");
-        let txn_type: String = row.get("type");
-        let direction: String = row.get("direction");
-        let amount: i64 = row.get("amount");
-        let currency: Option<String> = row.get("currency");
-        let description: Option<String> = row.get("description");
-        let txn_date: chrono::NaiveDate = row.get("transaction_date");
-        let due_date: Option<chrono::NaiveDate> = row.get("due_date");
-        let created_at: chrono::NaiveDateTime = row.get("created_at");
-
+    for txn in transactions {
         // Create event data
         let event_data = serde_json::json!({
-            "contact_id": contact_id.to_string(),
-            "type": txn_type,
-            "direction": direction,
-            "amount": amount,
-            "currency": currency.unwrap_or_else(|| "USD".to_string()),
-            "description": description,
-            "transaction_date": txn_date.format("%Y-%m-%d").to_string(),
-            "due_date": due_date.map(|d| d.format("%Y-%m-%d").to_string()),
-            "comment": format!("Backfilled event for existing transaction - Created: {}", created_at.format("%Y-%m-%d %H:%M:%S")),
-            "timestamp": created_at.format("%Y-%m-%dT%H:%M:%S%.fZ").to_string()
+            "contact_id": txn.contact_id.to_string(),
+            "type": txn.txn_type,
+            "direction": txn.direction,
+            "amount": txn.amount,
+            "currency": txn.currency.unwrap_or_else(|| "USD".to_string()),
+            "description": txn.description,
+            "transaction_date": txn.transaction_date.format("%Y-%m-%d").to_string(),
+            "due_date": txn.due_date.map(|d| d.format("%Y-%m-%d").to_string()),
+            "comment": format!("Backfilled event for existing transaction - Created: {}", txn.created_at.format("%Y-%m-%d %H:%M:%S")),
+            "timestamp": txn.created_at.format("%Y-%m-%dT%H:%M:%S%.fZ").to_string()
         });
 
         // Insert event
-        let event_id = sqlx::query_scalar::<_, i64>(
-            r#"
-            INSERT INTO events (user_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-            VALUES ($1, 'transaction', $2, 'TRANSACTION_CREATED', 1, $3, $4)
-            RETURNING id
-            "#
-        )
-        .bind(user_id)
-        .bind(txn_id)
-        .bind(&event_data)
-        .bind(created_at)
-        .fetch_one(&*state.db_pool)
-        .await;
-
-        match event_id {
+        match db.insert_backfill_event(user_id, txn.id, event_data, txn.created_at).await {
             Ok(eid) => {
                 // Update transaction's last_event_id
-                let _ = sqlx::query(
-                    r#"
-                    UPDATE transactions_projection 
-                    SET last_event_id = $1 
-                    WHERE id = $2
-                    "#
-                )
-                .bind(eid)
-                .bind(txn_id)
-                .execute(&*state.db_pool)
-                .await;
-
+                if let Err(e) = db.update_transaction_last_event_id(txn.id, eid).await {
+                    tracing::error!("Error updating transaction last_event_id: {:?}", e);
+                }
                 created_count += 1;
             }
             Err(e) => {
-                tracing::error!("Error creating event for transaction {}: {:?}", txn_id, e);
+                tracing::error!("Error creating event for transaction {}: {:?}", txn.id, e);
                 error_count += 1;
             }
         }
@@ -451,18 +409,18 @@ pub async fn backfill_transaction_events(
 pub async fn get_projection_status(
     State(state): State<AppState>,
 ) -> Result<Json<ProjectionStatus>, (StatusCode, Json<serde_json::Value>)> {
-    let last_event = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT MAX(id) FROM events"
-    )
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching projection status: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-        )
-    })?;
+    use crate::database::repository::{Database, DatabaseRepository};
+
+    let db = Database::new((*state.db_pool).clone());
+    let last_event = db.get_latest_event_id()
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching projection status: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
 
     Ok(Json(ProjectionStatus {
         last_event_id: last_event,
@@ -478,6 +436,10 @@ pub async fn get_total_debt(
     Query(params): Query<std::collections::HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::database::repository::{Database, DatabaseRepository};
+    use uuid::Uuid;
+
+    let db = Database::new((*state.db_pool).clone());
     let wallet_id_param = params.get("wallet_id").and_then(|s| {
         let s = s.trim();
         if s.is_empty() { None } else { Some(s) }
@@ -485,70 +447,24 @@ pub async fn get_total_debt(
 
     let total_debt = if let Some(wid) = wallet_id_param {
         // Single wallet: use latest event total_debt when available, else projection
-        let result: Option<String> = sqlx::query_scalar(
-            r#"
-            SELECT event_data->>'total_debt'
-            FROM events
-            WHERE event_data->>'total_debt' IS NOT NULL
-              AND wallet_id::text = $1
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            "#
-        )
-        .bind(wid)
-        .fetch_optional(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching total debt: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-            )
-        })?;
-
-        if let Some(debt_str) = result {
-            debt_str.parse::<i64>().unwrap_or_else(|_| {
-                serde_json::from_str::<i64>(&debt_str).unwrap_or(0)
-            })
-        } else {
-            sqlx::query_scalar::<_, i64>(
-                r#"
-                SELECT COALESCE(SUM(
-                    CASE 
-                        WHEN t.direction = 'lent' THEN t.amount
-                        WHEN t.direction = 'owed' THEN -t.amount
-                        ELSE 0
-                    END
-                )::BIGINT, 0)
-                FROM contacts_projection c
-                LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = c.wallet_id
-                WHERE c.is_deleted = false AND c.wallet_id::text = $1
-                "#
-            )
-            .bind(wid)
-            .fetch_one(&*state.db_pool)
-            .await
-            .unwrap_or(0)
+        match Uuid::parse_str(wid) {
+            Ok(wallet_id) => {
+                db.get_total_debt_for_wallet(wallet_id)
+                    .await
+                    .unwrap_or(0)
+            }
+            Err(_) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "Invalid wallet_id format"})),
+                ));
+            }
         }
     } else {
         // All wallets: always use projection sum so we get the sum of every wallet's total
-        sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT COALESCE(SUM(
-                CASE 
-                    WHEN t.direction = 'lent' THEN t.amount
-                    WHEN t.direction = 'owed' THEN -t.amount
-                    ELSE 0
-                END
-            )::BIGINT, 0)
-            FROM contacts_projection c
-            LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = c.wallet_id
-            WHERE c.is_deleted = false
-            "#
-        )
-        .fetch_one(&*state.db_pool)
-        .await
-        .unwrap_or(0)
+        db.get_total_debt_all_wallets()
+            .await
+            .unwrap_or(0)
     };
 
     Ok(Json(serde_json::json!({

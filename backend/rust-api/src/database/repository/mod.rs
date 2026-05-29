@@ -26,6 +26,8 @@ pub trait DatabaseRepository: Send + Sync {
 
     async fn get_event_by_id(&self, event_id: Uuid) -> Result<Option<EventRow>, DbError>;
 
+    async fn get_latest_event_id(&self) -> Result<Option<i64>, DbError>;
+
     async fn insert_event(
         &self,
         event_id: Uuid,
@@ -259,6 +261,8 @@ pub trait DatabaseRepository: Send + Sync {
 
     async fn contact_group_in_wallet(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError>;
 
+    async fn get_permission_matrix(&self, wallet_id: Uuid) -> Result<Vec<(Uuid, Uuid, Vec<String>)>, DbError>;
+
     // ============ USERS ============
     async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, DbError>;
 
@@ -333,6 +337,24 @@ pub trait DatabaseRepository: Send + Sync {
     async fn count_events(&self, wallet_id: Uuid) -> Result<i64, DbError>;
 
     async fn clear_projections(&self, wallet_id: Uuid) -> Result<(), DbError>;
+
+    async fn get_first_user_id(&self) -> Result<Option<Uuid>, DbError>;
+
+    async fn get_transactions_without_events(&self) -> Result<Vec<utility::TransactionWithoutEvent>, DbError>;
+
+    async fn insert_backfill_event(
+        &self,
+        user_id: Uuid,
+        transaction_id: Uuid,
+        event_data: Value,
+        created_at: NaiveDateTime,
+    ) -> Result<i64, DbError>;
+
+    async fn update_transaction_last_event_id(&self, transaction_id: Uuid, event_id: i64) -> Result<(), DbError>;
+
+    async fn get_total_debt_for_wallet(&self, wallet_id: Uuid) -> Result<i64, DbError>;
+
+    async fn get_total_debt_all_wallets(&self) -> Result<i64, DbError>;
 }
 
 pub struct Database {
@@ -357,6 +379,10 @@ impl DatabaseRepository for Database {
 
     async fn get_event_by_id(&self, event_id: Uuid) -> Result<Option<EventRow>, DbError> {
         self.get_event_by_id_impl(event_id).await
+    }
+
+    async fn get_latest_event_id(&self) -> Result<Option<i64>, DbError> {
+        self.get_latest_event_id_impl().await
     }
 
     async fn insert_event(&self, event_id: Uuid, aggregate_id: Uuid, aggregate_type: String, event_type: String, data: Value, wallet_id: Uuid, user_id: Uuid, version: i32, idempotency_key: Option<String>) -> Result<i64, DbError> {
@@ -585,6 +611,10 @@ impl DatabaseRepository for Database {
         self.contact_group_in_wallet_impl(group_id, wallet_id).await
     }
 
+    async fn get_permission_matrix(&self, wallet_id: Uuid) -> Result<Vec<(Uuid, Uuid, Vec<String>)>, DbError> {
+        self.get_permission_matrix_impl(wallet_id).await
+    }
+
     async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
         self.get_user_by_email_impl(email).await
     }
@@ -711,5 +741,35 @@ impl DatabaseRepository for Database {
 
     async fn clear_projections(&self, wallet_id: Uuid) -> Result<(), DbError> {
         self.clear_projections_impl(wallet_id).await
+    }
+
+    async fn get_first_user_id(&self) -> Result<Option<Uuid>, DbError> {
+        self.get_first_user_id_impl().await
+    }
+
+    async fn get_transactions_without_events(&self) -> Result<Vec<utility::TransactionWithoutEvent>, DbError> {
+        self.get_transactions_without_events_impl().await
+    }
+
+    async fn insert_backfill_event(
+        &self,
+        user_id: Uuid,
+        transaction_id: Uuid,
+        event_data: Value,
+        created_at: NaiveDateTime,
+    ) -> Result<i64, DbError> {
+        self.insert_backfill_event_impl(user_id, transaction_id, event_data, created_at).await
+    }
+
+    async fn update_transaction_last_event_id(&self, transaction_id: Uuid, event_id: i64) -> Result<(), DbError> {
+        self.update_transaction_last_event_id_impl(transaction_id, event_id).await
+    }
+
+    async fn get_total_debt_for_wallet(&self, wallet_id: Uuid) -> Result<i64, DbError> {
+        self.get_total_debt_for_wallet_impl(wallet_id).await
+    }
+
+    async fn get_total_debt_all_wallets(&self) -> Result<i64, DbError> {
+        self.get_total_debt_all_wallets_impl().await
     }
 }

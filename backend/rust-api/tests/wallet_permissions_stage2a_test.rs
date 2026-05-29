@@ -14,7 +14,6 @@ mod test_helpers;
 use test_helpers::*;
 
 #[tokio::test]
-#[ignore]
 async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     let pool = setup_test_db().await;
 

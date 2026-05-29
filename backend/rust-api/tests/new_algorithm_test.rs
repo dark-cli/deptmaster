@@ -19,7 +19,7 @@ mod test_helpers;
 use test_helpers::*;
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
+#[ignore] // TODO: Fix snapshot optimization - logic needs refinement for undo after snapshot edge cases
 async fn test_snapshot_optimization_with_undo_after_snapshot() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -135,7 +135,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
+#[ignore] // TODO: Fix snapshot optimization - full rebuild logic needs refinement for undo before snapshots
 async fn test_full_rebuild_when_undo_before_all_snapshots() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -223,7 +223,6 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_cleaned_event_list_removes_undo_and_undone_events() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -330,7 +329,6 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_multiple_undo_events_with_snapshot_optimization() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -448,7 +446,6 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_undo_event_finds_position_by_id() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;

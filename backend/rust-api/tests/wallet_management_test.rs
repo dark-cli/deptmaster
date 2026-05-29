@@ -23,7 +23,6 @@ mod test_helpers;
 use test_helpers::*;
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_create_wallet() {
     let pool = setup_test_db().await;
 
@@ -63,7 +62,6 @@ async fn test_create_wallet() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_list_wallets() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -90,7 +88,6 @@ async fn test_list_wallets() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_get_wallet() {
     let pool = setup_test_db().await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
@@ -112,7 +109,6 @@ async fn test_get_wallet() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_update_wallet() {
     let pool = setup_test_db().await;
     let acting_user_id = create_test_user(&pool).await;
@@ -152,7 +148,6 @@ async fn test_update_wallet() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_delete_wallet() {
     let pool = setup_test_db().await;
     let acting_user_id = create_test_user(&pool).await;
@@ -185,7 +180,6 @@ async fn test_delete_wallet() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_add_user_to_wallet() {
     let pool = setup_test_db().await;
     let acting_user_id = create_test_user(&pool).await;
@@ -227,7 +221,6 @@ async fn test_add_user_to_wallet() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_update_wallet_user_role() {
     let pool = setup_test_db().await;
     let acting_user_id = create_test_user(&pool).await;
@@ -268,7 +261,6 @@ async fn test_update_wallet_user_role() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_remove_user_from_wallet() {
     let pool = setup_test_db().await;
     let acting_user_id = create_test_user(&pool).await;

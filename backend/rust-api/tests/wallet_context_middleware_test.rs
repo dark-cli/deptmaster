@@ -19,7 +19,6 @@ mod test_helpers;
 use test_helpers::*;
 
 #[tokio::test]
-#[ignore] // Ignore by default - requires test database
 async fn test_wallet_context_validation_wallet_exists() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -48,7 +47,6 @@ async fn test_wallet_context_validation_wallet_exists() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_wallet_context_validation_invalid_uuid() {
     // Verify invalid UUID format would be rejected
     let invalid_uuid_result = Uuid::parse_str("invalid-uuid");
@@ -56,7 +54,6 @@ async fn test_wallet_context_validation_invalid_uuid() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_wallet_context_validation_non_existent_wallet() {
     let pool = setup_test_db().await;
     let non_existent_wallet_id = Uuid::new_v4();
@@ -73,7 +70,6 @@ async fn test_wallet_context_validation_non_existent_wallet() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_wallet_context_validation_unauthorized_access() {
     let pool = setup_test_db().await;
     let user1_id = create_test_user(&pool).await;
@@ -96,7 +92,6 @@ async fn test_wallet_context_validation_unauthorized_access() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_wallet_context_validation_inactive_wallet() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
@@ -122,7 +117,6 @@ async fn test_wallet_context_validation_inactive_wallet() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_wallet_context_extraction_from_query() {
     let pool = setup_test_db().await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
@@ -138,7 +132,6 @@ async fn test_wallet_context_extraction_from_query() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_wallet_context_extraction_from_header() {
     let pool = setup_test_db().await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;

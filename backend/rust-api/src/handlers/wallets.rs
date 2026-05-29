@@ -4,7 +4,6 @@ use axum::{
     response::Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 use crate::AppState;
 use crate::handlers::sync;
@@ -13,6 +12,7 @@ use crate::middleware::wallet_context::WalletContext;
 use crate::services::permission_service::{self, ResourceType, insufficient_permission_response};
 use crate::websocket;
 use crate::database::repository::{DatabaseRepository, Database};
+use crate::database::error::DbError;
 
 /// Validate permission dependencies (e.g., Write implies Read)
 fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
@@ -214,7 +214,7 @@ pub async fn create_my_wallet(
     );
 
     // Initialize default permissions (system groups and matrix)
-    if let Err(e) = initialize_wallet_permissions(&state.db_pool, wallet_id).await {
+    if let Err(e) = initialize_wallet_permissions(&db, wallet_id).await {
         tracing::error!("Failed to initialize wallet permissions for {}: {:?}", wallet_id, e);
     }
 
@@ -226,64 +226,24 @@ pub async fn create_my_wallet(
 
 /// Helper to initialize default permissions for a new wallet (all_users, all_contacts, matrix)
 async fn initialize_wallet_permissions(
-    db_pool: &sqlx::PgPool,
+    db: &Database,
     wallet_id: Uuid,
-) -> Result<(), sqlx::Error> {
-    // 1. Create all_users system user group
-    let ug_id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO user_groups (id, wallet_id, name, is_system) VALUES ($1, $2, 'all_users', true) ON CONFLICT (wallet_id, name) DO NOTHING"
-    )
-    .bind(ug_id)
-    .bind(wallet_id)
-    .execute(db_pool)
-    .await?;
+) -> Result<(), DbError> {
+    use crate::database::repository::DatabaseRepository;
 
-    // Get the actual ID (in case of conflict)
-    let ug_id: Uuid = sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users' LIMIT 1")
-        .bind(wallet_id)
-        .fetch_one(db_pool)
-        .await?;
+    // 1. Create all_users system user group
+    let ug_id = db.create_user_group(wallet_id, "all_users", true).await?;
 
     // 2. Create all_contacts system contact group
-    let cg_id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO contact_groups (id, wallet_id, name, type, is_system) VALUES ($1, $2, 'all_contacts', 'static', true) ON CONFLICT (wallet_id, name) DO NOTHING"
-    )
-    .bind(cg_id)
-    .bind(wallet_id)
-    .execute(db_pool)
-    .await?;
-
-    // Get the actual ID
-    let cg_id: Uuid = sqlx::query_scalar("SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1")
-        .bind(wallet_id)
-        .fetch_one(db_pool)
-        .await?;
+    let cg_id = db.create_contact_group(wallet_id, "all_contacts", "static", true).await?;
 
     // 3. Grant default permissions: all_users can only READ contacts/transactions by default.
     // Events are always viewable (no permission). Explicitly exclude create/update/delete/close to force admins to grant them.
-    let actions = [
-        "contact:read",
-        "transaction:read",
-    ];
+    let actions = ["contact:read", "transaction:read"];
 
     for action in actions {
-        // Look up action ID
-        let action_id: Option<i16> = sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = $1")
-            .bind(action)
-            .fetch_optional(db_pool)
-            .await?;
-        
-        if let Some(aid) = action_id {
-            sqlx::query(
-                "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
-            )
-            .bind(ug_id)
-            .bind(cg_id)
-            .bind(aid)
-            .execute(db_pool)
-            .await?;
+        if let Some(aid) = db.get_permission_action_id(action).await? {
+            db.grant_permission(ug_id, cg_id, aid).await?;
         }
     }
 
@@ -336,7 +296,7 @@ pub async fn create_wallet(
     );
 
     // Initialize default permissions (system groups and matrix)
-    if let Err(e) = initialize_wallet_permissions(&state.db_pool, wallet_id).await {
+    if let Err(e) = initialize_wallet_permissions(&db, wallet_id).await {
         tracing::error!("Failed to initialize wallet permissions for {}: {:?}", wallet_id, e);
     }
 
@@ -1306,29 +1266,25 @@ async fn get_wallet_role(
     if auth_user.is_admin {
         return Ok("admin".to_string());
     }
-    let role = sqlx::query_scalar::<_, String>(
-        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
-    )
-    .bind(wallet_id)
-    .bind(auth_user.user_id)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("get_wallet_role: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?
-    .ok_or_else(|| {
-        (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({
-                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
-                "message": "You do not have access to this wallet"
-            })),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+    let role = db.get_wallet_user_role(wallet_id, auth_user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_wallet_role: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                    "message": "You do not have access to this wallet"
+                })),
+            )
+        })?;
     Ok(role)
 }
 
@@ -1338,25 +1294,24 @@ async fn reject_system_user_group(
     wallet_id: Uuid,
     group_id: Uuid,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    let is_system: Option<bool> = sqlx::query_scalar(
-        "SELECT is_system FROM user_groups WHERE id = $1 AND wallet_id = $2",
-    )
-    .bind(group_id)
-    .bind(wallet_id)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("reject_system_user_group: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check group"})),
-        )
-    })?;
-    if is_system == Some(true) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "System group all_users cannot be modified"})),
-        ));
+    let db = Database::new((*state.db_pool).clone());
+    let group = db.get_user_group(group_id, wallet_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("reject_system_user_group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check group"})),
+            )
+        })?;
+
+    if let Some((_id, _name, is_system)) = group {
+        if is_system {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "System group all_users cannot be modified"})),
+            ));
+        }
     }
     Ok(())
 }
@@ -1367,25 +1322,24 @@ async fn reject_system_contact_group(
     wallet_id: Uuid,
     group_id: Uuid,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    let is_system: Option<bool> = sqlx::query_scalar(
-        "SELECT is_system FROM contact_groups WHERE id = $1 AND wallet_id = $2",
-    )
-    .bind(group_id)
-    .bind(wallet_id)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("reject_system_contact_group: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check group"})),
-        )
-    })?;
-    if is_system == Some(true) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "System group all_contacts cannot be modified"})),
-        ));
+    let db = Database::new((*state.db_pool).clone());
+    let group = db.get_contact_group(group_id, wallet_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("reject_system_contact_group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check group"})),
+            )
+        })?;
+
+    if let Some((_id, _name, _type, is_system)) = group {
+        if is_system {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "System group all_contacts cannot be modified"})),
+            ));
+        }
     }
     Ok(())
 }
@@ -1404,27 +1358,24 @@ pub async fn list_user_groups(
     })?;
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
-    let rows = sqlx::query(
-        "SELECT id, wallet_id, name, is_system FROM user_groups WHERE wallet_id = $1 ORDER BY is_system DESC, name",
-    )
-    .bind(wallet_uuid)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("list_user_groups: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to list user groups"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+    let groups = db.list_user_groups(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_user_groups: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list user groups"})),
+            )
+        })?;
 
-    let list: Vec<UserGroupResponse> = rows
+    let list: Vec<UserGroupResponse> = groups
         .into_iter()
-        .map(|row: sqlx::postgres::PgRow| UserGroupResponse {
-            id: row.get::<Uuid, _>("id").to_string(),
-            wallet_id: row.get::<Uuid, _>("wallet_id").to_string(),
-            name: row.get("name"),
-            is_system: row.get("is_system"),
+        .map(|(id, name, is_system)| UserGroupResponse {
+            id: id.to_string(),
+            wallet_id: wallet_uuid.to_string(),
+            name,
+            is_system,
         })
         .collect();
     Ok(Json(list))
@@ -1616,32 +1567,22 @@ pub async fn list_user_group_members(
     })?;
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
-    let rows = sqlx::query(
-        r#"
-        SELECT ugm.user_id, u.username
-        FROM user_group_members ugm
-        INNER JOIN user_groups ug ON ug.id = ugm.user_group_id
-        LEFT JOIN users_projection u ON u.id = ugm.user_id
-        WHERE ug.id = $1 AND ug.wallet_id = $2
-        "#,
-    )
-    .bind(group_uuid)
-    .bind(wallet_uuid)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("list_user_group_members: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to list members"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+    let members = db.list_user_group_members(group_uuid, wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_user_group_members: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list members"})),
+            )
+        })?;
 
-    let list: Vec<UserGroupMemberResponse> = rows
+    let list: Vec<UserGroupMemberResponse> = members
         .into_iter()
-        .map(|row: sqlx::postgres::PgRow| UserGroupMemberResponse {
-            user_id: row.get::<Uuid, _>("user_id").to_string(),
-            username: row.try_get::<String, _>("username").ok(),
+        .map(|(user_id, username)| UserGroupMemberResponse {
+            user_id: user_id.to_string(),
+            username,
         })
         .collect();
     Ok(Json(list))
@@ -1678,44 +1619,39 @@ pub async fn add_user_group_member(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
     reject_system_user_group(&state, wallet_uuid, group_uuid).await?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Look up user by username
-    let user_uuid: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM users_projection WHERE username = $1 LIMIT 1",
-    )
-    .bind(username)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("add_user_group_member lookup: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user = db.get_user_by_username(username)
+        .await
+        .map_err(|e| {
+            tracing::error!("add_user_group_member lookup: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User not found"})),
+            )
+        })?;
 
-    let user_uuid = user_uuid.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "User not found"})),
-        )
-    })?;
+    let user_uuid = user.id;
 
-    let group_row = sqlx::query(
-        "SELECT id FROM user_groups WHERE id = $1 AND wallet_id = $2",
-    )
-    .bind(group_uuid)
-    .bind(wallet_uuid)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("add_user_group_member: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to add member"})),
-        )
-    })?;
+    // Check group exists in wallet
+    let group_exists = db.user_group_in_wallet(group_uuid, wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("add_user_group_member: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to add member"})),
+            )
+        })?;
 
-    if group_row.is_none() {
+    if !group_exists {
         return Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "User group not found"})),
@@ -1723,20 +1659,15 @@ pub async fn add_user_group_member(
     }
 
     // User must be a member of the wallet
-    let in_wallet = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)",
-    )
-    .bind(wallet_uuid)
-    .bind(user_uuid)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("add_user_group_member: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to add member"})),
-        )
-    })?;
+    let in_wallet = db.wallet_user_exists(wallet_uuid, user_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("add_user_group_member: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to add member"})),
+            )
+        })?;
 
     if !in_wallet {
         return Err((
@@ -1834,28 +1765,25 @@ pub async fn list_contact_groups(
     })?;
     let _ = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "member").await?;
 
-    let rows = sqlx::query(
-        "SELECT id, wallet_id, name, type, is_system FROM contact_groups WHERE wallet_id = $1 ORDER BY is_system DESC, name",
-    )
-    .bind(wallet_uuid)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("list_contact_groups: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to list contact groups"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+    let groups = db.list_contact_groups(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_contact_groups: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list contact groups"})),
+            )
+        })?;
 
-    let list: Vec<ContactGroupResponse> = rows
+    let list: Vec<ContactGroupResponse> = groups
         .into_iter()
-        .map(|row: sqlx::postgres::PgRow| ContactGroupResponse {
-            id: row.get::<Uuid, _>("id").to_string(),
-            wallet_id: row.get::<Uuid, _>("wallet_id").to_string(),
-            name: row.get("name"),
-            type_: row.get::<String, _>("type"),
-            is_system: row.get("is_system"),
+        .map(|(id, name, type_, is_system)| ContactGroupResponse {
+            id: id.to_string(),
+            wallet_id: wallet_uuid.to_string(),
+            name,
+            type_,
+            is_system,
         })
         .collect();
     Ok(Json(list))
@@ -2048,30 +1976,21 @@ pub async fn list_contact_group_members(
     })?;
     let _ = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "member").await?;
 
-    let rows = sqlx::query(
-        r#"
-        SELECT cgm.contact_id
-        FROM contact_group_members cgm
-        INNER JOIN contact_groups cg ON cg.id = cgm.contact_group_id
-        WHERE cg.id = $1 AND cg.wallet_id = $2
-        "#,
-    )
-    .bind(group_uuid)
-    .bind(wallet_uuid)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("list_contact_group_members: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to list members"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+    let members = db.list_contact_group_members(group_uuid, wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("list_contact_group_members: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to list members"})),
+            )
+        })?;
 
-    let list: Vec<ContactGroupMemberResponse> = rows
+    let list: Vec<ContactGroupMemberResponse> = members
         .into_iter()
-        .map(|row: sqlx::postgres::PgRow| ContactGroupMemberResponse {
-            contact_id: row.get::<Uuid, _>("contact_id").to_string(),
+        .map(|contact_id| ContactGroupMemberResponse {
+            contact_id: contact_id.to_string(),
         })
         .collect();
     Ok(Json(list))
@@ -2149,22 +2068,18 @@ pub async fn add_contact_group_member(
     }
     reject_system_contact_group(&state, wallet_uuid, group_uuid).await?;
 
-    let group_row = sqlx::query(
-        "SELECT id FROM contact_groups WHERE id = $1 AND wallet_id = $2",
-    )
-    .bind(group_uuid)
-    .bind(wallet_uuid)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("add_contact_group_member: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to add member"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+    let group_exists = db.contact_group_in_wallet(group_uuid, wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("add_contact_group_member: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to add member"})),
+            )
+        })?;
 
-    if group_row.is_none() {
+    if !group_exists {
         return Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Contact group not found"})),
@@ -2316,8 +2231,8 @@ pub async fn list_permission_actions(
     })?;
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
-    let rows = sqlx::query("SELECT id, name, resource FROM permission_actions ORDER BY resource, name")
-        .fetch_all(&*state.db_pool)
+    let db = Database::new((*state.db_pool).clone());
+    let actions = db.get_all_permission_actions()
         .await
         .map_err(|e| {
             tracing::error!("list_permission_actions: {:?}", e);
@@ -2327,13 +2242,13 @@ pub async fn list_permission_actions(
             )
         })?;
 
-    let list: Vec<PermissionActionResponse> = rows
+    let list: Vec<PermissionActionResponse> = actions
         .into_iter()
-        .filter(|row| row.get::<String, _>("name") != "events:read")
-        .map(|row| PermissionActionResponse {
-            id: row.get("id"),
-            name: row.get("name"),
-            resource: row.get("resource"),
+        .filter(|(_id, name, _resource)| name != "events:read")
+        .map(|(id, name, resource)| PermissionActionResponse {
+            id,
+            name,
+            resource,
         })
         .collect();
     Ok(Json(list))
@@ -2353,37 +2268,25 @@ pub async fn get_permission_matrix(
     })?;
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
-    let rows = sqlx::query(
-        r#"
-        SELECT m.user_group_id, m.contact_group_id,
-               array_agg(pa.name ORDER BY pa.name) as action_names
-        FROM group_permission_matrix m
-        JOIN permission_actions pa ON pa.id = m.permission_action_id
-        JOIN user_groups ug ON ug.id = m.user_group_id AND ug.wallet_id = $1
-        JOIN contact_groups cg ON cg.id = m.contact_group_id AND cg.wallet_id = $1
-        GROUP BY m.user_group_id, m.contact_group_id
-        "#,
-    )
-    .bind(wallet_uuid)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("get_permission_matrix: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to get permission matrix"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+    let matrix = db.get_permission_matrix(wallet_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("get_permission_matrix: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to get permission matrix"})),
+            )
+        })?;
 
-    let list: Vec<MatrixEntry> = rows
+    let list: Vec<MatrixEntry> = matrix
         .into_iter()
-        .map(|row: sqlx::postgres::PgRow| {
-            let mut arr: Vec<String> = row.get("action_names");
-            arr.retain(|a| a != "events:read");
+        .map(|(user_group_id, contact_group_id, mut action_names)| {
+            action_names.retain(|a| a != "events:read");
             MatrixEntry {
-                user_group_id: row.get::<Uuid, _>("user_group_id").to_string(),
-                contact_group_id: row.get::<Uuid, _>("contact_group_id").to_string(),
-                action_names: arr,
+                user_group_id: user_group_id.to_string(),
+                contact_group_id: contact_group_id.to_string(),
+                action_names,
             }
         })
         .collect();
@@ -2433,34 +2336,25 @@ pub async fn put_permission_matrix(
             )
         })?;
 
-        let ug_ok = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM user_groups WHERE id = $1 AND wallet_id = $2)",
-        )
-        .bind(ug_id)
-        .bind(wallet_uuid)
-        .fetch_one(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("put_permission_matrix: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to update matrix"})),
-            )
-        })?;
-        let cg_ok = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
-        )
-        .bind(cg_id)
-        .bind(wallet_uuid)
-        .fetch_one(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("put_permission_matrix: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to update matrix"})),
-            )
-        })?;
+        let db = Database::new((*state.db_pool).clone());
+        let ug_ok = db.user_group_in_wallet(ug_id, wallet_uuid)
+            .await
+            .map_err(|e| {
+                tracing::error!("put_permission_matrix: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to update matrix"})),
+                )
+            })?;
+        let cg_ok = db.contact_group_in_wallet(cg_id, wallet_uuid)
+            .await
+            .map_err(|e| {
+                tracing::error!("put_permission_matrix: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to update matrix"})),
+                )
+            })?;
 
         if !ug_ok || !cg_ok {
             return Err((
