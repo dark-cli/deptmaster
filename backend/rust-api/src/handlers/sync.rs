@@ -8,7 +8,7 @@ use sqlx::Row;
 use crate::AppState;
 use crate::websocket;
 use crate::services::projection_snapshot_service;
-use crate::services::permission_service::{self, SyncReadContext};
+use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::{permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole}};
@@ -69,9 +69,9 @@ async fn apply_contact_group_ids_from_event_data(
     Ok(())
 }
 
-/// Returns true if the user is allowed to read this event using precomputed SyncReadContext (no DB).
+/// Returns true if the user is allowed to read this event using precomputed ReadContext (no DB).
 fn event_read_allowed(
-    ctx: &SyncReadContext,
+    ctx: &ReadContext,
     aggregate_type: &str,
     aggregate_id: uuid::Uuid,
     event_data: &serde_json::Value,
@@ -212,7 +212,7 @@ pub async fn get_sync_hash(
         )
     })?;
 
-    let read_ctx = permission_service::sync_read_context(
+    let read_ctx = ReadContext::new(
         &*state.db_pool,
         wallet_id,
         auth_user.user_id,
@@ -220,7 +220,7 @@ pub async fn get_sync_hash(
     )
     .await
     .map_err(|e| {
-        tracing::error!("sync_read_context: {:?}", e);
+        tracing::error!("ReadContext: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to check permissions"})),
@@ -350,7 +350,7 @@ pub async fn get_sync_events(
         )
     })?;
 
-    let read_ctx = permission_service::sync_read_context(
+    let read_ctx = ReadContext::new(
         &*state.db_pool,
         wallet_id,
         auth_user.user_id,
@@ -358,7 +358,7 @@ pub async fn get_sync_events(
     )
     .await
     .map_err(|e| {
-        tracing::error!("sync_read_context: {:?}", e);
+        tracing::error!("ReadContext: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to check permissions"})),
@@ -516,6 +516,47 @@ pub struct SyncEventsResponse {
     pub conflicts: Vec<String>,
 }
 
+/// Read context for filtering sync events based on user permissions
+/// Replaces permission_service::SyncReadContext - uses PermissionModel for all queries
+pub struct ReadContext {
+    /// None = can read all contacts; Some(set) = can only read these contact ids
+    pub contact_ids_allowed: Option<std::collections::HashSet<uuid::Uuid>>,
+    /// None = can read all transactions; Some(set) = can only read transactions for these contact ids
+    pub transaction_contact_ids_allowed: Option<std::collections::HashSet<uuid::Uuid>>,
+}
+
+impl ReadContext {
+    /// Create ReadContext from PermissionModel
+    pub async fn new(
+        pool: &sqlx::PgPool,
+        wallet_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+        user_role: &str,
+    ) -> Result<Self, crate::database::error::DbError> {
+        let perm_model = PermissionModel::new(pool.clone());
+        let perm_ctx = PermissionContext::new(
+            wallet_id,
+            user_id,
+            match user_role {
+                "owner" => WalletRole::Owner,
+                "admin" => WalletRole::Admin,
+                _ => WalletRole::Member,
+            },
+        );
+
+        // Get contacts user can read (contact:read permission)
+        let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await?;
+
+        // Get contacts whose transactions user can read (transaction:read permission)
+        let transaction_contact_ids_allowed = perm_model.get_readable_transaction_contacts(&perm_ctx).await?;
+
+        Ok(ReadContext {
+            contact_ids_allowed,
+            transaction_contact_ids_allowed,
+        })
+    }
+}
+
 /// Permission event types (write-only; projection builds wallet_users, user_groups, etc.)
 const PERMISSION_EVENT_TYPES: &[&str] = &[
     "WALLET_USER_ADDED", "WALLET_USER_ROLE_CHANGED", "WALLET_USER_REMOVED",
@@ -649,7 +690,7 @@ pub async fn post_sync_events(
         // Permission events are admin/owner only.
         if event.aggregate_type == "permission" {
             if wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
-                return Err(permission_service::insufficient_permission_response());
+                return Err(responses::insufficient_permission_response());
             }
             continue;
         }
@@ -670,11 +711,11 @@ pub async fn post_sync_events(
         let results: Vec<bool> = perm_model
             .check_permissions(&perm_ctx, permission_checks)
             .await
-            .map_err(|_| permission_service::insufficient_permission_response())?;
+            .map_err(|_| responses::insufficient_permission_response())?;
 
         // Check that all permission checks passed
         if !results.iter().all(|&allowed| allowed) {
-            return Err(permission_service::insufficient_permission_response());
+            return Err(responses::insufficient_permission_response());
         }
     }
 

@@ -88,6 +88,23 @@ impl PermissionModel {
         resolver::get_readable_contacts(&self.pool, ctx).await
     }
 
+    /// Get contacts whose transactions a user can read (for sync filtering)
+    ///
+    /// Returns None if user can read all transaction contacts, Some(set) if limited to specific contacts.
+    /// Owner/Admin get None (can read all).
+    ///
+    /// # Arguments
+    /// * `ctx` - Permission context (who, what wallet, what role)
+    ///
+    /// # Returns
+    /// None = can read all transaction contacts, Some(HashSet<Uuid>) = specific contact IDs
+    pub async fn get_readable_transaction_contacts(
+        &self,
+        ctx: &PermissionContext,
+    ) -> Result<Option<HashSet<Uuid>>, DbError> {
+        resolver::get_readable_transaction_contacts(&self.pool, ctx).await
+    }
+
     pub async fn check_permissions(
         &self,
         ctx: &PermissionContext,

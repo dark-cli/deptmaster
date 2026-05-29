@@ -9,7 +9,7 @@ use crate::AppState;
 use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
-use crate::services::permission_service::insufficient_permission_response;
+use crate::handlers::responses::insufficient_permission_response;
 use crate::permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole};
 use crate::websocket;
 use crate::database::repository::{DatabaseRepository, Database};

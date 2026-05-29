@@ -128,3 +128,41 @@ pub async fn get_readable_contacts(
         Ok(Some(explicit.into_iter().collect())) // Specific contacts only
     }
 }
+
+/// Get all contacts whose transactions a user can read (for sync filtering)
+/// Returns contact IDs whose transactions the user can read
+pub async fn get_readable_transaction_contacts(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+) -> Result<Option<HashSet<Uuid>>, DbError> {
+    // Owner and admin can read all
+    if ctx.bypasses_permissions() {
+        return Ok(None); // None = can read all
+    }
+
+    // Try explicit contact groups first
+    let explicit: Vec<Uuid> = sqlx::query_scalar(queries::GET_READABLE_TRANSACTION_CONTACTS_QUERY)
+        .bind(ctx.wallet_id)
+        .bind(ctx.user_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    // Check if user can read via all_contacts group
+    let query = format!(
+        "SELECT EXISTS(SELECT 1 FROM ({}) AS t LIMIT 1)",
+        queries::GET_READABLE_TRANSACTION_CONTACTS_VIA_ALL_QUERY
+    );
+    let can_read_all: bool = sqlx::query_scalar(&query)
+        .bind(ctx.wallet_id)
+        .bind(ctx.user_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    if can_read_all {
+        Ok(None) // Can read all transactions
+    } else {
+        Ok(Some(explicit.into_iter().collect())) // Specific contacts only
+    }
+}

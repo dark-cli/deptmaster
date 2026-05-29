@@ -5,6 +5,7 @@ pub mod admin_auth;
 pub mod sync;
 pub mod users;
 pub mod wallets;
+pub mod responses;
 
 pub use admin::{
     admin_panel,
