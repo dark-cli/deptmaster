@@ -498,4 +498,51 @@ impl DomainEvent {
             | DomainEvent::PermissionMatrixSet { version, .. } => *version,
         }
     }
+
+    /// Convert DomainEvent to a generic Event for database storage
+    pub fn to_event(&self) -> crate::database::models::Event {
+        crate::database::models::Event {
+            id: self.id(),
+            aggregate_id: self.aggregate_id(),
+            aggregate_type: self.aggregate_type().to_string(),
+            event_type: self.event_type().to_string(),
+            data: serde_json::to_value(self).unwrap_or(serde_json::json!({})),
+            wallet_id: self.wallet_id(),
+            user_id: self.user_id(),
+            created_at: self.created_at(),
+            version: self.version(),
+            idempotency_key: match self {
+                DomainEvent::ContactCreated { idempotency_key, .. }
+                | DomainEvent::ContactUpdated { idempotency_key, .. }
+                | DomainEvent::ContactDeleted { idempotency_key, .. }
+                | DomainEvent::ContactUndone { idempotency_key, .. }
+                | DomainEvent::TransactionCreated { idempotency_key, .. }
+                | DomainEvent::TransactionUpdated { idempotency_key, .. }
+                | DomainEvent::TransactionDeleted { idempotency_key, .. }
+                | DomainEvent::TransactionUndone { idempotency_key, .. }
+                | DomainEvent::WalletUserAdded { idempotency_key, .. }
+                | DomainEvent::WalletUserRoleChanged { idempotency_key, .. }
+                | DomainEvent::WalletUserRemoved { idempotency_key, .. }
+                | DomainEvent::UserGroupCreated { idempotency_key, .. }
+                | DomainEvent::UserGroupRenamed { idempotency_key, .. }
+                | DomainEvent::UserGroupDeleted { idempotency_key, .. }
+                | DomainEvent::UserGroupMemberAdded { idempotency_key, .. }
+                | DomainEvent::UserGroupMemberRemoved { idempotency_key, .. }
+                | DomainEvent::ContactGroupCreated { idempotency_key, .. }
+                | DomainEvent::ContactGroupRenamed { idempotency_key, .. }
+                | DomainEvent::ContactGroupDeleted { idempotency_key, .. }
+                | DomainEvent::ContactGroupMemberAdded { idempotency_key, .. }
+                | DomainEvent::ContactGroupMemberRemoved { idempotency_key, .. }
+                | DomainEvent::PermissionMatrixSet { idempotency_key, .. } => {
+                    idempotency_key.clone()
+                }
+            },
+        }
+    }
+
+    /// Convert a generic Event to DomainEvent
+    pub fn from_event(event: &crate::database::models::Event) -> Result<Self, String> {
+        serde_json::from_value(event.data.clone())
+            .map_err(|e| format!("Failed to deserialize event: {}", e))
+    }
 }

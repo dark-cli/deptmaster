@@ -5,7 +5,7 @@ pub mod wallet;
 pub mod permission;
 pub mod user;
 
-pub use event::EventRow;
+pub use event::{Event, EventRow};
 pub use contact::{Contact, ContactProjection};
 pub use transaction::{Transaction, TransactionProjection};
 pub use wallet::{Wallet, WalletUser, WalletUserWithUsername};
