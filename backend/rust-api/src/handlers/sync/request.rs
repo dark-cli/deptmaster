@@ -65,8 +65,9 @@ where
 
 /// Sync event request with validation at deserialization boundary.
 /// Invalid data is rejected during JSON parsing, before any handler logic.
+/// This struct REPLACES the old SyncEventRequest with runtime validation.
 #[derive(Debug, Clone, Deserialize)]
-pub struct ValidatedSyncEventRequest {
+pub struct SyncEventRequest {
     #[serde(deserialize_with = "deserialize_uuid_string")]
     pub id: String,
     #[serde(deserialize_with = "deserialize_aggregate_type")]
@@ -81,7 +82,7 @@ pub struct ValidatedSyncEventRequest {
     pub version: i32,
 }
 
-impl ValidatedSyncEventRequest {
+impl SyncEventRequest {
     /// Convert to DomainEvent with context information
     pub fn to_domain_event(
         &self,
@@ -271,6 +272,98 @@ impl ValidatedSyncEventRequest {
                 })
             }
             _ => Err(format!("Unsupported event: {} {}", self.aggregate_type, self.event_type)),
+        }
+    }
+}
+
+impl SyncEventRequest {
+    /// Validate event data (for events created programmatically, not deserialized from JSON)
+    /// Events from JSON are already validated by serde deserializers.
+    pub fn validate_data(&self) -> Option<String> {
+        match (self.aggregate_type.as_str(), self.event_type.as_str()) {
+            ("contact", "UNDO") | ("transaction", "UNDO") => {
+                if self.event_data.get("undone_event_id").and_then(|v| v.as_str()).is_none() {
+                    return Some("UNDO events must have 'undone_event_id' in event_data".to_string());
+                }
+                if let Some(undone_id) = self.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if Uuid::parse_str(undone_id).is_err() {
+                        return Some("UNDO event 'undone_event_id' must be a valid UUID".to_string());
+                    }
+                }
+            }
+            ("contact", "CREATED") => {
+                if self.event_data.get("name").and_then(|v| v.as_str()).is_none() {
+                    return Some("CREATED contact events must have 'name' in event_data".to_string());
+                }
+            }
+            ("transaction", "CREATED") => {
+                if self.event_data.get("amount").and_then(|v| v.as_i64()).is_none() {
+                    return Some("CREATED transaction must have 'amount'".to_string());
+                }
+                if self.event_data.get("direction").and_then(|v| v.as_str()).is_none() {
+                    return Some("CREATED transaction must have 'direction'".to_string());
+                }
+                if self.event_data.get("contact_id").and_then(|v| v.as_str()).is_none() {
+                    return Some("CREATED transaction must have 'contact_id'".to_string());
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// Get required permissions for this event
+    pub fn required_permissions(&self) -> Vec<(super::super::super::permissions::Action, super::super::super::permissions::Resource)> {
+        use super::super::super::permissions::{Action, Resource};
+
+        match (self.aggregate_type.as_str(), self.event_type.as_str()) {
+            // Contact events
+            ("contact", "CREATED") => vec![(Action::ContactCreate, Resource::AllContacts)],
+            ("contact", "UPDATED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactUpdate, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("contact", "DELETED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactDelete, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("contact", "UNDO") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactUpdate, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            // Transaction events
+            ("transaction", "CREATED") => vec![(Action::TransactionCreate, Resource::AllTransactions)],
+            ("transaction", "UPDATED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("transaction", "DELETED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionClose, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("transaction", "UNDO") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
         }
     }
 }

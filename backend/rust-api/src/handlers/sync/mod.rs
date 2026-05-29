@@ -15,7 +15,7 @@ use crate::{permissions::{Action, PermissionContext, PermissionModel, Resource, 
 use sha2::{Sha256, Digest};
 
 pub mod request;
-pub use request::ValidatedSyncEventRequest;
+pub use request::SyncEventRequest;
 
 /// Sync contact_group_members for a contact from event_data.group_ids (contact UPDATED).
 /// Desired set is all_contacts + group_ids from event. Clears wallet's group memberships for this contact then inserts desired.
@@ -399,79 +399,6 @@ pub async fn get_sync_events(
     Ok(Json(sync_events))
 }
 
-#[derive(Deserialize, Clone)]
-pub struct SyncEventRequest {
-    pub id: String,
-    pub aggregate_type: String,
-    pub aggregate_id: String,
-    pub event_type: String,
-    pub event_data: serde_json::Value,
-    pub timestamp: String,
-    pub version: i32,
-}
-
-/// Trait defining permission requirements for events
-/// Each event type declares what permissions are needed to perform it
-pub trait EventPermissionRequirement {
-    fn required_permissions(&self) -> Vec<(Action, Resource)>;
-}
-
-impl EventPermissionRequirement for SyncEventRequest {
-    fn required_permissions(&self) -> Vec<(Action, Resource)> {
-        match (self.aggregate_type.as_str(), self.event_type.as_str()) {
-            // Contact events
-            ("contact", "CREATED") => vec![(Action::ContactCreate, Resource::AllContacts)],
-            ("contact", "UPDATED") => {
-                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
-                    vec![(Action::ContactUpdate, Resource::Contact(id))]
-                } else {
-                    vec![]
-                }
-            }
-            ("contact", "DELETED") => {
-                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
-                    vec![(Action::ContactDelete, Resource::Contact(id))]
-                } else {
-                    vec![]
-                }
-            }
-            ("contact", "UNDO") => {
-                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
-                    vec![(Action::ContactUpdate, Resource::Contact(id))]
-                } else {
-                    vec![]
-                }
-            }
-            // Transaction events
-            ("transaction", "CREATED") => vec![(Action::TransactionCreate, Resource::AllTransactions)],
-            ("transaction", "UPDATED") => {
-                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
-                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
-                } else {
-                    vec![]
-                }
-            }
-            ("transaction", "DELETED") => {
-                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
-                    vec![(Action::TransactionClose, Resource::Transaction(id))]
-                } else {
-                    vec![]
-                }
-            }
-            ("transaction", "UNDO") => {
-                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
-                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
-                } else {
-                    vec![]
-                }
-            }
-            // Permission events require owner/admin (handled separately in handler)
-            ("permission", _) => vec![],
-            _ => vec![],
-        }
-    }
-}
-
 /// Insert a permission event and apply it to projections. Used by wallet management handlers.
 pub(crate) async fn insert_permission_event_and_apply(
     state: &AppState,
@@ -561,110 +488,8 @@ impl ReadContext {
 }
 
 /// Permission event types (write-only; projection builds wallet_users, user_groups, etc.)
-const PERMISSION_EVENT_TYPES: &[&str] = &[
-    "WALLET_USER_ADDED", "WALLET_USER_ROLE_CHANGED", "WALLET_USER_REMOVED",
-    "USER_GROUP_CREATED", "USER_GROUP_RENAMED", "USER_GROUP_DELETED",
-    "USER_GROUP_MEMBER_ADDED", "USER_GROUP_MEMBER_REMOVED",
-    "CONTACT_GROUP_CREATED", "CONTACT_GROUP_RENAMED", "CONTACT_GROUP_DELETED",
-    "CONTACT_GROUP_MEMBER_ADDED", "CONTACT_GROUP_MEMBER_REMOVED",
-    "PERMISSION_MATRIX_SET",
-];
-
-/// Validate event structure and data
-/// Returns error message if validation fails, None if valid
-fn validate_event(event: &SyncEventRequest) -> Option<String> {
-    // Validate aggregate_type first (permission has different event_type set)
-    let allowed_aggregate_types = ["contact", "transaction", "permission"];
-    if !allowed_aggregate_types.contains(&event.aggregate_type.as_str()) {
-        return Some(format!(
-            "Invalid aggregate_type: '{}'. Allowed: contact, transaction, permission",
-            event.aggregate_type
-        ));
-    }
-
-    if event.aggregate_type == "permission" {
-        if !PERMISSION_EVENT_TYPES.contains(&event.event_type.as_str()) {
-            return Some(format!(
-                "Invalid permission event_type: '{}'. Allowed: {:?}",
-                event.event_type, PERMISSION_EVENT_TYPES
-            ));
-        }
-        // Minimal validation: event_data must be object; required fields checked in apply
-        return None;
-    }
-
-    // Validate event_type for contact/transaction
-    let allowed_event_types = ["CREATED", "UPDATED", "DELETED", "UNDO"];
-    if !allowed_event_types.contains(&event.event_type.as_str()) {
-        return Some(format!(
-            "Invalid event_type: '{}'. Allowed values: CREATED, UPDATED, DELETED, UNDO",
-            event.event_type
-        ));
-    }
-
-    // Validate event_data structure based on event_type and aggregate_type
-    match event.event_type.as_str() {
-        "UNDO" => {
-            // UNDO events must have undone_event_id
-            if !event.event_data.get("undone_event_id").and_then(|v| v.as_str()).is_some() {
-                return Some("UNDO events must have 'undone_event_id' in event_data".to_string());
-            }
-            // Validate undone_event_id is a valid UUID string
-            if let Some(undone_id) = event.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
-                if uuid::Uuid::parse_str(undone_id).is_err() {
-                    return Some("UNDO event 'undone_event_id' must be a valid UUID".to_string());
-                }
-            }
-            // Note: 5-second validation is done in post_sync_events after we can query the undone event
-        }
-        "CREATED" | "UPDATED" => {
-            match event.aggregate_type.as_str() {
-                "contact" => {
-                    // CREATED contact must have name
-                    if event.event_type == "CREATED" {
-                        if !event.event_data.get("name").and_then(|v| v.as_str()).is_some() {
-                            return Some("CREATED contact events must have 'name' in event_data".to_string());
-                        }
-                    }
-                    // Optional fields: username, phone, email, notes (no validation needed)
-                }
-                "transaction" => {
-                    // CREATED/UPDATED transaction must have required fields
-                    if event.event_data.get("amount").and_then(|v| v.as_i64()).is_none() {
-                        return Some("Transaction events must have 'amount' in event_data".to_string());
-                    }
-                    if !event.event_data.get("direction").and_then(|v| v.as_str()).is_some() {
-                        return Some("Transaction events must have 'direction' in event_data".to_string());
-                    }
-                    if let Some(direction) = event.event_data.get("direction").and_then(|v| v.as_str()) {
-                        if direction != "lent" && direction != "owed" {
-                            return Some("Transaction 'direction' must be 'lent' or 'owed'".to_string());
-                        }
-                    }
-                    if event.event_type == "CREATED" {
-                        if !event.event_data.get("contact_id").and_then(|v| v.as_str()).is_some() {
-                            return Some("CREATED transaction events must have 'contact_id' in event_data".to_string());
-                        }
-                        // Validate contact_id is a valid UUID
-                        if let Some(contact_id) = event.event_data.get("contact_id").and_then(|v| v.as_str()) {
-                            if uuid::Uuid::parse_str(contact_id).is_err() {
-                                return Some("Transaction 'contact_id' must be a valid UUID".to_string());
-                            }
-                        }
-                    }
-                    // Optional fields: type, currency, description, transaction_date, due_date (no validation needed)
-                }
-                _ => {}
-            }
-        }
-        "DELETED" => {
-            // DELETED events have no specific requirements (may have comment)
-        }
-        _ => {}
-    }
-
-    None // Validation passed
-}
+// Validation is now handled at deserialization time via custom serde deserializers
+// in request.rs. Invalid JSON is rejected before reaching handler logic.
 
 /// Accept events from client and insert them
 pub async fn post_sync_events(
@@ -746,11 +571,10 @@ pub async fn post_sync_events(
             })?
             .naive_utc();
 
-        // Validate event structure and data
-        if let Some(validation_error) = validate_event(&event) {
-            let event_id_clone = event.id.clone();
-            conflicts.push(event.id);
-            tracing::warn!("Event validation failed for {}: {}", event_id_clone, validation_error);
+        // Validation at deserialization (custom serde deserializers) + data validation for programmatic creation
+        if let Some(validation_error) = event.validate_data() {
+            conflicts.push(event.id.clone());
+            tracing::warn!("Event validation failed for {}: {}", event.id, validation_error);
             continue;
         }
 
