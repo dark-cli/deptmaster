@@ -4,8 +4,4 @@ pub mod repository;
 
 mod pool;
 
-pub use pool::{create_pool, new_pool, DatabasePool};
-pub use repository::{Database, DatabaseRepository};
-
-// Re-export common types
-pub use sqlx::PgPool;
+pub use pool::{new_pool, DatabasePool};

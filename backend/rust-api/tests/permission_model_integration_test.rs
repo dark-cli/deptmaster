@@ -119,13 +119,6 @@ fn test_resource_type_classification() {
     // Wildcard resources have no ID
     assert_eq!(Resource::AllContacts.id(), None);
     assert_eq!(Resource::AllTransactions.id(), None);
-
-    // Wildcard detection
-    assert!(Resource::AllContacts.is_wildcard());
-    assert!(Resource::AllTransactions.is_wildcard());
-    assert!(!Resource::Contact(contact_id).is_wildcard());
-    assert!(!Resource::Transaction(transaction_id).is_wildcard());
-    assert!(!Resource::Wallet(wallet_id).is_wildcard());
 }
 
 #[test]
@@ -172,10 +165,9 @@ fn test_resource_enum_completeness() {
 
     assert_eq!(resources.len(), 5, "Should have exactly 5 resource types");
 
-    // Verify resource_type() is implemented for all resources
+    // Verify Display trait is implemented for all resources
     for resource in &resources {
-        let rt = resource.resource_type();
-        // Just verify it returns something (the actual enum value doesn't matter here)
-        let _ = rt;
+        let display = format!("{}", resource);
+        assert!(!display.is_empty(), "Resource should have non-empty display");
     }
 }

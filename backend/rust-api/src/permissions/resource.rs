@@ -19,18 +19,6 @@ pub enum Resource {
 }
 
 impl Resource {
-    /// Get resource type (for permission lookup)
-    pub fn resource_type(&self) -> ResourceType {
-        match self {
-            Resource::Contact(_) => ResourceType::Contact,
-            Resource::Transaction(_) => ResourceType::Transaction,
-            Resource::Wallet(_) => ResourceType::Wallet,
-            Resource::ContactGroup(_) => ResourceType::ContactGroup,
-            Resource::AllContacts => ResourceType::Contact,
-            Resource::AllTransactions => ResourceType::Transaction,
-        }
-    }
-
     /// Get resource ID if this is a specific resource
     pub fn id(&self) -> Option<Uuid> {
         match self {
@@ -41,11 +29,6 @@ impl Resource {
             Resource::AllContacts => None,
             Resource::AllTransactions => None,
         }
-    }
-
-    /// Is this a wildcard resource (affects all of type)?
-    pub fn is_wildcard(&self) -> bool {
-        matches!(self, Resource::AllContacts | Resource::AllTransactions)
     }
 }
 
@@ -62,22 +45,3 @@ impl fmt::Display for Resource {
     }
 }
 
-/// Resource type classification (for permission matrix lookup)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResourceType {
-    Contact,
-    Transaction,
-    Wallet,
-    ContactGroup,
-}
-
-impl fmt::Display for ResourceType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ResourceType::Contact => write!(f, "contact"),
-            ResourceType::Transaction => write!(f, "transaction"),
-            ResourceType::Wallet => write!(f, "wallet"),
-            ResourceType::ContactGroup => write!(f, "contact_group"),
-        }
-    }
-}

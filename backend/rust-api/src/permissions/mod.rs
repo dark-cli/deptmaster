@@ -37,4 +37,4 @@ pub mod resource;
 pub use action::Action;
 pub use context::{PermissionContext, WalletRole};
 pub use model::PermissionModel;
-pub use resource::{Resource, ResourceType};
+pub use resource::Resource;
