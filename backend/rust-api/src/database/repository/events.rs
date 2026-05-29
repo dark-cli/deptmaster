@@ -1092,4 +1092,162 @@ impl Database {
         }
         Ok(())
     }
+
+    pub async fn restore_projections_from_snapshot(
+        &self,
+        snapshot: &crate::services::projection_snapshot_service::ProjectionSnapshot,
+        user_id: uuid::Uuid,
+        wallet_id: uuid::Uuid,
+        undone_event_ids: &std::collections::HashSet<uuid::Uuid>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+            .bind(wallet_id)
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+            .bind(wallet_id)
+            .execute(&self.pool)
+            .await?;
+
+        let mut undone_transaction_ids = std::collections::HashSet::new();
+        let mut undone_contact_ids = std::collections::HashSet::new();
+
+        if !undone_event_ids.is_empty() {
+            let undone_event_ids_vec: Vec<uuid::Uuid> = undone_event_ids.iter().copied().collect();
+            let undone_aggregates = sqlx::query(
+                r#"
+                SELECT aggregate_type, aggregate_id
+                FROM events
+                WHERE event_id = ANY($1) AND event_type = 'CREATED'
+                "#
+            )
+            .bind(&undone_event_ids_vec[..])
+            .fetch_all(&self.pool)
+            .await?;
+
+            for row in undone_aggregates {
+                let aggregate_type: String = row.get("aggregate_type");
+                let aggregate_id: uuid::Uuid = row.get("aggregate_id");
+                match aggregate_type.as_str() {
+                    "transaction" => {
+                        undone_transaction_ids.insert(aggregate_id);
+                    }
+                    "contact" => {
+                        undone_contact_ids.insert(aggregate_id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if let Some(contacts_array) = snapshot.contacts_snapshot.as_array() {
+            for contact_json in contacts_array {
+                let id_str = contact_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(contact_id) = uuid::Uuid::parse_str(id_str) {
+                    if undone_contact_ids.contains(&contact_id) {
+                        continue;
+                    }
+                    let name = contact_json.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let username = contact_json.get("username").and_then(|v| v.as_str());
+                    let phone = contact_json.get("phone").and_then(|v| v.as_str());
+                    let email = contact_json.get("email").and_then(|v| v.as_str());
+                    let notes = contact_json.get("notes").and_then(|v| v.as_str());
+                    let created_at_str = contact_json.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                    let updated_at_str = contact_json.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+
+                    let created_at = chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                        .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
+                    let updated_at = chrono::NaiveDateTime::parse_from_str(updated_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                        .unwrap_or(created_at);
+
+                    sqlx::query(
+                        r#"
+                        INSERT INTO contacts_projection
+                        (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $10, 0)
+                        "#
+                    )
+                    .bind(contact_id)
+                    .bind(user_id)
+                    .bind(wallet_id)
+                    .bind(name)
+                    .bind(username)
+                    .bind(phone)
+                    .bind(email)
+                    .bind(notes)
+                    .bind(created_at)
+                    .bind(updated_at)
+                    .execute(&self.pool)
+                    .await?;
+                }
+            }
+        }
+
+        if let Some(transactions_array) = snapshot.transactions_snapshot.as_array() {
+            for transaction_json in transactions_array {
+                let id_str = transaction_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(transaction_id) = uuid::Uuid::parse_str(id_str) {
+                    if undone_transaction_ids.contains(&transaction_id) {
+                        continue;
+                    }
+
+                    let contact_id_str = transaction_json.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
+                    if let Ok(contact_id) = uuid::Uuid::parse_str(contact_id_str) {
+                        let tx_type = transaction_json.get("type").and_then(|v| v.as_str()).unwrap_or("money");
+                        let direction = transaction_json.get("direction").and_then(|v| v.as_str()).unwrap_or("lent");
+                        let amount = transaction_json.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let currency = transaction_json.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
+                        let description = transaction_json.get("description").and_then(|v| v.as_str());
+                        let transaction_date_str = transaction_json.get("transaction_date").and_then(|v| v.as_str()).unwrap_or("");
+                        let due_date_str = transaction_json.get("due_date").and_then(|v| v.as_str());
+                        let created_at_str = transaction_json.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                        let updated_at_str = transaction_json.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+
+                        let transaction_date = if !transaction_date_str.is_empty() {
+                            chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d").ok()
+                        } else {
+                            None
+                        };
+
+                        let due_date = due_date_str.and_then(|d| {
+                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+                        });
+
+                        let created_at = chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                            .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
+                        let updated_at = chrono::NaiveDateTime::parse_from_str(updated_at_str, "%Y-%m-%d %H:%M:%S%.f")
+                            .unwrap_or(created_at);
+
+                        if let Some(txn_date) = transaction_date {
+                            sqlx::query(
+                                r#"
+                                INSERT INTO transactions_projection
+                                (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $13, 0)
+                                "#
+                            )
+                            .bind(transaction_id)
+                            .bind(user_id)
+                            .bind(wallet_id)
+                            .bind(contact_id)
+                            .bind(tx_type)
+                            .bind(direction)
+                            .bind(amount)
+                            .bind(currency)
+                            .bind(description)
+                            .bind(txn_date)
+                            .bind(due_date)
+                            .bind(created_at)
+                            .bind(updated_at)
+                            .execute(&self.pool)
+                            .await?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
