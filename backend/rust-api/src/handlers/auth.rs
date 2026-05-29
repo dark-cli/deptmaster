@@ -170,10 +170,9 @@ pub async fn login(
     ).await;
 
     // Generate JWT token
-    let username = user.username.as_deref().unwrap_or(&user.email);
     let token = generate_jwt_token(
         &user.id,
-        username,
+        &user.username,
         &state.config.jwt_secret,
         state.config.jwt_expiration,
     )
@@ -190,7 +189,7 @@ pub async fn login(
         Json(AuthResponse {
             token,
             user_id: user.id.to_string(),
-            username: user.username.unwrap_or(user.email),
+            username: user.username,
         }),
     ))
 }

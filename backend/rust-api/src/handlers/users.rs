@@ -435,8 +435,8 @@ pub async fn backup_user_data(
     let backup = serde_json::json!({
         "user": {
             "id": user_uuid.to_string(),
-            "username": user.username.unwrap_or(user.email.clone()),
-            "created_at": user.created_at,
+            "username": user.username,
+            "created_at": user.created_at.and_utc().to_rfc3339(),
         },
         "contacts": contacts.iter().map(|row| {
             serde_json::json!({

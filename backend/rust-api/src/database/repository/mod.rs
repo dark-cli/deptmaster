@@ -490,7 +490,9 @@ impl DatabaseRepository for Database {
     }
 
     async fn set_default_groups(&self, user_id: Uuid, wallet_id: Uuid, contact_group_id: Option<Uuid>, transaction_group_id: Option<Uuid>) -> Result<(), DbError> {
-        self.set_default_groups_impl(user_id, wallet_id, contact_group_id, transaction_group_id).await
+        let contact_ids: Vec<Uuid> = contact_group_id.into_iter().collect();
+        let transaction_ids: Vec<Uuid> = transaction_group_id.into_iter().collect();
+        self.set_default_groups_impl(user_id, wallet_id, &contact_ids, &transaction_ids).await
     }
 
     async fn insert_login_log(&self, user_id: Option<Uuid>, ip_address: &str, user_agent: &str, success: bool, failure_reason: Option<&str>) -> Result<(), DbError> {

@@ -86,7 +86,7 @@ impl Database {
     ) -> Result<(), DbError> {
         sqlx::query(
             r#"
-            INSERT INTO wallet_users (wallet_id, user_id, role, created_at)
+            INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
             VALUES ($1, $2, $3, NOW())
             ON CONFLICT (wallet_id, user_id) DO NOTHING
             "#

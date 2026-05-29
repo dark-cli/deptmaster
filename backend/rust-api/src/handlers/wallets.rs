@@ -368,8 +368,8 @@ pub async fn list_wallets(
             id: w.id.to_string(),
             name: w.name,
             description: w.description,
-            created_at: w.created_at.to_rfc3339(),
-            updated_at: w.updated_at.to_rfc3339(),
+            created_at: w.created_at.and_utc().to_rfc3339(),
+            updated_at: w.updated_at.and_utc().to_rfc3339(),
             created_by: w.created_by.map(|u| u.to_string()),
             is_active: w.is_active,
         })
@@ -407,8 +407,8 @@ pub async fn get_wallet(
             id: w.id.to_string(),
             name: w.name,
             description: w.description,
-            created_at: w.created_at.to_rfc3339(),
-            updated_at: w.updated_at.to_rfc3339(),
+            created_at: w.created_at.and_utc().to_rfc3339(),
+            updated_at: w.updated_at.and_utc().to_rfc3339(),
             created_by: w.created_by.map(|u| u.to_string()),
             is_active: w.is_active,
         })),
@@ -869,7 +869,7 @@ pub async fn list_wallet_users(
             user_id: u.user_id.to_string(),
             username: u.username,
             role: u.role,
-            subscribed_at: u.created_at.to_rfc3339(),
+            subscribed_at: u.created_at.and_utc().to_rfc3339(),
         })
         .collect();
 
@@ -1064,8 +1064,8 @@ pub async fn list_user_wallets(
             id: w.id.to_string(),
             name: w.name,
             description: w.description,
-            created_at: w.created_at.to_rfc3339(),
-            updated_at: w.updated_at.to_rfc3339(),
+            created_at: w.created_at.and_utc().to_rfc3339(),
+            updated_at: w.updated_at.and_utc().to_rfc3339(),
             created_by: w.created_by.map(|u| u.to_string()),
             is_active: w.is_active,
         })

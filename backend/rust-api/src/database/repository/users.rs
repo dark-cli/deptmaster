@@ -8,7 +8,7 @@ impl Database {
     pub async fn get_user_by_email_impl(&self, email: &str) -> Result<Option<User>, DbError> {
         let user = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, email, username, password_hash, is_admin, created_at, updated_at
+            SELECT id, email, username, password_hash, created_at
             FROM users_projection
             WHERE email = $1
             LIMIT 1
@@ -24,7 +24,7 @@ impl Database {
     pub async fn get_user_by_id_impl(&self, user_id: Uuid) -> Result<Option<User>, DbError> {
         let user = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, email, username, password_hash, is_admin, created_at, updated_at
+            SELECT id, email, username, password_hash, created_at
             FROM users_projection
             WHERE id = $1
             "#
@@ -44,8 +44,8 @@ impl Database {
     ) -> Result<(), DbError> {
         sqlx::query(
             r#"
-            INSERT INTO users_projection (id, username, email, password_hash, is_admin, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, false, NOW(), NOW())
+            INSERT INTO users_projection (id, username, email, password_hash, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
             ON CONFLICT (id) DO NOTHING
             "#
         )
@@ -60,7 +60,7 @@ impl Database {
     }
 
     pub async fn update_user_password_impl(&self, user_id: Uuid, password_hash: String) -> Result<bool, DbError> {
-        let result = sqlx::query("UPDATE users_projection SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+        let result = sqlx::query("UPDATE users_projection SET password_hash = $1 WHERE id = $2")
             .bind(&password_hash)
             .bind(user_id)
             .execute(&self.pool)
@@ -76,7 +76,7 @@ impl Database {
     ) -> Result<Option<UserSettings>, DbError> {
         let settings = sqlx::query_as::<_, UserSettings>(
             r#"
-            SELECT id, user_id, wallet_id, default_contact_group_id, default_transaction_group_id, created_at, updated_at
+            SELECT wallet_id, user_id, default_contact_group_ids, default_transaction_group_ids
             FROM user_wallet_settings
             WHERE user_id = $1 AND wallet_id = $2
             "#
@@ -93,23 +93,22 @@ impl Database {
         &self,
         user_id: Uuid,
         wallet_id: Uuid,
-        contact_group_id: Option<Uuid>,
-        transaction_group_id: Option<Uuid>,
+        contact_group_ids: &[Uuid],
+        transaction_group_ids: &[Uuid],
     ) -> Result<(), DbError> {
         sqlx::query(
             r#"
-            INSERT INTO user_wallet_settings (user_id, wallet_id, default_contact_group_id, default_transaction_group_id, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, NOW(), NOW())
-            ON CONFLICT (user_id, wallet_id) DO UPDATE SET
-                default_contact_group_id = $3,
-                default_transaction_group_id = $4,
-                updated_at = NOW()
+            INSERT INTO user_wallet_settings (wallet_id, user_id, default_contact_group_ids, default_transaction_group_ids)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (wallet_id, user_id) DO UPDATE SET
+                default_contact_group_ids = $3,
+                default_transaction_group_ids = $4
             "#
         )
-        .bind(user_id)
         .bind(wallet_id)
-        .bind(contact_group_id)
-        .bind(transaction_group_id)
+        .bind(user_id)
+        .bind(contact_group_ids)
+        .bind(transaction_group_ids)
         .execute(&self.pool)
         .await?;
 
@@ -119,7 +118,7 @@ impl Database {
     pub async fn get_user_by_username_impl(&self, username: &str) -> Result<Option<User>, DbError> {
         let user = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, email, username, password_hash, is_admin, created_at, updated_at
+            SELECT id, email, username, password_hash, created_at
             FROM users_projection
             WHERE username = $1
             LIMIT 1
