@@ -6,6 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::AppState;
+use crate::database::repository::{DatabaseRepository, Database};
 
 #[derive(Deserialize)]
 pub struct UpdateSettingRequest {
@@ -32,6 +33,7 @@ pub struct SettingsResponse {
 pub async fn get_settings(
     State(state): State<AppState>,
 ) -> Result<Json<SettingsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // TODO: This should use authenticated user context, not just first user
     let user_id = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM users_projection LIMIT 1"
     )
@@ -45,20 +47,18 @@ pub async fn get_settings(
         )
     })?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Get all settings for this user
-    let settings = sqlx::query_as::<_, (String, Option<String>)>(
-        "SELECT setting_key, setting_value FROM user_settings WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching settings: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let settings = db.get_user_settings_all(user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching settings: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     let mut dark_mode = true; // Default
     let mut default_direction = "give".to_string();
@@ -95,6 +95,7 @@ pub async fn update_setting(
     State(state): State<AppState>,
     Json(payload): Json<UpdateSettingRequest>,
 ) -> Result<Json<SettingResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // TODO: This should use authenticated user context, not just first user
     let user_id = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM users_projection LIMIT 1"
     )
@@ -108,27 +109,18 @@ pub async fn update_setting(
         )
     })?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Upsert setting
-    sqlx::query(
-        r#"
-        INSERT INTO user_settings (user_id, setting_key, setting_value, updated_at)
-        VALUES ($1, $2, $3, NOW())
-        ON CONFLICT (user_id, setting_key)
-        DO UPDATE SET setting_value = $3, updated_at = NOW()
-        "#
-    )
-    .bind(user_id)
-    .bind(&setting_key)
-    .bind(&payload.value)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error updating setting: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to update setting"})),
-        )
-    })?;
+    db.upsert_user_setting(user_id, &setting_key, &payload.value)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error updating setting: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to update setting"})),
+            )
+        })?;
 
     Ok(Json(SettingResponse {
         key: setting_key,

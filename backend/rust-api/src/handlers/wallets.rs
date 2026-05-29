@@ -6,7 +6,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
-use chrono::Utc;
 use crate::AppState;
 use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;

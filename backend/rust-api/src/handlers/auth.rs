@@ -4,13 +4,13 @@ use axum::{
     response::Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
 use chrono::{Utc, Duration};
 use crate::AppState;
 use crate::middleware::auth::Claims;
+use crate::database::repository::{DatabaseRepository, Database};
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -96,37 +96,33 @@ pub async fn login(
         ));
     }
 
-    // Find user by username
-    let user = sqlx::query(
-        "SELECT id, username, password_hash FROM users_projection WHERE username = $1 LIMIT 1"
-    )
-    .bind(&payload.username.trim())
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
-
+    let db = Database::new((*state.db_pool).clone());
+    let username = payload.username.trim();
     let ip_address = extract_ip_address(&headers);
     let user_agent = extract_user_agent(&headers);
+
+    // Find user by username
+    let user = db.get_user_by_username(username)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     let user = match user {
         Some(u) => u,
         None => {
-            // Log failed login attempt
-            let _ = sqlx::query(
-                "INSERT INTO login_logs (user_id, login_at, ip_address, user_agent, success, failure_reason) 
-                 VALUES (NULL, NOW(), $1, $2, false, 'user_not_found')"
-            )
-            .bind(&ip_address)
-            .bind(&user_agent)
-            .execute(&*state.db_pool)
-            .await;
-            
+            let _ = db.insert_login_log(
+                None,
+                &ip_address,
+                &user_agent,
+                false,
+                Some("user_not_found"),
+            ).await;
+
             return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(serde_json::json!({
@@ -137,12 +133,8 @@ pub async fn login(
         }
     };
 
-    let user_id: Uuid = user.get::<Uuid, _>("id");
-    let password_hash: String = user.get::<String, _>("password_hash");
-    let username: String = user.get::<String, _>("username");
-
     // Verify password
-    let valid = verify(&payload.password, &password_hash)
+    let valid = verify(&payload.password, &user.password_hash)
         .map_err(|e| {
             tracing::error!("Error verifying password: {:?}", e);
             (
@@ -152,17 +144,14 @@ pub async fn login(
         })?;
 
     if !valid {
-        // Log failed login attempt
-        let _ = sqlx::query(
-            "INSERT INTO login_logs (user_id, login_at, ip_address, user_agent, success, failure_reason) 
-             VALUES ($1, NOW(), $2, $3, false, 'invalid_password')"
-        )
-        .bind(&user_id)
-        .bind(&ip_address)
-        .bind(&user_agent)
-        .execute(&*state.db_pool)
-        .await;
-        
+        let _ = db.insert_login_log(
+            Some(user.id),
+            &ip_address,
+            &user_agent,
+            false,
+            Some("invalid_password"),
+        ).await;
+
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({
@@ -172,21 +161,19 @@ pub async fn login(
         ));
     }
 
-    // Log successful login
-    let _ = sqlx::query(
-        "INSERT INTO login_logs (user_id, login_at, ip_address, user_agent, success) 
-         VALUES ($1, NOW(), $2, $3, true)"
-    )
-    .bind(&user_id)
-    .bind(&ip_address)
-    .bind(&user_agent)
-    .execute(&*state.db_pool)
-    .await;
+    let _ = db.insert_login_log(
+        Some(user.id),
+        &ip_address,
+        &user_agent,
+        true,
+        None,
+    ).await;
 
     // Generate JWT token
+    let username = user.username.as_deref().unwrap_or(&user.email);
     let token = generate_jwt_token(
-        &user_id,
-        &username,
+        &user.id,
+        username,
         &state.config.jwt_secret,
         state.config.jwt_expiration,
     )
@@ -202,8 +189,8 @@ pub async fn login(
         StatusCode::OK,
         Json(AuthResponse {
             token,
-            user_id: user_id.to_string(),
-            username: username,
+            user_id: user.id.to_string(),
+            username: user.username.unwrap_or(user.email),
         }),
     ))
 }
@@ -227,19 +214,19 @@ pub async fn register(
         ));
     }
 
-    let existing = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE username = $1)"
-    )
-    .bind(&username)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("register: check existing: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    // Check if user exists
+    let existing = db.get_user_by_username(username)
+        .await
+        .map_err(|e| {
+            tracing::error!("register: check existing: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .is_some();
 
     if existing {
         return Err((
@@ -258,24 +245,16 @@ pub async fn register(
         })?;
 
     let user_id = Uuid::new_v4();
-    let created_at = chrono::Utc::now().naive_utc();
 
-    sqlx::query(
-        "INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id) VALUES ($1, $2, $3, $4, 0)"
-    )
-    .bind(&user_id)
-    .bind(&username)
-    .bind(&password_hash)
-    .bind(&created_at)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("register: insert: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create account"})),
-        )
-    })?;
+    db.create_user(user_id, username.to_string(), password_hash)
+        .await
+        .map_err(|e| {
+            tracing::error!("register: insert: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create account"})),
+            )
+        })?;
 
     let token = generate_jwt_token(
         &user_id,

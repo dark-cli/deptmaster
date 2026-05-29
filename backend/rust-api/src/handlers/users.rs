@@ -4,10 +4,11 @@ use axum::{
     response::Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 use bcrypt::{hash, DEFAULT_COST};
+use sqlx::Row;
 use crate::AppState;
+use crate::database::repository::{DatabaseRepository, Database};
 
 #[derive(Serialize)]
 pub struct UserResponse {
@@ -48,25 +49,24 @@ pub struct AdminChangePasswordRequest {
 pub async fn get_users(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    let users = sqlx::query(
-        "SELECT id, username, created_at FROM users_projection ORDER BY created_at DESC"
-    )
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching users: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    let users = db.get_all_users()
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching users: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     let user_responses: Vec<UserResponse> = users
         .into_iter()
-        .map(|row| UserResponse {
-            id: row.get::<Uuid, _>("id").to_string(),
-            username: row.get::<String, _>("username"),
-            created_at: row.get::<chrono::NaiveDateTime, _>("created_at"),
+        .map(|(id, username, created_at)| UserResponse {
+            id: id.to_string(),
+            username: username.unwrap_or_default(),
+            created_at,
         })
         .collect();
 
@@ -79,7 +79,8 @@ pub async fn create_user(
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), (StatusCode, Json<serde_json::Value>)> {
     // Validate input
-    if payload.username.trim().is_empty() {
+    let username = payload.username.trim();
+    if username.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Username is required"})),
@@ -92,20 +93,19 @@ pub async fn create_user(
         ));
     }
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Check if user already exists
-    let existing = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE username = $1)"
-    )
-    .bind(&payload.username.trim())
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking existing user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let existing = db.get_user_by_username(username)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error checking existing user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .is_some();
 
     if existing {
         return Err((
@@ -126,32 +126,23 @@ pub async fn create_user(
 
     // Create user
     let user_id = Uuid::new_v4();
-    let username = payload.username.trim().to_string();
     let created_at = chrono::Utc::now().naive_utc();
 
-    sqlx::query(
-        "INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id) 
-         VALUES ($1, $2, $3, $4, 0)"
-    )
-    .bind(&user_id)
-    .bind(&username)
-    .bind(&password_hash)
-    .bind(&created_at)
-    .execute(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error creating user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create user"})),
-        )
-    })?;
+    db.create_user(user_id, username.to_string(), password_hash)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error creating user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create user"})),
+            )
+        })?;
 
     Ok((
         StatusCode::CREATED,
         Json(UserResponse {
             id: user_id.to_string(),
-            username,
+            username: username.to_string(),
             created_at,
         }),
     ))
@@ -170,20 +161,19 @@ pub async fn delete_user(
             )
         })?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Check if user exists
-    let exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)"
-    )
-    .bind(&user_uuid)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let exists = db.get_user_by_id(user_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error checking user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .is_some();
 
     if !exists {
         return Err((
@@ -192,10 +182,8 @@ pub async fn delete_user(
         ));
     }
 
-    // Delete user (cascade will handle related data)
-    sqlx::query("DELETE FROM users_projection WHERE id = $1")
-        .bind(&user_uuid)
-        .execute(&*state.db_pool)
+    // Delete user
+    db.delete_user(user_uuid)
         .await
         .map_err(|e| {
             tracing::error!("Error deleting user: {:?}", e);
@@ -221,23 +209,27 @@ pub async fn change_password(
         ));
     }
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Get current password hash
-    let password_hash: String = sqlx::query_scalar(
-        "SELECT password_hash FROM users_projection WHERE id = $1"
-    )
-    .bind(&auth_user.user_id)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user = db.get_user_by_id(auth_user.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "User not found"})),
+            )
+        })?;
 
     // Verify current password
-    let valid = bcrypt::verify(&payload.current_password, &password_hash)
+    let valid = bcrypt::verify(&payload.current_password, &user.password_hash)
         .map_err(|e| {
             tracing::error!("Error verifying password: {:?}", e);
             (
@@ -264,10 +256,7 @@ pub async fn change_password(
         })?;
 
     // Update password
-    sqlx::query("UPDATE users_projection SET password_hash = $1 WHERE id = $2")
-        .bind(&new_password_hash)
-        .bind(&auth_user.user_id)
-        .execute(&*state.db_pool)
+    db.update_user_password(auth_user.user_id, new_password_hash)
         .await
         .map_err(|e| {
             tracing::error!("Error updating password: {:?}", e);
@@ -301,6 +290,8 @@ pub async fn admin_change_password(
             )
         })?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Hash new password
     let new_password_hash = hash(&payload.new_password, DEFAULT_COST)
         .map_err(|e| {
@@ -312,10 +303,7 @@ pub async fn admin_change_password(
         })?;
 
     // Update password
-    let rows_affected = sqlx::query("UPDATE users_projection SET password_hash = $1 WHERE id = $2")
-        .bind(&new_password_hash)
-        .bind(&user_uuid)
-        .execute(&*state.db_pool)
+    let updated = db.update_user_password(user_uuid, new_password_hash)
         .await
         .map_err(|e| {
             tracing::error!("Error updating password: {:?}", e);
@@ -325,7 +313,7 @@ pub async fn admin_change_password(
             )
         })?;
 
-    if rows_affected.rows_affected() == 0 {
+    if !updated {
         return Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "User not found"})),
@@ -348,34 +336,28 @@ pub async fn get_user_login_logs(
             )
         })?;
 
-    let logs = sqlx::query(
-        "SELECT id, user_id, login_at, ip_address, user_agent, success, failure_reason 
-         FROM login_logs 
-         WHERE user_id = $1 
-         ORDER BY login_at DESC 
-         LIMIT 100"
-    )
-    .bind(&user_uuid)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching login logs: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
+
+    let logs = db.get_login_logs(user_uuid, 100)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching login logs: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
     let log_responses: Vec<LoginLogResponse> = logs
         .into_iter()
-        .map(|row| LoginLogResponse {
-            id: row.get::<i64, _>("id"),
-            user_id: row.get::<Uuid, _>("user_id").to_string(),
-            login_at: row.get::<chrono::NaiveDateTime, _>("login_at"),
-            ip_address: row.get::<Option<String>, _>("ip_address"),
-            user_agent: row.get::<Option<String>, _>("user_agent"),
-            success: row.get::<bool, _>("success"),
-            failure_reason: row.get::<Option<String>, _>("failure_reason"),
+        .map(|(id, user_id, login_at, ip_address, user_agent, success, failure_reason)| LoginLogResponse {
+            id,
+            user_id: user_id.to_string(),
+            login_at,
+            ip_address,
+            user_agent,
+            success,
+            failure_reason,
         })
         .collect();
 
@@ -395,32 +377,29 @@ pub async fn backup_user_data(
             )
         })?;
 
+    let db = Database::new((*state.db_pool).clone());
+
     // Get user info
-    let user: Option<(String, chrono::NaiveDateTime)> = sqlx::query_as(
-        "SELECT username, created_at FROM users_projection WHERE id = $1"
-    )
-    .bind(&user_uuid)
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let user = db.get_user_by_id(user_uuid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User not found"})),
+            )
+        })?;
 
-    let (username, created_at) = user.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "User not found"})),
-        )
-    })?;
-
-    // Get contacts
+    // Get contacts (TODO: refactor to use wallet-based repository method)
     let contacts = sqlx::query(
-        "SELECT id, name, phone, email, notes, created_at, updated_at 
-         FROM contacts_projection 
+        "SELECT id, name, phone, email, notes, created_at, updated_at
+         FROM contacts_projection
          WHERE user_id = $1 AND is_deleted = false"
     )
     .bind(&user_uuid)
@@ -434,11 +413,11 @@ pub async fn backup_user_data(
         )
     })?;
 
-    // Get transactions
+    // Get transactions (TODO: refactor to use wallet-based repository method)
     let transactions = sqlx::query(
-        "SELECT id, contact_id, type, direction, amount, currency, description, 
-                transaction_date, due_date, created_at, updated_at 
-         FROM transactions_projection 
+        "SELECT id, contact_id, type, direction, amount, currency, description,
+                transaction_date, due_date, created_at, updated_at
+         FROM transactions_projection
          WHERE user_id = $1 AND is_deleted = false"
     )
     .bind(&user_uuid)
@@ -456,8 +435,8 @@ pub async fn backup_user_data(
     let backup = serde_json::json!({
         "user": {
             "id": user_uuid.to_string(),
-            "username": username,
-            "created_at": created_at,
+            "username": user.username.unwrap_or(user.email.clone()),
+            "created_at": user.created_at,
         },
         "contacts": contacts.iter().map(|row| {
             serde_json::json!({

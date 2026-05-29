@@ -4,13 +4,13 @@ use axum::{
     response::Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use uuid::Uuid;
 use bcrypt::verify;
 use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
 use chrono::{Utc, Duration};
 use crate::AppState;
 use crate::middleware::auth::Claims;
+use crate::database::repository::{DatabaseRepository, Database};
 
 #[derive(Deserialize)]
 pub struct AdminLoginRequest {
@@ -44,7 +44,8 @@ pub async fn admin_login(
     Json(payload): Json<AdminLoginRequest>,
 ) -> Result<(StatusCode, Json<AdminAuthResponse>), (StatusCode, Json<serde_json::Value>)> {
     // Validate input
-    if payload.username.trim().is_empty() {
+    let username = payload.username.trim();
+    if username.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Username is required"})),
@@ -57,22 +58,20 @@ pub async fn admin_login(
         ));
     }
 
-    // Find admin user by username
-    let admin = sqlx::query(
-        "SELECT id, username, password_hash, is_active FROM admin_users WHERE username = $1 AND is_active = true LIMIT 1"
-    )
-    .bind(&payload.username.trim())
-    .fetch_optional(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Error fetching admin user: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Database error"})),
-        )
-    })?;
+    let db = Database::new((*state.db_pool).clone());
 
-    let admin = match admin {
+    // Find admin user by username
+    let admin = db.get_admin_by_username(username)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching admin user: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+    let (admin_id, username_result, password_hash, is_active) = match admin {
         Some(a) => a,
         None => {
             return Err((
@@ -81,11 +80,6 @@ pub async fn admin_login(
             ));
         }
     };
-
-    let admin_id: Uuid = admin.get::<Uuid, _>("id");
-    let password_hash: String = admin.get::<String, _>("password_hash");
-    let username: String = admin.get::<String, _>("username");
-    let is_active: bool = admin.get::<bool, _>("is_active");
 
     if !is_active {
         return Err((
@@ -112,15 +106,12 @@ pub async fn admin_login(
     }
 
     // Update last login time
-    let _ = sqlx::query("UPDATE admin_users SET last_login_at = NOW() WHERE id = $1")
-        .bind(&admin_id)
-        .execute(&*state.db_pool)
-        .await;
+    let _ = db.update_admin_last_login(admin_id).await;
 
     // Generate JWT token
     let token = generate_admin_jwt_token(
         &admin_id,
-        &username,
+        &username_result,
         &state.config.jwt_secret,
         state.config.jwt_expiration,
     )
@@ -137,7 +128,7 @@ pub async fn admin_login(
         Json(AdminAuthResponse {
             token,
             admin_id: admin_id.to_string(),
-            username,
+            username: username_result,
         }),
     ))
 }
