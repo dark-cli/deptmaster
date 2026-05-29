@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
 /// Strongly-typed domain events replacing generic Event struct
@@ -544,5 +544,176 @@ impl DomainEvent {
     pub fn from_event(event: &crate::database::models::Event) -> Result<Self, String> {
         serde_json::from_value(event.data.clone())
             .map_err(|e| format!("Failed to deserialize event: {}", e))
+    }
+}
+
+// ============ HTTP Request Types ============
+
+/// Custom deserializer for UUID strings - validates format
+fn deserialize_uuid_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Uuid::parse_str(&s).map_err(serde::de::Error::custom)?;
+    Ok(s)
+}
+
+/// Custom deserializer for aggregate_type - validates against allowed values
+fn deserialize_aggregate_type<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    match s.as_str() {
+        "contact" | "transaction" | "permission" => Ok(s),
+        _ => Err(serde::de::Error::custom(format!(
+            "Invalid aggregate_type '{}'. Must be one of: contact, transaction, permission",
+            s
+        ))),
+    }
+}
+
+/// Custom deserializer for event_type - validates against allowed values
+fn deserialize_event_type<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    match s.as_str() {
+        // Contact/Transaction events
+        "CREATED" | "UPDATED" | "DELETED" | "UNDO" => Ok(s),
+        // Permission events
+        "WALLET_USER_ADDED" | "WALLET_USER_ROLE_CHANGED" | "WALLET_USER_REMOVED"
+        | "USER_GROUP_CREATED" | "USER_GROUP_RENAMED" | "USER_GROUP_DELETED"
+        | "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED"
+        | "CONTACT_GROUP_CREATED" | "CONTACT_GROUP_RENAMED" | "CONTACT_GROUP_DELETED"
+        | "CONTACT_GROUP_MEMBER_ADDED" | "CONTACT_GROUP_MEMBER_REMOVED"
+        | "PERMISSION_MATRIX_SET" => Ok(s),
+        _ => Err(serde::de::Error::custom(format!(
+            "Invalid event_type '{}'. Must be a valid event type (CREATED, UPDATED, DELETED, UNDO, or permission event)",
+            s
+        ))),
+    }
+}
+
+/// Custom deserializer for RFC3339 timestamp - validates format
+fn deserialize_timestamp<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    DateTime::parse_from_rfc3339(&s)
+        .map_err(|_| serde::de::Error::custom("Invalid RFC3339 timestamp format"))?;
+    Ok(s)
+}
+
+/// Sync event request with validation at deserialization boundary.
+/// Invalid data is rejected during JSON parsing, before any handler logic.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncEventRequest {
+    #[serde(deserialize_with = "deserialize_uuid_string")]
+    pub id: String,
+    #[serde(deserialize_with = "deserialize_aggregate_type")]
+    pub aggregate_type: String,
+    #[serde(deserialize_with = "deserialize_uuid_string")]
+    pub aggregate_id: String,
+    #[serde(deserialize_with = "deserialize_event_type")]
+    pub event_type: String,
+    pub event_data: serde_json::Value,
+    #[serde(deserialize_with = "deserialize_timestamp")]
+    pub timestamp: String,
+    pub version: i32,
+}
+
+impl SyncEventRequest {
+    /// Validate event data (for events created programmatically, not deserialized from JSON)
+    /// Events from JSON are already validated by serde deserializers.
+    pub fn validate_data(&self) -> Option<String> {
+        match (self.aggregate_type.as_str(), self.event_type.as_str()) {
+            ("contact", "UNDO") | ("transaction", "UNDO") => {
+                if self.event_data.get("undone_event_id").and_then(|v| v.as_str()).is_none() {
+                    return Some("UNDO events must have 'undone_event_id' in event_data".to_string());
+                }
+                if let Some(undone_id) = self.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if Uuid::parse_str(undone_id).is_err() {
+                        return Some("UNDO event 'undone_event_id' must be a valid UUID".to_string());
+                    }
+                }
+            }
+            ("contact", "CREATED") => {
+                if self.event_data.get("name").and_then(|v| v.as_str()).is_none() {
+                    return Some("CREATED contact events must have 'name' in event_data".to_string());
+                }
+            }
+            ("transaction", "CREATED") => {
+                if self.event_data.get("amount").and_then(|v| v.as_i64()).is_none() {
+                    return Some("CREATED transaction must have 'amount'".to_string());
+                }
+                if self.event_data.get("direction").and_then(|v| v.as_str()).is_none() {
+                    return Some("CREATED transaction must have 'direction'".to_string());
+                }
+                if self.event_data.get("contact_id").and_then(|v| v.as_str()).is_none() {
+                    return Some("CREATED transaction must have 'contact_id'".to_string());
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// Get required permissions for this event
+    pub fn required_permissions(&self) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
+        use crate::permissions::{Action, Resource};
+
+        match (self.aggregate_type.as_str(), self.event_type.as_str()) {
+            // Contact events
+            ("contact", "CREATED") => vec![(Action::ContactCreate, Resource::AllContacts)],
+            ("contact", "UPDATED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactUpdate, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("contact", "DELETED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactDelete, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("contact", "UNDO") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactUpdate, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            // Transaction events
+            ("transaction", "CREATED") => vec![(Action::TransactionCreate, Resource::AllTransactions)],
+            ("transaction", "UPDATED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("transaction", "DELETED") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionClose, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("transaction", "UNDO") => {
+                if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            _ => vec![],
+        }
     }
 }

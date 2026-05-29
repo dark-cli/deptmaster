@@ -8,16 +8,72 @@ use crate::database::error::DbError;
 use crate::database::repository::Database;
 use crate::handlers::sync::SyncEventRequest;
 
+// Helper struct for mapping database columns to EventRow fields
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct EventRowDb {
+    id: i64,
+    event_id: Uuid,
+    aggregate_id: Uuid,
+    aggregate_type: String,
+    event_type: String,
+    #[sqlx(rename = "event_data")]
+    data: Value,
+    wallet_id: Uuid,
+    user_id: Uuid,
+    created_at: NaiveDateTime,
+    #[sqlx(rename = "event_version")]
+    version: i32,
+    idempotency_key: Option<String>,
+}
+
+impl From<EventRowDb> for EventRow {
+    fn from(db: EventRowDb) -> Self {
+        EventRow {
+            id: db.id,
+            event_id: db.event_id,
+            aggregate_id: db.aggregate_id,
+            aggregate_type: db.aggregate_type,
+            event_type: db.event_type,
+            data: db.data,
+            wallet_id: db.wallet_id,
+            user_id: db.user_id,
+            created_at: db.created_at,
+            version: db.version,
+            idempotency_key: db.idempotency_key,
+        }
+    }
+}
+
 impl Database {
+    pub async fn get_all_events_for_wallet(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Vec<EventRow>, DbError> {
+        let rows = sqlx::query_as::<_, EventRowDb>(
+            r#"
+            SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
+                   wallet_id, user_id, created_at, event_version, idempotency_key
+            FROM events
+            WHERE wallet_id = $1
+            ORDER BY created_at ASC
+            "#
+        )
+        .bind(wallet_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|db| db.into()).collect())
+    }
+
     pub async fn get_events_since_impl(
         &self,
         wallet_id: Uuid,
         since_timestamp: DateTime<Utc>,
     ) -> Result<Vec<EventRow>, DbError> {
-        let rows = sqlx::query_as::<_, EventRow>(
+        let rows = sqlx::query_as::<_, EventRowDb>(
             r#"
-            SELECT id, event_id, aggregate_type, aggregate_id, event_type, data,
-                   wallet_id, user_id, created_at, version, idempotency_key
+            SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
+                   wallet_id, user_id, created_at, event_version, idempotency_key
             FROM events
             WHERE wallet_id = $1 AND created_at > $2
             ORDER BY created_at ASC
@@ -28,14 +84,14 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows)
+        Ok(rows.into_iter().map(|db| db.into()).collect())
     }
 
     pub async fn get_event_by_id_impl(&self, event_id: Uuid) -> Result<Option<EventRow>, DbError> {
-        let row = sqlx::query_as::<_, EventRow>(
+        let row = sqlx::query_as::<_, EventRowDb>(
             r#"
-            SELECT id, event_id, aggregate_type, aggregate_id, event_type, data,
-                   wallet_id, user_id, created_at, version, idempotency_key
+            SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
+                   wallet_id, user_id, created_at, event_version, idempotency_key
             FROM events
             WHERE event_id = $1
             "#
@@ -44,7 +100,7 @@ impl Database {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row)
+        Ok(row.map(|db| db.into()))
     }
 
     pub async fn insert_event_impl(
@@ -61,7 +117,7 @@ impl Database {
     ) -> Result<i64, DbError> {
         let result = sqlx::query_scalar::<_, i64>(
             r#"
-            INSERT INTO events (event_id, aggregate_id, aggregate_type, event_type, data, wallet_id, user_id, version, idempotency_key, created_at)
+            INSERT INTO events (event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, event_version, idempotency_key, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
             ON CONFLICT (event_id) DO NOTHING
             RETURNING id
@@ -94,7 +150,7 @@ impl Database {
     pub async fn get_hash_for_sync_impl(&self, wallet_id: Uuid) -> Result<(String, i64), DbError> {
         let rows = sqlx::query(
             r#"
-            SELECT event_id, aggregate_type, aggregate_id, event_type, data, created_at
+            SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at
             FROM events
             WHERE wallet_id = $1
             ORDER BY created_at ASC
@@ -110,7 +166,7 @@ impl Database {
             let aggregate_type: String = row.get("aggregate_type");
             let aggregate_id: Uuid = row.get("aggregate_id");
             let event_type: String = row.get("event_type");
-            let data: Value = row.get("data");
+            let data: Value = row.get("event_data");
 
             hasher.update(event_id.to_string().as_bytes());
             hasher.update(aggregate_type.as_bytes());
@@ -1095,7 +1151,7 @@ impl Database {
 
     pub async fn restore_projections_from_snapshot(
         &self,
-        snapshot: &crate::services::projection_snapshot_service::ProjectionSnapshot,
+        snapshot: &crate::services::snapshots::ProjectionSnapshot,
         user_id: uuid::Uuid,
         wallet_id: uuid::Uuid,
         undone_event_ids: &std::collections::HashSet<uuid::Uuid>,
@@ -1249,5 +1305,78 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    pub async fn get_transaction_contact_map(
+        &self,
+        wallet_id: Uuid,
+        transaction_ids: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, Uuid>, sqlx::Error> {
+        if transaction_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let rows = sqlx::query(
+            "SELECT id, contact_id FROM transactions_projection WHERE wallet_id = $1 AND id = ANY($2)",
+        )
+        .bind(wallet_id)
+        .bind(transaction_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                (
+                    r.get::<Uuid, _>("id"),
+                    r.get::<Uuid, _>("contact_id"),
+                )
+            })
+            .collect())
+    }
+
+    pub async fn calculate_total_debt(
+        &self,
+        wallet_id: Uuid,
+    ) -> i64 {
+        let result = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN t.direction = 'lent' THEN t.amount
+                    WHEN t.direction = 'owed' THEN -t.amount
+                    ELSE 0
+                END
+            )::BIGINT, 0)
+            FROM contacts_projection c
+            LEFT JOIN transactions_projection t ON t.contact_id = c.id AND t.is_deleted = false AND t.wallet_id = $1
+            WHERE c.is_deleted = false AND c.wallet_id = $1
+            "#
+        )
+        .bind(wallet_id)
+        .fetch_one(&self.pool)
+        .await;
+
+        match result {
+            Ok(total) => total,
+            Err(e) => {
+                tracing::error!("calculate_total_debt failed for wallet {}: {:?}", wallet_id, e);
+                0
+            }
+        }
+    }
+
+    pub async fn get_event_count(&self) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM events")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0)
+    }
+
+    pub async fn get_event_db_id_by_uuid(&self, event_id: Uuid) -> Result<Option<i64>, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM events WHERE event_id = $1"
+        )
+        .bind(event_id)
+        .fetch_optional(&self.pool)
+        .await
     }
 }

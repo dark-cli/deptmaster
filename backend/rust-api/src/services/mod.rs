@@ -1,1 +1,2 @@
-pub mod projection_snapshot_service;
+pub mod snapshots;
+pub mod projections;

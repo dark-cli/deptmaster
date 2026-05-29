@@ -478,8 +478,8 @@ pub async fn rebuild_projections(
     Query(params): Query<std::collections::HashMap<String, String>>,
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    use crate::handlers::sync::rebuild_projections_from_events;
-    
+    use crate::services::projections::Projections;
+
     // Get wallet_id from query parameters
     let wallet_id_str = params.get("wallet_id")
         .ok_or_else(|| {
@@ -488,7 +488,7 @@ pub async fn rebuild_projections(
                 Json(serde_json::json!({"error": "wallet_id query parameter is required"})),
             )
         })?;
-    
+
     let wallet_id = uuid::Uuid::parse_str(wallet_id_str)
         .map_err(|e| {
             (
@@ -496,8 +496,8 @@ pub async fn rebuild_projections(
                 Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
             )
         })?;
-    
-    match rebuild_projections_from_events(&state, wallet_id).await {
+
+    match Projections::rebuild_projections_from_events(&state, wallet_id).await {
         Ok(_) => Ok(Json(serde_json::json!({
             "message": "Projections rebuilt successfully"
         }))),
