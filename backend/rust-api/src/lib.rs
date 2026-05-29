@@ -10,6 +10,7 @@ pub mod utils;
 pub mod middleware;
 pub mod models;
 pub mod permissions;
+pub mod domain;
 use database::DatabasePool;
 use std::sync::Arc;
 use websocket::BroadcastChannel;

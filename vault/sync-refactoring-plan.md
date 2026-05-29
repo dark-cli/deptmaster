@@ -1,240 +1,347 @@
----
-tags:
-  - sync
-  - refactoring
-  - architecture
----
+# sync.rs Refactoring: Type-Driven Validation & Thin Orchestration
 
-# Sync Refactoring Plan (Hybrid Approach)
+## Context
+sync.rs is 2467 lines with mixed concerns:
+- **apply_events_to_projections**: 744 lines of business logic
+- **post_sync_events**: 322 lines orchestrating validation, permissions, application
+- **validate_event**: 95 lines of imperative validation rules
+- **ReadContext**: Permission filtering duplicating PermissionModel
+- **Event types**: Generic EventRow/Event with String fields and serde_json::Value data
 
-**Decision**: Option C - Hybrid approach (fix bugs + incremental refactoring, not full rewrite)
+**Goal:** Build proper Event Sourcing architecture with:
+1. **Strongly-typed domain events** (ContactCreated, TransactionUpdated, etc.)
+2. **Type safety**: Invalid states unrepresentable
+3. **Validation at boundaries**: Serde deserializers enforce rules
+4. **Reusable types**: Use DomainEvent throughout codebase
+5. **Thin sync.rs**: HTTP orchestration only
 
-**Rationale**: sync.rs is working and tested, but hard to maintain. Fix critical bugs first, then split incrementally while keeping behavior constant. Only rewrite modules if/when needed.
+## Current State Analysis
 
----
-
-## Phase 1: Critical Bug Fixes (Week 1)
-
-### 1.1 Fix Hash Performance (Incremental Calculation)
-**Current Problem**: `get_sync_hash()` loads ALL events from DB every request
-- 100K events = 100MB+ memory + network transfer
-- Mobile calls frequently before pull → would collapse in production
-
-**Solution**: Hash = previous_hash + hash(new_events_since_last_hash)
-
-**Implementation**:
-```sql
--- Add sync_hash_cache table
-CREATE TABLE sync_hash_cache (
-  wallet_id UUID PRIMARY KEY,
-  hash TEXT NOT NULL,
-  last_event_id UUID,
-  last_event_timestamp TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- On GET /api/sync/hash:
--- 1. Get cached hash + last_timestamp
--- 2. Fetch only events since last_timestamp
--- 3. Calculate new_hash = combine(old_hash, hash(new_events))
--- 4. Return new_hash
-
--- On POST /api/sync/events:
--- 1. Store events
--- 2. Update sync_hash_cache with new hash + timestamp
-```
-
-**Effort**: ~1-2 hours  
-**Risk**: Low (isolated change)  
-**Tests**: Verify hash matches full recalc for first request, then matches incremental for subsequent requests
-
----
-
-### 1.2 Fix Error Handling (Per-Event Feedback)
-**Current Problem**: Batch rejected with generic "DEBITUM_INSUFFICIENT_PERMISSION", user doesn't know which event failed
-
-**Solution**: Return detailed `failed_events` list with reasons
-
-**Implementation**:
+### Existing Event Models (Generic)
 ```rust
-// Current response:
-{ "error": "DEBITUM_INSUFFICIENT_PERMISSION" }
-
-// New response:
-{
-  "error": "DEBITUM_SYNC_PERMISSION_DENIED",
-  "failed_events": [
-    {
-      "event_id": "uuid-3",
-      "aggregate_type": "contact",
-      "required_permission": "contact:create",
-      "reason": "User lacks permission"
-    }
-  ],
-  "accepted_count": 0,
-  "total_count": 3
+// database/models/event.rs
+pub struct EventRow {
+    pub event_id: Uuid,
+    pub aggregate_type: String,      // ❌ String, not typed
+    pub event_type: String,          // ❌ String, not typed
+    pub data: serde_json::Value,     // ❌ Untyped JSON
+    pub wallet_id: Uuid,
+    pub user_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub version: i32,
 }
 ```
 
-**File**: `backend/rust-api/src/handlers/sync.rs` - `post_sync_events()` error response  
-**Effort**: ~30-60 minutes  
-**Risk**: Low (just better error detail)  
-**Tests**: Verify error response includes failed event details
+### Issues
+- No type safety for event structure
+- Invalid states possible (ContactCreated without name)
+- Validation scattered in validate_event() function
+- Same untyped event structure everywhere (sync, snapshot, repository)
+- Hard to pattern match on specific event types
 
----
+## Proposed Architecture: Strongly-Typed Domain Events
 
-## Phase 2: Modularization (Week 2-3)
+### New Event Type Structure
+```
+src/domain/
+└── events.rs
+    └── DomainEvent enum with 12-15 typed variants:
+        ├── ContactCreated { id, name, wallet_id, ... }
+        ├── ContactUpdated { id, name, group_ids, ... }
+        ├── ContactDeleted { id }
+        ├── ContactUndone { id, undone_event_id }
+        ├── TransactionCreated { id, contact_id, amount, direction, ... }
+        ├── TransactionUpdated { id, contact_id, amount, direction, ... }
+        ├── TransactionDeleted { id }
+        ├── TransactionUndone { id, undone_event_id }
+        ├── PermissionCreated { ... }
+        ├── PermissionUpdated { ... }
+        ├── PermissionDeleted { ... }
+        └── ... (other permission event types)
+```
 
-### 2.1 Extract Traits
-Define clear contracts before refactoring:
-
+### Key Principle: Invalid States Unrepresentable
 ```rust
-// Define what each module will provide
-pub trait EventValidator: Send + Sync {
-    async fn validate(&self, event: &Event) -> Result<ValidationResult>;
+enum DomainEvent {
+    ContactCreated { 
+        id: Uuid, 
+        name: String,                    // ✅ Must have - can't be created without
+        wallet_id: Uuid,
+        // ... other required fields
+    },
+    ContactUpdated { 
+        id: Uuid, 
+        name: Option<String>,             // ✅ Optional in updates
+        group_ids: Vec<Uuid>,
+        // ... other optional fields
+    },
+    // ... rest of variants
 }
 
-pub trait EventApplier: Send + Sync {
-    async fn apply(&mut self, event: &Event) -> Result<()>;
-}
-
-pub trait PermissionChecker: Send + Sync {
-    async fn check(&self, user: &User, action: &str) -> Result<bool>;
-}
+// Can't accidentally create ContactCreated without name - compiler won't allow it
 ```
 
-**File**: `backend/rust-api/src/handlers/sync/traits.rs` (new)  
-**Effort**: ~1 hour  
-**Risk**: None (just type definitions)
-
----
-
-### 2.2 Split sync.rs into Modules
-
-**Current**: `src/handlers/sync.rs` (2400 lines, monolithic)
-
-**Target**: 
+### Conversion Strategy
 ```
-src/handlers/sync/
-  ├── mod.rs                    (re-exports, router)
-  ├── traits.rs                 (event validator, applier, permission checker)
-  ├── pull.rs                   (GET /api/sync/events, get_sync_hash)
-  ├── push.rs                   (POST /api/sync/events)
-  ├── validator.rs              (validate_event, structure checks, idempotency)
-  ├── applier.rs                (apply_events_to_projections)
-  ├── permission.rs             (permission checks)
-  ├── snapshot.rs               (snapshot management)
-  ├── group.rs                  (contact group sync)
-  └── utils.rs                  (helpers: calculate_total_debt, event_read_allowed)
+HTTP Request (JSON)
+    ↓
+[Custom Serde Deserializer]
+    ↓
+DomainEvent (Strongly-Typed) ✅ VALIDATED
+    ↓
+[Business Logic Uses DomainEvent]
+    ↓
+[Store as EventRow - convert back to JSON]
+    ↓
+Database (EventRow with JSON)
+    ↓
+[Read EventRow - convert to DomainEvent]
+    ↓
+[Apply to Projections]
 ```
 
-**Steps**:
-1. Create `sync/` directory
-2. Move functions into respective files (no logic changes)
-3. Extract helper functions into utils.rs
-4. Update imports in sync/mod.rs
-5. Run tests after each move (verify no behavior change)
+## Implementation Plan (5 Phases - Foundation First)
 
-**File organization**:
-- **pull.rs** (250 lines) — get_sync_hash, get_sync_events
-- **push.rs** (350 lines) — post_sync_events core logic
-- **validator.rs** (200 lines) — validate_event, permission checks
-- **applier.rs** (300 lines) — apply_events_to_projections, apply_permission_event
-- **permission.rs** (150 lines) — permission service calls, checks
-- **snapshot.rs** (200 lines) — create_snapshot_json, restore_projections_from_snapshot
-- **group.rs** (100 lines) — apply_contact_group_ids_from_event_data
-- **utils.rs** (150 lines) — calculate_total_debt, event_read_allowed, helpers
+### Phase 0: Create Strongly-Typed Domain Events (4-5 hours)
+**Files to create:**
+- `src/domain/mod.rs` - module init
+- `src/domain/events.rs` - DomainEvent enum with all variants
 
-**Effort**: ~6-8 hours (careful refactoring, testing after each move)  
-**Risk**: Medium (modularization can introduce subtle bugs), mitigated by tests  
-**Tests**: Run entire test suite after each module split, verify 0 test failures
+**What to do:**
+1. Define `DomainEvent` enum with 12-15 variants:
+   - Contact: Created, Updated, Deleted, Undone (4 variants)
+   - Transaction: Created, Updated, Deleted, Undone (4 variants)
+   - Permission: Created, Updated, Deleted, etc. (3-4 variants based on PERMISSION_EVENT_TYPES)
+2. Each variant has only its required/optional fields:
+   ```rust
+   enum DomainEvent {
+       ContactCreated {
+           id: Uuid,
+           name: String,
+           wallet_id: Uuid,
+       },
+       ContactUpdated {
+           id: Uuid,
+           name: Option<String>,
+           group_ids: Option<Vec<Uuid>>,
+       },
+       // ... etc
+   }
+   ```
+3. Implement serde traits with custom deserializers for validation
+4. Add conversion methods: `DomainEvent → serde_json::Value` (for storage)
+5. Add conversion methods: `serde_json::Value → DomainEvent` (for reading)
 
----
+**Verification:**
+- All variants compile
+- Can construct events without invalid states
+- Serialization/deserialization works
+- No validate_event() function needed
 
-### 2.3 Extract Traits Implementation (Defer)
+**Result:** Foundation of type-safe events ready to use everywhere
 
-**Don't do this yet.** Keep current functions as-is. Traits are just interface definitions.
+### Phase 1: Update Database Models & Repository (3-4 hours)
+**Files to modify:**
+- `src/database/models/event.rs` - Keep EventRow generic (DB storage)
+- `src/database/models/mod.rs` - Export DomainEvent
+- `src/database/repository/events.rs` - NEW methods for DomainEvent
 
-Once split is complete and working, THEN consider:
-- Making applier implement `EventApplier` trait
-- Making validator implement `EventValidator` trait
-- This can be done module-by-module
+**What to do:**
+1. Keep EventRow as-is (generic, how it's stored in DB)
+2. Add repository methods:
+   - `convert_event_row_to_domain(EventRow) -> DomainEvent` 
+   - `convert_domain_to_event_data(DomainEvent) -> serde_json::Value`
+3. Update event insertion:
+   - Accept `DomainEvent` instead of raw fields
+   - Convert to JSON before storing
+4. Create new repository methods:
+   - `get_events_as_domain(wallet_id, since) -> Vec<DomainEvent>`
+   - `insert_domain_event(wallet_id, DomainEvent) -> Result`
 
----
+**Verification:**
+- Can insert DomainEvent and retrieve it back
+- Round-trip conversion works: DomainEvent → JSON → DomainEvent
+- No data loss in conversions
+- All 44 existing tests still pass
 
-## Phase 3: Optimization & Cleanup (Future)
+**Result:** DomainEvent integrated into database layer
 
-### 3.1 Refactor Individual Modules
-Once modules are separated, you can refactor them independently:
+### Phase 2: Update sync.rs Event Handling (3-4 hours)
+**Files to modify:**
+- `src/handlers/sync.rs` - Use DomainEvent instead of validate_event()
+- Create `src/handlers/sync/request.rs` - SyncEventRequest with deserializer
 
-```rust
-// Example: Refactor push.rs with trait-based design
-pub struct SyncPusher {
-    validators: Vec<Box<dyn EventValidator>>,
-    applier: Box<dyn EventApplier>,
-}
+**What to do:**
+1. Create `SyncEventRequest` struct with custom deserializer:
+   ```rust
+   #[derive(Deserialize)]
+   pub struct SyncEventRequest {
+       #[serde(flatten, deserialize_with = "deserialize_domain_event")]
+       pub event: DomainEvent,  // ← Already validated!
+       // timestamp, version, etc
+   }
+   ```
+2. The deserializer converts JSON → DomainEvent (validates structure)
+3. Remove `validate_event()` function from sync.rs
+4. Remove `ReadContext` usage (will be removed in later phase)
+5. Update `post_sync_events()` to use `SyncEventRequest` with DomainEvent
 
-impl SyncPusher {
-    pub async fn push(&self, events: Vec<Event>) -> Result<SyncPushResponse> {
-        // Validate all
-        for validator in &self.validators {
-            validator.validate(event).await?;
-        }
-        // Apply all
-        for event in &events {
-            self.applier.apply(event).await?;
-        }
-        Ok(response)
-    }
-}
-```
+**Verification:**
+- Invalid JSON rejected at deserialization (400 errors)
+- Valid events processed correctly
+- All sync tests pass
+- No more manual validate_event() calls
 
-**When to do**: After Phase 2 is complete and working  
-**Risk**: Lower (isolated module, can revert easily)
+**Result:** sync.rs uses type-safe DomainEvent
 
----
+### Phase 3: Update Event Application Logic (2-3 hours)
+**Files to modify:**
+- `src/handlers/sync.rs` - apply_events_to_projections
+- `src/database/repository/events.rs` - add event application methods
 
-### 3.2 Optimize Algorithms
-Once code is readable:
-- Implement incremental hash caching
-- Batch permission checks (instead of per-event)
-- Use snapshots for large event logs
+**What to do:**
+1. Update `apply_events_to_projections()` to pattern match on DomainEvent:
+   ```rust
+   fn apply_event(event: &DomainEvent, db: &Database) {
+       match event {
+           DomainEvent::ContactCreated { id, name, wallet_id } => {
+               // Apply contact creation
+           }
+           DomainEvent::ContactUpdated { id, name, group_ids } => {
+               // Apply contact update
+           }
+           // ... etc for each variant
+       }
+   }
+   ```
+2. Move this logic to repository/events.rs
+3. Type-safe - can't accidentally miss a variant
 
----
+**Verification:**
+- Events apply correctly to projections
+- Pattern matching covers all variants
+- Compiler warns if new variant added but not handled
+- All tests pass
 
-## Timeline & Effort
+**Result:** Event application uses type-safe DomainEvent
 
-| Phase | Task | Effort | Risk | Week |
-|-------|------|--------|------|------|
-| 1 | Hash performance | 1-2h | Low | W1 |
-| 1 | Error handling | 1h | Low | W1 |
-| 2 | Extract traits | 1h | None | W2 |
-| 2 | Split sync.rs | 6-8h | Medium | W2-W3 |
-| 3 | Refactor modules | 4-6h per module | Low | W4+ |
+### Phase 4: Update Snapshots (1-2 hours)
+**Files to modify:**
+- `src/services/projection_snapshot_service.rs` - Use DomainEvent if needed
 
-**Total for Phase 1-2**: ~10-12 hours = 1-2 weeks  
-**Phase 3**: Ongoing as needed
+**What to do:**
+1. Verify snapshot logic works with DomainEvent conversions
+2. Update any snapshot creation/restoration to use typed events
+3. Test snapshot serialization/deserialization
 
----
+**Verification:**
+- Snapshots can be created and restored
+- Events in snapshots deserialize to DomainEvent
+- All snapshot tests pass
 
-## Success Criteria
+**Result:** Snapshot service works with DomainEvent
 
-**Phase 1**: All tests pass, no behavior change, performance improved for hash calculation
-**Phase 2**: All tests pass, no behavior change, code is organized and readable
-**Phase 3**: Traits implemented, modules refactored, easier to extend
+### Phase 5: Full sync.rs Refactoring (2-3 hours)
+**Files to modify:**
+- `src/handlers/sync.rs` - THIN ORCHESTRATION
+- Create `src/handlers/sync/mod.rs`, `response.rs`
+- `src/database/repository/events.rs` - move business logic
 
----
+**What to do:**
+1. Move `apply_events_to_projections()` to repository
+2. Delete `ReadContext`, use PermissionModel directly
+3. Delete duplicate snapshot logic, use snapshot_service
+4. Simplify sync.rs to ~200 lines (orchestration only)
+5. Use DomainEvent throughout
 
-## Risk Mitigation
+**Verification:**
+- sync.rs is ~200 lines (92% reduction)
+- All tests pass
+- No invalid states possible
+- Type safety at all boundaries
 
-1. **Run tests after every change** (not at the end)
-2. **Small commits** (each module split = one commit)
-3. **Code review** (at least one other person checks each commit)
-4. **Revert plan** (if something breaks, revert that one commit)
-5. **Keep current sync.rs backup** until Phase 2 is 100% done
+**Result:** Clean, thin sync.rs with proper event types
 
----
+## Critical Files
 
-## Related Notes
-- [[sync-handler-deep-dive.md]] — Current implementation details
-- [[todos.md]] — Updated with phased tasks
+### To Create (Phase 0)
+- `src/domain/mod.rs` - module init
+- `src/domain/events.rs` - DomainEvent enum (all 12-15 variants)
+
+### To Modify
+- `src/database/repository/events.rs` - NEW event methods + conversions
+- `src/database/models/mod.rs` - export DomainEvent
+- `src/handlers/sync.rs` - use DomainEvent + thin orchestration
+- `src/handlers/sync/request.rs` - SyncEventRequest
+
+### To Reference/Use
+- `src/services/projection_snapshot_service.rs` - USE it
+- `src/permissions/model.rs` - USE PermissionModel API
+
+## Validation Strategy
+
+### Level 1: Type System
+- Invalid states unrepresentable (ContactCreated without name impossible)
+- Compiler enforces all variants handled in pattern matching
+- No serde_json::Value - all fields typed
+
+### Level 2: Serde Deserializer
+- UUID parsing with proper errors
+- Enum validation (direction: lent|owed)
+- Required fields must exist
+- Invalid JSON rejected at boundary (400 error)
+
+### Level 3: Handler
+- Receives ONLY validated DomainEvent
+- No runtime checks needed
+- Pattern matching covers all cases
+
+## Timeline Estimate
+- Phase 0 (Domain events): 4-5 hours
+- Phase 1 (Database integration): 3-4 hours
+- Phase 2 (sync.rs event handling): 3-4 hours
+- Phase 3 (Event application): 2-3 hours
+- Phase 4 (Snapshots): 1-2 hours
+- Phase 5 (sync.rs refactoring): 2-3 hours
+- **Total: 15-21 hours**
+
+## Testing Strategy
+
+### Phase 0 Verification
+- All 44 existing tests still pass
+- No new tests needed (just foundation)
+
+### Phase 1 Verification
+- Tests: `cargo test --lib`
+- Verify: EventRow → DomainEvent → JSON conversions work
+
+### Phase 2 Verification
+- Tests: `cargo test --test app_instances_sync_test`
+- Manual: Try sending bad JSON - should get 400 error
+
+### Phase 3 Verification
+- Tests: `cargo test --test wallet_permissions_stage2a_test`
+- Verify: Events apply correctly to projections
+
+### Phase 4 Verification
+- Tests: `cargo test` (full suite)
+- Verify: Snapshots work with DomainEvent
+
+### Phase 5 Verification
+- Tests: `cargo test` (full suite)
+- Verify: sync.rs is ~200 lines
+- Verify: All 50+ tests pass
+- No validate_event() function exists
+- No ReadContext struct exists
+
+## Benefits
+1. ✅ **Type Safety**: Invalid states unrepresentable
+2. ✅ **Validation at Boundary**: Serde rejects invalid JSON early
+3. ✅ **Self-Documenting**: Each event type shows exactly what fields it has
+4. ✅ **Pattern Matching**: Type-safe handling of all event variants
+5. ✅ **Reusable**: DomainEvent used throughout codebase
+6. ✅ **Compiler Assistance**: New variants require updating all handlers
+7. ✅ **Proper Event Sourcing**: Industry-standard strongly-typed events
+8. ✅ **sync.rs 92% smaller**: From 2467 → ~200 lines
+9. ✅ **No Duplicate Logic**: Snapshot and permission logic centralized
+10. ✅ **Foundation for Future**: Easy to extend with new event types
