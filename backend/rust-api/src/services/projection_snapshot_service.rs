@@ -203,3 +203,74 @@ pub async fn get_snapshot_before_event_count(
 
     Ok(snapshot)
 }
+
+/// Create snapshot JSON from current projections for a wallet
+pub async fn create_snapshot_json(
+    pool: &PgPool,
+    wallet_id: uuid::Uuid,
+) -> Result<(serde_json::Value, serde_json::Value), sqlx::Error> {
+    // Get all contacts for this wallet
+    let contacts = sqlx::query(
+        r#"
+        SELECT id, user_id, name, username, phone, email, notes, is_deleted, created_at, updated_at
+        FROM contacts_projection
+        WHERE wallet_id = $1 AND is_deleted = false
+        ORDER BY created_at
+        "#
+    )
+    .bind(wallet_id)
+    .fetch_all(pool)
+    .await?;
+
+    let contacts_json: Vec<serde_json::Value> = contacts
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.get::<uuid::Uuid, _>("id").to_string(),
+                "name": row.get::<String, _>("name"),
+                "username": row.get::<Option<String>, _>("username"),
+                "phone": row.get::<Option<String>, _>("phone"),
+                "email": row.get::<Option<String>, _>("email"),
+                "notes": row.get::<Option<String>, _>("notes"),
+                "created_at": row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
+                "updated_at": row.get::<chrono::NaiveDateTime, _>("updated_at").to_string(),
+            })
+        })
+        .collect();
+
+    // Get all transactions for this wallet
+    let transactions = sqlx::query(
+        r#"
+        SELECT id, user_id, contact_id, type, direction, amount, currency, description,
+               transaction_date, due_date, is_deleted, created_at, updated_at
+        FROM transactions_projection
+        WHERE wallet_id = $1 AND is_deleted = false
+        ORDER BY created_at
+        "#
+    )
+    .bind(wallet_id)
+    .fetch_all(pool)
+    .await?;
+
+    let transactions_json: Vec<serde_json::Value> = transactions
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.get::<uuid::Uuid, _>("id").to_string(),
+                "contact_id": row.get::<uuid::Uuid, _>("contact_id").to_string(),
+                "type": row.get::<String, _>("type"),
+                "direction": row.get::<String, _>("direction"),
+                "amount": row.get::<i64, _>("amount"),
+                "currency": row.get::<Option<String>, _>("currency"),
+                "description": row.get::<Option<String>, _>("description"),
+                "transaction_date": row.get::<chrono::NaiveDate, _>("transaction_date").to_string(),
+                "due_date": row.get::<Option<chrono::NaiveDate>, _>("due_date")
+                    .map(|d| d.to_string()),
+                "created_at": row.get::<chrono::NaiveDateTime, _>("created_at").to_string(),
+                "updated_at": row.get::<chrono::NaiveDateTime, _>("updated_at").to_string(),
+            })
+        })
+        .collect();
+
+    Ok((serde_json::json!(contacts_json), serde_json::json!(transactions_json)))
+}
