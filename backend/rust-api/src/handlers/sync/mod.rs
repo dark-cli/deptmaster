@@ -20,9 +20,10 @@ pub use request::SyncEventRequest;
 
 /// Sync contact_group_members for a contact from event_data.group_ids (contact UPDATED).
 /// Desired set is all_contacts + group_ids from event. Clears wallet's group memberships for this contact then inserts desired.
-/// Returns true if the user is allowed to read this event using precomputed ReadContext (no DB).
+/// Returns true if the user is allowed to read this event based on permission filtering.
 fn event_read_allowed(
-    ctx: &ReadContext,
+    contact_ids_allowed: &Option<std::collections::HashSet<uuid::Uuid>>,
+    transaction_contact_ids_allowed: &Option<std::collections::HashSet<uuid::Uuid>>,
     aggregate_type: &str,
     aggregate_id: uuid::Uuid,
     event_data: &serde_json::Value,
@@ -32,7 +33,7 @@ fn event_read_allowed(
         return true;
     }
     if aggregate_type == "contact" {
-        return match &ctx.contact_ids_allowed {
+        return match contact_ids_allowed {
             None => true,
             Some(set) => set.contains(&aggregate_id),
         };
@@ -47,7 +48,7 @@ fn event_read_allowed(
             return false;
         };
         // Transactions don't have their own groups; visibility is by contact's contact groups (transaction:read).
-        return match &ctx.transaction_contact_ids_allowed {
+        return match transaction_contact_ids_allowed {
             None => true,
             Some(set) => set.contains(&contact_id),
         };
@@ -163,15 +164,25 @@ pub async fn get_sync_hash(
         )
     })?;
 
-    let read_ctx = ReadContext::new(
-        &*state.db_pool,
-        wallet_id,
-        auth_user.user_id,
-        &wallet_context.user_role,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("ReadContext: {:?}", e);
+    // Get readable contacts and transactions for permission filtering
+    let user_role = match wallet_context.user_role.as_str() {
+        "owner" => WalletRole::Owner,
+        "admin" => WalletRole::Admin,
+        _ => WalletRole::Member,
+    };
+    let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
+    let perm_model = PermissionModel::new((*state.db_pool).clone());
+
+    let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|e| {
+        tracing::error!("Failed to get readable contacts: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    let transaction_contact_ids_allowed = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|e| {
+        tracing::error!("Failed to get readable transaction contacts: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to check permissions"})),
@@ -184,7 +195,8 @@ pub async fn get_sync_hash(
         let aggregate_id: uuid::Uuid = row.get("aggregate_id");
         let event_data: serde_json::Value = row.get("event_data");
         if event_read_allowed(
-            &read_ctx,
+            &contact_ids_allowed,
+            &transaction_contact_ids_allowed,
             &aggregate_type,
             aggregate_id,
             &event_data,
@@ -301,15 +313,25 @@ pub async fn get_sync_events(
         )
     })?;
 
-    let read_ctx = ReadContext::new(
-        &*state.db_pool,
-        wallet_id,
-        auth_user.user_id,
-        &wallet_context.user_role,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("ReadContext: {:?}", e);
+    // Get readable contacts and transactions for permission filtering
+    let user_role = match wallet_context.user_role.as_str() {
+        "owner" => WalletRole::Owner,
+        "admin" => WalletRole::Admin,
+        _ => WalletRole::Member,
+    };
+    let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
+    let perm_model = PermissionModel::new((*state.db_pool).clone());
+
+    let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|e| {
+        tracing::error!("Failed to get readable contacts: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    let transaction_contact_ids_allowed = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|e| {
+        tracing::error!("Failed to get readable transaction contacts: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to check permissions"})),
@@ -322,7 +344,8 @@ pub async fn get_sync_events(
         let aggregate_id: uuid::Uuid = row.get("aggregate_id");
         let event_data: serde_json::Value = row.get("event_data");
         if !event_read_allowed(
-            &read_ctx,
+            &contact_ids_allowed,
+            &transaction_contact_ids_allowed,
             &aggregate_type,
             aggregate_id,
             &event_data,
@@ -394,47 +417,6 @@ pub(crate) async fn insert_permission_event_and_apply(
 pub struct SyncEventsResponse {
     pub accepted: Vec<String>,
     pub conflicts: Vec<String>,
-}
-
-/// Read context for filtering sync events based on user permissions
-/// Replaces permission_service::SyncReadContext - uses PermissionModel for all queries
-pub struct ReadContext {
-    /// None = can read all contacts; Some(set) = can only read these contact ids
-    pub contact_ids_allowed: Option<std::collections::HashSet<uuid::Uuid>>,
-    /// None = can read all transactions; Some(set) = can only read transactions for these contact ids
-    pub transaction_contact_ids_allowed: Option<std::collections::HashSet<uuid::Uuid>>,
-}
-
-impl ReadContext {
-    /// Create ReadContext from PermissionModel
-    pub async fn new(
-        pool: &sqlx::PgPool,
-        wallet_id: uuid::Uuid,
-        user_id: uuid::Uuid,
-        user_role: &str,
-    ) -> Result<Self, crate::database::error::DbError> {
-        let perm_model = PermissionModel::new(pool.clone());
-        let perm_ctx = PermissionContext::new(
-            wallet_id,
-            user_id,
-            match user_role {
-                "owner" => WalletRole::Owner,
-                "admin" => WalletRole::Admin,
-                _ => WalletRole::Member,
-            },
-        );
-
-        // Get contacts user can read (contact:read permission)
-        let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await?;
-
-        // Get contacts whose transactions user can read (transaction:read permission)
-        let transaction_contact_ids_allowed = perm_model.get_readable_transaction_contacts(&perm_ctx).await?;
-
-        Ok(ReadContext {
-            contact_ids_allowed,
-            transaction_contact_ids_allowed,
-        })
-    }
 }
 
 /// Permission event types (write-only; projection builds wallet_users, user_groups, etc.)
