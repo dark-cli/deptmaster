@@ -321,12 +321,13 @@ for (i, event) in events.iter().enumerate() {
    ```
    src/
    └── permissions/
-       ├── mod.rs           (exports)
+       ├── mod.rs           (exports, public API)
        ├── action.rs        (Action enum)
        ├── resource.rs      (Resource enum)
        ├── context.rs       (PermissionContext)
-       ├── model.rs         (PermissionModel - main API)
-       └── queries.rs       (SQL queries for permission resolution)
+       ├── model.rs         (PermissionModel - main check_permissions() API)
+       ├── resolver.rs      (Internal: permission resolution logic)
+       └── queries.rs       (SQL queries: single JOIN, not 3-5 separate)
    ```
 
 ### Phase 2: Gradual Migration (3-4 hours)
@@ -351,18 +352,39 @@ for (i, event) in events.iter().enumerate() {
    - No new functionality, just refactored API
 
 ### Phase 3: Advanced Optimization (1-2 hours, OPTIONAL)
-**Goal**: Further optimize batch permission resolution
+**Goal**: Further optimize permission resolution with single SQL JOIN
 
-1. **Caching Strategy** (optional)
+1. **Single SQL Query Optimization** (INCLUDED IN PHASE 1 as part of check_permissions)
+   - **Current approach** (3-5 separate queries per check):
+     1. `resolve_user_groups()` - Gets user's groups
+     2. `resolve_contact_groups_for_resource()` - Gets contact groups (2-3 sub-queries)
+     3. `resolve_allowed_actions()` - Queries permission matrix
+   
+   - **Optimized approach** (single JOIN query):
+     ```sql
+     SELECT DISTINCT pa.name
+     FROM user_groups ug
+     JOIN user_group_members ugm ON ugm.user_group_id = ug.id
+     JOIN group_permission_matrix m ON m.user_group_id = ug.id
+     JOIN contact_groups cg ON cg.id = m.contact_group_id
+     JOIN contact_group_members cgm ON cgm.contact_group_id = cg.id 
+       OR cg.name = 'all_contacts'
+     JOIN permission_actions pa ON pa.id = m.permission_action_id
+     WHERE ug.wallet_id = $1 
+       AND ugm.user_id = $2
+       AND (cgm.contact_id = $3 OR cg.name = 'all_contacts')
+     ```
+   
+   - **Benefit**: Single database round-trip instead of 3-5
+   - **Cost**: Complex JOIN, must test correctness
+   - **File**: `src/permissions/queries.rs` - SQL as constant strings
+   - **Testing**: Verify single query returns same results as current approach
+
+2. **Caching Strategy** (optional, Phase 3 only if needed)
    - Cache user groups per wallet per user
    - Cache permission matrix per wallet
    - Invalidate on permission changes
-   - Only if profiling shows cache benefit
-
-2. **Query Batching** (already in Phase 1)
-   - Single JOIN query for entire batch
-   - No per-item queries
-   - Included in base `check_permissions()` implementation
+   - Only implement if profiling shows cache benefit after Phase 1-2
 
 ### Phase 4: Event Trait Declarations (2-3 hours, FUTURE)
 **Goal**: Move permission requirements into event definitions
@@ -473,11 +495,17 @@ After:  100 events = ~10 queries, 0.1s
 
 | Phase | Duration | Deliverable |
 |-------|----------|-------------|
-| 1: Foundation | 2-3h | Permission model with batch-only API |
+| 1: Foundation + SQL Optimization | 2-4h | Permission model + single JOIN query |
 | 2: Gradual Migration | 3-4h | Handlers migrated, tests passing |
-| 3: Optional Optimization | 0-2h | Caching if needed, performance profiling |
+| 3: Optional Caching | 0-2h | Cache layer if profiling shows benefit |
 | 4: Event Traits | 2-3h | Event-based permission declarations (FUTURE) |
-| **Total** | **7-11h** | **Complete permission isolation** |
+| **Total** | **7-13h** | **Complete permission isolation + optimized queries** |
+
+**Phase 1 includes**:
+- ✅ Batch-only API design
+- ✅ Single JOIN query (3-5 queries → 1 query)
+- ✅ Enums for type safety
+- ✅ Permission module structure
 
 ---
 
