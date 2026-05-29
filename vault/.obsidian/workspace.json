@@ -200,6 +200,8 @@
   },
   "active": "cd2b8a1db33004c8",
   "lastOpenFiles": [
+    "code-statistics.md",
+    "Deptmaster",
     "database-crate-separation.md.tmp.449427.8b3997024da8",
     "database-crate-separation.md.tmp.449427.f8138ce6e894",
     "todos.md",
@@ -212,8 +214,6 @@
     "MEMORY.md.tmp.449427.632f89f06951",
     "todos.md.tmp.449427.e788ab5e1857",
     "client-todos.md",
-    "client-todos.md.tmp.449427.638a12a7c9b4",
-    "MEMORY.md.tmp.449427.423dca3ccd36",
     "undo_event-client-optimization.md",
     "MEMORY.md",
     "database-setup.md",

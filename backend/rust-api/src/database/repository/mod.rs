@@ -219,6 +219,46 @@ pub trait DatabaseRepository: Send + Sync {
         group_ids: Vec<Uuid>,
     ) -> Result<(), DbError>;
 
+    async fn create_user_group(&self, wallet_id: Uuid, name: &str, is_system: bool) -> Result<Uuid, DbError>;
+
+    async fn get_user_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Option<(Uuid, String, bool)>, DbError>;
+
+    async fn get_user_group_by_name(&self, wallet_id: Uuid, name: &str) -> Result<Option<Uuid>, DbError>;
+
+    async fn list_user_groups(&self, wallet_id: Uuid) -> Result<Vec<(Uuid, String, bool)>, DbError>;
+
+    async fn delete_user_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError>;
+
+    async fn list_user_group_members(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Vec<(Uuid, Option<String>)>, DbError>;
+
+    async fn add_user_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<(), DbError>;
+
+    async fn remove_user_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<bool, DbError>;
+
+    async fn create_contact_group(&self, wallet_id: Uuid, name: &str, group_type: &str, is_system: bool) -> Result<Uuid, DbError>;
+
+    async fn get_contact_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Option<(Uuid, String, String, bool)>, DbError>;
+
+    async fn get_contact_group_by_name(&self, wallet_id: Uuid, name: &str) -> Result<Option<Uuid>, DbError>;
+
+    async fn list_contact_groups(&self, wallet_id: Uuid) -> Result<Vec<(Uuid, String, String, bool)>, DbError>;
+
+    async fn delete_contact_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError>;
+
+    async fn list_contact_group_members(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Vec<Uuid>, DbError>;
+
+    async fn get_permission_action_id(&self, name: &str) -> Result<Option<i16>, DbError>;
+
+    async fn get_all_permission_actions(&self) -> Result<Vec<(i16, String, String)>, DbError>;
+
+    async fn grant_permission(&self, user_group_id: Uuid, contact_group_id: Uuid, action_id: i16) -> Result<(), DbError>;
+
+    async fn revoke_permission(&self, user_group_id: Uuid, contact_group_id: Uuid, action_id: i16) -> Result<bool, DbError>;
+
+    async fn user_group_in_wallet(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError>;
+
+    async fn contact_group_in_wallet(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError>;
+
     // ============ USERS ============
     async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, DbError>;
 
@@ -463,6 +503,86 @@ impl DatabaseRepository for Database {
 
     async fn sync_contact_group_members(&self, wallet_id: Uuid, contact_id: Uuid, group_ids: Vec<Uuid>) -> Result<(), DbError> {
         self.sync_contact_group_members_impl(wallet_id, contact_id, group_ids).await
+    }
+
+    async fn create_user_group(&self, wallet_id: Uuid, name: &str, is_system: bool) -> Result<Uuid, DbError> {
+        self.create_user_group_impl(wallet_id, name, is_system).await
+    }
+
+    async fn get_user_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Option<(Uuid, String, bool)>, DbError> {
+        self.get_user_group_impl(group_id, wallet_id).await
+    }
+
+    async fn get_user_group_by_name(&self, wallet_id: Uuid, name: &str) -> Result<Option<Uuid>, DbError> {
+        self.get_user_group_by_name_impl(wallet_id, name).await
+    }
+
+    async fn list_user_groups(&self, wallet_id: Uuid) -> Result<Vec<(Uuid, String, bool)>, DbError> {
+        self.list_user_groups_impl(wallet_id).await
+    }
+
+    async fn delete_user_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError> {
+        self.delete_user_group_impl(group_id, wallet_id).await
+    }
+
+    async fn list_user_group_members(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Vec<(Uuid, Option<String>)>, DbError> {
+        self.list_user_group_members_impl(group_id, wallet_id).await
+    }
+
+    async fn add_user_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<(), DbError> {
+        self.add_user_group_member_impl(group_id, user_id).await
+    }
+
+    async fn remove_user_group_member(&self, group_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {
+        self.remove_user_group_member_impl(group_id, user_id).await
+    }
+
+    async fn create_contact_group(&self, wallet_id: Uuid, name: &str, group_type: &str, is_system: bool) -> Result<Uuid, DbError> {
+        self.create_contact_group_impl(wallet_id, name, group_type, is_system).await
+    }
+
+    async fn get_contact_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Option<(Uuid, String, String, bool)>, DbError> {
+        self.get_contact_group_impl(group_id, wallet_id).await
+    }
+
+    async fn get_contact_group_by_name(&self, wallet_id: Uuid, name: &str) -> Result<Option<Uuid>, DbError> {
+        self.get_contact_group_by_name_impl(wallet_id, name).await
+    }
+
+    async fn list_contact_groups(&self, wallet_id: Uuid) -> Result<Vec<(Uuid, String, String, bool)>, DbError> {
+        self.list_contact_groups_impl(wallet_id).await
+    }
+
+    async fn delete_contact_group(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError> {
+        self.delete_contact_group_impl(group_id, wallet_id).await
+    }
+
+    async fn list_contact_group_members(&self, group_id: Uuid, wallet_id: Uuid) -> Result<Vec<Uuid>, DbError> {
+        self.list_contact_group_members_impl(group_id, wallet_id).await
+    }
+
+    async fn get_permission_action_id(&self, name: &str) -> Result<Option<i16>, DbError> {
+        self.get_permission_action_id_impl(name).await
+    }
+
+    async fn get_all_permission_actions(&self) -> Result<Vec<(i16, String, String)>, DbError> {
+        self.get_all_permission_actions_impl().await
+    }
+
+    async fn grant_permission(&self, user_group_id: Uuid, contact_group_id: Uuid, action_id: i16) -> Result<(), DbError> {
+        self.grant_permission_impl(user_group_id, contact_group_id, action_id).await
+    }
+
+    async fn revoke_permission(&self, user_group_id: Uuid, contact_group_id: Uuid, action_id: i16) -> Result<bool, DbError> {
+        self.revoke_permission_impl(user_group_id, contact_group_id, action_id).await
+    }
+
+    async fn user_group_in_wallet(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError> {
+        self.user_group_in_wallet_impl(group_id, wallet_id).await
+    }
+
+    async fn contact_group_in_wallet(&self, group_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError> {
+        self.contact_group_in_wallet_impl(group_id, wallet_id).await
     }
 
     async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, DbError> {
