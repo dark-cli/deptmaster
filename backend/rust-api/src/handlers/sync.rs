@@ -8,7 +8,7 @@ use sqlx::Row;
 use crate::AppState;
 use crate::websocket;
 use crate::services::projection_snapshot_service;
-use crate::services::permission_service::{self, ResourceType, SyncReadContext};
+use crate::services::permission_service::{self, SyncReadContext};
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::{permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole}};
@@ -67,82 +67,6 @@ async fn apply_contact_group_ids_from_event_data(
         .await?;
     }
     Ok(())
-}
-
-/// Convert old permission system (string action + ResourceType) to new PermissionModel (Action + Resource)
-fn convert_to_new_permission_model(
-    action_str: &str,
-    resource_type: ResourceType,
-    resource_id: Option<uuid::Uuid>,
-) -> Option<(Action, Resource)> {
-    let action = match action_str {
-        "contact:create" => Action::ContactCreate,
-        "contact:read" => Action::ContactRead,
-        "contact:update" | "contact:edit" => Action::ContactUpdate,
-        "contact:delete" => Action::ContactDelete,
-        "transaction:create" => Action::TransactionCreate,
-        "transaction:read" => Action::TransactionRead,
-        "transaction:update" => Action::TransactionUpdate,
-        "transaction:close" => Action::TransactionClose,
-        "wallet:read" => Action::WalletRead,
-        "wallet:update" => Action::WalletUpdate,
-        "wallet:manage_members" => Action::WalletAddMember,
-        "events:read" => Action::EventsRead,
-        _ => return None,
-    };
-
-    let resource = match resource_type {
-        ResourceType::Contact => {
-            if let Some(id) = resource_id {
-                Resource::Contact(id)
-            } else {
-                Resource::AllContacts
-            }
-        }
-        ResourceType::Transaction => {
-            if let Some(id) = resource_id {
-                Resource::Transaction(id)
-            } else {
-                Resource::AllTransactions
-            }
-        }
-        ResourceType::Wallet => {
-            if let Some(id) = resource_id {
-                Resource::Wallet(id)
-            } else {
-                return None;
-            }
-        }
-    };
-
-    Some((action, resource))
-}
-
-fn map_event_to_permission_action(
-    event: &SyncEventRequest,
-    aggregate_id: uuid::Uuid,
-) -> Option<(String, ResourceType, Option<uuid::Uuid>)> {
-    let action = match (event.aggregate_type.as_str(), event.event_type.as_str()) {
-        ("contact", "CREATED") => "contact:create",
-        ("contact", "UPDATED") => "contact:update",
-        ("contact", "DELETED") => "contact:delete",
-        ("contact", "UNDO") => "contact:update",
-        ("transaction", "CREATED") => "transaction:create",
-        ("transaction", "UPDATED") => "transaction:update",
-        ("transaction", "DELETED") => "transaction:delete",
-        ("transaction", "UNDO") => "transaction:update",
-        // Permission events are handled separately (admin/owner only).
-        ("permission", _) => return None,
-        _ => return None,
-    };
-
-    let (resource_type, resource_id) = match event.aggregate_type.as_str() {
-        "contact" => (ResourceType::Contact, Some(aggregate_id)),
-        "transaction" => (ResourceType::Transaction, None),
-        _ => (ResourceType::Contact, None),
-    };
-
-    Some((action.to_string(), resource_type, resource_id))
 }
 
 /// Returns true if the user is allowed to read this event using precomputed SyncReadContext (no DB).
@@ -483,6 +407,68 @@ pub struct SyncEventRequest {
     pub version: i32,
 }
 
+/// Trait defining permission requirements for events
+/// Each event type declares what permissions are needed to perform it
+pub trait EventPermissionRequirement {
+    fn required_permissions(&self) -> Vec<(Action, Resource)>;
+}
+
+impl EventPermissionRequirement for SyncEventRequest {
+    fn required_permissions(&self) -> Vec<(Action, Resource)> {
+        match (self.aggregate_type.as_str(), self.event_type.as_str()) {
+            // Contact events
+            ("contact", "CREATED") => vec![(Action::ContactCreate, Resource::AllContacts)],
+            ("contact", "UPDATED") => {
+                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactUpdate, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("contact", "DELETED") => {
+                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactDelete, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("contact", "UNDO") => {
+                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::ContactUpdate, Resource::Contact(id))]
+                } else {
+                    vec![]
+                }
+            }
+            // Transaction events
+            ("transaction", "CREATED") => vec![(Action::TransactionCreate, Resource::AllTransactions)],
+            ("transaction", "UPDATED") => {
+                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("transaction", "DELETED") => {
+                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionClose, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            ("transaction", "UNDO") => {
+                if let Ok(id) = uuid::Uuid::parse_str(&self.aggregate_id) {
+                    vec![(Action::TransactionUpdate, Resource::Transaction(id))]
+                } else {
+                    vec![]
+                }
+            }
+            // Permission events require owner/admin (handled separately in handler)
+            ("permission", _) => vec![],
+            _ => vec![],
+        }
+    }
+}
+
 /// Insert a permission event and apply it to projections. Used by wallet management handlers.
 pub(crate) async fn insert_permission_event_and_apply(
     state: &AppState,
@@ -660,13 +646,6 @@ pub async fn post_sync_events(
     // Collect all permission checks for batch verification
     let mut permission_checks: Vec<(Action, Resource)> = Vec::new();
     for event in &events {
-        let aggregate_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Invalid aggregate ID: {}", e)})),
-            )
-        })?;
-
         // Permission events are admin/owner only.
         if event.aggregate_type == "permission" {
             if wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
@@ -675,17 +654,12 @@ pub async fn post_sync_events(
             continue;
         }
 
-        if let Some((action, resource_type, resource_id)) = map_event_to_permission_action(event, aggregate_id) {
-            if let Some((perm_action, perm_resource)) = convert_to_new_permission_model(&action, resource_type, resource_id) {
-                permission_checks.push((perm_action, perm_resource));
-            }
+        // Get required permissions from event trait
+        permission_checks.extend(event.required_permissions());
 
-            // Transactions require contact read (dependency safety).
-            if event.aggregate_type == "transaction" {
-                if let Some((perm_action, perm_resource)) = convert_to_new_permission_model("contact:read", ResourceType::Contact, None) {
-                    permission_checks.push((perm_action, perm_resource));
-                }
-            }
+        // Transactions require contact read (dependency safety).
+        if event.aggregate_type == "transaction" {
+            permission_checks.push((Action::ContactRead, Resource::AllContacts));
         }
     }
 
