@@ -16,6 +16,9 @@ pub enum DbError {
 
     #[error("Serialization error: {0}")]
     SerializationError(String),
+
+    #[error("Permission resolution error: {0}")]
+    PermissionResolution(String),
 }
 
 impl From<sqlx::Error> for DbError {

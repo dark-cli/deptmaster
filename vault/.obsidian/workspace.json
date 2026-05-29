@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "sync-handler-deep-dive.md",
+                "file": "Projects/Permission System Isolation & Refinement.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "sync-handler-deep-dive"
+              "title": "Permission System Isolation & Refinement"
             }
           }
         ]
@@ -185,6 +185,15 @@
   },
   "active": "4886aa282ed462fe",
   "lastOpenFiles": [
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.3f06fb70d6c5",
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.1d80d3b32a35",
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.9d8a0386a5ea",
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.f81e2ccf4416",
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.4e17d79ba11a",
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.77189f8a68cc",
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.42bfdd751eb9",
+    "Projects/Permission System Isolation & Refinement.md.tmp.449427.6e82657a446b",
+    "sync-handler-deep-dive.md",
     "Projects/Permission System Isolation & Refinement.md",
     "Projects/Permission System Isolation & Refinement.md.tmp.449427.abbc8db6b30b",
     "Projects/User Settings.md",
@@ -192,23 +201,15 @@
     "Projects/Permission System Decoupling Plan.md",
     "Projects",
     "Projects/Permission System Decoupling.md.tmp.449427.7c8d92156e18",
-    "Projects/Permission System Decoupling.md.tmp.449427.99a15920e25b",
     "todos.md",
-    "Projects/User Settings.md.tmp.449427.b399f4e962b3",
     "undo_event-client-optimization.md",
     "database-crate-separation.md",
     "code-statistics.md",
-    "Deptmaster",
-    "database-crate-separation.md.tmp.449427.8b3997024da8",
-    "database-crate-separation.md.tmp.449427.f8138ce6e894",
-    "MEMORY.md.tmp.449427.6848baea79b8",
-    "database-crate-separation.md.tmp.449427.7755579ba9fb",
     "client-todos.md",
     "MEMORY.md",
     "database-setup.md",
     "migration-guidelines.md",
     "migration-guide.md",
-    "sync-handler-deep-dive.md",
     "architecture.md",
     "permission-system-deep-dive.md",
     "sync-refactoring-plan.md",
@@ -219,7 +220,6 @@
     "reading-guide.md",
     "INDEX.md",
     "READING_GUIDE.md",
-    "middleware-architecture.md",
-    "security-fixes.md"
+    "middleware-architecture.md"
   ]
 }

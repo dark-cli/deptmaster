@@ -9,6 +9,7 @@ pub mod background;
 pub mod utils;
 pub mod middleware;
 pub mod models;
+pub mod permissions;
 use database::DatabasePool;
 use std::sync::Arc;
 use websocket::BroadcastChannel;
