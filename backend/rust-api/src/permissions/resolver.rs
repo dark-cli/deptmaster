@@ -20,10 +20,40 @@ pub async fn resolve_actions(
         return Ok(Action::all().iter().copied().collect());
     }
 
+    // Handle ContactGroup resources specially
+    if let Resource::ContactGroup(group_id) = resource {
+        let action_names: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT DISTINCT pa.name
+            FROM user_groups ug
+              JOIN user_group_members ugm ON ugm.user_group_id = ug.id
+              JOIN group_permission_matrix m ON m.user_group_id = ug.id
+              JOIN permission_actions pa ON pa.id = m.permission_action_id
+            WHERE ug.wallet_id = $1
+              AND ugm.user_id = $2
+              AND m.contact_group_id = $3
+            "#,
+        )
+        .bind(ctx.wallet_id)
+        .bind(ctx.user_id)
+        .bind(group_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+        let mut actions = HashSet::new();
+        for name in action_names {
+            if let Some(action) = Action::from_str(&name) {
+                actions.insert(action);
+            }
+        }
+        return Ok(actions);
+    }
+
     // Get resource ID (None for wildcard resources)
     let resource_id = resource.id();
 
-    // Execute single query to get allowed actions
+    // Execute single query to get allowed actions for Contact/Transaction/Wallet resources
     let action_names: Vec<String> = sqlx::query_scalar(queries::RESOLVE_ACTIONS_QUERY)
         .bind(ctx.wallet_id)
         .bind(ctx.user_id)

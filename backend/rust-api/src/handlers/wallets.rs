@@ -2098,7 +2098,7 @@ pub async fn add_contact_group_member(
             &auth_user,
             &role,
             Action::ContactUpdate,
-            Resource::AllContacts,  // Check on group means checking all_contacts
+            Resource::ContactGroup(group_uuid),
         )
         .await?;
 
@@ -2188,39 +2188,26 @@ pub async fn remove_contact_group_member(
     })?;
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
     if role != "owner" && role != "admin" {
-        let can_edit_contact = permission_service::can_perform(
-            &*state.db_pool,
+        let can_edit_contact = check_permission_matrix(
+            &state,
             wallet_uuid,
-            auth_user.user_id,
+            &auth_user,
             &role,
-            "contact:edit",
-            ResourceType::Contact,
-            Some(contact_uuid),
+            Action::ContactUpdate,
+            Resource::Contact(contact_uuid),
         )
-        .await
-        .map_err(|e| {
-            tracing::error!("remove_contact_group_member can_perform: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
-        let can_edit_group = permission_service::can_perform_action_on_contact_group(
-            &*state.db_pool,
+        .await?;
+
+        let can_edit_group = check_permission_matrix(
+            &state,
             wallet_uuid,
-            auth_user.user_id,
+            &auth_user,
             &role,
-            group_uuid,
-            "contact:edit",
+            Action::ContactUpdate,
+            Resource::ContactGroup(group_uuid),
         )
-        .await
-        .map_err(|e| {
-            tracing::error!("remove_contact_group_member can_perform_action_on_contact_group: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
+        .await?;
+
         if !can_edit_contact && !can_edit_group {
             tracing::warn!(
                 contact_id = %contact_id,

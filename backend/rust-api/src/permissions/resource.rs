@@ -10,6 +10,8 @@ pub enum Resource {
     Transaction(Uuid),
     /// Specific wallet by ID
     Wallet(Uuid),
+    /// Specific contact group by ID
+    ContactGroup(Uuid),
     /// All contacts in wallet (implicit group)
     AllContacts,
     /// All transactions in wallet (implicit group)
@@ -23,6 +25,7 @@ impl Resource {
             Resource::Contact(_) => ResourceType::Contact,
             Resource::Transaction(_) => ResourceType::Transaction,
             Resource::Wallet(_) => ResourceType::Wallet,
+            Resource::ContactGroup(_) => ResourceType::ContactGroup,
             Resource::AllContacts => ResourceType::Contact,
             Resource::AllTransactions => ResourceType::Transaction,
         }
@@ -34,6 +37,7 @@ impl Resource {
             Resource::Contact(id) => Some(*id),
             Resource::Transaction(id) => Some(*id),
             Resource::Wallet(id) => Some(*id),
+            Resource::ContactGroup(id) => Some(*id),
             Resource::AllContacts => None,
             Resource::AllTransactions => None,
         }
@@ -51,6 +55,7 @@ impl fmt::Display for Resource {
             Resource::Contact(id) => write!(f, "contact:{}", id),
             Resource::Transaction(id) => write!(f, "transaction:{}", id),
             Resource::Wallet(id) => write!(f, "wallet:{}", id),
+            Resource::ContactGroup(id) => write!(f, "contact_group:{}", id),
             Resource::AllContacts => write!(f, "all_contacts"),
             Resource::AllTransactions => write!(f, "all_transactions"),
         }
@@ -63,6 +68,7 @@ pub enum ResourceType {
     Contact,
     Transaction,
     Wallet,
+    ContactGroup,
 }
 
 impl fmt::Display for ResourceType {
@@ -71,6 +77,7 @@ impl fmt::Display for ResourceType {
             ResourceType::Contact => write!(f, "contact"),
             ResourceType::Transaction => write!(f, "transaction"),
             ResourceType::Wallet => write!(f, "wallet"),
+            ResourceType::ContactGroup => write!(f, "contact_group"),
         }
     }
 }
