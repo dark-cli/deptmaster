@@ -9,6 +9,7 @@
 
 use debt_tracker_api::handlers::wallets;
 use debt_tracker_api::middleware::auth::AuthUser;
+use uuid::Uuid;
 
 mod test_helpers;
 use test_helpers::*;
@@ -17,9 +18,9 @@ use test_helpers::*;
 async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     let pool = setup_test_db().await;
 
-    // Two users, two wallets.
-    let user_a = create_test_user_with_email(&pool, "user_a@example.com").await;
-    let user_b = create_test_user_with_email(&pool, "user_b@example.com").await;
+    // Two users, two wallets. Use unique emails to avoid conflicts with previous test runs.
+    let user_a = create_test_user_with_email(&pool, &format!("user_a-{}@example.com", Uuid::new_v4())).await;
+    let user_b = create_test_user_with_email(&pool, &format!("user_b-{}@example.com", Uuid::new_v4())).await;
 
     let wallet_a = create_test_wallet(&pool, "Wallet A").await;
     let wallet_b = create_test_wallet(&pool, "Wallet B").await;
