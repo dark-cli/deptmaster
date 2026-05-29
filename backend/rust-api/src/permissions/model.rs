@@ -1,4 +1,5 @@
 use sqlx::PgPool;
+use uuid::Uuid;
 use crate::database::error::DbError;
 use std::collections::HashSet;
 
@@ -68,6 +69,23 @@ impl PermissionModel {
         resource: &Resource,
     ) -> Result<HashSet<Action>, DbError> {
         resolver::resolve_actions(&self.pool, ctx, resource).await
+    }
+
+    /// Get contact IDs the user can read (for sync filtering)
+    ///
+    /// Returns None if user can read all contacts, Some(set) if limited to specific contacts.
+    /// Owner/Admin get None (can read all).
+    ///
+    /// # Arguments
+    /// * `ctx` - Permission context (who, what wallet, what role)
+    ///
+    /// # Returns
+    /// None = can read all contacts, Some(HashSet<Uuid>) = specific contact IDs
+    pub async fn get_readable_contacts(
+        &self,
+        ctx: &PermissionContext,
+    ) -> Result<Option<HashSet<Uuid>>, DbError> {
+        resolver::get_readable_contacts(&self.pool, ctx).await
     }
 
     pub async fn check_permissions(
