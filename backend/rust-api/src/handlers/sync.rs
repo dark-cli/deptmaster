@@ -26,21 +26,23 @@ pub async fn rebuild_projections_from_events(state: &crate::AppState, wallet_id:
     Projections::rebuild_projections_from_events(state, wallet_id).await
 }
 
-
-/// Build map transaction_id -> contact_id for transaction events that don't have contact_id in event_data.
-async fn transaction_contact_ids_for_events(
-    state: &AppState,
+/// Get transaction_id -> contact_id map for transactions missing contact_id in event_data
+async fn get_transaction_contact_map(
+    db: &Database,
     wallet_id: uuid::Uuid,
-    transaction_ids: &[uuid::Uuid],
+    events: &[EventRow],
 ) -> Result<std::collections::HashMap<uuid::Uuid, uuid::Uuid>, sqlx::Error> {
-    let db = Database::new((*state.db_pool).clone());
-    db.get_transaction_contact_map(wallet_id, transaction_ids).await
-}
+    let transaction_ids: Vec<uuid::Uuid> = events
+        .iter()
+        .filter(|row| row.aggregate_type == "transaction" && !row.data.get("contact_id").and_then(|v| v.as_str()).is_some())
+        .map(|row| row.aggregate_id)
+        .collect();
 
-/// Calculate total debt (sum of all contact balances) at current time for a wallet
-async fn calculate_total_debt(state: &AppState, wallet_id: uuid::Uuid) -> i64 {
-    let db = Database::new((*state.db_pool).clone());
-    db.calculate_total_debt(wallet_id).await
+    if transaction_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    db.get_transaction_contact_map(wallet_id, &transaction_ids).await
 }
 
 #[derive(Serialize)]
@@ -68,29 +70,7 @@ pub async fn get_sync_hash(
             )
         })?;
 
-    let transaction_ids_missing_contact: Vec<uuid::Uuid> = events
-        .iter()
-        .filter(|row| row.aggregate_type == "transaction")
-        .filter(|row| {
-            !row.data.get("contact_id").and_then(|v| v.as_str()).is_some()
-        })
-        .map(|row| row.aggregate_id)
-        .collect();
-    let transaction_contact_map = transaction_contact_ids_for_events(
-        &state,
-        wallet_id,
-        &transaction_ids_missing_contact,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("transaction_contact_ids_for_events: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to fetch events"})),
-        )
-    })?;
-
-    // Get readable contacts and transactions for permission filtering
+    // Parse role once at the beginning
     let user_role = match wallet_context.user_role.as_str() {
         "owner" => WalletRole::Owner,
         "admin" => WalletRole::Admin,
@@ -99,6 +79,7 @@ pub async fn get_sync_hash(
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
+    // Get permission boundaries once
     let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|e| {
         tracing::error!("Failed to get readable contacts: {:?}", e);
         (
@@ -114,6 +95,17 @@ pub async fn get_sync_hash(
             Json(serde_json::json!({"error": "Failed to check permissions"})),
         )
     })?;
+
+    // Get transaction contact map for permission filtering
+    let transaction_contact_map = get_transaction_contact_map(&db, wallet_id, &events)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get transaction contact map: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to fetch transaction data"})),
+            )
+        })?;
 
     let mut filtered_event_ids_with_timestamps: Vec<(uuid::Uuid, chrono::NaiveDateTime)> = Vec::new();
     for row in &events {
@@ -193,29 +185,7 @@ pub async fn get_sync_events(
         )
     })?;
 
-    let transaction_ids_missing_contact: Vec<uuid::Uuid> = events
-        .iter()
-        .filter(|row| row.aggregate_type == "transaction")
-        .filter(|row| {
-            !row.data.get("contact_id").and_then(|v| v.as_str()).is_some()
-        })
-        .map(|row| row.aggregate_id)
-        .collect();
-    let transaction_contact_map = transaction_contact_ids_for_events(
-        &state,
-        wallet_id,
-        &transaction_ids_missing_contact,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("transaction_contact_ids_for_events: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to fetch events"})),
-        )
-    })?;
-
-    // Get readable contacts and transactions for permission filtering
+    // Parse role once at the beginning
     let user_role = match wallet_context.user_role.as_str() {
         "owner" => WalletRole::Owner,
         "admin" => WalletRole::Admin,
@@ -224,6 +194,7 @@ pub async fn get_sync_events(
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
+    // Get permission boundaries once
     let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|e| {
         tracing::error!("Failed to get readable contacts: {:?}", e);
         (
@@ -239,6 +210,17 @@ pub async fn get_sync_events(
             Json(serde_json::json!({"error": "Failed to check permissions"})),
         )
     })?;
+
+    // Get transaction contact map for permission filtering
+    let transaction_contact_map = get_transaction_contact_map(&db, wallet_id, &events)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get transaction contact map: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to fetch transaction data"})),
+            )
+        })?;
 
     let mut sync_events = Vec::with_capacity(events.len());
     for row in &events {
