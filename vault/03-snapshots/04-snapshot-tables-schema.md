@@ -267,4 +267,4 @@ LIMIT 1  -- Uses index
 
 ---
 
-Next: [../04-permissions-and-undo/01-undo-events.md](../04-permissions-and-undo/01-undo-events.md) — Understand UNDO events and how they trigger rebuilds
+Next: [05-when-optimizations-apply.md](05-when-optimizations-apply.md) — See the complete picture: when Phase 1, Phase 2, and snapshots all apply
