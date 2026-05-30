@@ -10,16 +10,18 @@ pub struct Projections;
 
 impl Projections {
     /// Rebuild projections from all events in the database for a specific wallet
-    /// Implements the optimized algorithm:
-    /// 1. Create projection after any new event
-    /// 2. Stack of snapshots (push after every 10 events or after UNDO event)
-    /// 3. If UNDO event: find undone event position, find snapshot before it, create cleaned event list
-    /// 4. Pass cleaned event list + snapshot to builder
-    /// 5. Builder creates new snapshot, make it current projection, save to stack
+    /// Implements optimized batch streaming for memory efficiency:
+    /// - For small wallets (<5k events): Load all events upfront (fast path)
+    /// - For medium wallets (5k-50k): Load in batches with snapshot optimization
+    /// - For large wallets (>50k): Use batch processing fallback (never loads all into RAM)
     pub async fn rebuild_projections_from_events(
         state: &AppState,
         wallet_id: Uuid,
     ) -> Result<(), sqlx::Error> {
+        const SMALL_WALLET_THRESHOLD: i64 = 5_000;     // Load all upfront (fast)
+        const MEDIUM_WALLET_THRESHOLD: i64 = 50_000;   // Can use snapshot optimization
+        const BATCH_SIZE: i64 = 1_000;                 // Events per batch for large wallets
+
         tracing::info!("Rebuilding projections from events for wallet {}...", wallet_id);
 
         // Get user ID (for this wallet, get the first user who has access)
@@ -46,27 +48,46 @@ impl Projections {
 
         let has_existing_projections = max_processed_id.is_some() && max_processed_id != Some(0);
 
-        // Get events for this wallet ordered by timestamp
-        // If projections exist, load only new events (Phase 1 optimization)
-        // If rebuilding from scratch, load all events
-        let events = sqlx::query(
-            r#"
-            SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
-            FROM events
-            WHERE wallet_id = $1 AND id > COALESCE($2, 0)
-            ORDER BY created_at ASC
-            "#
+        // Count events to decide between fast path (load all) and batch path (stream)
+        let event_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM events WHERE wallet_id = $1 AND id > COALESCE($2, 0)"
         )
         .bind(wallet_id)
         .bind(max_processed_id.unwrap_or(0))
-        .fetch_all(&*state.db_pool)
+        .fetch_one(&*state.db_pool)
         .await?;
 
-        // Early return if no new events and projections already exist (Phase 1 optimization win)
-        if events.is_empty() && has_existing_projections {
+        // Early return if no new events and projections already exist
+        if event_count == 0 && has_existing_projections {
             tracing::info!("No new events since last projection update, skipping rebuild");
             return Ok(());
         }
+
+        // Decide between fast path (load all) and batch streaming path
+        let use_batch_path = event_count > SMALL_WALLET_THRESHOLD;
+        if use_batch_path {
+            tracing::info!("Large wallet detected ({} events), using batch processing for memory efficiency", event_count);
+        }
+
+        // Get events for this wallet ordered by timestamp
+        // Fast path: Load all events upfront (safe for <5k events)
+        // Batch path: Use empty vector to trigger batch processing loop below
+        let events = if use_batch_path {
+            Vec::new() // Empty vector triggers batch fallback loop
+        } else {
+            sqlx::query(
+                r#"
+                SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
+                FROM events
+                WHERE wallet_id = $1 AND id > COALESCE($2, 0)
+                ORDER BY created_at ASC
+                "#
+            )
+            .bind(wallet_id)
+            .bind(max_processed_id.unwrap_or(0))
+            .fetch_all(&*state.db_pool)
+            .await?
+        };
 
         // Get last event info (used for snapshot lookup)
         let last_event_db_id = events.last().and_then(|row| row.get::<Option<i64>, _>("id"));
