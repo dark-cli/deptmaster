@@ -1371,6 +1371,14 @@ impl Database {
             .unwrap_or(0)
     }
 
+    pub async fn get_event_count_for_wallet(&self, wallet_id: Uuid) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE wallet_id = $1")
+            .bind(wallet_id)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0)
+    }
+
     pub async fn get_event_db_id_by_uuid(&self, event_id: Uuid) -> Result<Option<i64>, sqlx::Error> {
         sqlx::query_scalar::<_, i64>(
             "SELECT id FROM events WHERE event_id = $1"

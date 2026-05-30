@@ -564,7 +564,7 @@ pub async fn post_sync_events(
 
                 // Save snapshot if needed (every 10 events or after UNDO)
                 if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
-                    let event_count = db.get_event_count().await;
+                    let event_count = db.get_event_count_for_wallet(wallet_id).await;
                     let should_save = crate::services::snapshots::should_create_snapshot(event_count)
                         || event.event_type == "UNDO";
 
