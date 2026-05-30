@@ -538,9 +538,9 @@ pub async fn post_sync_events(
                 // Event inserted successfully - now apply it and calculate total_debt
                 accepted.push(event.id.clone());
                 
-                // Apply this single event to projections
+                // Apply this event to projections
                 let db = Database::new((*state.db_pool).clone());
-                if let Err(e) = db.apply_single_event_to_projections_impl(&event, aggregate_id, user_id, wallet_id, timestamp).await {
+                if let Err(e) = db.apply_event_to_projections(event_id, user_id, wallet_id).await {
                     tracing::error!("Error applying event to projections: {:?}", e);
                     // Continue anyway - event is inserted
                 } else {

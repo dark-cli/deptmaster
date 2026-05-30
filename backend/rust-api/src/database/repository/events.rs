@@ -597,6 +597,35 @@ impl Database {
         Ok(())
     }
 
+    /// Apply a single event by fetching it from DB and using the batch processor
+    /// This consolidates event application logic into one place
+    pub async fn apply_event_to_projections(
+        &self,
+        event_uuid: Uuid,
+        user_id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        // Fetch the event from database
+        let event_row = sqlx::query(
+            r#"
+            SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
+            FROM events
+            WHERE event_id = $1 AND wallet_id = $2
+            "#
+        )
+        .bind(event_uuid)
+        .bind(wallet_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = event_row {
+            let row_ref: &sqlx::postgres::PgRow = &row;
+            self.apply_events_to_projections_impl(&[row_ref], user_id, wallet_id, &mut std::collections::HashSet::new()).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn apply_single_event_to_projections_impl(
         &self,
         event: &SyncEventRequest,
