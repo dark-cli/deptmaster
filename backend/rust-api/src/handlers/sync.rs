@@ -15,7 +15,7 @@ use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::permissions::{Action, PermissionContext, PermissionModel, Resource};
 use crate::database::repository::Database;
-use crate::database::models::{EventRow, Event};
+use crate::database::models::EventRow;
 use crate::services::projections::Projections;
 use crate::domain::DomainEvent;
 use sha2::{Sha256, Digest};
@@ -290,7 +290,7 @@ pub async fn post_sync_events(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
     Extension(auth_user): Extension<AuthUser>,
-    Json(events): Json<Vec<SyncEventRequest>>,
+    Json(events): Json<Vec<DomainEvent>>,
 ) -> Result<Json<SyncEventsResponse>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
     let user_id = auth_user.user_id;
@@ -300,21 +300,41 @@ pub async fn post_sync_events(
     let perm_ctx = PermissionContext::new(wallet_id, user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    // Preflight: collect permission checks
+    // PERMISSION CHECK: Pattern matching on DomainEvent types (no strings)
     let mut permission_checks: Vec<(Action, Resource)> = Vec::new();
-    for event in &events {
-        match event.aggregate_type.as_str() {
-            "permission" => {
+
+    for domain_event in &events {
+        match domain_event {
+            // Permission events require admin/owner - enforce via role check
+            DomainEvent::WalletUserAdded { .. }
+            | DomainEvent::WalletUserRoleChanged { .. }
+            | DomainEvent::WalletUserRemoved { .. }
+            | DomainEvent::UserGroupCreated { .. }
+            | DomainEvent::UserGroupRenamed { .. }
+            | DomainEvent::UserGroupDeleted { .. }
+            | DomainEvent::UserGroupMemberAdded { .. }
+            | DomainEvent::UserGroupMemberRemoved { .. }
+            | DomainEvent::ContactGroupCreated { .. }
+            | DomainEvent::ContactGroupRenamed { .. }
+            | DomainEvent::ContactGroupDeleted { .. }
+            | DomainEvent::ContactGroupMemberAdded { .. }
+            | DomainEvent::ContactGroupMemberRemoved { .. }
+            | DomainEvent::PermissionMatrixSet { .. } => {
                 if !wallet_context.user_role.is_admin_or_higher() {
                     return Err(responses::insufficient_permission_response());
                 }
             }
-            _ => {
-                permission_checks.extend(event.required_permissions());
-                if event.aggregate_type == "transaction" {
-                    permission_checks.push((Action::ContactRead, Resource::AllContacts));
-                }
+
+            // Transaction events require ContactRead permission
+            DomainEvent::TransactionCreated { .. }
+            | DomainEvent::TransactionUpdated { .. }
+            | DomainEvent::TransactionDeleted { .. }
+            | DomainEvent::TransactionUndone { .. } => {
+                permission_checks.push((Action::ContactRead, Resource::AllContacts));
             }
+
+            // Contact events use their defined permissions
+            _ => {}
         }
     }
 
@@ -334,19 +354,9 @@ pub async fn post_sync_events(
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
 
-    for event_req in events {
-        let event_id = Uuid::parse_str(&event_req.id).expect("deserializer guarantees valid UUID");
-        let aggregate_id = Uuid::parse_str(&event_req.aggregate_id).expect("deserializer guarantees valid UUID");
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&event_req.timestamp)
-            .expect("deserializer guarantees valid RFC3339 timestamp")
-            .naive_utc();
-
-        // Validate event data
-        if let Some(error) = event_req.validate_data() {
-            conflicts.push(event_req.id.clone());
-            tracing::warn!("Event validation failed: {}", error);
-            continue;
-        }
+    for domain_event in events {
+        let event_id = domain_event.id();
+        let aggregate_id = domain_event.aggregate_id();
 
         // Check idempotency
         let existing = db.get_event_by_id_impl(event_id)
@@ -358,74 +368,154 @@ pub async fn post_sync_events(
                 )
             })?;
 
-        if let Some(existing_event) = existing {
-            if existing_event.wallet_id == wallet_id {
-                if existing_event.data == event_req.event_data {
-                    accepted.push(event_req.id);
-                    continue;
-                }
-            }
-            conflicts.push(event_req.id);
+        if let Some(_existing_event) = existing {
+            conflicts.push(event_id.to_string());
             continue;
         }
 
+        // Build event_data JSON from DomainEvent (serialize the data fields only)
+        let event_data = match &domain_event {
+            DomainEvent::ContactCreated { name, username, phone, email, notes, .. } => {
+                serde_json::json!({
+                    "name": name,
+                    "username": username,
+                    "phone": phone,
+                    "email": email,
+                    "notes": notes,
+                })
+            }
+            DomainEvent::ContactUpdated { name, username, phone, email, notes, .. } => {
+                serde_json::json!({
+                    "name": name,
+                    "username": username,
+                    "phone": phone,
+                    "email": email,
+                    "notes": notes,
+                })
+            }
+            DomainEvent::ContactDeleted { comment, .. } => {
+                serde_json::json!({"comment": comment})
+            }
+            DomainEvent::ContactUndone { undone_event_id, .. } => {
+                serde_json::json!({"undone_event_id": undone_event_id.to_string()})
+            }
+            DomainEvent::TransactionCreated { contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date, .. } => {
+                serde_json::json!({
+                    "contact_id": contact_id.to_string(),
+                    "amount": amount,
+                    "direction": direction,
+                    "transaction_type": transaction_type,
+                    "currency": currency,
+                    "description": description,
+                    "transaction_date": transaction_date,
+                    "due_date": due_date,
+                })
+            }
+            DomainEvent::TransactionUpdated { contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date, .. } => {
+                serde_json::json!({
+                    "contact_id": contact_id,
+                    "amount": amount,
+                    "direction": direction,
+                    "transaction_type": transaction_type,
+                    "currency": currency,
+                    "description": description,
+                    "transaction_date": transaction_date,
+                    "due_date": due_date,
+                })
+            }
+            DomainEvent::TransactionDeleted { comment, .. } => {
+                serde_json::json!({"comment": comment})
+            }
+            DomainEvent::TransactionUndone { undone_event_id, .. } => {
+                serde_json::json!({"undone_event_id": undone_event_id.to_string()})
+            }
+            // Permission events already have data field
+            DomainEvent::WalletUserAdded { data, .. }
+            | DomainEvent::WalletUserRoleChanged { data, .. }
+            | DomainEvent::WalletUserRemoved { data, .. }
+            | DomainEvent::UserGroupCreated { data, .. }
+            | DomainEvent::UserGroupRenamed { data, .. }
+            | DomainEvent::UserGroupDeleted { data, .. }
+            | DomainEvent::UserGroupMemberAdded { data, .. }
+            | DomainEvent::UserGroupMemberRemoved { data, .. }
+            | DomainEvent::ContactGroupCreated { data, .. }
+            | DomainEvent::ContactGroupRenamed { data, .. }
+            | DomainEvent::ContactGroupDeleted { data, .. }
+            | DomainEvent::ContactGroupMemberAdded { data, .. }
+            | DomainEvent::ContactGroupMemberRemoved { data, .. }
+            | DomainEvent::PermissionMatrixSet { data, .. } => data.clone(),
+        };
+
         // Insert event
+        let aggregate_type = domain_event.aggregate_type();
+        let event_type = domain_event.event_type();
+
         if db.insert_event_impl(
             event_id,
             aggregate_id,
-            event_req.aggregate_type.clone(),
-            event_req.event_type.clone(),
-            event_req.event_data.clone(),
+            aggregate_type.to_string(),
+            event_type.to_string(),
+            event_data,
             wallet_id,
             user_id,
-            event_req.version,
+            domain_event.version(),
             None,
         ).await.is_err() {
-            conflicts.push(event_req.id);
+            conflicts.push(event_id.to_string());
             continue;
         }
 
-        accepted.push(event_req.id.clone());
+        accepted.push(event_id.to_string());
 
-        // Apply event using DomainEvent (no string matching)
+        // Apply event using strongly-typed DomainEvent (already validated at boundary)
         if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
             if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
-                let event_model = Event::from(event_row.clone());
-                if let Ok(domain_event) = DomainEvent::from_event(&event_model) {
-                    // Apply using polymorphic DomainEvent
-                    if let Err(e) = domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await {
-                        tracing::error!("Error applying event: {:?}", e);
-                    } else {
-                        websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, &event_row.aggregate_type);
-                    }
+                if let Err(e) = domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await {
+                    tracing::error!("Error applying event: {:?}", e);
+                } else {
+                    // Broadcast using pattern matching on DomainEvent
+                    let broadcast_type = match domain_event {
+                        DomainEvent::ContactCreated { .. }
+                        | DomainEvent::ContactUpdated { .. }
+                        | DomainEvent::ContactDeleted { .. }
+                        | DomainEvent::ContactUndone { .. } => "contact",
 
-                    // Handle UNDO: full wallet rebuild
-                    match domain_event {
-                        DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. } => {
-                            tracing::info!("UNDO event processed, rebuilding wallet projections");
-                            if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
-                                tracing::error!("Error rebuilding projections: {:?}", e);
-                            }
+                        DomainEvent::TransactionCreated { .. }
+                        | DomainEvent::TransactionUpdated { .. }
+                        | DomainEvent::TransactionDeleted { .. }
+                        | DomainEvent::TransactionUndone { .. } => "transaction",
+
+                        _ => "permission",
+                    };
+                    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, broadcast_type);
+                }
+
+                // Handle UNDO: full wallet rebuild (using pattern matching)
+                match domain_event {
+                    DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. } => {
+                        tracing::info!("UNDO event processed, rebuilding wallet projections");
+                        if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
+                            tracing::error!("Error rebuilding projections: {:?}", e);
                         }
-                        _ => {}
                     }
+                    _ => {}
+                }
 
-                    // Save snapshot if needed
-                    let event_count = db.get_event_count_for_wallet(wallet_id).await;
-                    let should_snapshot = snapshots::should_create_snapshot(event_count)
-                        || matches!(domain_event, DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. });
+                // Save snapshot if needed
+                let event_count = db.get_event_count_for_wallet(wallet_id).await;
+                let should_snapshot = snapshots::should_create_snapshot(event_count)
+                    || matches!(domain_event, DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. });
 
-                    if should_snapshot {
-                        if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
-                            let _ = snapshots::save_snapshot(
-                                &*state.db_pool,
-                                db_id,
-                                event_count,
-                                snapshot_json.0,
-                                snapshot_json.1,
-                                wallet_id,
-                            ).await;
-                        }
+                if should_snapshot {
+                    if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
+                        let _ = snapshots::save_snapshot(
+                            &*state.db_pool,
+                            db_id,
+                            event_count,
+                            snapshot_json.0,
+                            snapshot_json.1,
+                            wallet_id,
+                        ).await;
                     }
                 }
             }
@@ -445,7 +535,6 @@ pub async fn insert_permission_event_and_apply(
     event_data: serde_json::Value,
 ) -> Result<(), sqlx::Error> {
     let event_id = Uuid::new_v4();
-    let created_at = chrono::Utc::now().naive_utc();
     let db = Database::new((*state.db_pool).clone());
 
     // Insert event
@@ -461,11 +550,22 @@ pub async fn insert_permission_event_and_apply(
         None,
     ).await.map_err(|_| sqlx::Error::RowNotFound)?;
 
-    // Apply using DomainEvent
-    if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
-        if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
-            let event_model = Event::from(event_row.clone());
-            if let Ok(domain_event) = DomainEvent::from_event(&event_model) {
+    // Build synthetic SyncEventRequest from inserted event and convert to DomainEvent
+    let created_at = chrono::Utc::now();
+    let sync_request = SyncEventRequest {
+        id: event_id.to_string(),
+        aggregate_type: "permission".to_string(),
+        aggregate_id: aggregate_id.to_string(),
+        event_type: event_type.to_string(),
+        event_data: event_data.clone(),
+        timestamp: created_at.to_rfc3339(),
+        version: 1,
+    };
+
+    // Apply using DomainEvent (converted from SyncEventRequest)
+    if let Ok(domain_event) = sync_request.to_domain_event(wallet_id, user_id, created_at) {
+        if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
+            if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
                 domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await?;
                 websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "permission");
             }

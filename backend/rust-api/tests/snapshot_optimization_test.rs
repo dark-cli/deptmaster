@@ -54,9 +54,9 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -85,9 +85,9 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -165,9 +165,9 @@ async fn test_full_rebuild_used_when_undo_events_present() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -196,9 +196,9 @@ async fn test_full_rebuild_used_when_undo_events_present() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event]),
+        axum::Json(sync_requests_to_domain_events(vec![undo_event], wallet_id, user_id)),
     ).await;
 
     // 3. Rebuild projections - should use FULL rebuild (undone event is before all snapshots)
@@ -252,9 +252,9 @@ async fn test_snapshot_restoration_correctness() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -291,9 +291,9 @@ async fn test_snapshot_restoration_correctness() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -347,9 +347,9 @@ async fn test_fallback_to_full_rebuild_when_no_snapshot() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -416,9 +416,9 @@ async fn test_snapshot_optimization_with_transactions() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -453,9 +453,9 @@ async fn test_snapshot_optimization_with_transactions() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -517,9 +517,9 @@ async fn test_batch_processing_with_small_batch_size() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -546,7 +546,7 @@ async fn test_batch_processing_with_small_batch_size() {
         .unwrap();
 
     // Rebuild - should use batch processing (no snapshots, batch size 5)
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed with batch processing");
 
     // Verify final state is correct (should have last contact name)
@@ -600,9 +600,9 @@ async fn test_batch_processing_with_large_batch_size() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -619,7 +619,7 @@ async fn test_batch_processing_with_large_batch_size() {
         .unwrap();
 
     // Rebuild - should process all events in single batch
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed");
 
     // Verify final state
@@ -672,9 +672,9 @@ async fn test_batch_processing_with_transactions() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![contact_event]),
+        axum::Json(sync_requests_to_domain_events(vec![contact_event], wallet_id, user_id)),
     ).await;
 
     // Create 10 transaction events (multiple batches of 3)
@@ -700,9 +700,9 @@ async fn test_batch_processing_with_transactions() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -719,7 +719,7 @@ async fn test_batch_processing_with_transactions() {
         .unwrap();
 
     // Rebuild with batch processing
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed");
 
     // Verify all transactions were created (should have 10 transactions)
@@ -775,9 +775,9 @@ async fn test_batch_processing_with_undo_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -797,9 +797,9 @@ async fn test_batch_processing_with_undo_events() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event]),
+        axum::Json(sync_requests_to_domain_events(vec![undo_event], wallet_id, user_id)),
     ).await;
 
     // Clear projections to force batch processing rebuild
@@ -815,7 +815,7 @@ async fn test_batch_processing_with_undo_events() {
         .unwrap();
 
     // Rebuild - should handle UNDO events correctly even with batch processing
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed with UNDO events");
 
     // Verify final state (event 2 was undone, so name should not be "Contact 2")
@@ -850,7 +850,7 @@ async fn test_batch_processing_empty_wallet() {
     };
 
     // Rebuild on empty wallet - should succeed without errors
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed on empty wallet");
 
     // Verify no projections were created
@@ -904,9 +904,9 @@ async fn test_batch_processing_with_permission_events() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -962,7 +962,7 @@ async fn test_batch_processing_with_permission_events() {
     assert!(!user_removed, "User should be removed from wallet_users");
 
     // Rebuild - should reapply all permission events
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed with permission events");
 
     // Verify user is back in wallet_users
@@ -1024,9 +1024,9 @@ async fn test_permission_events_with_undo() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![user2_add_event.clone()]),
+        axum::Json(sync_requests_to_domain_events(vec![user2_add_event.clone()], wallet_id, user_id)),
     ).await;
 
     // Create WALLET_USER_ADDED event for user3
@@ -1046,9 +1046,9 @@ async fn test_permission_events_with_undo() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![user3_add_event.clone()]),
+        axum::Json(sync_requests_to_domain_events(vec![user3_add_event.clone()], wallet_id, user_id)),
     ).await;
 
     // Verify both users are in wallet
@@ -1077,13 +1077,13 @@ async fn test_permission_events_with_undo() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event]),
+        axum::Json(sync_requests_to_domain_events(vec![undo_event], wallet_id, user_id)),
     ).await;
 
     // Rebuild to apply UNDO
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed with UNDO event");
 
     // Verify user2 is NOT in wallet (was undone)
@@ -1153,9 +1153,9 @@ async fn test_permission_events_with_snapshot() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -1195,9 +1195,9 @@ async fn test_permission_events_with_snapshot() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(sync_requests_to_domain_events(vec![event], wallet_id, user_id)),
         ).await;
     }
 
@@ -1222,7 +1222,7 @@ async fn test_permission_events_with_snapshot() {
     .unwrap();
 
     // Rebuild - should use snapshot + apply permission events after snapshot
-    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed with snapshot");
 
     // Verify all users are restored

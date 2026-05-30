@@ -5,6 +5,8 @@ use uuid::Uuid;
 use chrono::Utc;
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::middleware::wallet_context::WalletContext;
+use debt_tracker_api::permissions::WalletRole;
+use std::str::FromStr;
 
 /// Connect to the test database and ensure migrations are applied.
 /// Does not reset or clear data: each test is isolated by creating its own user and wallet
@@ -145,8 +147,8 @@ pub async fn create_test_contact(pool: &PgPool, user_id: Uuid, wallet_id: Uuid, 
 }
 
 /// Create Extension<WalletContext> for calling handlers in tests
-pub fn wallet_context_extension(wallet_id: Uuid, role: &str) -> axum::extract::Extension<WalletContext> {
-    axum::extract::Extension(WalletContext::new(wallet_id, role.to_string()))
+pub fn wallet_context_extension(wallet_id: Uuid, role: WalletRole) -> axum::extract::Extension<WalletContext> {
+    axum::extract::Extension(WalletContext::new(wallet_id, role))
 }
 
 /// Create Extension<AuthUser> for calling handlers that require auth in tests
@@ -171,4 +173,28 @@ pub fn create_test_app_state(
         broadcast_tx,
         rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     }
+}
+
+/// Convert SyncEventRequest to DomainEvent for testing
+pub fn sync_request_to_domain_event(
+    request: debt_tracker_api::handlers::sync::SyncEventRequest,
+    wallet_id: Uuid,
+    user_id: Uuid,
+) -> debt_tracker_api::domain::DomainEvent {
+    let now = Utc::now();
+    request.to_domain_event(wallet_id, user_id, now)
+        .expect("Test event should be valid")
+}
+
+/// Convert Vec<SyncEventRequest> to Vec<DomainEvent> for testing
+pub fn sync_requests_to_domain_events(
+    requests: Vec<debt_tracker_api::handlers::sync::SyncEventRequest>,
+    wallet_id: Uuid,
+    user_id: Uuid,
+) -> Vec<debt_tracker_api::domain::DomainEvent> {
+    let now = Utc::now();
+    requests.into_iter()
+        .map(|req| req.to_domain_event(wallet_id, user_id, now)
+            .expect("Test event should be valid"))
+        .collect()
 }

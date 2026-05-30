@@ -76,6 +76,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -94,6 +95,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -113,6 +115,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -124,6 +127,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -136,6 +140,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -158,6 +163,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -183,6 +189,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -194,6 +201,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -206,6 +214,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -217,6 +226,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -228,6 +238,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -239,6 +250,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -250,6 +262,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -261,6 +274,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -272,6 +286,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -283,6 +298,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -294,6 +310,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -305,6 +322,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -316,6 +334,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -327,6 +346,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -338,6 +358,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -349,6 +370,7 @@ pub enum DomainEvent {
         aggregate_id: Uuid,
         wallet_id: Uuid,
         user_id: Uuid,
+        #[serde(deserialize_with = "deserialize_datetime_utc")]
         created_at: DateTime<Utc>,
         version: i32,
         idempotency_key: Option<String>,
@@ -962,7 +984,7 @@ impl DomainEvent {
         _created_at: chrono::NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
         match self {
-            DomainEvent::WalletUserAdded { aggregate_id, data, .. } => {
+            DomainEvent::WalletUserAdded { aggregate_id: _, data, .. } => {
                 if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                         let role = data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
@@ -1130,7 +1152,7 @@ where
     }
 }
 
-/// Custom deserializer for RFC3339 timestamp - validates format
+/// Custom deserializer for RFC3339 timestamp string - validates format
 fn deserialize_timestamp<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -1139,6 +1161,17 @@ where
     DateTime::parse_from_rfc3339(&s)
         .map_err(|_| serde::de::Error::custom("Invalid RFC3339 timestamp format"))?;
     Ok(s)
+}
+
+/// Custom deserializer for DateTime<Utc> from RFC3339 string
+fn deserialize_datetime_utc<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    DateTime::parse_from_rfc3339(&s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|_| serde::de::Error::custom("Invalid RFC3339 timestamp format"))
 }
 
 /// Sync event request with validation at deserialization boundary.
@@ -1247,6 +1280,345 @@ impl SyncEventRequest {
                 }
             }
             _ => vec![],
+        }
+    }
+
+    /// Convert SyncEventRequest to strongly-typed DomainEvent
+    /// JSON has been validated at deserialization boundary, so parsing here should not fail
+    pub fn to_domain_event(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        created_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<DomainEvent, String> {
+        let id = Uuid::parse_str(&self.id)
+            .map_err(|_| "Invalid event ID UUID".to_string())?;
+        let aggregate_id = Uuid::parse_str(&self.aggregate_id)
+            .map_err(|_| "Invalid aggregate ID UUID".to_string())?;
+
+        match (self.aggregate_type.as_str(), self.event_type.as_str()) {
+            // Contact events
+            ("contact", "CREATED") => {
+                let name = self.event_data.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "CREATED contact requires 'name'".to_string())?
+                    .to_string();
+
+                Ok(DomainEvent::ContactCreated {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    name,
+                    username: self.event_data.get("username").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    phone: self.event_data.get("phone").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    email: self.event_data.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    notes: self.event_data.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                })
+            }
+            ("contact", "UPDATED") => {
+                Ok(DomainEvent::ContactUpdated {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    name: self.event_data.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    username: self.event_data.get("username").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    phone: self.event_data.get("phone").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    email: self.event_data.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    notes: self.event_data.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                })
+            }
+            ("contact", "DELETED") => {
+                Ok(DomainEvent::ContactDeleted {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    comment: self.event_data.get("comment").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                })
+            }
+            ("contact", "UNDO") => {
+                let undone_event_id = self.event_data.get("undone_event_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "UNDO contact requires 'undone_event_id'".to_string())
+                    .and_then(|s| Uuid::parse_str(s).map_err(|_| "Invalid undone_event_id UUID".to_string()))?;
+
+                Ok(DomainEvent::ContactUndone {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    undone_event_id,
+                })
+            }
+
+            // Transaction events
+            ("transaction", "CREATED") => {
+                let contact_id = self.event_data.get("contact_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "CREATED transaction requires 'contact_id'".to_string())
+                    .and_then(|s| Uuid::parse_str(s).map_err(|_| "Invalid contact_id UUID".to_string()))?;
+
+                let amount = self.event_data.get("amount")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| "CREATED transaction requires 'amount'".to_string())?;
+
+                let direction = self.event_data.get("direction")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "CREATED transaction requires 'direction'".to_string())?
+                    .to_string();
+
+                Ok(DomainEvent::TransactionCreated {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    contact_id,
+                    amount,
+                    direction,
+                    transaction_type: self.event_data.get("transaction_type").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    currency: self.event_data.get("currency").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    description: self.event_data.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    transaction_date: self.event_data.get("transaction_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
+                    due_date: self.event_data.get("due_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
+                })
+            }
+            ("transaction", "UPDATED") => {
+                Ok(DomainEvent::TransactionUpdated {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    contact_id: self.event_data.get("contact_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()),
+                    amount: self.event_data.get("amount").and_then(|v| v.as_i64()),
+                    direction: self.event_data.get("direction").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    transaction_type: self.event_data.get("transaction_type").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    currency: self.event_data.get("currency").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    description: self.event_data.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    transaction_date: self.event_data.get("transaction_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
+                    due_date: self.event_data.get("due_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
+                })
+            }
+            ("transaction", "DELETED") => {
+                Ok(DomainEvent::TransactionDeleted {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    comment: self.event_data.get("comment").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                })
+            }
+            ("transaction", "UNDO") => {
+                let undone_event_id = self.event_data.get("undone_event_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "UNDO transaction requires 'undone_event_id'".to_string())
+                    .and_then(|s| Uuid::parse_str(s).map_err(|_| "Invalid undone_event_id UUID".to_string()))?;
+
+                Ok(DomainEvent::TransactionUndone {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    undone_event_id,
+                })
+            }
+
+            // Permission events
+            ("permission", "WALLET_USER_ADDED") => {
+                Ok(DomainEvent::WalletUserAdded {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "WALLET_USER_ROLE_CHANGED") => {
+                Ok(DomainEvent::WalletUserRoleChanged {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "WALLET_USER_REMOVED") => {
+                Ok(DomainEvent::WalletUserRemoved {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "USER_GROUP_CREATED") => {
+                Ok(DomainEvent::UserGroupCreated {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "USER_GROUP_RENAMED") => {
+                Ok(DomainEvent::UserGroupRenamed {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "USER_GROUP_DELETED") => {
+                Ok(DomainEvent::UserGroupDeleted {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "USER_GROUP_MEMBER_ADDED") => {
+                Ok(DomainEvent::UserGroupMemberAdded {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "USER_GROUP_MEMBER_REMOVED") => {
+                Ok(DomainEvent::UserGroupMemberRemoved {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "CONTACT_GROUP_CREATED") => {
+                Ok(DomainEvent::ContactGroupCreated {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "CONTACT_GROUP_RENAMED") => {
+                Ok(DomainEvent::ContactGroupRenamed {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "CONTACT_GROUP_DELETED") => {
+                Ok(DomainEvent::ContactGroupDeleted {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "CONTACT_GROUP_MEMBER_ADDED") => {
+                Ok(DomainEvent::ContactGroupMemberAdded {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "CONTACT_GROUP_MEMBER_REMOVED") => {
+                Ok(DomainEvent::ContactGroupMemberRemoved {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+            ("permission", "PERMISSION_MATRIX_SET") => {
+                Ok(DomainEvent::PermissionMatrixSet {
+                    id,
+                    aggregate_id,
+                    wallet_id,
+                    user_id,
+                    created_at,
+                    version: self.version,
+                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    data: self.event_data.clone(),
+                })
+            }
+
+            _ => Err(format!("Unknown event type: {} / {}", self.aggregate_type, self.event_type)),
         }
     }
 }

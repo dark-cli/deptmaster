@@ -38,7 +38,7 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
@@ -63,7 +63,7 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
@@ -89,7 +89,7 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let result = post_sync_events(
         axum::extract::State(app_state),
         request,
@@ -134,7 +134,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
@@ -156,7 +156,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
@@ -189,7 +189,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
@@ -244,7 +244,7 @@ async fn test_undo_event_syncs_correctly() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
@@ -267,7 +267,7 @@ async fn test_undo_event_syncs_correctly() {
     };
 
     // 3. Server accepts UNDO event
-    let request = wallet_context_extension(wallet_id, "owner");
+    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
@@ -334,7 +334,7 @@ async fn test_event_validation_rejects_invalid_undo() {
 
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![no_undone_id.clone()]),
     ).await;
@@ -356,7 +356,7 @@ async fn test_event_validation_rejects_invalid_undo() {
 
     let result = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![invalid_uuid.clone()]),
     ).await;
@@ -378,7 +378,7 @@ async fn test_event_validation_rejects_invalid_undo() {
 
     let result = post_sync_events(
         axum::extract::State(app_state),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![valid_structure.clone()]),
     ).await;
@@ -446,7 +446,7 @@ async fn test_multiple_undo_events() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![event1.clone(), event2.clone(), event3.clone()]),
     ).await;
@@ -480,7 +480,7 @@ async fn test_multiple_undo_events() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![undo1.clone(), undo2.clone()]),
     ).await;
@@ -540,7 +540,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
 
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
-            wallet_context_extension(wallet_id, "owner"),
+            wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
             axum::Json(vec![event]),
         ).await;
@@ -569,7 +569,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
 
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![undo_event]),
     ).await;
@@ -625,7 +625,7 @@ async fn test_undo_synced_at_window_validation() {
 
     let response = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![create_event]),
     ).await.unwrap().0;
@@ -663,7 +663,7 @@ async fn test_undo_synced_at_window_validation() {
 
     let response = post_sync_events(
         axum::extract::State(app_state.clone()),
-        wallet_context_extension(wallet_id, "owner"),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![undo_event]),
     ).await.unwrap().0;

@@ -10,11 +10,10 @@
 // 8. Updating user roles in wallets
 
 use debt_tracker_api::handlers::wallets;
-use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
 use debt_tracker_api::middleware::auth::AuthUser;
+use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::websocket;
-use sqlx::PgPool;
 use uuid::Uuid;
 use std::sync::Arc;
 use chrono;
@@ -234,7 +233,7 @@ async fn test_update_wallet_user_role() {
     let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let update_request = wallets::UpdateWalletUserRequest {
-        role: "admin".to_string(),
+        role: WalletRole::Admin,
     };
 
     let result = wallets::update_wallet_user(

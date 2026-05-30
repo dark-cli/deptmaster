@@ -8,6 +8,7 @@ use axum::extract::Query;
 use debt_tracker_api::handlers::sync::{get_sync_events, get_sync_hash, SyncEvent, SyncEventsQuery};
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::middleware::wallet_context::WalletContext;
+use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::{AppState, Config};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -178,7 +179,7 @@ async fn test_sync_read_permission_filter_and_full_pull() {
             username: "owner".to_string(),
             is_admin: false,
         },
-        wallet_context: WalletContext::new(wallet_id, "owner".to_string()),
+        wallet_context: WalletContext::new(wallet_id, WalletRole::Owner),
     };
     let instance_member = AppInstance {
         auth_user: AuthUser {
@@ -186,7 +187,7 @@ async fn test_sync_read_permission_filter_and_full_pull() {
             username: "member".to_string(),
             is_admin: false,
         },
-        wallet_context: WalletContext::new(wallet_id, "member".to_string()),
+        wallet_context: WalletContext::new(wallet_id, WalletRole::Member),
     };
 
     // Owner: full pull sees both events
