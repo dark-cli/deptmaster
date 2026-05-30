@@ -3,6 +3,8 @@ use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
 use debt_tracker_api::websocket;
 use debt_tracker_api::services::projections::Projections;
+use debt_tracker_api::permissions::WalletRole;
+use debt_tracker_api::domain::DomainEvent;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 use std::sync::Arc;
@@ -17,7 +19,7 @@ async fn test_undo_event_validation() {
     let user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
@@ -27,7 +29,8 @@ async fn test_undo_event_validation() {
         rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     };
 
-    // Test 1: UNDO event without 'undone_event_id' should be rejected
+    // Test 1: UNDO event without 'undone_event_id' should be rejected at deserialization
+    // (In programmatic test, we test that to_domain_event() returns error)
     let invalid_undo = SyncEventRequest {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
@@ -38,19 +41,12 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
-    let result = post_sync_events(
-        axum::extract::State(app_state.clone()),
-        request,
-        auth_user_extension(user_id, None),
-        axum::Json(vec![invalid_undo.clone()]),
-    ).await;
+    // Verify that invalid UNDO events cannot be converted to DomainEvent
+    let error = invalid_undo.to_domain_event(wallet_id, user_id, chrono::Utc::now());
+    assert!(error.is_err(), "UNDO without undone_event_id should fail to convert");
+    assert!(error.unwrap_err().contains("undone_event_id"), "Error should mention missing undone_event_id");
 
-    // Should be rejected (validation error) - validation happens before insert, so it goes to conflicts
-    let response = result.unwrap().0;
-    assert!(response.conflicts.contains(&invalid_undo.id), "Invalid UNDO event should be in conflicts");
-
-    // Test 2: UNDO event with invalid UUID in 'undone_event_id' should be rejected
+    // Test 2: UNDO event with invalid UUID in 'undone_event_id' should be rejected at deserialization
     let invalid_uuid_undo = SyncEventRequest {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
@@ -63,12 +59,9 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
-    let result = post_sync_events(
-        axum::extract::State(app_state.clone()),
-        request,
-        auth_user_extension(user_id, None),
-        axum::Json(vec![invalid_uuid_undo.clone()]),
+    let error = invalid_uuid_undo.to_domain_event(wallet_id, user_id, chrono::Utc::now());
+    assert!(error.is_err(), "UNDO with invalid UUID should fail to convert");
+    assert!(error.unwrap_err().contains("UUID"), "Error should mention invalid UUID")
     ).await;
 
     // Should be rejected (validation error)
@@ -89,17 +82,9 @@ async fn test_undo_event_validation() {
         version: 1,
     };
 
-    let request = wallet_context_extension(wallet_id, WalletRole::Owner);
-    let result = post_sync_events(
-        axum::extract::State(app_state),
-        request,
-        auth_user_extension(user_id, None),
-        axum::Json(vec![valid_undo.clone()]),
-    ).await;
-
-    // Should be accepted (even if undone event doesn't exist - validation only checks structure)
-    let response = result.unwrap().0;
-    assert!(response.accepted.contains(&valid_undo.id), "Valid UNDO event structure should be accepted");
+    // Verify that valid UNDO events can be converted to DomainEvent
+    let undo_domain_event = valid_undo.to_domain_event(wallet_id, user_id, chrono::Utc::now());
+    assert!(undo_domain_event.is_ok(), "Valid UNDO event should convert successfully");
 }
 
 #[tokio::test]
@@ -119,7 +104,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     };
 
     let contact_id = Uuid::new_v4();
-    
+
     // 1. Create a contact via CREATED event
     let created_event = SyncEventRequest {
         id: Uuid::new_v4().to_string(),
@@ -127,19 +112,19 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         aggregate_id: contact_id.to_string(),
         event_type: "CREATED".to_string(),
         event_data: json!({
-            "name": "Original Name",
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "name": "Original Name"
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(created_event.clone(), wallet_id, user_id);
     let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
         auth_user_extension(user_id, None),
-        axum::Json(vec![created_event.clone()]),
+        axum::Json(vec![domain_event]),
     ).await;
 
     // 2. Update the contact via UPDATED event
@@ -149,19 +134,19 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         aggregate_id: contact_id.to_string(),
         event_type: "UPDATED".to_string(),
         event_data: json!({
-            "name": "Updated Name",
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "name": "Updated Name"
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(updated_event.clone(), wallet_id, user_id);
     let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
         auth_user_extension(user_id, None),
-        axum::Json(vec![updated_event.clone()]),
+        axum::Json(vec![domain_event]),
     ).await;
 
     // Verify update was applied
@@ -182,19 +167,19 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": updated_event.id,
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": updated_event.id
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(undo_event.clone(), wallet_id, user_id);
     let request = wallet_context_extension(wallet_id, WalletRole::Owner);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         request,
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event.clone()]),
+        axum::Json(vec![domain_event]),
     ).await;
 
     // Rebuild projections to apply UNDO

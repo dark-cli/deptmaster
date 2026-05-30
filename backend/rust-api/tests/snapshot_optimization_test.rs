@@ -11,6 +11,8 @@ use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
 use debt_tracker_api::websocket;
 use debt_tracker_api::services::projections::Projections;
+use debt_tracker_api::permissions::WalletRole;
+use debt_tracker_api::domain::DomainEvent;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 use std::sync::Arc;

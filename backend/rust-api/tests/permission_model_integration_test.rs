@@ -29,13 +29,13 @@ fn test_permission_dependency_validation() {
     );
 
     // Test: Transaction operations
-    let transaction_actions = [Action::TransactionClose, Action::TransactionRead];
+    let transaction_actions = [Action::TransactionDelete, Action::TransactionRead];
     assert!(
         PermissionModel::validate_dependencies(&transaction_actions).is_ok(),
         "Transaction close with read should be valid"
     );
 
-    let transaction_invalid = [Action::TransactionClose];
+    let transaction_invalid = [Action::TransactionDelete];
     assert!(
         PermissionModel::validate_dependencies(&transaction_invalid).is_err(),
         "Transaction close without read should be invalid"
@@ -93,12 +93,15 @@ fn test_action_implication_chain() {
 
     // Transaction operations
     assert!(Action::TransactionUpdate.implies(Action::TransactionRead));
-    assert!(Action::TransactionClose.implies(Action::TransactionRead));
+    assert!(Action::TransactionDelete.implies(Action::TransactionRead));
 
     // Wallet operations
     assert!(Action::WalletUpdate.implies(Action::WalletRead));
-    assert!(Action::WalletAddMember.implies(Action::WalletRead));
-    assert!(Action::WalletRemoveMember.implies(Action::WalletRead));
+    assert!(Action::WalletDelete.implies(Action::WalletRead));
+
+    // User group operations
+    assert!(Action::UserGroupAddMember.implies(Action::UserGroupRead));
+    assert!(Action::UserGroupRemoveMember.implies(Action::UserGroupRead));
 
     // Create does not imply read (create is standalone)
     assert!(!Action::ContactCreate.implies(Action::ContactRead));
@@ -132,15 +135,25 @@ fn test_action_enum_completeness() {
         Action::TransactionCreate,
         Action::TransactionRead,
         Action::TransactionUpdate,
-        Action::TransactionClose,
+        Action::TransactionDelete,
+        Action::UserGroupCreate,
+        Action::UserGroupRead,
+        Action::UserGroupAddMember,
+        Action::UserGroupRemoveMember,
+        Action::UserGroupEdit,
+        Action::ContactGroupCreate,
+        Action::ContactGroupRead,
+        Action::ContactGroupAddMember,
+        Action::ContactGroupRemoveMember,
+        Action::ContactGroupEdit,
         Action::WalletRead,
         Action::WalletUpdate,
-        Action::WalletAddMember,
-        Action::WalletRemoveMember,
+        Action::WalletDelete,
+        Action::WalletSuperPermission,
         Action::EventsRead,
     ];
 
-    assert_eq!(actions.len(), 13, "Should have exactly 13 permission actions");
+    assert_eq!(actions.len(), 23, "Should have exactly 23 permission actions");
 
     // Verify all actions have string representations
     for action in &actions {

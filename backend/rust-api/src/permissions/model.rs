@@ -116,14 +116,23 @@ impl PermissionModel {
 
         let mut results = Vec::with_capacity(checks.len());
 
-        // Owner and admin bypass all checks
-        if ctx.bypasses_permissions() {
-            return Ok(vec![true; checks.len()]);
-        }
-
-        // For members, check each permission (currently per-check, can be batch optimized)
+        // Check each permission with WalletSuperPermission as automatic fallback
         for (action, resource) in checks {
+            // Check specific permission
             let allowed = resolver::can_perform(&self.pool, ctx, action, &resource).await?;
+
+            // If specific permission denied, check WalletSuperPermission fallback
+            let allowed = if !allowed {
+                resolver::can_perform(
+                    &self.pool,
+                    ctx,
+                    Action::WalletSuperPermission,
+                    &Resource::Wallet(ctx.wallet_id),
+                ).await?
+            } else {
+                true
+            };
+
             results.push(allowed);
         }
 
@@ -146,7 +155,7 @@ impl PermissionModel {
                         ));
                     }
                 }
-                Action::TransactionUpdate | Action::TransactionClose => {
+                Action::TransactionUpdate | Action::TransactionDelete => {
                     if !actions.contains(&Action::TransactionRead) {
                         return Err(format!(
                             "Permission {} requires transaction:read",
@@ -154,10 +163,26 @@ impl PermissionModel {
                         ));
                     }
                 }
-                Action::WalletUpdate | Action::WalletAddMember | Action::WalletRemoveMember => {
+                Action::WalletUpdate | Action::WalletDelete => {
                     if !actions.contains(&Action::WalletRead) {
                         return Err(format!(
                             "Permission {} requires wallet:read",
+                            action
+                        ));
+                    }
+                }
+                Action::UserGroupEdit | Action::UserGroupAddMember | Action::UserGroupRemoveMember => {
+                    if !actions.contains(&Action::UserGroupRead) {
+                        return Err(format!(
+                            "Permission {} requires user_group:read",
+                            action
+                        ));
+                    }
+                }
+                Action::ContactGroupEdit | Action::ContactGroupAddMember | Action::ContactGroupRemoveMember => {
+                    if !actions.contains(&Action::ContactGroupRead) {
+                        return Err(format!(
+                            "Permission {} requires contact_group:read",
                             action
                         ));
                     }

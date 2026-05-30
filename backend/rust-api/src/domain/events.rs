@@ -1075,28 +1075,53 @@ impl DomainEvent {
                 vec![(Action::TransactionUpdate, Resource::Transaction(*aggregate_id))]
             }
             DomainEvent::TransactionDeleted { aggregate_id, .. } => {
-                vec![(Action::TransactionClose, Resource::Transaction(*aggregate_id))]
+                vec![(Action::TransactionDelete, Resource::Transaction(*aggregate_id))]
             }
             DomainEvent::TransactionUndone { aggregate_id, .. } => {
                 vec![(Action::TransactionUpdate, Resource::Transaction(*aggregate_id))]
             }
-            // Permission events - all require Admin or Owner (enforced in handler via pattern match)
-            DomainEvent::WalletUserAdded { wallet_id, .. }
-            | DomainEvent::WalletUserRoleChanged { wallet_id, .. }
-            | DomainEvent::WalletUserRemoved { wallet_id, .. }
-            | DomainEvent::UserGroupCreated { wallet_id, .. }
-            | DomainEvent::UserGroupRenamed { wallet_id, .. }
-            | DomainEvent::UserGroupDeleted { wallet_id, .. }
-            | DomainEvent::UserGroupMemberAdded { wallet_id, .. }
-            | DomainEvent::UserGroupMemberRemoved { wallet_id, .. }
-            | DomainEvent::ContactGroupCreated { wallet_id, .. }
-            | DomainEvent::ContactGroupRenamed { wallet_id, .. }
-            | DomainEvent::ContactGroupDeleted { wallet_id, .. }
-            | DomainEvent::ContactGroupMemberAdded { wallet_id, .. }
-            | DomainEvent::ContactGroupMemberRemoved { wallet_id, .. }
-            | DomainEvent::PermissionMatrixSet { wallet_id, .. } => {
-                // Permission events require admin/owner - checked via user_role.is_admin_or_higher() in handler
-                vec![(Action::WalletAddMember, Resource::Wallet(*wallet_id))]
+            // Permission events - map to specific permission types
+            DomainEvent::WalletUserAdded { .. } => {
+                vec![(Action::UserGroupAddMember, Resource::AllUserGroups)]
+            }
+            DomainEvent::WalletUserRemoved { .. } => {
+                vec![(Action::UserGroupRemoveMember, Resource::AllUserGroups)]
+            }
+            DomainEvent::WalletUserRoleChanged { .. } => {
+                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
+            }
+            DomainEvent::UserGroupCreated { wallet_id, .. } => {
+                vec![(Action::UserGroupCreate, Resource::Wallet(*wallet_id))]
+            }
+            DomainEvent::UserGroupRenamed { .. } => {
+                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
+            }
+            DomainEvent::UserGroupDeleted { .. } => {
+                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
+            }
+            DomainEvent::UserGroupMemberAdded { .. } => {
+                vec![(Action::UserGroupAddMember, Resource::AllUserGroups)]
+            }
+            DomainEvent::UserGroupMemberRemoved { .. } => {
+                vec![(Action::UserGroupRemoveMember, Resource::AllUserGroups)]
+            }
+            DomainEvent::ContactGroupCreated { wallet_id, .. } => {
+                vec![(Action::ContactGroupCreate, Resource::Wallet(*wallet_id))]
+            }
+            DomainEvent::ContactGroupRenamed { .. } => {
+                vec![(Action::ContactGroupEdit, Resource::AllUserGroups)]
+            }
+            DomainEvent::ContactGroupDeleted { .. } => {
+                vec![(Action::ContactGroupEdit, Resource::AllUserGroups)]
+            }
+            DomainEvent::ContactGroupMemberAdded { .. } => {
+                vec![(Action::ContactGroupAddMember, Resource::AllUserGroups)]
+            }
+            DomainEvent::ContactGroupMemberRemoved { .. } => {
+                vec![(Action::ContactGroupRemoveMember, Resource::AllUserGroups)]
+            }
+            DomainEvent::PermissionMatrixSet { .. } => {
+                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
             }
         }
     }
@@ -1267,7 +1292,7 @@ impl SyncEventRequest {
             }
             ("transaction", "DELETED") => {
                 if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
-                    vec![(Action::TransactionClose, Resource::Transaction(id))]
+                    vec![(Action::TransactionDelete, Resource::Transaction(id))]
                 } else {
                     vec![]
                 }
