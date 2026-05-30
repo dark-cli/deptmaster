@@ -99,7 +99,7 @@ impl Projections {
 
             let owner_id = owner_user_id.unwrap_or(user_id); // Fallback to current user if no owner found
 
-            // Clear existing projections first
+            // Clear existing projections
             sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
                 .bind(wallet_id)
                 .execute(&*state.db_pool)
@@ -425,6 +425,8 @@ impl Projections {
 
                 if !filtered.is_empty() {
                     let db = Database::new((*state.db_pool).clone());
+                    // Keep using the old apply_event_batch while we complete the type-driven migration
+                    // TODO: Migrate to apply_event_batch_type_driven once all event handlers are complete
                     db.apply_event_batch(&filtered, user_id, wallet_id, &mut undone_event_ids).await?;
                     total_processed += filtered.len();
                     tracing::debug!("Processed batch of {} events (total: {})", filtered.len(), total_processed);

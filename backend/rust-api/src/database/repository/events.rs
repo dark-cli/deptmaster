@@ -739,6 +739,67 @@ impl Database {
         Ok(())
     }
 
+    /// Type-driven event batch application using DomainEvent
+    /// This is the new simplified approach that delegates to DomainEvent.apply_self()
+    /// Each event type knows how to apply itself via impl methods in domain/events.rs
+    pub async fn apply_event_batch_type_driven(
+        &self,
+        events: &[&sqlx::postgres::PgRow],
+        user_id: Uuid,
+        wallet_id: Uuid,
+        undone_event_ids: &mut std::collections::HashSet<Uuid>,
+    ) -> Result<(), sqlx::Error> {
+        use crate::domain::events::DomainEvent;
+
+        tracing::info!("apply_event_batch_type_driven: processing {} events", events.len());
+
+        // Collect UNDO events first
+        if undone_event_ids.is_empty() {
+            for row in events.iter() {
+                let event_type: String = row.get("event_type");
+                if event_type == "UNDO" {
+                    let event_data: Value = row.get("event_data");
+                    if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                        if let Ok(undone_id) = Uuid::parse_str(undone_id_str) {
+                            undone_event_ids.insert(undone_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Process events using type-driven approach
+        for row in events {
+            let event_id: Uuid = row.get("event_id");
+            let event_type: String = row.get("event_type");
+            let created_at: NaiveDateTime = row.get("created_at");
+            let event_db_id: i64 = row.get("id");
+
+            // Skip UNDO and undone events
+            if event_type == "UNDO" || undone_event_ids.contains(&event_id) {
+                continue;
+            }
+
+            // Deserialize row data into a DomainEvent
+            let event_data: Value = row.get("event_data");
+            let domain_event: DomainEvent = match serde_json::from_value(event_data) {
+                Ok(evt) => evt,
+                Err(e) => {
+                    tracing::error!("Failed to deserialize event {}: {}", event_id, e);
+                    continue;
+                }
+            };
+
+            // Let the event apply itself - type-safe, no string matching!
+            if let Err(e) = domain_event.apply_self(&self.pool, wallet_id, user_id, event_db_id, created_at).await {
+                tracing::error!("Error applying event {}: {}", event_id, e);
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Apply a single event by fetching it from DB and using the batch processor
     /// This consolidates event application logic into one place
     pub async fn apply_event_to_projections(
@@ -762,6 +823,7 @@ impl Database {
 
         if let Some(row) = event_row {
             let row_ref: &sqlx::postgres::PgRow = &row;
+            // TODO: Use type-driven approach (apply_event_batch_type_driven) once all handlers are complete
             self.apply_event_batch(&[row_ref], user_id, wallet_id, &mut std::collections::HashSet::new()).await?;
         }
 
