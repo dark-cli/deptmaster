@@ -1029,6 +1029,55 @@ impl DomainEvent {
             _ => Ok(()),
         }
     }
+
+    /// Get required permissions for this event (type-driven)
+    /// Permission events require Admin or Owner role
+    pub fn required_permissions(&self) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
+        use crate::permissions::{Action, Resource};
+
+        match self {
+            // Contact events
+            DomainEvent::ContactCreated { .. } => vec![(Action::ContactCreate, Resource::AllContacts)],
+            DomainEvent::ContactUpdated { aggregate_id, .. } => {
+                vec![(Action::ContactUpdate, Resource::Contact(*aggregate_id))]
+            }
+            DomainEvent::ContactDeleted { aggregate_id, .. } => {
+                vec![(Action::ContactDelete, Resource::Contact(*aggregate_id))]
+            }
+            DomainEvent::ContactUndone { aggregate_id, .. } => {
+                vec![(Action::ContactUpdate, Resource::Contact(*aggregate_id))]
+            }
+            // Transaction events
+            DomainEvent::TransactionCreated { .. } => vec![(Action::TransactionCreate, Resource::AllTransactions)],
+            DomainEvent::TransactionUpdated { aggregate_id, .. } => {
+                vec![(Action::TransactionUpdate, Resource::Transaction(*aggregate_id))]
+            }
+            DomainEvent::TransactionDeleted { aggregate_id, .. } => {
+                vec![(Action::TransactionClose, Resource::Transaction(*aggregate_id))]
+            }
+            DomainEvent::TransactionUndone { aggregate_id, .. } => {
+                vec![(Action::TransactionUpdate, Resource::Transaction(*aggregate_id))]
+            }
+            // Permission events - all require Admin or Owner (enforced in handler via pattern match)
+            DomainEvent::WalletUserAdded { wallet_id, .. }
+            | DomainEvent::WalletUserRoleChanged { wallet_id, .. }
+            | DomainEvent::WalletUserRemoved { wallet_id, .. }
+            | DomainEvent::UserGroupCreated { wallet_id, .. }
+            | DomainEvent::UserGroupRenamed { wallet_id, .. }
+            | DomainEvent::UserGroupDeleted { wallet_id, .. }
+            | DomainEvent::UserGroupMemberAdded { wallet_id, .. }
+            | DomainEvent::UserGroupMemberRemoved { wallet_id, .. }
+            | DomainEvent::ContactGroupCreated { wallet_id, .. }
+            | DomainEvent::ContactGroupRenamed { wallet_id, .. }
+            | DomainEvent::ContactGroupDeleted { wallet_id, .. }
+            | DomainEvent::ContactGroupMemberAdded { wallet_id, .. }
+            | DomainEvent::ContactGroupMemberRemoved { wallet_id, .. }
+            | DomainEvent::PermissionMatrixSet { wallet_id, .. } => {
+                // Permission events require admin/owner - checked via user_role.is_admin_or_higher() in handler
+                vec![(Action::WalletAddMember, Resource::Wallet(*wallet_id))]
+            }
+        }
+    }
 }
 
 // ============ HTTP Request Types ============
