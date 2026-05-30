@@ -30,22 +30,45 @@ impl Projections {
         .fetch_one(&*state.db_pool)
         .await?;
 
-        // Get all events for this wallet ordered by timestamp (chronological order)
+        // Phase 1 optimization: Check if projections exist for this wallet
+        // If they do, only load events after the last processed event
+        let max_processed_id: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(last_event_id) FROM (
+                SELECT COALESCE(MAX(last_event_id), 0) as last_event_id FROM contacts_projection WHERE wallet_id = $1
+                UNION ALL
+                SELECT COALESCE(MAX(last_event_id), 0) as last_event_id FROM transactions_projection WHERE wallet_id = $1
+            ) t"
+        )
+        .bind(wallet_id)
+        .fetch_optional(&*state.db_pool)
+        .await?
+        .flatten();
+
+        let has_existing_projections = max_processed_id.is_some() && max_processed_id != Some(0);
+
+        // Get events for this wallet ordered by timestamp
+        // If projections exist, load only new events (Phase 1 optimization)
+        // If rebuilding from scratch, load all events
         let events = sqlx::query(
             r#"
             SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
             FROM events
-            WHERE wallet_id = $1
+            WHERE wallet_id = $1 AND id > COALESCE($2, 0)
             ORDER BY created_at ASC
             "#
         )
         .bind(wallet_id)
+        .bind(max_processed_id.unwrap_or(0))
         .fetch_all(&*state.db_pool)
         .await?;
 
-        // Get event count and last event info
-        let event_count = events.len() as i64;
-        let last_event_uuid = events.last().map(|row| row.get::<Uuid, _>("event_id"));
+        // Early return if no new events and projections already exist (Phase 1 optimization win)
+        if events.is_empty() && has_existing_projections {
+            tracing::info!("No new events since last projection update, skipping rebuild");
+            return Ok(());
+        }
+
+        // Get last event info (used for snapshot lookup)
         let last_event_db_id = events.last().and_then(|row| row.get::<Option<i64>, _>("id"));
 
         // Build a map of event_id (UUID) -> position (1-based index) for fast lookup
