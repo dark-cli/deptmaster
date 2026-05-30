@@ -21,10 +21,11 @@ impl PermissionModel {
         Self { pool }
     }
 
-    /// Check permissions for a batch of (action, resource) pairs
+    /// Check permissions for a batch of (action, resource) pairs (internal use only)
     ///
-    /// Even single checks should be wrapped in a vec and passed here
-    /// This ensures all permission checks go through optimized batch path
+    /// This is called internally by get_denied_event_ids(). For public API,
+    /// use get_denied_event_ids() instead, which handles event permission checking
+    /// with proper batching and returns only denied event IDs.
     ///
     /// # Arguments
     /// * `ctx` - Permission context (who, what wallet, what role)
@@ -105,7 +106,7 @@ impl PermissionModel {
         resolver::get_readable_transaction_contacts(&self.pool, ctx).await
     }
 
-    pub async fn check_permissions(
+    async fn check_permissions(
         &self,
         ctx: &PermissionContext,
         checks: Vec<(Action, Resource)>,
@@ -137,6 +138,28 @@ impl PermissionModel {
         }
 
         Ok(results)
+    }
+
+    /// Check if a user can perform a single action on a resource
+    ///
+    /// # Arguments
+    /// * `ctx` - Permission context (who, what wallet, what role)
+    /// * `action` - The action to check
+    /// * `resource` - The resource being accessed
+    ///
+    /// # Returns
+    /// * `Ok(true)` - Permission allowed
+    /// * `Ok(false)` - Permission denied
+    pub async fn can_perform(
+        &self,
+        ctx: &PermissionContext,
+        action: Action,
+        resource: Resource,
+    ) -> Result<bool, DbError> {
+        let results = self
+            .check_permissions(ctx, vec![(action, resource)])
+            .await?;
+        Ok(results.first().copied().unwrap_or(false))
     }
 
     /// Check event permissions and return list of denied event IDs

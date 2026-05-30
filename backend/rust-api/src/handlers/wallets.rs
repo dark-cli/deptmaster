@@ -127,8 +127,8 @@ async fn check_permission_matrix(
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    let allowed = perm_model
-        .check_permissions(&perm_ctx, vec![(action, resource)])
+    perm_model
+        .can_perform(&perm_ctx, action, resource)
         .await
         .map_err(|e| {
             tracing::error!("Permission check error: {:?}", e);
@@ -136,9 +136,7 @@ async fn check_permission_matrix(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "Failed to check permissions"})),
             )
-        })?;
-
-    Ok(allowed.first().copied().unwrap_or(false))
+        })
 }
 
 #[derive(Serialize, Deserialize)]
