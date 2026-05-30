@@ -25,43 +25,6 @@ pub async fn rebuild_projections_from_events(state: &crate::AppState, wallet_id:
     Projections::rebuild_projections_from_events(state, wallet_id).await
 }
 
-/// Sync contact_group_members for a contact from event_data.group_ids (contact UPDATED).
-/// Desired set is all_contacts + group_ids from event. Clears wallet's group memberships for this contact then inserts desired.
-/// Returns true if the user is allowed to read this event based on permission filtering.
-fn event_read_allowed(
-    contact_ids_allowed: &Option<std::collections::HashSet<uuid::Uuid>>,
-    transaction_contact_ids_allowed: &Option<std::collections::HashSet<uuid::Uuid>>,
-    aggregate_type: &str,
-    aggregate_id: uuid::Uuid,
-    event_data: &serde_json::Value,
-    transaction_contact_map: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
-) -> bool {
-    if aggregate_type == "permission" {
-        return true;
-    }
-    if aggregate_type == "contact" {
-        return match contact_ids_allowed {
-            None => true,
-            Some(set) => set.contains(&aggregate_id),
-        };
-    }
-    if aggregate_type == "transaction" {
-        let contact_id = event_data
-            .get("contact_id")
-            .and_then(|v| v.as_str())
-            .and_then(|s| uuid::Uuid::parse_str(s).ok())
-            .or_else(|| transaction_contact_map.get(&aggregate_id).copied());
-        let Some(contact_id) = contact_id else {
-            return false;
-        };
-        // Transactions don't have their own groups; visibility is by contact's contact groups (transaction:read).
-        return match transaction_contact_ids_allowed {
-            None => true,
-            Some(set) => set.contains(&contact_id),
-        };
-    }
-    false
-}
 
 /// Build map transaction_id -> contact_id for transaction events that don't have contact_id in event_data.
 async fn transaction_contact_ids_for_events(
@@ -153,7 +116,7 @@ pub async fn get_sync_hash(
 
     let mut filtered_event_ids_with_timestamps: Vec<(uuid::Uuid, chrono::NaiveDateTime)> = Vec::new();
     for row in &events {
-        if event_read_allowed(
+        if Database::event_read_allowed(
             &contact_ids_allowed,
             &transaction_contact_ids_allowed,
             &row.aggregate_type,
@@ -278,7 +241,7 @@ pub async fn get_sync_events(
 
     let mut sync_events = Vec::with_capacity(events.len());
     for row in &events {
-        if !event_read_allowed(
+        if !Database::event_read_allowed(
             &contact_ids_allowed,
             &transaction_contact_ids_allowed,
             &row.aggregate_type,

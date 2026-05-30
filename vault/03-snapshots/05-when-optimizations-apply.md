@@ -1,10 +1,10 @@
-# When Each Optimization Applies
+# How Memory Stays Bounded: Three Architectural Optimizations
 
-**Main question this file answers:** When is Phase 1 used vs Phase 2 vs Snapshots? How do they work together?
+**Main question this file answers:** How do incremental syncing, event batching, and snapshots work together to keep memory bounded?
 
 ---
 
-## Three Scenarios
+## Three Operational Scenarios
 
 ### Scenario 1: Normal Sync (Most Common)
 
@@ -12,15 +12,15 @@
 
 **What happens:**
 ```
-1. Check max_processed_id (last event we saw)
-2. Query: WHERE id > max_processed_id  ← Phase 1!
+1. Check max_processed_id (last event we processed)
+2. Query: WHERE id > max_processed_id  ← Last_event_id optimization
 3. Load only NEW events (small batch)
 4. Apply to projections
 5. Save new max_processed_id
 ```
 
 **Memory:** Always small (100 new events = 1MB)
-**Optimization:** Phase 1 (last_event_id filtering)
+**Architecture:** Last_event_id optimization (incremental sync)
 **Status:** ✅ Bounded memory (constant)
 
 **Example:**
@@ -40,16 +40,16 @@ Apply only new ones
 ```
 1. Event received: "UNDO event #500 (in 1M event wallet)"
 2. Clear projections (to rebuild from clean state)
-3. Find snapshot BEFORE event #500
+3. Find snapshot BEFORE event #500  ← Snapshot checkpointing
 4. Restore snapshot (say, at event #400)
 5. Load only events #401-#1,000,000
-6. Apply in batches (Phase 2)
+6. Apply in batches (Event batching)  ← 1000-event batches
 7. Filter out UNDO and event #500
 8. Create NEW snapshot (safeguard for future UNDOs)
 ```
 
 **Memory:** Snapshot (~1MB) + 1 batch of events (~2MB) = ~3MB
-**Optimization:** Snapshots (step back) + Phase 2 (batch process remaining)
+**Architecture:** Snapshot checkpointing + Event batching
 **Status:** ✅ Bounded memory (never loads full wallet)
 
 **Example:**
@@ -84,7 +84,7 @@ Memory never exceeds snapshot + 1 batch = ~3MB
 ```
 
 **Memory:** Depends on batch size (~2MB per batch)
-**Optimization:** Phase 2 (batch processing)
+**Architecture:** Event batching (1000-event chunks for large wallets)
 **Status:** ✅ Bounded memory (never exceed 1 batch size)
 
 ---
@@ -97,16 +97,16 @@ Event arrives at sync handler
   ├─ Is it an UNDO event?
   │  │
   │  YES ──→ Clear projections
-  │       ├─ Find snapshot BEFORE undone event
+  │       ├─ Find snapshot BEFORE undone event  (Snapshot checkpointing)
   │       ├─ Restore snapshot
-  │       ├─ Apply remaining events in batches (Phase 2)
+  │       ├─ Apply remaining events in batches  (Event batching)
   │       └─ Memory: snapshot + 1 batch = ~3MB ✓
   │
   └─ NO (normal event)
      │
      ├─ Has max_processed_id set? (from last sync)
      │  │
-     │  YES ──→ Query: WHERE id > max_processed_id (Phase 1)
+     │  YES ──→ Query: WHERE id > max_processed_id  (Last_event_id optimization)
      │       └─ Memory: always small ✓
      │
      └─ NO (cold start)
@@ -116,31 +116,34 @@ Event arrives at sync handler
         ├─ If count < 5000: Load all (safe)
         │  └─ Memory: ~50MB ✓
         │
-        └─ If count >= 5000: Use batch loop (Phase 2)
+        └─ If count >= 5000: Use batch loop  (Event batching)
            └─ Memory: 1 batch = ~2MB ✓
 ```
 
 ---
 
-## The Complete Picture
+## The Complete Architecture
 
-**Three safety nets work together:**
+**Three optimizations work together to bound memory:**
 
-1. **Phase 1 (Normal operation)**
-   - `last_event_id` filtering
-   - Only load new events
-   - Memory = event count since last sync (always small)
+1. **Last_event_id optimization (Incremental syncing)**
+   - Tracks the last processed event ID
+   - Next sync: `WHERE id > max_processed_id`
+   - Only new events loaded, old ones never touched
+   - Memory = new events since last sync (always small)
 
-2. **Phase 2 (Batching)**
-   - When we must load many events, batch them (1000 at a time)
+2. **Event batching (Bounded processing)**
+   - When rebuilding, process events in 1000-event chunks
+   - Never load entire wallet into RAM
    - Memory = 1 batch + snapshot = ~3MB max
 
-3. **Snapshots (UNDO recovery)**
+3. **Snapshot checkpointing (UNDO recovery)**
    - Created after every UNDO event
-   - Lets us "step back" to a known good state
-   - Process only events after snapshot
+   - Provides a checkpoint: "state at event N"
+   - On UNDO: restore snapshot, process only events after it
+   - Avoids reprocessing events before the UNDO
 
-**Result:** Memory is ALWAYS bounded (< 50MB for any wallet size)
+**Result:** Memory is ALWAYS bounded (< 50MB regardless of wallet size)
 
 ---
 
@@ -158,30 +161,30 @@ Event arrives at sync handler
 
 ---
 
-## Common Misconceptions
+## Common Misconceptions (Avoid These)
 
 ### ❌ "Snapshots prevent loading events"
 
 **Wrong.** Snapshots prevent loading ALL 1M events at once.
 
-**Right.** Snapshots let us skip events 1-400,000 and only load/batch events 400,001-1,000,000.
+**Correct.** Snapshots let us skip events 1-400,000 and only load/batch events 400,001-1,000,000.
 
-### ❌ "Phase 2 batching means we use it for every sync"
+### ❌ "Event batching is used for every sync"
 
-**Wrong.** Phase 1 (last_event_id) handles normal syncs. Phase 2 only triggers for cold starts or UNDO rebuilds (rare).
+**Wrong.** Last_event_id optimization handles normal syncs. Batching only kicks in for cold starts or UNDO rebuilds (rare).
 
-**Right.** Normal syncs are fast because Phase 1 filters to only new events. Phase 2 is a safety net for rebuilds.
+**Correct.** Normal syncs are fast because last_event_id filters to only new events. Batching is a safety net for rebuilds.
 
-### ❌ "If memory is bounded, why do we have three optimizations?"
+### ❌ "Why do we need three optimizations if memory is bounded?"
 
-**Wrong.** Redundancy is wasteful.
+**Wrong.** They're redundant.
 
-**Right.** Each optimization handles a different scenario:
-- Phase 1: Normal operation (most common)
-- Phase 2: Batching when we must load many (rare)
-- Snapshots: UNDO recovery (rare but critical)
+**Correct.** Each architecture handles a different scenario:
+- **Last_event_id optimization:** Normal operation (most common, always small memory)
+- **Event batching:** Cold starts/rebuilds (rare, memory = 1 batch)
+- **Snapshot checkpointing:** UNDO recovery (rare but critical, memory = snapshot + 1 batch)
 
-Together they ensure **any scenario stays memory-safe**.
+Together they ensure **any scenario stays memory-safe without waste**.
 
 ---
 

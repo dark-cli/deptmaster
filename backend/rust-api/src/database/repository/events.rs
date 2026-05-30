@@ -1654,4 +1654,40 @@ impl Database {
         .fetch_optional(&self.pool)
         .await
     }
+
+    /// Check if a user can read a specific event based on permission filtering
+    /// Returns true if user is allowed to read this event
+    pub fn event_read_allowed(
+        contact_ids_allowed: &Option<std::collections::HashSet<Uuid>>,
+        transaction_contact_ids_allowed: &Option<std::collections::HashSet<Uuid>>,
+        aggregate_type: &str,
+        aggregate_id: Uuid,
+        event_data: &serde_json::Value,
+        transaction_contact_map: &std::collections::HashMap<Uuid, Uuid>,
+    ) -> bool {
+        if aggregate_type == "permission" {
+            return true;
+        }
+        if aggregate_type == "contact" {
+            return match contact_ids_allowed {
+                None => true,
+                Some(set) => set.contains(&aggregate_id),
+            };
+        }
+        if aggregate_type == "transaction" {
+            let contact_id = event_data
+                .get("contact_id")
+                .and_then(|v| v.as_str())
+                .and_then(|s| Uuid::parse_str(s).ok())
+                .or_else(|| transaction_contact_map.get(&aggregate_id).copied());
+            let Some(contact_id) = contact_id else {
+                return false;
+            };
+            return match transaction_contact_ids_allowed {
+                None => true,
+                Some(set) => set.contains(&contact_id),
+            };
+        }
+        false
+    }
 }
