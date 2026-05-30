@@ -262,7 +262,7 @@ impl Projections {
 
         // If snapshot optimization failed or not used, do full rebuild
         if !used_snapshot {
-            tracing::warn!("Snapshot optimization failed or not available, performing full rebuild");
+            tracing::warn!("Snapshot optimization failed or not available, performing full rebuild with batch processing");
             // Clear existing projections for this wallet (delete transactions first due to foreign key constraints)
             sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
                 .bind(wallet_id)
@@ -290,26 +290,53 @@ impl Projections {
                 }
             }
 
-            // Apply all events to rebuild
-            let filtered: Vec<_> = events.iter()
-                .filter(|row| {
-                    let event_type: String = row.get("event_type");
+            // Phase 2 optimization: Batch process events to maintain bounded memory
+            let batch_size = state.config.event_rebuild_batch_size;
+            let mut offset = 0;
+            let mut total_processed = 0;
 
-                    // Skip UNDO events
-                    if event_type == "UNDO" {
-                        return false;
-                    }
+            loop {
+                // Load one batch at a time
+                let batch = sqlx::query(
+                    r#"
+                    SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
+                    FROM events
+                    WHERE wallet_id = $1 AND id > COALESCE($2, 0)
+                    ORDER BY created_at ASC
+                    LIMIT $3 OFFSET $4
+                    "#
+                )
+                .bind(wallet_id)
+                .bind(max_processed_id.unwrap_or(0))
+                .bind(batch_size as i64)
+                .bind(offset as i64)
+                .fetch_all(&*state.db_pool)
+                .await?;
 
-                    true
-                })
-                .map(|row| row as &sqlx::postgres::PgRow)
-                .collect();
+                if batch.is_empty() {
+                    break;
+                }
 
-            tracing::info!("After filtering: {} events to process (from {} total)", filtered.len(), events.len());
+                // Filter out UNDO events from this batch
+                let filtered: Vec<_> = batch.iter()
+                    .filter(|row| {
+                        let event_type: String = row.get("event_type");
+                        event_type != "UNDO"
+                    })
+                    .map(|row| row as &sqlx::postgres::PgRow)
+                    .collect();
 
-            let rows_to_apply: Vec<_> = filtered.iter().map(|row| *row).collect();
-            let db = Database::new((*state.db_pool).clone());
-            db.apply_event_batch(&rows_to_apply, user_id, wallet_id, &mut undone_event_ids).await?;
+                if !filtered.is_empty() {
+                    let db = Database::new((*state.db_pool).clone());
+                    db.apply_event_batch(&filtered, user_id, wallet_id, &mut undone_event_ids).await?;
+                    total_processed += filtered.len();
+                    tracing::debug!("Processed batch of {} events (total: {})", filtered.len(), total_processed);
+                }
+
+                offset += batch.len();
+            }
+
+            tracing::info!("Completed full rebuild: processed {} events in batches of {}", total_processed, batch_size);
         }
 
         tracing::info!("Projection rebuild completed for wallet {}", wallet_id);

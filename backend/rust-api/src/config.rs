@@ -12,6 +12,7 @@ pub struct Config {
     pub tls_key_path: Option<String>,
     pub rate_limit_requests: u32,
     pub rate_limit_window: u64,
+    pub event_rebuild_batch_size: usize,
 }
 
 impl Config {
@@ -50,6 +51,10 @@ impl Config {
                 .unwrap_or_else(|_| "60".to_string())
                 .parse()
                 .unwrap_or(60),
+            event_rebuild_batch_size: env::var("EVENT_REBUILD_BATCH_SIZE")
+                .unwrap_or_else(|_| "1000".to_string())
+                .parse()
+                .unwrap_or(1000),
         })
     }
 

@@ -472,3 +472,393 @@ async fn test_snapshot_optimization_with_transactions() {
     .unwrap();
     assert_eq!(transaction_count, 12, "Should have all 12 transactions after snapshot optimization");
 }
+
+// Phase 2 Batch Processing Tests
+// These tests verify that the batch processing optimization correctly handles
+// large wallets by processing events in configurable batch sizes
+
+#[tokio::test]
+async fn test_batch_processing_with_small_batch_size() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    // Create config with small batch size (5 events per batch)
+    let mut config = Config::from_env().unwrap();
+    config.event_rebuild_batch_size = 5;
+    let config = Arc::new(config);
+
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    let contact_id = Uuid::new_v4();
+
+    // Create 15 events (3 batches of 5 each with batch size 5)
+    for i in 0..15 {
+        let event = SyncEventRequest {
+            id: Uuid::new_v4().to_string(),
+            aggregate_type: "contact".to_string(),
+            aggregate_id: contact_id.to_string(),
+            event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
+            event_data: json!({
+                "name": format!("Batch Contact {}", i),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+        };
+
+        let _ = post_sync_events(
+            axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
+            axum::Json(vec![event]),
+        ).await;
+    }
+
+    // Verify all 15 events were created
+    let event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE wallet_id = $1"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(event_count, 15, "Should have 15 events");
+
+    // Clear projections to force full rebuild with batch processing
+    sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Rebuild - should use batch processing (no snapshots, batch size 5)
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed with batch processing");
+
+    // Verify final state is correct (should have last contact name)
+    let final_name: String = sqlx::query_scalar(
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
+    )
+    .bind(contact_id)
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(final_name, "Batch Contact 14", "Final state should reflect all 15 events processed in batches");
+}
+
+#[tokio::test]
+async fn test_batch_processing_with_large_batch_size() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    // Create config with large batch size (1000 events per batch)
+    let mut config = Config::from_env().unwrap();
+    config.event_rebuild_batch_size = 1000;
+    let config = Arc::new(config);
+
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    let contact_id = Uuid::new_v4();
+
+    // Create 25 events (should fit in 1 batch with batch size 1000)
+    for i in 0..25 {
+        let event = SyncEventRequest {
+            id: Uuid::new_v4().to_string(),
+            aggregate_type: "contact".to_string(),
+            aggregate_id: contact_id.to_string(),
+            event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
+            event_data: json!({
+                "name": format!("Large Batch {}", i),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+        };
+
+        let _ = post_sync_events(
+            axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
+            axum::Json(vec![event]),
+        ).await;
+    }
+
+    // Clear projections to force full rebuild
+    sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Rebuild - should process all events in single batch
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed");
+
+    // Verify final state
+    let final_name: String = sqlx::query_scalar(
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
+    )
+    .bind(contact_id)
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(final_name, "Large Batch 24", "Final state should reflect all 25 events");
+}
+
+#[tokio::test]
+async fn test_batch_processing_with_transactions() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    // Create config with small batch size to test batching
+    let mut config = Config::from_env().unwrap();
+    config.event_rebuild_batch_size = 3;
+    let config = Arc::new(config);
+
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    let contact_id = Uuid::new_v4();
+
+    // First, create a contact via event
+    let contact_event = SyncEventRequest {
+        id: Uuid::new_v4().to_string(),
+        aggregate_type: "contact".to_string(),
+        aggregate_id: contact_id.to_string(),
+        event_type: "CREATED".to_string(),
+        event_data: json!({
+            "name": "Test Contact",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let _ = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
+        axum::Json(vec![contact_event]),
+    ).await;
+
+    // Create 10 transaction events (multiple batches of 3)
+    for i in 0..10 {
+        let transaction_id = Uuid::new_v4();
+        let event = SyncEventRequest {
+            id: Uuid::new_v4().to_string(),
+            aggregate_type: "transaction".to_string(),
+            aggregate_id: transaction_id.to_string(),
+            event_type: "CREATED".to_string(),
+            event_data: json!({
+                "contact_id": contact_id.to_string(),
+                "type": "money",
+                "direction": "lent",
+                "amount": (i + 1) as i64 * 100,
+                "currency": "USD",
+                "transaction_date": chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+        };
+
+        let _ = post_sync_events(
+            axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
+            axum::Json(vec![event]),
+        ).await;
+    }
+
+    // Clear projections to force batch processing rebuild
+    sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Rebuild with batch processing
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed");
+
+    // Verify all transactions were created (should have 10 transactions)
+    let transaction_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM transactions_projection WHERE contact_id = $1 AND wallet_id = $2 AND is_deleted = false"
+    )
+    .bind(contact_id)
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(transaction_count, 10, "Should have all 10 transactions after batch processing");
+}
+
+#[tokio::test]
+async fn test_batch_processing_with_undo_events() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    // Create config with small batch size
+    let mut config = Config::from_env().unwrap();
+    config.event_rebuild_batch_size = 3;
+    let config = Arc::new(config);
+
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    let contact_id = Uuid::new_v4();
+    let mut event_ids = Vec::new();
+
+    // Create 8 events and track their IDs
+    for i in 0..8 {
+        let event = SyncEventRequest {
+            id: Uuid::new_v4().to_string(),
+            aggregate_type: "contact".to_string(),
+            aggregate_id: contact_id.to_string(),
+            event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
+            event_data: json!({
+                "name": format!("Contact {}", i),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+        };
+        event_ids.push(event.id.clone());
+
+        let _ = post_sync_events(
+            axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
+            axum::Json(vec![event]),
+        ).await;
+    }
+
+    // Create UNDO event for event 3 (index 2)
+    let undo_event = SyncEventRequest {
+        id: Uuid::new_v4().to_string(),
+        aggregate_type: "contact".to_string(),
+        aggregate_id: contact_id.to_string(),
+        event_type: "UNDO".to_string(),
+        event_data: json!({
+            "undone_event_id": event_ids[2],
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let _ = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
+        axum::Json(vec![undo_event]),
+    ).await;
+
+    // Clear projections to force batch processing rebuild
+    sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+        .bind(wallet_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Rebuild - should handle UNDO events correctly even with batch processing
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed with UNDO events");
+
+    // Verify final state (event 2 was undone, so name should not be "Contact 2")
+    let final_name: String = sqlx::query_scalar(
+        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
+    )
+    .bind(contact_id)
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_ne!(final_name, "Contact 2", "Undone event 2 should not be reflected in final state");
+}
+
+#[tokio::test]
+async fn test_batch_processing_empty_wallet() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Empty Wallet").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    let mut config = Config::from_env().unwrap();
+    config.event_rebuild_batch_size = 5;
+    let config = Arc::new(config);
+
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    // Rebuild on empty wallet - should succeed without errors
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed on empty wallet");
+
+    // Verify no projections were created
+    let contact_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM contacts_projection WHERE wallet_id = $1"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(contact_count, 0, "Should have no contacts in empty wallet");
+}
