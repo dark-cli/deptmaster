@@ -17,6 +17,37 @@ let events = sqlx::query(
 
 ## Why This is Bad
 
+### 0. CRITICAL: Loads ALL events BEFORE deciding on optimization strategy
+
+The worst part: the code loads ALL events **REGARDLESS of whether snapshot optimization will be used**:
+
+```rust
+// Loads ALL 1M events into RAM
+let events = sqlx::query("SELECT ... FROM events WHERE wallet_id = $1")
+    .fetch_all(&pool)  // <-- 1GB RAM for 1M events
+    .await?;
+
+// Then builds position map for ALL events
+for event in events { /* process 1M events */ }
+
+// Then checks for UNDO in ALL events
+let has_undo = events.iter().any(...);
+
+// THEN decides: snapshot or full rebuild?
+if use_snapshot {
+    // Too late! Already loaded all 1M events
+}
+```
+
+**This defeats the entire purpose of snapshots!**
+
+Even with snapshot optimization:
+- Load 1M events (1GB RAM) ❌
+- Identify snapshot exists ✅
+- Restore from snapshot (50MB) ✅
+- Apply 10 events after snapshot ✅
+- **Result**: Still consumed 1GB RAM to avoid processing 1M events
+
 ### 1. Memory Consumption
 
 **Scenario: 1M events**
@@ -56,6 +87,50 @@ With snapshot optimization (current):
 - Filter to 10 events after snapshot
 - Process 10 events
 - Result: Still used 1GB RAM, only processed 10 events!
+```
+
+---
+
+## Three-Tier Optimization Strategy
+
+The solution depends on the path taken:
+
+### Path 1: Snapshot Exists (Fast Path) - 95% of rebuilds
+
+**Current**: Load all 1M events, then use snapshot (wasteful!)
+**Optimized**: Don't load all events upfront
+
+```
+Snapshot path (when snapshot exists):
+1. Check if snapshot exists
+2. If yes: ONLY load events AFTER snapshot (typically 0-20 events)
+3. Skip loading all events entirely
+4. Memory: O(1) instead of O(n)
+```
+
+### Path 2: Full Rebuild (Slow Path) - 5% of rebuilds
+
+**Current**: Load all 1M events into RAM, process
+**Optimized**: Stream/batch events, process as you go
+
+```
+Full rebuild path (no snapshot or restore failed):
+1. Load events in batches of 1000
+2. Clear projections
+3. Process batch, then next batch
+4. Memory: O(BATCH_SIZE) instead of O(n)
+```
+
+### Path 3: UNDO Detection - Optimization opportunity
+
+**Current**: Load all 1M events just to check if ANY are UNDO
+**Optimized**: Only load UNDO events
+
+```sql
+-- Instead of: SELECT * FROM events WHERE wallet_id = $1
+-- Do this:
+SELECT event_data FROM events 
+WHERE wallet_id = $1 AND event_type = 'UNDO'
 ```
 
 ---
@@ -234,9 +309,65 @@ if let Some(snapshot) = get_snapshot() {
 
 ---
 
+## Optimal Multi-Path Solution
+
+Instead of loading all events then deciding, **check snapshot FIRST**:
+
+```rust
+// Step 1: Check for snapshot FIRST (fast query)
+if let Some(snapshot) = get_snapshot_before_last_event(wallet_id).await {
+    // Fast path: only load events after snapshot
+    restore_from_snapshot(&snapshot).await?;
+    
+    let batch = fetch_events_batch(
+        wallet_id,
+        snapshot.last_event_id,
+        1000  // Only events after snapshot
+    ).await?;
+    
+    apply_events(batch).await?;
+    return Ok(());  // Done! Minimal memory used
+}
+
+// Step 2: If no snapshot, check for UNDO events (minimal query)
+let has_undo = has_any_undo_events(wallet_id).await?;
+
+// Step 3: Full rebuild (use batching)
+if has_undo {
+    // Load UNDO events separately (small)
+    let undo_events = load_undo_events(wallet_id).await?;
+    let undone_ids = extract_undone_ids(&undo_events);
+    
+    // Batch-load and process other events
+    let mut offset = 0;
+    loop {
+        let batch = fetch_events_batch(wallet_id, offset, 1000).await?;
+        if batch.is_empty() { break; }
+        
+        for event in batch {
+            if !undone_ids.contains(&event.id) {
+                apply_event(&event).await?;
+            }
+        }
+        offset += batch.len();
+    }
+}
+```
+
+**Memory usage by scenario**:
+
+| Scenario | Path | Memory | Time |
+|----------|------|--------|------|
+| Normal rebuild with snapshot | Snapshot path | ~5MB | 0.1s |
+| Large wallet, needs rebuild | Full rebuild (batched) | ~5MB | 5s |
+| Multiple UNDO events | Full rebuild (batched) | ~5MB | 5s |
+| Snapshot + UNDO after | Snapshot path | ~5MB | 0.1s |
+
+---
+
 ## Recommended Solution
 
-**Implement Option 3 (Hybrid + Batches)** because:
+**Implement Three-Path Optimization** because:
 
 1. **Low Risk**: Minimal code changes, keeps snapshot logic intact
 2. **High Benefit**: 10-100x memory reduction
@@ -244,15 +375,38 @@ if let Some(snapshot) = get_snapshot() {
 4. **Scalable**: Works with wallets of any size
 5. **Can Iterate**: Easy to optimize BATCH_SIZE later
 
-**Implementation Plan**:
+**Implementation Plan (Three-Path Strategy)**:
 
 ```
-Phase 1: Add BATCH_SIZE constant
-Phase 2: Refactor snapshot path to use batches
-Phase 3: Refactor full rebuild path to use batches
-Phase 4: Add monitoring/metrics for memory usage
-Phase 5: Benchmark and tune BATCH_SIZE
+Phase 1: Refactor logic order
+- Move snapshot check BEFORE loading all events
+- Load events strategically based on which path
+
+Phase 2: Snapshot path (fast path) - PRIORITY
+- Check snapshot existence first
+- Load ONLY events after snapshot if found
+- Result: ~95% of rebuilds use <5MB memory
+
+Phase 3: UNDO detection optimization
+- Extract UNDO check to separate query
+- Only load UNDO events, not all events
+- Reduce unnecessary column fetches
+
+Phase 4: Full rebuild path (slow path)
+- Implement batch loading for full rebuilds
+- Process in chunks of 1000 events
+- Result: O(BATCH_SIZE) memory for all rebuilds
+
+Phase 5: Monitoring & testing
+- Add metrics for memory usage by path
+- Performance tests for each scenario
+- Load test with 10M+ events
 ```
+
+**Expected Results**:
+- Snapshot path: 0.1-1s, ~5MB memory (95% of cases)
+- Full rebuild: 5-50s, ~5MB memory (5% of cases)
+- No OOM even with 100M+ events
 
 ---
 
