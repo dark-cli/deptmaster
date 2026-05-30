@@ -6,10 +6,11 @@
 // 4. Incremental event application after snapshot
 // 5. Fallback to full rebuild when snapshot optimization fails
 
-use debt_tracker_api::handlers::sync::{post_sync_events, rebuild_projections_from_events, SyncEventRequest};
+use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
 use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
 use debt_tracker_api::websocket;
+use debt_tracker_api::services::projections::Projections;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 use std::sync::Arc;
@@ -112,7 +113,7 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
     println!("Event count: {}", event_count);
 
     // 3. Rebuild projections - should use snapshot optimization (no UNDO events)
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state is correct (should have name "Contact 12" from last update)
     let final_name: String = sqlx::query_scalar(
@@ -201,7 +202,7 @@ async fn test_full_rebuild_used_when_undo_events_present() {
     ).await;
 
     // 3. Rebuild projections - should use FULL rebuild (undone event is before all snapshots)
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify state is correct (event 6 was undone, so should have name from event 5 or later)
     let final_name: String = sqlx::query_scalar(
@@ -297,7 +298,7 @@ async fn test_snapshot_restoration_correctness() {
     }
 
     // 3. Rebuild - should restore from snapshot and apply events after
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state (should be "After Snapshot 11" from last event)
     let final_name: String = sqlx::query_scalar(
@@ -361,7 +362,7 @@ async fn test_fallback_to_full_rebuild_when_no_snapshot() {
     assert_eq!(snapshot_count, 0, "No snapshot should exist yet");
 
     // 2. Rebuild - should fallback to full rebuild (no snapshot available)
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 3. Verify state is correct (full rebuild should work)
     let final_name: String = sqlx::query_scalar(
@@ -459,7 +460,7 @@ async fn test_snapshot_optimization_with_transactions() {
     }
 
     // 3. Rebuild - should use snapshot optimization
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify transaction count is correct (should have 12 transactions)
     let transaction_count: i64 = sqlx::query_scalar(

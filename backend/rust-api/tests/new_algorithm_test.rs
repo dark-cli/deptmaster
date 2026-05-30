@@ -6,10 +6,11 @@
 // 4. Finding undone event position by ID (fast lookup)
 // 5. Multiple UNDO events with snapshot optimization
 
-use debt_tracker_api::handlers::sync::{post_sync_events, rebuild_projections_from_events, SyncEventRequest};
+use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
 use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
 use debt_tracker_api::websocket;
+use debt_tracker_api::services::projections::Projections;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 use std::sync::Arc;
@@ -117,7 +118,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
     ).await;
 
     // 4. Rebuild projections - should use snapshot optimization (snapshot exists before undone event)
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 5. Verify final state is correct (event 13 was undone, so should have name from event 12 or earlier)
     let final_name: String = sqlx::query_scalar(
@@ -208,7 +209,7 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
     ).await;
 
     // 3. Rebuild projections - should use full rebuild (no snapshot before undone event)
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state is correct (event 3 was undone)
     let final_name: String = sqlx::query_scalar(
@@ -311,7 +312,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
     ).await;
 
     // 4. Rebuild projections - cleaned event list should exclude UNDO and undone event
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 5. Verify final state (event 12 was undone, so should have name from event 11 or earlier)
     let final_name: String = sqlx::query_scalar(
@@ -430,7 +431,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
     ).await;
 
     // 4. Rebuild projections - should use snapshot optimization (snapshot at event 10, undone events are 12 and 14)
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 5. Verify final state (events 12 and 14 were undone)
     let final_name: String = sqlx::query_scalar(
@@ -519,7 +520,7 @@ async fn test_undo_event_finds_position_by_id() {
     ).await;
 
     // 3. Rebuild projections - should use snapshot at event 10 (since undone event is at position 16)
-    let _ = rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify final state (event 16 was undone)
     let final_name: String = sqlx::query_scalar(

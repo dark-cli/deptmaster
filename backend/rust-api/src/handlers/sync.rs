@@ -13,7 +13,7 @@ use crate::services::snapshots;
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
-use crate::permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole};
+use crate::permissions::{Action, PermissionContext, PermissionModel, Resource};
 use crate::database::repository::Database;
 use crate::database::models::{EventRow, Event};
 use crate::services::projections::Projections;
@@ -23,11 +23,6 @@ use std::collections::{HashMap, HashSet};
 
 // Re-exports for backward compatibility
 pub use crate::domain::SyncEventRequest;
-
-// Wrapper for backward compatibility
-pub async fn rebuild_projections_from_events(state: &crate::AppState, wallet_id: Uuid) -> Result<(), sqlx::Error> {
-    Projections::rebuild_projections_from_events(state, wallet_id).await
-}
 
 // ============ RESPONSE TYPES ============
 
@@ -120,15 +115,6 @@ fn can_read_event(
     }
 }
 
-/// Get permission context from wallet role
-fn get_permission_context(
-    wallet_id: Uuid,
-    user_id: Uuid,
-    user_role: WalletRole,
-) -> PermissionContext {
-    PermissionContext::new(wallet_id, user_id, user_role)
-}
-
 // ============ PUBLIC ENDPOINTS ============
 
 /// Get hash of all events for sync comparison (permission-filtered)
@@ -152,7 +138,7 @@ pub async fn get_sync_hash(
         })?;
 
     // Get permission boundaries once
-    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, wallet_context.user_role);
+    let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
@@ -247,7 +233,7 @@ pub async fn get_sync_events(
     })?;
 
     // Get permission boundaries once
-    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, wallet_context.user_role);
+    let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
@@ -311,7 +297,7 @@ pub async fn post_sync_events(
     let db = Database::new((*state.db_pool).clone());
 
     // Get permission context once
-    let perm_ctx = get_permission_context(wallet_id, user_id, wallet_context.user_role);
+    let perm_ctx = PermissionContext::new(wallet_id, user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     // Preflight: collect permission checks

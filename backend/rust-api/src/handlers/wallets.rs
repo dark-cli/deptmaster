@@ -61,18 +61,20 @@ fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-async fn require_wallet_role_at_least(
+/// Check user has required wallet role (type-safe)
+async fn check_wallet_role(
     state: &AppState,
     wallet_id: Uuid,
     auth_user: &AuthUser,
-    required_role: &str,
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+    required_role: WalletRole,
+) -> Result<WalletRole, (StatusCode, Json<serde_json::Value>)> {
+    // System admins bypass all checks
     if auth_user.is_admin {
-        return Ok("admin".to_string());
+        return Ok(WalletRole::Admin);
     }
 
     let db = Database::new((*state.db_pool).clone());
-    let role = db.get_wallet_user_role(wallet_id, auth_user.user_id)
+    let role_str = db.get_wallet_user_role(wallet_id, auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("Error checking wallet role: {:?}", e);
@@ -91,45 +93,37 @@ async fn require_wallet_role_at_least(
             )
         })?;
 
-    // member < admin < owner
-    let role_hierarchy = ["member", "admin", "owner"];
-    let user_level = role_hierarchy
-        .iter()
-        .position(|&r| r == role.as_str())
-        .unwrap_or(0);
-    let required_level = role_hierarchy
-        .iter()
-        .position(|&r| r == required_role)
-        .unwrap_or(0);
+    let user_role = WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member);
 
-    if user_level < required_level {
-        return Err((
+    // Use type-safe comparison: user_role must meet or exceed required_role
+    if user_role.can_perform(required_role) {
+        Ok(user_role)
+    } else {
+        Err((
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({
                 "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
                 "message": "Insufficient wallet permissions"
             })),
-        ));
+        ))
     }
-
-    Ok(role)
 }
 
 /// Check if user can perform an action on a resource using PermissionModel
+/// For members only (owners/admins bypass all checks)
 async fn check_permission_matrix(
     state: &AppState,
     wallet_id: Uuid,
     auth_user: &AuthUser,
-    wallet_role: &str,
+    user_role: WalletRole,
     action: Action,
     resource: Resource,
 ) -> Result<bool, (StatusCode, Json<serde_json::Value>)> {
     // Owner/Admin bypass all checks
-    if wallet_role == "owner" || wallet_role == "admin" {
+    if user_role.is_admin_or_higher() {
         return Ok(true);
     }
 
-    let user_role = WalletRole::Member;
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
@@ -438,7 +432,7 @@ pub async fn update_wallet(
     })?;
 
     // Enforce permissions: only wallet admins/owners may edit wallet details.
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Admin).await?;
 
     let db = Database::new((*state.db_pool).clone());
 
@@ -517,7 +511,7 @@ pub async fn delete_wallet(
     })?;
 
     // Enforce permissions: only wallet owners may delete a wallet.
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "owner").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Owner).await?;
 
     let db = Database::new((*state.db_pool).clone());
 
@@ -561,7 +555,7 @@ pub async fn add_user_to_wallet(
     })?;
 
     // Enforce permissions: only wallet owners/admins may add members.
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Admin).await?;
 
     let username = payload.username.trim();
     if username.is_empty() {
@@ -664,7 +658,7 @@ pub async fn search_wallet_users(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Admin).await?;
 
     let q = params.get("q").map(|s| s.trim()).unwrap_or("").to_string();
     if q.is_empty() {
@@ -718,7 +712,7 @@ pub async fn create_wallet_invite(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Admin).await?;
 
     // 4-digit numeric code (0000–9999)
     let code = format!("{:04}", (Uuid::new_v4().as_u128() % 10000) as u32);
@@ -851,7 +845,7 @@ pub async fn list_wallet_users(
     })?;
 
     // When called from user-facing API, require admin. Admin panel callers have is_admin and bypass.
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Admin).await?;
 
     let db = Database::new((*state.db_pool).clone());
 
@@ -895,7 +889,7 @@ pub async fn update_wallet_user(
     })?;
 
     // Enforce permissions: only wallet admins/owners may manage members.
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Admin).await?;
 
     let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
         (
@@ -955,7 +949,7 @@ pub async fn remove_user_from_wallet(
     })?;
 
     // Enforce permissions: only wallet admins/owners may manage members.
-    let _role = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "admin").await?;
+    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Admin).await?;
 
     let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
         (
@@ -1319,21 +1313,21 @@ async fn require_wallet_admin(
     wallet_id: Uuid,
     auth_user: &AuthUser,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    let _ = require_wallet_role_at_least(state, wallet_id, auth_user, "admin").await?;
+    let _ = check_wallet_role(state, wallet_id, auth_user, WalletRole::Admin).await?;
     Ok(())
 }
 
-/// Returns the user's role in the wallet (owner, admin, member) or error if not a member.
+/// Returns the user's role in the wallet (type-safe enum)
 async fn get_wallet_role(
     state: &AppState,
     wallet_id: Uuid,
     auth_user: &AuthUser,
-) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<WalletRole, (StatusCode, Json<serde_json::Value>)> {
     if auth_user.is_admin {
-        return Ok("admin".to_string());
+        return Ok(WalletRole::Admin);
     }
     let db = Database::new((*state.db_pool).clone());
-    let role = db.get_wallet_user_role(wallet_id, auth_user.user_id)
+    let role_str = db.get_wallet_user_role(wallet_id, auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("get_wallet_role: {:?}", e);
@@ -1351,7 +1345,7 @@ async fn get_wallet_role(
                 })),
             )
         })?;
-    Ok(role)
+    Ok(WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member))
 }
 
 /// Returns error if the user group is system (all_users). System groups cannot be edited or have members changed.
@@ -1829,7 +1823,7 @@ pub async fn list_contact_groups(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    let _ = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "member").await?;
+    let _ = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Member).await?;
 
     let db = Database::new((*state.db_pool).clone());
     let groups = db.list_contact_groups(wallet_uuid)
@@ -2040,7 +2034,7 @@ pub async fn list_contact_group_members(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    let _ = require_wallet_role_at_least(&state, wallet_uuid, &auth_user, "member").await?;
+    let _ = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Member).await?;
 
     let db = Database::new((*state.db_pool).clone());
     let members = db.list_contact_group_members(group_uuid, wallet_uuid)
@@ -2088,12 +2082,12 @@ pub async fn add_contact_group_member(
         )
     })?;
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
-    if role != "owner" && role != "admin" {
+    if !role.is_admin_or_higher() {
         let can_edit_contact = check_permission_matrix(
             &state,
             wallet_uuid,
             &auth_user,
-            &role,
+            role,
             Action::ContactUpdate,
             Resource::Contact(contact_uuid),
         )
@@ -2103,7 +2097,7 @@ pub async fn add_contact_group_member(
             &state,
             wallet_uuid,
             &auth_user,
-            &role,
+            role,
             Action::ContactUpdate,
             Resource::ContactGroup(group_uuid),
         )
@@ -2194,12 +2188,12 @@ pub async fn remove_contact_group_member(
         )
     })?;
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
-    if role != "owner" && role != "admin" {
+    if !role.is_admin_or_higher() {
         let can_edit_contact = check_permission_matrix(
             &state,
             wallet_uuid,
             &auth_user,
-            &role,
+            role,
             Action::ContactUpdate,
             Resource::Contact(contact_uuid),
         )
@@ -2209,7 +2203,7 @@ pub async fn remove_contact_group_member(
             &state,
             wallet_uuid,
             &auth_user,
-            &role,
+            role,
             Action::ContactUpdate,
             Resource::ContactGroup(group_uuid),
         )

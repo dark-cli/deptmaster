@@ -2,6 +2,7 @@ use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
 use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
 use debt_tracker_api::websocket;
+use debt_tracker_api::services::projections::Projections;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 use std::sync::Arc;
@@ -197,7 +198,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     ).await;
 
     // Rebuild projections to apply UNDO
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify projection shows original contact data (update was undone)
     let name_after_undo: String = sqlx::query_scalar(
@@ -290,7 +291,7 @@ async fn test_undo_event_syncs_correctly() {
     assert!(undo_exists, "UNDO event should be stored in database");
 
     // 5. Rebuild projections - undone event should be skipped
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // Verify contact doesn't exist (original event was undone)
     let contact_exists: bool = sqlx::query_scalar(
@@ -485,7 +486,7 @@ async fn test_multiple_undo_events() {
     ).await;
 
     // 3. Rebuild projections - all undone events should be skipped
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify state is correct (should have original name, both updates undone)
     let name: String = sqlx::query_scalar(
@@ -574,7 +575,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
     ).await;
 
     // 3. Rebuild projections - should use snapshot and filter undone events
-    let _ = debt_tracker_api::handlers::sync::rebuild_projections_from_events(&app_state, wallet_id).await;
+    let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify rebuild filtered out undone events correctly
     // The contact should exist with a name from events after the undone one
