@@ -4,144 +4,38 @@ use axum::{
     response::Json,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
+use uuid::Uuid;
+use chrono::{DateTime, Utc};
+
 use crate::AppState;
 use crate::websocket;
 use crate::services::snapshots;
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
-use crate::{permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole}};
+use crate::permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole};
 use crate::database::repository::Database;
-use crate::database::models::EventRow;
+use crate::database::models::{EventRow, Event};
 use crate::services::projections::Projections;
 use crate::domain::DomainEvent;
 use sha2::{Sha256, Digest};
+use std::collections::{HashMap, HashSet};
 
-// Re-exports for backward compatibility with tests and other modules
+// Re-exports for backward compatibility
 pub use crate::domain::SyncEventRequest;
 
-// Wrapper function for backward compatibility
-pub async fn rebuild_projections_from_events(state: &crate::AppState, wallet_id: uuid::Uuid) -> Result<(), sqlx::Error> {
+// Wrapper for backward compatibility
+pub async fn rebuild_projections_from_events(state: &crate::AppState, wallet_id: Uuid) -> Result<(), sqlx::Error> {
     Projections::rebuild_projections_from_events(state, wallet_id).await
 }
 
-/// Get transaction_id -> contact_id map for transactions missing contact_id in event_data
-async fn get_transaction_contact_map(
-    db: &Database,
-    wallet_id: uuid::Uuid,
-    events: &[EventRow],
-) -> Result<std::collections::HashMap<uuid::Uuid, uuid::Uuid>, sqlx::Error> {
-    let transaction_ids: Vec<uuid::Uuid> = events
-        .iter()
-        .filter(|row| row.aggregate_type == "transaction" && !row.data.get("contact_id").and_then(|v| v.as_str()).is_some())
-        .map(|row| row.aggregate_id)
-        .collect();
-
-    if transaction_ids.is_empty() {
-        return Ok(std::collections::HashMap::new());
-    }
-
-    db.get_transaction_contact_map(wallet_id, &transaction_ids).await
-}
+// ============ RESPONSE TYPES ============
 
 #[derive(Serialize)]
 pub struct SyncHashResponse {
     pub hash: String,
     pub event_count: i64,
     pub last_event_timestamp: Option<chrono::NaiveDateTime>,
-}
-
-/// Get hash of all events for sync comparison. Hash is computed only over events the user is allowed to read (same filter as get_sync_events).
-pub async fn get_sync_hash(
-    State(state): State<AppState>,
-    Extension(wallet_context): Extension<WalletContext>,
-    Extension(auth_user): Extension<AuthUser>,
-) -> Result<Json<SyncHashResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let wallet_id = wallet_context.wallet_id;
-    let db = Database::new((*state.db_pool).clone());
-    let events = db.get_all_events_for_wallet(wallet_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching events for hash: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to fetch events"})),
-            )
-        })?;
-
-    // Parse role once at the beginning
-    let user_role = match wallet_context.user_role.as_str() {
-        "owner" => WalletRole::Owner,
-        "admin" => WalletRole::Admin,
-        _ => WalletRole::Member,
-    };
-    let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
-    let perm_model = PermissionModel::new((*state.db_pool).clone());
-
-    // Get permission boundaries once
-    let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|e| {
-        tracing::error!("Failed to get readable contacts: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
-
-    let transaction_contact_ids_allowed = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|e| {
-        tracing::error!("Failed to get readable transaction contacts: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
-
-    // Get transaction contact map for permission filtering
-    let transaction_contact_map = get_transaction_contact_map(&db, wallet_id, &events)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get transaction contact map: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to fetch transaction data"})),
-            )
-        })?;
-
-    let mut filtered_event_ids_with_timestamps: Vec<(uuid::Uuid, chrono::NaiveDateTime)> = Vec::new();
-    for row in &events {
-        if Database::event_read_allowed(
-            &contact_ids_allowed,
-            &transaction_contact_ids_allowed,
-            &row.aggregate_type,
-            row.aggregate_id,
-            &row.data,
-            &transaction_contact_map,
-        ) {
-            filtered_event_ids_with_timestamps.push((row.event_id, row.created_at));
-        }
-    }
-
-    let mut hasher = Sha256::new();
-    for (event_id, created_at) in &filtered_event_ids_with_timestamps {
-        hasher.update(event_id.to_string().as_bytes());
-        hasher.update(created_at.to_string().as_bytes());
-    }
-    let hash = format!("{:x}", hasher.finalize());
-
-    let last_event_timestamp = filtered_event_ids_with_timestamps
-        .last()
-        .map(|(_, created_at)| *created_at);
-
-    Ok(Json(SyncHashResponse {
-        hash,
-        event_count: filtered_event_ids_with_timestamps.len() as i64,
-        last_event_timestamp,
-    }))
-}
-
-#[derive(Deserialize)]
-pub struct SyncEventsQuery {
-    pub since: Option<String>, // ISO timestamp
 }
 
 #[derive(Serialize)]
@@ -155,7 +49,176 @@ pub struct SyncEvent {
     pub version: i32,
 }
 
-/// Get events since a timestamp. Only returns events the user is allowed to read (contact:read / transaction:read).
+#[derive(Serialize)]
+pub struct SyncEventsResponse {
+    pub accepted: Vec<String>,
+    pub conflicts: Vec<String>,
+}
+
+// ============ QUERY TYPES ============
+
+#[derive(Deserialize)]
+pub struct SyncEventsQuery {
+    pub since: Option<String>,
+}
+
+// ============ INTERNAL HELPERS ============
+
+/// Build transaction_id -> contact_id map for permission filtering
+fn build_transaction_contact_map(
+    events: &[EventRow],
+    db_map: &HashMap<Uuid, Uuid>,
+) -> HashMap<Uuid, Uuid> {
+    let mut result = HashMap::new();
+    for event in events {
+        match event.aggregate_type.as_str() {
+            "transaction" => {
+                // Try to get contact_id from event_data first
+                if let Some(contact_id_str) = event.data
+                    .get("contact_id")
+                    .and_then(|v| v.as_str())
+                {
+                    if let Ok(contact_id) = Uuid::parse_str(contact_id_str) {
+                        result.insert(event.aggregate_id, contact_id);
+                    }
+                }
+                // Fall back to database map if not in event_data
+                else if let Some(&contact_id) = db_map.get(&event.aggregate_id) {
+                    result.insert(event.aggregate_id, contact_id);
+                }
+            }
+            _ => {}
+        }
+    }
+    result
+}
+
+/// Check if user can read an event based on permission boundaries
+fn can_read_event(
+    event: &EventRow,
+    contact_ids: &Option<HashSet<Uuid>>,
+    transaction_contact_ids: &Option<HashSet<Uuid>>,
+    transaction_map: &HashMap<Uuid, Uuid>,
+) -> bool {
+    match event.aggregate_type.as_str() {
+        "permission" => true,
+        "contact" => match contact_ids {
+            None => true,
+            Some(set) => set.contains(&event.aggregate_id),
+        },
+        "transaction" => {
+            if let Some(&contact_id) = transaction_map.get(&event.aggregate_id) {
+                match transaction_contact_ids {
+                    None => true,
+                    Some(set) => set.contains(&contact_id),
+                }
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Get permission context from wallet role string
+fn get_permission_context(
+    wallet_id: Uuid,
+    user_id: Uuid,
+    user_role: &str,
+) -> PermissionContext {
+    let role = match user_role {
+        "owner" => WalletRole::Owner,
+        "admin" => WalletRole::Admin,
+        _ => WalletRole::Member,
+    };
+    PermissionContext::new(wallet_id, user_id, role)
+}
+
+// ============ PUBLIC ENDPOINTS ============
+
+/// Get hash of all events for sync comparison (permission-filtered)
+pub async fn get_sync_hash(
+    State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<SyncHashResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
+    let db = Database::new((*state.db_pool).clone());
+
+    // Fetch all events
+    let events = db.get_all_events_for_wallet(wallet_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching events: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to fetch events"})),
+            )
+        })?;
+
+    // Get permission boundaries once
+    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, &wallet_context.user_role);
+    let perm_model = PermissionModel::new((*state.db_pool).clone());
+
+    let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    let readable_transaction_contacts = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    // Get transaction contact map for filtering
+    let missing_ids: Vec<Uuid> = events
+        .iter()
+        .filter(|e| e.aggregate_type == "transaction" && e.data.get("contact_id").and_then(|v| v.as_str()).is_none())
+        .map(|e| e.aggregate_id)
+        .collect();
+
+    let db_map = if missing_ids.is_empty() {
+        HashMap::new()
+    } else {
+        db.get_transaction_contact_map(wallet_id, &missing_ids)
+            .await
+            .unwrap_or_default()
+    };
+
+    let transaction_map = build_transaction_contact_map(&events, &db_map);
+
+    // Filter events by permission and compute hash
+    let mut hasher = Sha256::new();
+    for event in &events {
+        if can_read_event(event, &readable_contacts, &readable_transaction_contacts, &transaction_map) {
+            hasher.update(event.event_id.to_string().as_bytes());
+            hasher.update(event.created_at.to_string().as_bytes());
+        }
+    }
+
+    let hash = format!("{:x}", hasher.finalize());
+    let event_count = events.iter()
+        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts, &transaction_map))
+        .count() as i64;
+
+    let last_timestamp = events
+        .iter()
+        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts, &transaction_map))
+        .last()
+        .map(|e| e.created_at);
+
+    Ok(Json(SyncHashResponse {
+        hash,
+        event_count,
+        last_event_timestamp: last_timestamp,
+    }))
+}
+
+/// Get events since timestamp (permission-filtered)
 pub async fn get_sync_events(
     Query(params): Query<SyncEventsQuery>,
     State(state): State<AppState>,
@@ -163,19 +226,22 @@ pub async fn get_sync_events(
     Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<Vec<SyncEvent>>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
-    let since_timestamp = params.since.and_then(|s| {
-        chrono::DateTime::parse_from_rfc3339(&s)
-            .ok()
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-    });
-
     let db = Database::new((*state.db_pool).clone());
-    let events = if let Some(since) = since_timestamp {
-        db.get_events_since_impl(wallet_id, since)
-            .await
+
+    // Fetch events (optionally filtered by since timestamp)
+    let events = if let Some(since_str) = &params.since {
+        let since = DateTime::parse_from_rfc3339(since_str)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "Invalid timestamp format"})),
+                )
+            })?;
+        db.get_events_since_impl(wallet_id, since).await
     } else {
-        db.get_all_events_for_wallet(wallet_id)
-            .await
+        db.get_all_events_for_wallet(wallet_id).await
     }
     .map_err(|e| {
         tracing::error!("Error fetching events: {:?}", e);
@@ -185,83 +251,224 @@ pub async fn get_sync_events(
         )
     })?;
 
-    // Parse role once at the beginning
-    let user_role = match wallet_context.user_role.as_str() {
-        "owner" => WalletRole::Owner,
-        "admin" => WalletRole::Admin,
-        _ => WalletRole::Member,
-    };
-    let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
+    // Get permission boundaries once
+    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, &wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    // Get permission boundaries once
-    let contact_ids_allowed = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|e| {
-        tracing::error!("Failed to get readable contacts: {:?}", e);
+    let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to check permissions"})),
         )
     })?;
 
-    let transaction_contact_ids_allowed = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|e| {
-        tracing::error!("Failed to get readable transaction contacts: {:?}", e);
+    let readable_transaction_contacts = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": "Failed to check permissions"})),
         )
     })?;
 
-    // Get transaction contact map for permission filtering
-    let transaction_contact_map = get_transaction_contact_map(&db, wallet_id, &events)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get transaction contact map: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to fetch transaction data"})),
-            )
-        })?;
+    // Get transaction contact map
+    let missing_ids: Vec<Uuid> = events
+        .iter()
+        .filter(|e| e.aggregate_type == "transaction" && e.data.get("contact_id").and_then(|v| v.as_str()).is_none())
+        .map(|e| e.aggregate_id)
+        .collect();
 
-    let mut sync_events = Vec::with_capacity(events.len());
-    for row in &events {
-        if !Database::event_read_allowed(
-            &contact_ids_allowed,
-            &transaction_contact_ids_allowed,
-            &row.aggregate_type,
-            row.aggregate_id,
-            &row.data,
-            &transaction_contact_map,
-        ) {
-            continue;
-        }
-        sync_events.push(SyncEvent {
+    let db_map = if missing_ids.is_empty() {
+        HashMap::new()
+    } else {
+        db.get_transaction_contact_map(wallet_id, &missing_ids)
+            .await
+            .unwrap_or_default()
+    };
+
+    let transaction_map = build_transaction_contact_map(&events, &db_map);
+
+    // Convert to response, filtering by permission
+    let sync_events: Vec<SyncEvent> = events
+        .into_iter()
+        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts, &transaction_map))
+        .map(|row| SyncEvent {
             id: row.event_id.to_string(),
-            aggregate_type: row.aggregate_type.clone(),
+            aggregate_type: row.aggregate_type,
             aggregate_id: row.aggregate_id.to_string(),
-            event_type: row.event_type.clone(),
-            event_data: row.data.clone(),
-            timestamp: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(row.created_at, chrono::Utc).to_rfc3339(),
+            event_type: row.event_type,
+            event_data: row.data,
+            timestamp: DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc).to_rfc3339(),
             version: row.version,
-        });
-    }
+        })
+        .collect();
 
     Ok(Json(sync_events))
 }
 
-/// Insert a permission event and apply it to projections. Used by wallet management handlers.
-pub(crate) async fn insert_permission_event_and_apply(
+/// Accept and process sync events from client
+pub async fn post_sync_events(
+    State(state): State<AppState>,
+    Extension(wallet_context): Extension<WalletContext>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(events): Json<Vec<SyncEventRequest>>,
+) -> Result<Json<SyncEventsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = wallet_context.wallet_id;
+    let user_id = auth_user.user_id;
+    let db = Database::new((*state.db_pool).clone());
+
+    // Get permission context once
+    let perm_ctx = get_permission_context(wallet_id, user_id, &wallet_context.user_role);
+    let perm_model = PermissionModel::new((*state.db_pool).clone());
+
+    // Preflight: collect permission checks
+    let mut permission_checks: Vec<(Action, Resource)> = Vec::new();
+    for event in &events {
+        match event.aggregate_type.as_str() {
+            "permission" => {
+                if !matches!(wallet_context.user_role.as_str(), "owner" | "admin") {
+                    return Err(responses::insufficient_permission_response());
+                }
+            }
+            _ => {
+                permission_checks.extend(event.required_permissions());
+                if event.aggregate_type == "transaction" {
+                    permission_checks.push((Action::ContactRead, Resource::AllContacts));
+                }
+            }
+        }
+    }
+
+    // Verify all permissions in batch
+    if !permission_checks.is_empty() {
+        let results = perm_model
+            .check_permissions(&perm_ctx, permission_checks)
+            .await
+            .map_err(|_| responses::insufficient_permission_response())?;
+
+        if !results.iter().all(|&allowed| allowed) {
+            return Err(responses::insufficient_permission_response());
+        }
+    }
+
+    // Process each event
+    let mut accepted = Vec::new();
+    let mut conflicts = Vec::new();
+
+    for event_req in events {
+        let event_id = Uuid::parse_str(&event_req.id).expect("deserializer guarantees valid UUID");
+        let aggregate_id = Uuid::parse_str(&event_req.aggregate_id).expect("deserializer guarantees valid UUID");
+        let timestamp = chrono::DateTime::parse_from_rfc3339(&event_req.timestamp)
+            .expect("deserializer guarantees valid RFC3339 timestamp")
+            .naive_utc();
+
+        // Validate event data
+        if let Some(error) = event_req.validate_data() {
+            conflicts.push(event_req.id.clone());
+            tracing::warn!("Event validation failed: {}", error);
+            continue;
+        }
+
+        // Check idempotency
+        let existing = db.get_event_by_id_impl(event_id)
+            .await
+            .map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Database error"})),
+                )
+            })?;
+
+        if let Some(existing_event) = existing {
+            if existing_event.wallet_id == wallet_id {
+                if existing_event.data == event_req.event_data {
+                    accepted.push(event_req.id);
+                    continue;
+                }
+            }
+            conflicts.push(event_req.id);
+            continue;
+        }
+
+        // Insert event
+        if db.insert_event_impl(
+            event_id,
+            aggregate_id,
+            event_req.aggregate_type.clone(),
+            event_req.event_type.clone(),
+            event_req.event_data.clone(),
+            wallet_id,
+            user_id,
+            event_req.version,
+            None,
+        ).await.is_err() {
+            conflicts.push(event_req.id);
+            continue;
+        }
+
+        accepted.push(event_req.id.clone());
+
+        // Apply event using DomainEvent (no string matching)
+        if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
+            if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
+                let event_model = Event::from(event_row.clone());
+                if let Ok(domain_event) = DomainEvent::from_event(&event_model) {
+                    // Apply using polymorphic DomainEvent
+                    if let Err(e) = domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await {
+                        tracing::error!("Error applying event: {:?}", e);
+                    } else {
+                        websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, &event_row.aggregate_type);
+                    }
+
+                    // Handle UNDO: full wallet rebuild
+                    match domain_event {
+                        DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. } => {
+                            tracing::info!("UNDO event processed, rebuilding wallet projections");
+                            if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
+                                tracing::error!("Error rebuilding projections: {:?}", e);
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    // Save snapshot if needed
+                    let event_count = db.get_event_count_for_wallet(wallet_id).await;
+                    let should_snapshot = snapshots::should_create_snapshot(event_count)
+                        || matches!(domain_event, DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. });
+
+                    if should_snapshot {
+                        if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
+                            let _ = snapshots::save_snapshot(
+                                &*state.db_pool,
+                                db_id,
+                                event_count,
+                                snapshot_json.0,
+                                snapshot_json.1,
+                                wallet_id,
+                            ).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Json(SyncEventsResponse { accepted, conflicts }))
+}
+
+/// Insert permission event directly (used by wallet management handlers)
+pub async fn insert_permission_event_and_apply(
     state: &AppState,
-    user_id: uuid::Uuid,
-    wallet_id: uuid::Uuid,
-    aggregate_id: uuid::Uuid,
+    user_id: Uuid,
+    wallet_id: Uuid,
+    aggregate_id: Uuid,
     event_type: &str,
     event_data: serde_json::Value,
 ) -> Result<(), sqlx::Error> {
-    let event_id = uuid::Uuid::new_v4();
+    let event_id = Uuid::new_v4();
     let created_at = chrono::Utc::now().naive_utc();
-
     let db = Database::new((*state.db_pool).clone());
-    db.insert_event_impl(
+
+    // Insert event
+    let _ = db.insert_event_impl(
         event_id,
         aggregate_id,
         "permission".to_string(),
@@ -271,270 +478,18 @@ pub(crate) async fn insert_permission_event_and_apply(
         user_id,
         1,
         None,
-    )
-    .await
-    .map_err(|e| sqlx::Error::RowNotFound)?;
+    ).await.map_err(|_| sqlx::Error::RowNotFound)?;
 
-    let event_req = SyncEventRequest {
-        id: event_id.to_string(),
-        aggregate_type: "permission".to_string(),
-        aggregate_id: aggregate_id.to_string(),
-        event_type: event_type.to_string(),
-        event_data,
-        timestamp: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(created_at, chrono::Utc).to_rfc3339(),
-        version: 1,
-    };
-    db.apply_single_event_to_projections_impl(&event_req, aggregate_id, user_id, wallet_id, created_at).await?;
-    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, &event_req.aggregate_type);
+    // Apply using DomainEvent
+    if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
+        if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
+            let event_model = Event::from(event_row.clone());
+            if let Ok(domain_event) = DomainEvent::from_event(&event_model) {
+                domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await?;
+                websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "permission");
+            }
+        }
+    }
 
     Ok(())
-}
-
-#[derive(Serialize)]
-pub struct SyncEventsResponse {
-    pub accepted: Vec<String>,
-    pub conflicts: Vec<String>,
-}
-
-/// Permission event types (write-only; projection builds wallet_users, user_groups, etc.)
-// Validation is now handled at deserialization time via custom serde deserializers
-// in request.rs. Invalid JSON is rejected before reaching handler logic.
-
-/// Accept events from client and insert them
-pub async fn post_sync_events(
-    State(state): State<AppState>,
-    axum::extract::Extension(wallet_context): axum::extract::Extension<WalletContext>,
-    axum::extract::Extension(auth_user): axum::extract::Extension<AuthUser>,
-    Json(events): Json<Vec<SyncEventRequest>>,
-) -> Result<Json<SyncEventsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let wallet_id = wallet_context.wallet_id;
-    let user_id = auth_user.user_id;
-    let mut accepted = Vec::new();
-    let mut conflicts = Vec::new();
-
-    // Preflight permission checks using batched API to avoid partial writes in a batch.
-    // Convert wallet role string to enum for PermissionContext
-    let user_role = match wallet_context.user_role.as_str() {
-        "owner" => WalletRole::Owner,
-        "admin" => WalletRole::Admin,
-        _ => WalletRole::Member,
-    };
-    let perm_ctx = PermissionContext::new(wallet_id, user_id, user_role);
-
-    // Collect all permission checks for batch verification
-    let mut permission_checks: Vec<(Action, Resource)> = Vec::new();
-    for event in &events {
-        // Permission events are admin/owner only.
-        if event.aggregate_type == "permission" {
-            if wallet_context.user_role != "owner" && wallet_context.user_role != "admin" {
-                return Err(responses::insufficient_permission_response());
-            }
-            continue;
-        }
-
-        // Get required permissions from event trait
-        permission_checks.extend(event.required_permissions());
-
-        // Transactions require contact read (dependency safety).
-        if event.aggregate_type == "transaction" {
-            permission_checks.push((Action::ContactRead, Resource::AllContacts));
-        }
-    }
-
-    // Verify all permissions in batch using optimized single query
-    if !permission_checks.is_empty() {
-        let db_pool = (*state.db_pool).clone();
-        let perm_model = PermissionModel::new(db_pool);
-        let results: Vec<bool> = perm_model
-            .check_permissions(&perm_ctx, permission_checks)
-            .await
-            .map_err(|_| responses::insufficient_permission_response())?;
-
-        // Check that all permission checks passed
-        if !results.iter().all(|&allowed| allowed) {
-            return Err(responses::insufficient_permission_response());
-        }
-    }
-
-    for event in events {
-        let event_id = uuid::Uuid::parse_str(&event.id).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Invalid event ID: {}", e)})),
-            )
-        })?;
-
-        let aggregate_id = uuid::Uuid::parse_str(&event.aggregate_id).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Invalid aggregate ID: {}", e)})),
-            )
-        })?;
-
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&event.timestamp)
-            .map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": format!("Invalid timestamp: {}", e)})),
-                )
-            })?
-            .naive_utc();
-
-        // Validation at deserialization (custom serde deserializers) + data validation for programmatic creation
-        if let Some(validation_error) = event.validate_data() {
-            conflicts.push(event.id.clone());
-            tracing::warn!("Event validation failed for {}: {}", event.id, validation_error);
-            continue;
-        }
-
-        // Special validation for UNDO events: check 5-second window from server sync time
-        // The 5 seconds is measured between when the undone event was synced to the server
-        // and when the UNDO event is being synced. This supports offline-first:
-        // - User creates event and UNDO offline (within 5 seconds of each other)
-        // - Both are synced to server shortly after when user comes online
-        // - Validation passes because synced times are within 5 seconds
-        if event.event_type == "UNDO" {
-            if let Some(undone_event_id_str) = event.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
-                if let Ok(undone_event_uuid) = uuid::Uuid::parse_str(undone_event_id_str) {
-                    // Query the undone event to get its created_at timestamp (must be in same wallet)
-                    let db = Database::new((*state.db_pool).clone());
-                    if let Ok(Some(undone_row)) = db.get_event_by_id_impl(undone_event_uuid).await {
-                        // Check if the event belongs to this wallet
-                        if undone_row.wallet_id == wallet_id {
-                            let undone_created_at = undone_row.created_at;
-                            let undo_synced_at = chrono::Utc::now().naive_utc();
-
-                            // Calculate time difference between when undone event was created and when UNDO is being synced
-                            let time_diff = undo_synced_at.signed_duration_since(undone_created_at);
-
-                            // Check if more than 5 seconds have passed since undone event was created
-                            if time_diff.num_seconds() > 5 {
-                                conflicts.push(event.id);
-                                tracing::warn!(
-                                    "UNDO event rejected: undone event was created {} seconds ago (max 5 seconds allowed)",
-                                    time_diff.num_seconds()
-                                );
-                                continue;
-                            }
-                        }
-                    }
-                    // If undone event doesn't exist, we still accept the UNDO event (structural validation passed)
-                }
-            }
-        }
-
-        // Check if event already exists (idempotency) - must be in same wallet
-        let db = Database::new((*state.db_pool).clone());
-        let existing_event = db.get_event_by_id_impl(event_id)
-            .await
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "Database error"})),
-                )
-            })?;
-
-        if let Some(existing) = existing_event {
-            // Event already exists - check if it belongs to this wallet and has same data
-            if existing.wallet_id == wallet_id {
-                if existing.data != event.event_data {
-                    // Conflict: same ID but different data
-                    conflicts.push(event.id);
-                    continue;
-                }
-            } else {
-                // Event exists but belongs to different wallet - conflict
-                conflicts.push(event.id);
-                continue;
-            }
-            // Same event in same wallet - accept it
-            accepted.push(event.id);
-            continue;
-        }
-
-        // Validate wallet_id in event_data matches request wallet_id
-        if let Some(event_wallet_id_str) = event.event_data.get("wallet_id").and_then(|v| v.as_str()) {
-            if let Ok(event_wallet_id) = uuid::Uuid::parse_str(event_wallet_id_str) {
-                if event_wallet_id != wallet_id {
-                    conflicts.push(event.id);
-                    tracing::warn!("Event wallet_id mismatch: event has {}, request has {}", event_wallet_id, wallet_id);
-                    continue;
-                }
-            }
-        } else {
-            // If wallet_id is missing from event_data, add it
-            // This handles legacy events that don't have wallet_id
-        }
-        
-        // Insert event first (without total_debt - we'll add it after execution)
-        let insert_result = db.insert_event_impl(
-            event_id,
-            aggregate_id,
-            event.aggregate_type.clone(),
-            event.event_type.clone(),
-            event.event_data.clone(),
-            wallet_id,
-            user_id,
-            event.version,
-            None,
-        ).await;
-
-        match insert_result {
-            Ok(_) => {
-                accepted.push(event.id.clone());
-
-                // Load event as DomainEvent and apply using strongly-typed structure
-                if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
-                    if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
-                        let event_model = crate::database::models::Event::from(event_row.clone());
-                        if let Ok(domain_event) = DomainEvent::from_event(&event_model) {
-                            // Apply event using polymorphic DomainEvent structure
-                            if let Err(e) = domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await {
-                                tracing::error!("Error applying event to projections: {:?}", e);
-                            } else {
-                                websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, &event_row.aggregate_type);
-                            }
-
-                            // If UNDO event, rebuild entire wallet projections for consistency
-                            if event.event_type == "UNDO" {
-                                tracing::info!("UNDO event processed, triggering full projection rebuild for wallet {}", wallet_id);
-                                if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
-                                    tracing::error!("Error rebuilding projections after UNDO: {:?}", e);
-                                }
-                            }
-
-                            // Save snapshot if needed
-                            let event_count = db.get_event_count_for_wallet(wallet_id).await;
-                            let should_save = crate::services::snapshots::should_create_snapshot(event_count)
-                                || event.event_type == "UNDO";
-
-                            if should_save {
-                                if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
-                                    let _ = crate::services::snapshots::save_snapshot(
-                                        &*state.db_pool,
-                                        db_id,
-                                        event_count,
-                                        snapshot_json.0,
-                                        snapshot_json.1,
-                                        wallet_id,
-                                    ).await;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!("Error inserting event: {:?}", e);
-                conflicts.push(event.id);
-            }
-        }
-    }
-
-    // Each accepted event already triggered broadcast_events_synced in apply_single_event_to_projections.
-
-    Ok(Json(SyncEventsResponse {
-        accepted,
-        conflicts,
-    }))
 }
