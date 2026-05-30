@@ -181,6 +181,11 @@
   },
   "active": "1b21b235138f2619",
   "lastOpenFiles": [
+    "08-wallet-refactoring/README.md",
+    "08-wallet-refactoring/README.md.tmp.449427.f6cd4e282931",
+    "08-wallet-refactoring/01-wallets-2-0-refactoring-plan.md",
+    "08-wallet-refactoring/01-wallets-2-0-refactoring-plan.md.tmp.449427.9bcddead10ab",
+    "08-wallet-refactoring",
     "03-snapshots/05-when-optimizations-apply.md.tmp.449427.baf9f34a9548",
     "03-snapshots/05-when-optimizations-apply.md.tmp.449427.e5f9c68f0cab",
     "03-snapshots/05-when-optimizations-apply.md.tmp.449427.dd7f3fbbfe1d",
@@ -188,12 +193,8 @@
     "03-snapshots/05-when-optimizations-apply.md.tmp.449427.620d0f238494",
     "03-snapshots/05-when-optimizations-apply.md.tmp.449427.4dc964ec04c8",
     "03-snapshots/05-when-optimizations-apply.md.tmp.449427.acd885137305",
-    "03-snapshots/04-snapshot-tables-schema.md.tmp.449427.5be7b2891167",
     "03-snapshots/05-when-optimizations-apply.md",
-    "03-snapshots/05-when-optimizations-apply.md.tmp.449427.2b2fb0d8c969",
     "auth.md",
-    "07-advanced-topics/03-performance-benchmarks.md.tmp.449427.a2d61a83147c",
-    "07-advanced-topics/02-consistency-verification.md.tmp.449427.2339f5aa1d44",
     "decisions.md",
     "database-setup.md",
     "client-todos.md",
@@ -215,7 +216,6 @@
     "04-permissions-and-undo/02-permission-events.md",
     "04-permissions-and-undo/01-undo-events.md",
     "03-snapshots/04-snapshot-tables-schema.md",
-    "03-snapshots/03-optimization-phase2.md",
-    "03-snapshots/02-optimization-phase1.md"
+    "03-snapshots/03-optimization-phase2.md"
   ]
 }

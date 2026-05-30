@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 use uuid::Uuid;
 use crate::AppState;
 use crate::handlers::sync;
@@ -14,6 +14,16 @@ use crate::permissions::{Action, PermissionContext, PermissionModel, Resource, W
 use crate::websocket;
 use crate::database::repository::{DatabaseRepository, Database};
 use crate::database::error::DbError;
+
+// Custom deserializer for WalletRole from string
+fn deserialize_wallet_role<'de, D>(deserializer: D) -> Result<WalletRole, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    WalletRole::from_str(&s)
+        .ok_or_else(|| serde::de::Error::custom("Invalid wallet role. Must be 'owner', 'admin', or 'member'"))
+}
 
 /// Validate permission dependencies (e.g., Write implies Read)
 fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
@@ -181,7 +191,8 @@ pub struct AddUserToWalletRequest {
 
 #[derive(Deserialize)]
 pub struct UpdateWalletUserRequest {
-    pub role: String, // 'owner', 'admin', 'member'
+    #[serde(deserialize_with = "deserialize_wallet_role")]
+    pub role: WalletRole,
 }
 
 #[derive(Serialize)]
@@ -223,7 +234,7 @@ pub async fn create_my_wallet(
             )
         })?;
 
-    db.add_wallet_user(wallet_id, user_id, "owner".to_string())
+    db.add_wallet_user(wallet_id, user_id, WalletRole::Owner.as_str().to_string())
         .await
         .map_err(|e| {
             tracing::error!("Error adding user to wallet: {:?}", e);
@@ -304,7 +315,7 @@ pub async fn create_wallet(
             )
         })?;
 
-    db.add_wallet_user(wallet_id, user_id, "owner".to_string())
+    db.add_wallet_user(wallet_id, user_id, WalletRole::Owner.as_str().to_string())
         .await
         .map_err(|e| {
             tracing::error!("Error adding user to wallet: {:?}", e);
@@ -582,7 +593,7 @@ pub async fn add_user_to_wallet(
 
     // New members get role 'member' (read-only by default). Change role later on the member.
     // POLICY: New invited users MUST start as 'member', never 'owner' or 'admin'.
-    let role = "member";
+    let role = WalletRole::Member;
 
     // Check if wallet exists
     let wallet_exists = db.wallet_exists(wallet_uuid)
@@ -603,7 +614,7 @@ pub async fn add_user_to_wallet(
     }
 
     // Emit event and apply to projection (user_uuid already resolved from username)
-    let event_data = serde_json::json!({ "user_id": user_uuid.to_string(), "role": role });
+    let event_data = serde_json::json!({ "user_id": user_uuid.to_string(), "role": role.as_str() });
     sync::insert_permission_event_and_apply(
         &state,
         auth_user.user_id,
@@ -629,7 +640,7 @@ pub async fn add_user_to_wallet(
         &serde_json::json!({
             "wallet_id": wallet_id,
             "user_id": user_uuid.to_string(),
-            "role": role
+            "role": role.as_str()
         }).to_string(),
     );
 
@@ -790,8 +801,8 @@ pub async fn join_wallet_by_code(
     }
 
     // POLICY: New invited users MUST start as 'member', never 'owner' or 'admin'.
-    let role = "member";
-    let event_data = serde_json::json!({ "user_id": auth_user.user_id.to_string(), "role": role });
+    let role = WalletRole::Member;
+    let event_data = serde_json::json!({ "user_id": auth_user.user_id.to_string(), "role": role.as_str() });
     sync::insert_permission_event_and_apply(
         &state,
         auth_user.user_id,
@@ -816,7 +827,7 @@ pub async fn join_wallet_by_code(
         &serde_json::json!({
             "wallet_id": wallet_uuid.to_string(),
             "user_id": auth_user.user_id.to_string(),
-            "role": role
+            "role": role.as_str()
         }).to_string(),
     );
 
@@ -893,16 +904,8 @@ pub async fn update_wallet_user(
         )
     })?;
 
-    // Validate role
-    if !["owner", "admin", "member"].contains(&payload.role.as_str()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid role. Must be 'owner', 'admin', or 'member'"})),
-        ));
-    }
-
-    // Emit event and apply to projection
-    let event_data = serde_json::json!({ "user_id": user_id, "role": payload.role });
+    // Emit event and apply to projection (payload.role is already validated by deserializer)
+    let event_data = serde_json::json!({ "user_id": user_id, "role": payload.role.as_str() });
     sync::insert_permission_event_and_apply(
         &state,
         auth_user.user_id,
@@ -928,7 +931,7 @@ pub async fn update_wallet_user(
         &serde_json::json!({
             "wallet_id": wallet_id,
             "user_id": user_id,
-            "role": payload.role
+            "role": payload.role.as_str()
         }).to_string(),
     );
 
@@ -965,7 +968,7 @@ pub async fn remove_user_from_wallet(
     if auth_user.user_id == user_uuid {
         let db = Database::new((*state.db_pool).clone());
 
-        let role = db.get_wallet_user_role(wallet_uuid, user_uuid)
+        let role_str = db.get_wallet_user_role(wallet_uuid, user_uuid)
             .await
             .map_err(|e| {
                 tracing::error!("remove_user_from_wallet role check: {:?}", e);
@@ -975,23 +978,27 @@ pub async fn remove_user_from_wallet(
                 )
             })?;
 
-        if role.as_deref() == Some("owner") {
-            let owner_count = db.count_wallet_owners(wallet_uuid)
-                .await
-                .map_err(|e| {
-                    tracing::error!("remove_user_from_wallet owner count: {:?}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
-                    )
-                })?;
-            if owner_count <= 1 {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": "Cannot remove the only owner from the wallet. Add another owner first."
-                    })),
-                ));
+        if let Some(role_str) = role_str {
+            if let Some(role) = WalletRole::from_str(&role_str) {
+                if role.is_owner() {
+                    let owner_count = db.count_wallet_owners(wallet_uuid)
+                        .await
+                        .map_err(|e| {
+                            tracing::error!("remove_user_from_wallet owner count: {:?}", e);
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
+                            )
+                        })?;
+                    if owner_count <= 1 {
+                        return Err((
+                            StatusCode::BAD_REQUEST,
+                            Json(serde_json::json!({
+                                "error": "Cannot remove the only owner from the wallet. Add another owner first."
+                            })),
+                        ));
+                    }
+                }
             }
         }
     }
