@@ -185,6 +185,8 @@
   },
   "active": "4b2641cdb8acda07",
   "lastOpenFiles": [
+    "projections_and_snapshots.md.tmp.449427.1a6650a023e7",
+    "projections_and_snapshots.md.tmp.449427.269634105f0b",
     "permission-system-deep-dive.md",
     "projections_and_snapshots.md",
     "projections_and_snapshots.md.tmp.449427.9d36dc66da48",
@@ -197,7 +199,6 @@
     "event_sourcing_improvements_roadmap.md.tmp.449427.4e5853f7cc29",
     "event_sourcing_memory_optimization.md.tmp.449427.baabf2e2f24a",
     "event_sourcing_memory_optimization.md.tmp.449427.4ec18c082162",
-    "event_sourcing_memory_optimization.md.tmp.449427.6397a17770a2",
     "event_sourcing_memory_optimization.md",
     "sync-refactoring-plan.md",
     "Projects/Permission System Isolation & Refinement.md",

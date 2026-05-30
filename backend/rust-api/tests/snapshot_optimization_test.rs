@@ -863,8 +863,374 @@ async fn test_batch_processing_empty_wallet() {
     assert_eq!(contact_count, 0, "Should have no contacts in empty wallet");
 }
 
-// TODO: Permission Event Tests
-// Permission events are applied directly to operational tables during rebuild,
-// not to separate projection tables like contacts/transactions.
-// Tests need debugging - apply_event_batch permission handling not being invoked yet.
-// See: https://github.com/dark-cli/deptmaster/issues/XXX
+#[tokio::test]
+async fn test_batch_processing_with_permission_events() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Wallet with Permissions").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    // Create a second user to add to the wallet
+    let user2_id = create_test_user(&pool).await;
+
+    let mut config = Config::from_env().unwrap();
+    config.event_rebuild_batch_size = 5;
+    let config = Arc::new(config);
+
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    // Create 10 permission events (WALLET_USER_ADDED events for the same user multiple times with role changes)
+    for i in 0..10 {
+        let event = SyncEventRequest {
+            id: Uuid::new_v4().to_string(),
+            aggregate_type: "permission".to_string(),
+            aggregate_id: user2_id.to_string(),
+            event_type: if i == 0 { "WALLET_USER_ADDED" } else { "WALLET_USER_ROLE_CHANGED" }.to_string(),
+            event_data: json!({
+                "user_id": user2_id.to_string(),
+                "role": if i < 5 { "member" } else { "admin" },
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+        };
+
+        let _ = post_sync_events(
+            axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
+            axum::Json(vec![event]),
+        ).await;
+    }
+
+    // Verify all 10 permission events were created
+    let event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM events WHERE wallet_id = $1 AND aggregate_type = 'permission'"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(event_count, 10, "Should have 10 permission events");
+
+    // Verify user was added to wallet_users
+    let user_in_wallet: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
+    )
+    .bind(wallet_id)
+    .bind(user2_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(user_in_wallet, "User2 should be in wallet_users after sync");
+
+    // Check the role after sync (should be 'admin' from the last WALLET_USER_ROLE_CHANGED)
+    let role_after_sync: String = sqlx::query_scalar(
+        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
+    )
+    .bind(wallet_id)
+    .bind(user2_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(role_after_sync, "admin", "Final role should be admin after all events");
+
+    // Clear wallet_users for this user to test rebuild
+    sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
+        .bind(wallet_id)
+        .bind(user2_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Verify user is no longer in wallet_users
+    let user_removed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
+    )
+    .bind(wallet_id)
+    .bind(user2_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!user_removed, "User should be removed from wallet_users");
+
+    // Rebuild - should reapply all permission events
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed with permission events");
+
+    // Verify user is back in wallet_users
+    let user_restored: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
+    )
+    .bind(wallet_id)
+    .bind(user2_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(user_restored, "User should be restored to wallet_users after rebuild");
+
+    // Verify final role is correct (should be 'admin' from last role change event)
+    let role_after_rebuild: String = sqlx::query_scalar(
+        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
+    )
+    .bind(wallet_id)
+    .bind(user2_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(role_after_rebuild, "admin", "Final role should still be admin after rebuild from batch processing");
+}
+
+#[tokio::test]
+async fn test_permission_events_with_undo() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Wallet with Permission UNDO").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    let user2_id = create_test_user(&pool).await;
+    let user3_id = create_test_user(&pool).await;
+
+    let config = Arc::new(Config::from_env().unwrap());
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    // Create WALLET_USER_ADDED event for user2
+    let user2_add_event = SyncEventRequest {
+        id: Uuid::new_v4().to_string(),
+        aggregate_type: "permission".to_string(),
+        aggregate_id: user2_id.to_string(),
+        event_type: "WALLET_USER_ADDED".to_string(),
+        event_data: json!({
+            "user_id": user2_id.to_string(),
+            "role": "member",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let _ = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
+        axum::Json(vec![user2_add_event.clone()]),
+    ).await;
+
+    // Create WALLET_USER_ADDED event for user3
+    let user3_add_event = SyncEventRequest {
+        id: Uuid::new_v4().to_string(),
+        aggregate_type: "permission".to_string(),
+        aggregate_id: user3_id.to_string(),
+        event_type: "WALLET_USER_ADDED".to_string(),
+        event_data: json!({
+            "user_id": user3_id.to_string(),
+            "role": "member",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let _ = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
+        axum::Json(vec![user3_add_event.clone()]),
+    ).await;
+
+    // Verify both users are in wallet
+    let count_before: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count_before, 3, "Should have 3 users (owner + user2 + user3)");
+
+    // Create UNDO event to undo user2's WALLET_USER_ADDED
+    let undo_event = SyncEventRequest {
+        id: Uuid::new_v4().to_string(),
+        aggregate_type: "permission".to_string(),
+        aggregate_id: Uuid::new_v4().to_string(),
+        event_type: "UNDO".to_string(),
+        event_data: json!({
+            "undone_event_id": user2_add_event.id.clone(),
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let _ = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, "owner"),
+        auth_user_extension(user_id, None),
+        axum::Json(vec![undo_event]),
+    ).await;
+
+    // Rebuild to apply UNDO
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed with UNDO event");
+
+    // Verify user2 is NOT in wallet (was undone)
+    let user2_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
+    )
+    .bind(wallet_id)
+    .bind(user2_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!user2_exists, "User2 should not be in wallet (WALLET_USER_ADDED was undone)");
+
+    // Verify user3 is still in wallet (not undone)
+    let user3_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
+    )
+    .bind(wallet_id)
+    .bind(user3_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(user3_exists, "User3 should still be in wallet (not undone)");
+
+    // Verify final count is 2 (owner + user3 only)
+    let count_after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count_after, 2, "Should have 2 users after UNDO");
+}
+
+#[tokio::test]
+async fn test_permission_events_with_snapshot() {
+    let pool = setup_test_db().await;
+    let user_id = create_test_user(&pool).await;
+    let wallet_id = create_test_wallet(&pool, "Wallet with Permission Snapshot").await;
+    add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
+
+    let config = Arc::new(Config::from_env().unwrap());
+    let broadcast_tx = websocket::create_broadcast_channel();
+    let app_state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        config: config.clone(),
+        broadcast_tx: broadcast_tx.clone(),
+        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+    };
+
+    // Create 15 contacts to trigger snapshot creation
+    for i in 0..15 {
+        let contact_id = Uuid::new_v4();
+        let event = SyncEventRequest {
+            id: Uuid::new_v4().to_string(),
+            aggregate_type: "contact".to_string(),
+            aggregate_id: contact_id.to_string(),
+            event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
+            event_data: json!({
+                "name": format!("Contact {}", i),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+        };
+
+        let _ = post_sync_events(
+            axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
+            axum::Json(vec![event]),
+        ).await;
+    }
+
+    // Verify snapshot was created
+    let snapshot_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(snapshot_count > 0, "Snapshot should be created");
+
+    // Create 5 permission events after snapshot
+    let new_users = vec![
+        create_test_user(&pool).await,
+        create_test_user(&pool).await,
+        create_test_user(&pool).await,
+        create_test_user(&pool).await,
+        create_test_user(&pool).await,
+    ];
+
+    for new_user_id in &new_users {
+        let event = SyncEventRequest {
+            id: Uuid::new_v4().to_string(),
+            aggregate_type: "permission".to_string(),
+            aggregate_id: new_user_id.to_string(),
+            event_type: "WALLET_USER_ADDED".to_string(),
+            event_data: json!({
+                "user_id": new_user_id.to_string(),
+                "role": "member",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            version: 1,
+        };
+
+        let _ = post_sync_events(
+            axum::extract::State(app_state.clone()),
+            wallet_context_extension(wallet_id, "owner"),
+            auth_user_extension(user_id, None),
+            axum::Json(vec![event]),
+        ).await;
+    }
+
+    // Verify all new users are in wallet_users
+    let user_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(user_count, 6, "Should have 6 users (1 owner + 5 new)");
+
+    // Clear wallet_users (except owner) to test rebuild with snapshot
+    sqlx::query(
+        "DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id != $2"
+    )
+    .bind(wallet_id)
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Rebuild - should use snapshot + apply permission events after snapshot
+    let rebuild_result = rebuild_projections_from_events(&app_state, wallet_id).await;
+    assert!(rebuild_result.is_ok(), "Rebuild should succeed with snapshot");
+
+    // Verify all users are restored
+    let restored_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1"
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(restored_count, 6, "All users should be restored after rebuild with snapshot");
+}

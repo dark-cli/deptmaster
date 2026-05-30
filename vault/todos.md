@@ -206,7 +206,7 @@ Mobile (Flutter) TODOs have been split into a separate document for clarity:
   - Remove SMTP variables from `.env.example`
   - Update `architecture.md` (lists "Email: Lettre" in tech stack)
 
-- [ ] Remove or implement Redis
+- [x] Remove or implement Redis
   - Either: Remove from docker-compose.yml, Cargo.toml, config.rs
   - Or: Implement actual caching logic if needed
   - Currently: Declared but not used (wastes resources)

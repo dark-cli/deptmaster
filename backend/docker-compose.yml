@@ -23,14 +23,6 @@ services:
     networks:
       - debt_tracker_network
 
-  redis:
-    image: redis:7-alpine
-    container_name: debt_tracker_redis
-    ports:
-      - "6379:6379"
-    networks:
-      - debt_tracker_network
-
   api:
     build:
       context: ./rust-api
@@ -38,7 +30,6 @@ services:
     container_name: debt_tracker_api
     environment:
       DATABASE_URL: postgresql://debt_tracker:${DB_PASSWORD:-dev_password}@postgres:5432/debt_tracker
-      REDIS_URL: redis://redis:6379
       PORT: 8000
       RUST_LOG: info
     ports:
@@ -46,8 +37,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_started
     networks:
       - debt_tracker_network
     restart: unless-stopped

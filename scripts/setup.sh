@@ -90,7 +90,7 @@ if ! docker ps > /dev/null 2>&1; then
 fi
 
 cd backend
-docker-compose up -d postgres eventstore redis 2>/dev/null || docker-compose up -d postgres eventstore redis
+docker-compose up -d postgres eventstore 2>/dev/null || docker-compose up -d postgres eventstore
 cd ..
 
 print_info "Waiting for services to be ready..."

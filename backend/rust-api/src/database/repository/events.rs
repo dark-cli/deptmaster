@@ -249,6 +249,8 @@ impl Database {
         wallet_id: Uuid,
         undone_event_ids: &mut std::collections::HashSet<Uuid>,
     ) -> Result<(), sqlx::Error> {
+        tracing::info!("apply_event_batch: processing {} events", events.len());
+
         if undone_event_ids.is_empty() {
             for row in events.iter() {
                 let event_type: String = row.get("event_type");
@@ -272,6 +274,7 @@ impl Database {
             let created_at: NaiveDateTime = row.get("created_at");
             let event_db_id: i64 = row.get("id");
 
+            tracing::info!("apply_event_batch processing: type={}/{}", aggregate_type, event_type);
 
             if event_type == "UNDO" {
                 continue;
@@ -595,12 +598,14 @@ impl Database {
             } else if aggregate_type == "permission" {
                 // Permission events are applied to operational tables (wallet_users, user_groups, etc.)
                 // They don't have a separate projection table since they're normalized and frequently queried
+                tracing::info!("Processing permission event: {}", event_type);
                 match event_type.as_str() {
                     "WALLET_USER_ADDED" => {
                         let user_id_str = event_data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        tracing::info!("WALLET_USER_ADDED: inserting user {}", user_id_str);
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                             let role = event_data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
-                            let _ = sqlx::query(
+                            let result = sqlx::query(
                                 r#"
                                 INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
                                 VALUES ($1, $2, $3, $4)
@@ -613,6 +618,12 @@ impl Database {
                             .bind(created_at)
                             .execute(&self.pool)
                             .await;
+
+                            if let Err(e) = result {
+                                tracing::error!("Error inserting wallet user: {:?}", e);
+                            } else {
+                                tracing::info!("Successfully inserted wallet user");
+                            }
                         }
                     }
                     "WALLET_USER_ROLE_CHANGED" => {

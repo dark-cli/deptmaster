@@ -627,16 +627,10 @@ cmd_start_docker_services() {
         (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
         sleep 5
     fi
-    
-    if [ "$1" = "redis" ] || [ -z "$1" ]; then
-        print_info "Starting Redis..."
-        (cd "$ROOT_DIR/backend" && docker-compose up -d redis > /dev/null 2>&1)
-        sleep 3
-    fi
-    
+
     if [ -z "$1" ]; then
         print_info "Starting all services..."
-        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres redis > /dev/null 2>&1)
+        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
     fi
     if [ "$VERBOSE" = true ]; then
         print_success "Services started"
@@ -645,15 +639,13 @@ cmd_start_docker_services() {
 
 cmd_stop_docker_services() {
     validate_flags "stop-docker-services"
-    
+
     print_info "Stopping Docker services..."
-    
+
     check_docker
-    
+
     if [ "$1" = "postgres" ]; then
         (cd "$ROOT_DIR/backend" && docker-compose stop postgres)
-    elif [ "$1" = "redis" ]; then
-        (cd "$ROOT_DIR/backend" && docker-compose stop redis)
     else
         (cd "$ROOT_DIR/backend" && docker-compose stop)
     fi
@@ -662,8 +654,8 @@ cmd_stop_docker_services() {
 
 cmd_start_server_docker() {
     validate_flags "start-server-docker"
-    
-    print_info "Starting API server (runs directly on system, uses Docker for database/redis)..."
+
+    print_info "Starting API server (runs directly on system, uses Docker for database)..."
     
     # Stop any existing server
     pkill -f "debt-tracker-api" > /dev/null 2>&1 || true
@@ -765,7 +757,7 @@ cmd_start_all_docker_production() {
     check_docker
     
     # Start all services including API in Docker
-    print_info "Starting all Docker services (postgres, redis, api)..."
+    print_info "Starting all Docker services (postgres, api)..."
     (cd "$ROOT_DIR/backend" && docker-compose up -d)
     
     # Wait for services to be healthy
@@ -788,9 +780,9 @@ cmd_start_server_direct() {
         exit 1
     fi
     
-    # Start services (postgres, redis) if not running
+    # Start services (postgres) if not running
     cmd_start_docker_services
-    
+
     # Stop Docker API container if running (to free port 8000)
     if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_api$'; then
         print_info "Stopping Docker API container to free port 8000..."
@@ -829,14 +821,12 @@ cmd_start_server_direct() {
     
     print_info "Starting Rust server directly..."
     print_info "Database: postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker"
-    print_info "Redis: redis://localhost:6379"
     print_info ""
     print_info "Press Ctrl+C to stop"
     print_info ""
-    
+
     # Set environment variables
     export DATABASE_URL="${DATABASE_URL:-postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker}"
-    export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
     export PORT="${PORT:-8000}"
     export RUST_LOG="${RUST_LOG:-debug}"
     export JWT_SECRET="${JWT_SECRET:-your-secret-key-change-in-production}"
@@ -890,12 +880,6 @@ cmd_status() {
             echo "    ✅ PostgreSQL"
         else
             echo "    ❌ PostgreSQL (not running)"
-        fi
-        
-        if docker ps | grep -q "debt_tracker_redis"; then
-            echo "    ✅ Redis"
-        else
-            echo "    ❌ Redis (not running)"
         fi
     else
         print_error "Docker: Not running"
@@ -2386,11 +2370,11 @@ Database Commands:
   rebuild-database-projections      Rebuild projections from events (via API)
 
 Docker Services Commands:
-  start-docker-services [name]     Start Docker services (postgres/redis/all)
+  start-docker-services [name]     Start Docker services (postgres/all)
   stop-docker-services [name]      Stop Docker services
 
 Server Commands:
-  start-server-docker              Start API server (runs directly on system, uses Docker for database/redis)
+  start-server-docker              Start API server (runs directly on system, uses Docker for database)
                                   Use --skip-server-build to skip build if binary exists
   start-server-direct              Start development server (runs directly, not in Docker, with auto-reload)
   start-all-docker-production      Start production server (all services in Docker containers)
@@ -2453,7 +2437,7 @@ Examples:
   $0 set-admin-password admin mypass              # Set admin panel login password
   $0 start-all-docker-production                  # Start production (all in Docker)
   $0 start-server-direct                          # Start development (Rust directly, faster, auto-reload)
-  $0 start-server-docker                          # Start server (runs on system, uses Docker for DB/Redis)
+  $0 start-server-docker                          # Start server (runs on system, uses Docker for DB)
   $0 restart-server                               # Restart server
   $0 status                                        # Check what's running
   $0 run-flutter-app android                      # Run Android app (dev mode)

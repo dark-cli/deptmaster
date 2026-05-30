@@ -484,12 +484,41 @@ if should_create_snapshot(event_count) {
 
 ---
 
+## Permission Events in Projections & Snapshots
+
+### How Permission Events Are Handled
+
+Permission events (WALLET_USER_ADDED, USER_GROUP_CREATED, etc.) are applied directly to operational tables during projection rebuilding, not to separate projection tables like contacts/transactions:
+
+**Affected Tables:**
+- `wallet_users` - User access to wallet (WALLET_USER_ADDED, WALLET_USER_REMOVED)
+- `user_groups` - Groups of users (USER_GROUP_CREATED, USER_GROUP_DELETED)
+- `user_group_members` - Group membership (USER_GROUP_MEMBER_ADDED, USER_GROUP_MEMBER_REMOVED)
+- `contact_groups` - Groups of contacts (CONTACT_GROUP_CREATED, CONTACT_GROUP_DELETED)
+- `contact_group_members` - Contact group membership
+
+### UNDO Support for Permission Events
+
+Permission events can be undone using UNDO events:
+- UNDO of WALLET_USER_ADDED → User is not added to wallet during rebuild
+- UNDO of USER_GROUP_CREATED → Group is not created during rebuild
+- UNDO of USER_GROUP_MEMBER_ADDED → Member is not added to group
+
+**Key Design:** When UNDO events are present for permission events:
+1. All permission tables are cleared (except wallet owner preserved)
+2. All events are replayed from scratch
+3. Undone events are skipped
+4. Final state represents correct permission hierarchy
+
+---
+
 ## Testing the System
 
 ### Unit Tests
-- `snapshot_optimization_test.rs`: 10 tests covering snapshot and batch processing
+- `snapshot_optimization_test.rs`: 13 tests covering snapshot, batch processing, and permission events
   - 5 snapshot optimization tests (Phase 1)
   - 5 batch processing tests (Phase 2)
+  - 3 permission event tests (Phase 2+)
 
 ### Key Test Scenarios
 1. ✅ Events applied successfully
@@ -502,6 +531,9 @@ if should_create_snapshot(event_count) {
 8. ✅ Batch processing maintains memory efficiency (Phase 2)
 9. ✅ UNDO events handled correctly within batches (Phase 2)
 10. ✅ Edge cases (empty wallet, batch size variations) (Phase 2)
+11. ✅ Permission events applied during batch processing
+12. ✅ Permission events work with snapshot optimization
+13. ✅ UNDO events work correctly with permission events
 
 ---
 
@@ -519,6 +551,13 @@ if should_create_snapshot(event_count) {
 - Default batch size: 1000 (configurable via EVENT_REBUILD_BATCH_SIZE)
 - Memory bounded at 5-10MB regardless of wallet size
 - Works with UNDO events and snapshot optimization
+
+**Permission Events Coverage** ✅
+- Permission events (WALLET_USER_ADDED, USER_GROUP_CREATED, etc.) fully integrated
+- Applied directly to operational tables during projection rebuilds
+- UNDO support: undoing permission events works correctly in full rebuilds
+- Comprehensive test coverage: 3 dedicated tests for permission event scenarios
+- Works with both snapshot optimization and batch processing
 
 ### Future Improvements
 

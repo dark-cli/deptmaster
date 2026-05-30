@@ -84,6 +84,61 @@ impl Projections {
             event_type == "UNDO"
         });
 
+        // Clear projections and permission data if UNDO events exist (they require full rebuild)
+        // or if doing full rebuild (checked later in snapshot path)
+        if has_undo_events {
+            tracing::info!("UNDO events detected, clearing projections for rebuild");
+
+            // Find the actual wallet owner (role = 'owner')
+            let owner_user_id: Option<Uuid> = sqlx::query_scalar(
+                "SELECT user_id FROM wallet_users WHERE wallet_id = $1 AND role = 'owner' LIMIT 1"
+            )
+            .bind(wallet_id)
+            .fetch_optional(&*state.db_pool)
+            .await?;
+
+            let owner_id = owner_user_id.unwrap_or(user_id); // Fallback to current user if no owner found
+
+            // Clear existing projections first
+            sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+
+            sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+
+            // Clear permission-related data (but preserve the wallet owner)
+            sqlx::query("DELETE FROM contact_group_members WHERE contact_group_id IN (SELECT id FROM contact_groups WHERE wallet_id = $1 AND is_system = false)")
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+
+            sqlx::query("DELETE FROM contact_groups WHERE wallet_id = $1 AND is_system = false")
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+
+            sqlx::query("DELETE FROM user_group_members WHERE user_group_id IN (SELECT id FROM user_groups WHERE wallet_id = $1 AND is_system = false)")
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+
+            sqlx::query("DELETE FROM user_groups WHERE wallet_id = $1 AND is_system = false")
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
+
+            // Clear all non-owner wallet users (to rebuild permission state from events)
+            sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id != $2")
+                .bind(wallet_id)
+                .bind(owner_id)
+                .execute(&*state.db_pool)
+                .await?;
+        }
+
         let used_snapshot = if has_undo_events {
             // Step 3: If UNDO event exists, find undone event positions
             let mut undone_event_positions = Vec::new();
@@ -263,16 +318,58 @@ impl Projections {
         // If snapshot optimization failed or not used, do full rebuild
         if !used_snapshot {
             tracing::warn!("Snapshot optimization failed or not available, performing full rebuild with batch processing");
-            // Clear existing projections for this wallet (delete transactions first due to foreign key constraints)
-            sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+
+            // Clear existing projections and permission data for this wallet if not already cleared above
+            if !has_undo_events {
+                // Only clear if we haven't already done so in the UNDO block above
+
+                // Find the actual wallet owner
+                let owner_user_id: Option<Uuid> = sqlx::query_scalar(
+                    "SELECT user_id FROM wallet_users WHERE wallet_id = $1 AND role = 'owner' LIMIT 1"
+                )
                 .bind(wallet_id)
-                .execute(&*state.db_pool)
+                .fetch_optional(&*state.db_pool)
                 .await?;
 
-            sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
-                .bind(wallet_id)
-                .execute(&*state.db_pool)
-                .await?;
+                let owner_id = owner_user_id.unwrap_or(user_id); // Fallback to current user if no owner found
+
+                sqlx::query("DELETE FROM transactions_projection WHERE wallet_id = $1")
+                    .bind(wallet_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+
+                sqlx::query("DELETE FROM contacts_projection WHERE wallet_id = $1")
+                    .bind(wallet_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+
+                // Clear permission-related data (but preserve the wallet owner)
+                sqlx::query("DELETE FROM contact_group_members WHERE contact_group_id IN (SELECT id FROM contact_groups WHERE wallet_id = $1 AND is_system = false)")
+                    .bind(wallet_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+
+                sqlx::query("DELETE FROM contact_groups WHERE wallet_id = $1 AND is_system = false")
+                    .bind(wallet_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+
+                sqlx::query("DELETE FROM user_group_members WHERE user_group_id IN (SELECT id FROM user_groups WHERE wallet_id = $1 AND is_system = false)")
+                    .bind(wallet_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+
+                sqlx::query("DELETE FROM user_groups WHERE wallet_id = $1 AND is_system = false")
+                    .bind(wallet_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+
+                sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id != $2")
+                    .bind(wallet_id)
+                    .bind(owner_id)
+                    .execute(&*state.db_pool)
+                    .await?;
+            }
 
             // Collect undone event IDs if UNDO events exist
             let mut undone_event_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();

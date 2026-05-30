@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run Rust server directly for faster development/testing
-# This assumes postgres and redis are running in Docker
+# This assumes postgres is running in Docker
 
 set -e
 
@@ -14,12 +14,11 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${GREEN}🚀 Starting Rust server in development mode...${NC}"
-echo -e "${YELLOW}Note: Make sure postgres and redis are running in Docker${NC}"
+echo -e "${YELLOW}Note: Make sure postgres is running in Docker${NC}"
 echo ""
 
 # Set environment variables (can be overridden by .env file)
 export DATABASE_URL="${DATABASE_URL:-postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker}"
-export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 export PORT="${PORT:-8000}"
 export RUST_LOG="${RUST_LOG:-debug}"
 
@@ -29,7 +28,6 @@ export JWT_EXPIRATION="${JWT_EXPIRATION:-3600}"
 
 echo "Configuration:"
 echo "  DATABASE_URL: $DATABASE_URL"
-echo "  REDIS_URL: $REDIS_URL"
 echo "  PORT: $PORT"
 echo "  RUST_LOG: $RUST_LOG"
 echo ""
