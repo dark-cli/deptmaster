@@ -405,41 +405,309 @@ if has_undo {
 
 ---
 
-## RECOMMENDED SOLUTION ⭐
+## RECOMMENDED SOLUTION ⭐ (Two-Part)
+
+### Optimization 1: Skip Already-Processed Events (Trivial)
 
 **Use `last_event_id` tracking (already exists!)**
 
-This is the simplest possible fix:
+```rust
+// Get the last event we've already processed
+let max_event_id = sqlx::query_scalar::<_, Option<i64>>(
+    "SELECT COALESCE(MAX(last_event_id), 0) FROM contacts_projection WHERE wallet_id = $1"
+)
+.bind(wallet_id)
+.fetch_one(&pool)
+.await?;
 
-1. **Trivial to implement**: 2-3 line change
-2. **Already tracked**: `last_event_id` exists in schema
-3. **Zero complexity**: No snapshots, batching, or multi-path logic
-4. **100,000x better**: 1GB → 10KB memory
-5. **Always works**: Whether snapshot exists or not
+// Only fetch NEW events
+let events = sqlx::query("SELECT ... FROM events WHERE id > $1 ...")
+    .bind(max_event_id.unwrap_or(0))
+    .fetch_all(&pool)
+    .await?;
+```
 
-**Implementation Plan (Super Simple)**:
+**Impact**: Most rebuilds have 0-100 new events = ~1KB memory
+
+---
+
+### Optimization 2: Batch Processing for Full Rebuilds (When No Prior State)
+
+For initial setup or disaster recovery where projections are empty:
+
+```rust
+const BATCH_SIZE: usize = 1000;  // Configurable via .env
+
+let mut offset = 0;
+loop {
+    // Fetch one batch
+    let batch = sqlx::query(
+        "SELECT ... FROM events WHERE wallet_id = $1 AND id > $2
+         ORDER BY created_at ASC LIMIT $3 OFFSET $4"
+    )
+    .bind(wallet_id)
+    .bind(max_event_id.unwrap_or(0))
+    .bind(BATCH_SIZE)
+    .bind(offset)
+    .fetch_all(&pool)
+    .await?;
+    
+    if batch.is_empty() { break; }
+    
+    // Process this batch
+    for event in &batch {
+        apply_event_to_projection(event).await?;
+    }
+    
+    offset += batch.len();
+}
+```
+
+**Impact**: Memory capped at ~5-10MB per batch, regardless of total events
+
+---
+
+## Combined Effect
+
+| Scenario | Memory | Speed |
+|----------|--------|-------|
+| Normal rebuild (1-100 new events) | ~1KB | <1s |
+| Full rebuild (1M events) | ~5-10MB | 5-10s |
+| Full rebuild (10M events) | ~5-10MB | 50-100s |
+
+**With both optimizations**: Scalable to any wallet size
+
+**Implementation Plan (Two-Phase)**:
+
+### Phase 1: Skip Already-Processed Events (Priority: IMMEDIATE)
 
 ```
-Phase 1: Get max last_event_id (1-2 lines)
-- Query MAX(last_event_id) from contacts_projection
-- Query MAX(last_event_id) from transactions_projection
-- Take the maximum
-
-Phase 2: Filter events query (1 line change)
-- Change: fetch_all() with WHERE wallet_id = $1
-- To: fetch_all() with WHERE wallet_id = $1 AND id > $2
-- Bind the max_event_id
-
-Phase 3: Test (verify memory usage)
-- Rebuild with large wallet
-- Verify memory stays ~10KB
-- Profit!
+1. Add query: SELECT COALESCE(MAX(last_event_id), 0) FROM contacts_projection
+2. Change WHERE clause: add "AND id > $2"
+3. Bind max_event_id parameter
+4. Test: verify normal rebuilds use <10KB memory
 ```
+
+**Time**: 15 minutes
+**Impact**: 90% of rebuilds now instant with minimal memory
+
+---
+
+### Phase 2: Batch Processing for Full Rebuilds (Priority: SOON)
+
+```
+1. Add config in .env:
+   EVENT_REBUILD_BATCH_SIZE=1000
+   
+2. Add env variable to Config struct:
+   pub event_rebuild_batch_size: usize
+   
+3. Implement batch loop in rebuild_projections_from_events:
+   for offset in (0..total).step_by(batch_size) {
+       fetch batch
+       apply batch
+   }
+   
+4. Test with 10M+ event wallet
+```
+
+**Time**: 30 minutes
+**Impact**: Full rebuilds bounded to ~10MB memory, linear time
+
+---
+
+## Naming: "Batch" vs Alternatives
+
+Term | Usage | Pros | Cons |
+|-----|-------|------|------|
+| **Batch** | Standard in DB/event sourcing | Industry term, clear | Could mean HTTP batch requests |
+| Chunk | File/stream processing | Clear "piece" metaphor | Less formal |
+| Window | Streaming/timeseries | Common in Kafka | May confuse with time windows |
+| Page | Pagination context | Familiar to web devs | Less about "batch processing" |
+| Segment | Data warehouse | Technical but vague | Overloaded term |
+
+**Recommendation**: `BATCH` - it's the industry standard for event sourcing and database operations.
+
+**Config naming**:
+```env
+# Event Sourcing Batch Settings
+EVENT_REBUILD_BATCH_SIZE=1000    # How many events to process at once during rebuild
+```
+
+---
 
 **Expected Results**:
-- All rebuilds: <1s, ~10KB memory
-- No memory issues ever
-- Can handle 1B+ events per wallet
+- Optimization 1: Most rebuilds <1s, ~1KB memory
+- Optimization 2: Full rebuilds ~5-10MB memory, linear time
+- Combined: Scalable to 1B+ events per wallet
+
+---
+
+## Implementation Code Snippets
+
+### Snippet 1: Phase 1 - Skip Already-Processed Events
+
+```rust
+// In src/services/projections.rs - Projections::rebuild_projections_from_events()
+
+// BEFORE (line 26-44):
+let user_id = sqlx::query_scalar::<_, Uuid>(...)
+    .bind(wallet_id)
+    .fetch_one(&*state.db_pool)
+    .await?;
+
+let events = sqlx::query(
+    r#"
+    SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
+    FROM events
+    WHERE wallet_id = $1
+    ORDER BY created_at ASC
+    "#
+)
+.bind(wallet_id)
+.fetch_all(&*state.db_pool)
+.await?;
+
+// AFTER:
+let user_id = sqlx::query_scalar::<_, Uuid>(...)
+    .bind(wallet_id)
+    .fetch_one(&*state.db_pool)
+    .await?;
+
+// NEW: Get max event ID already processed
+let max_processed_id: Option<i64> = sqlx::query_scalar(
+    "SELECT COALESCE(MAX(last_event_id), 0) FROM contacts_projection WHERE wallet_id = $1"
+)
+.bind(wallet_id)
+.fetch_one(&*state.db_pool)
+.await?;
+
+let events = sqlx::query(
+    r#"
+    SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
+    FROM events
+    WHERE wallet_id = $1 AND id > $2
+    ORDER BY created_at ASC
+    "#
+)
+.bind(wallet_id)
+.bind(max_processed_id.unwrap_or(0))  // NEW parameter
+.fetch_all(&*state.db_pool)
+.await?;
+```
+
+---
+
+### Snippet 2: Phase 2 - Batch Processing for Full Rebuild
+
+```rust
+// In src/services/projections.rs - Full rebuild section (around line 237)
+
+const BATCH_SIZE: usize = 1000;  // Or load from config.event_rebuild_batch_size
+
+if !used_snapshot {
+    tracing::warn!("Snapshot optimization failed, performing full rebuild");
+    
+    // CHANGE: Instead of processing all events at once,
+    // fetch and process in batches
+    
+    let mut offset = 0;
+    
+    loop {
+        // Fetch one batch
+        let batch = sqlx::query(
+            r#"
+            SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
+            FROM events
+            WHERE wallet_id = $1 AND id > $2
+            ORDER BY created_at ASC
+            LIMIT $3 OFFSET $4
+            "#
+        )
+        .bind(wallet_id)
+        .bind(max_processed_id.unwrap_or(0))
+        .bind(BATCH_SIZE as i64)
+        .bind(offset as i64)
+        .fetch_all(&*state.db_pool)
+        .await?;
+        
+        if batch.is_empty() {
+            break;  // No more events
+        }
+        
+        // Collect undone event IDs (can reuse from earlier check)
+        let mut undone_event_ids = /* from earlier */;
+        
+        // Process this batch
+        let filtered: Vec<_> = batch.iter()
+            .filter(|row| {
+                let event_type: String = row.get("event_type");
+                if event_type == "UNDO" {
+                    return false;
+                }
+                true
+            })
+            .map(|row| row as &sqlx::postgres::PgRow)
+            .collect();
+        
+        // Apply events in this batch
+        let rows_to_apply: Vec<_> = filtered.iter().map(|row| *row).collect();
+        let db = Database::new((*state.db_pool).clone());
+        db.apply_events_to_projections_impl(&rows_to_apply, user_id, wallet_id, &mut undone_event_ids).await?;
+        
+        tracing::info!("Processed batch of {} events (offset: {})", batch.len(), offset);
+        
+        offset += batch.len();
+    }
+}
+```
+
+---
+
+### Snippet 3: Configuration (in .env)
+
+```bash
+# Event Sourcing Configuration
+# Batch size for rebuilding projections from events
+# Larger values = more memory per batch but fewer DB queries
+# Smaller values = less memory but more DB round-trips
+# Optimal: 500-5000 depending on event_data size
+# Default: 1000
+EVENT_REBUILD_BATCH_SIZE=1000
+```
+
+---
+
+### Snippet 4: Load from Config
+
+```rust
+// In src/config.rs
+pub struct Config {
+    // ... existing fields ...
+    pub event_rebuild_batch_size: usize,
+}
+
+impl Config {
+    pub fn from_env() -> Result<Self, Error> {
+        Ok(Self {
+            // ... existing fields ...
+            event_rebuild_batch_size: std::env::var("EVENT_REBUILD_BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1000),  // Default: 1000 events per batch
+        })
+    }
+}
+
+// In src/services/projections.rs
+pub async fn rebuild_projections_from_events(
+    state: &AppState,
+    wallet_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let batch_size = state.config.event_rebuild_batch_size;
+    // ... use batch_size in loop ...
+}
+```
 
 ---
 
