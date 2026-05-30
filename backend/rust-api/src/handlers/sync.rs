@@ -13,7 +13,7 @@ use crate::services::snapshots;
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
-use crate::permissions::{Action, PermissionContext, PermissionModel, Resource};
+use crate::permissions::{PermissionContext, PermissionModel};
 use crate::database::repository::Database;
 use crate::database::models::EventRow;
 use crate::services::projections::Projections;
@@ -300,47 +300,28 @@ pub async fn post_sync_events(
     let perm_ctx = PermissionContext::new(wallet_id, user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    // PERMISSION CHECK: Build permissions list, tracking which event each belongs to
-    let mut permission_checks: Vec<(Action, Resource)> = Vec::new();
-    let mut perm_index_to_event_id: Vec<Uuid> = Vec::new();
-
-    for domain_event in &events {
-        let event_id = domain_event.id();
-        let perms = domain_event.required_permissions();
-
-        // Track which event each permission belongs to
-        for perm in perms {
-            permission_checks.push(perm);
-            perm_index_to_event_id.push(event_id);
-        }
-    }
-
     // Process each event
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
 
-    // Verify all permissions in batch, tracking which events fail permission checks
-    if !permission_checks.is_empty() {
-        let results = perm_model
-            .check_permissions(&perm_ctx, permission_checks)
-            .await
-            .map_err(|_| responses::insufficient_permission_response())?;
-
-        // Map permission check results back to events
-        for (idx, &allowed) in results.iter().enumerate() {
-            if !allowed && idx < perm_index_to_event_id.len() {
-                let event_id = perm_index_to_event_id[idx];
-                // Only add to conflicts if not already there
-                if !conflicts.contains(&event_id.to_string()) {
-                    conflicts.push(event_id.to_string());
-                }
-            }
-        }
-    }
-
     for domain_event in events {
         let event_id = domain_event.id();
         let aggregate_id = domain_event.aggregate_id();
+
+        // PERMISSION CHECK: Check required permissions for this event
+        let perms = domain_event.required_permissions();
+        if !perms.is_empty() {
+            let results = perm_model
+                .check_permissions(&perm_ctx, perms)
+                .await
+                .map_err(|_| responses::insufficient_permission_response())?;
+
+            // If any permission check failed, add event to conflicts
+            if !results.iter().all(|&allowed| allowed) {
+                conflicts.push(event_id.to_string());
+                continue;
+            }
+        }
 
         // Check idempotency
         let existing = db.get_event_by_id_impl(event_id)
