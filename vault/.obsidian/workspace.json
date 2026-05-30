@@ -185,6 +185,11 @@
   },
   "active": "4b2641cdb8acda07",
   "lastOpenFiles": [
+    "projections_and_snapshots.md.tmp.449427.4c0caad380f9",
+    "projections_and_snapshots.md.tmp.449427.c1855053a0d8",
+    "projections_and_snapshots.md.tmp.449427.9dee28028c13",
+    "event_handler_architecture.md",
+    "event_handler_architecture.md.tmp.449427.d81a2ed73cab",
     "projections_and_snapshots.md.tmp.449427.1a6650a023e7",
     "projections_and_snapshots.md.tmp.449427.269634105f0b",
     "permission-system-deep-dive.md",
@@ -194,11 +199,7 @@
     "projections_and_snapshots.md.tmp.449427.22e82b74c3a7",
     "projections_and_snapshots.md.tmp.449427.9f517f40f9fb",
     "projections_and_snapshots.md.tmp.449427.625e433d5fd6",
-    "projections_and_snapshots.md.tmp.449427.60db5eb8e9c8",
     "event_sourcing_improvements_roadmap.md",
-    "event_sourcing_improvements_roadmap.md.tmp.449427.4e5853f7cc29",
-    "event_sourcing_memory_optimization.md.tmp.449427.baabf2e2f24a",
-    "event_sourcing_memory_optimization.md.tmp.449427.4ec18c082162",
     "event_sourcing_memory_optimization.md",
     "sync-refactoring-plan.md",
     "Projects/Permission System Isolation & Refinement.md",
@@ -219,7 +220,6 @@
     "sync-architecture.md",
     "backend-reader-guide.md",
     "wiki-links.md",
-    "advanced-permissions-plan.md",
-    "reading-guide.md"
+    "advanced-permissions-plan.md"
   ]
 }

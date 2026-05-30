@@ -4,6 +4,10 @@
 
 This document explains the **Event Sourcing** pattern with **Snapshot Optimization** used in the debt tracker application for efficient projection rebuilding.
 
+**Related Documentation:**
+- **[Event Handler Architecture](event_handler_architecture.md)** - How events are applied using type-driven handlers (read this first for understanding event application)
+- This document focuses on projection caching and rebuilding optimization
+
 ### Core Concepts
 
 **Event Sourcing**: Store complete history of state changes (events) instead of current state
@@ -59,25 +63,32 @@ Both paths ultimately use the same core logic:
              └─→ Update projections
 ```
 
-### Single Source of Truth: `apply_event_batch()`
+### Single Source of Truth: `apply_event_batch()` and Type-Driven Handlers
 
-All event application (sync or rebuild) delegates to one function:
+All event application (sync or rebuild) uses the **type-driven event handler architecture**:
 
+**Current Implementation:**
+- `apply_event_batch()` - Traditional string-based matching (being phased out)
+- `apply_event_batch_type_driven()` - New type-safe approach (in progress)
+
+**How It Works:**
 ```rust
-pub async fn apply_event_batch(
-    &self,
-    events: &[&sqlx::postgres::PgRow],  // Row(s) from events table
-    user_id: Uuid,
-    wallet_id: Uuid,
-    undone_event_ids: &mut HashSet<Uuid>,
-) -> Result<(), sqlx::Error>
+// Events are deserialized into DomainEvent enum
+let event: DomainEvent = serde_json::from_value(event_data)?;
+
+// Each event knows how to apply itself (type-driven delegation)
+event.apply_self(pool, wallet_id, user_id, event_db_id, created_at).await?;
 ```
 
-This ensures:
+**Architecture Benefits:**
+- ✅ Type-safe event handling (compiler validates aggregate types)
+- ✅ Aggregate-specific handlers (ContactEvent, PermissionEvent, etc.)
+- ✅ Adding new event types is trivial (just add enum variant + handler)
 - ✅ Same logic for sync and rebuild
-- ✅ Single place to fix bugs
 - ✅ Consistent behavior everywhere
 - ✅ Automatic last_event_id tracking
+
+See **[Event Handler Architecture](event_handler_architecture.md)** for detailed explanation of how to add new event types.
 
 ---
 
@@ -558,6 +569,14 @@ Permission events can be undone using UNDO events:
 - UNDO support: undoing permission events works correctly in full rebuilds
 - Comprehensive test coverage: 3 dedicated tests for permission event scenarios
 - Works with both snapshot optimization and batch processing
+
+**Type-Driven Event Handler Architecture** ✅ (New)
+- Replaced string-based event matching with strongly-typed enums
+- Each aggregate type (Contact, Transaction, Permission) has dedicated handler
+- Events know how to apply themselves via `DomainEvent.apply_self()`
+- Adding new event types requires only ~50 lines of code (no core logic changes)
+- Foundation complete: ready for User, Team, Expense event types
+- See [Event Handler Architecture](event_handler_architecture.md) for details
 
 ### Future Improvements
 
