@@ -59,12 +59,12 @@ Both paths ultimately use the same core logic:
              └─→ Update projections
 ```
 
-### Single Source of Truth: `apply_events_to_projections_impl()`
+### Single Source of Truth: `apply_event_batch()`
 
 All event application (sync or rebuild) delegates to one function:
 
 ```rust
-pub async fn apply_events_to_projections_impl(
+pub async fn apply_event_batch(
     &self,
     events: &[&sqlx::postgres::PgRow],  // Row(s) from events table
     user_id: Uuid,
@@ -159,7 +159,7 @@ contacts_projection:
 2. Event applied to projection
 3. Projection updated with `last_event_id = 1001`
 
-**During rebuild** (apply_events_to_projections_impl):
+**During rebuild** (apply_event_batch):
 1. Query `MAX(last_event_id)` from projections = 1000
 2. Load only events WHERE id > 1000
 3. Skip events 1-1000 (already in projections)
@@ -232,7 +232,7 @@ loop {
     if batch.is_empty() { break; }
     
     // Process batch
-    apply_events_to_projections_impl(&batch, ...)?;
+    apply_event_batch(&batch, ...)?;
     
     offset += batch.len();
 }
@@ -271,19 +271,19 @@ pub async fn apply_event_to_projections(
 
     if let Some(row) = event_row {
         // Delegate to core logic
-        apply_events_to_projections_impl(&[&row], user_id, wallet_id, ...)?;
+        apply_event_batch(&[&row], user_id, wallet_id, ...)?;
     }
 
     Ok(())
 }
 ```
 
-### apply_events_to_projections_impl()
+### apply_event_batch()
 
 Core logic (both sync and rebuild use this):
 
 ```rust
-pub async fn apply_events_to_projections_impl(
+pub async fn apply_event_batch(
     &self,
     events: &[&sqlx::postgres::PgRow],
     user_id: Uuid,

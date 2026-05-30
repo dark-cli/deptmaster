@@ -242,7 +242,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn apply_events_to_projections_impl(
+    pub async fn apply_event_batch(
         &self,
         events: &[&sqlx::postgres::PgRow],
         user_id: Uuid,
@@ -620,7 +620,7 @@ impl Database {
 
         if let Some(row) = event_row {
             let row_ref: &sqlx::postgres::PgRow = &row;
-            self.apply_events_to_projections_impl(&[row_ref], user_id, wallet_id, &mut std::collections::HashSet::new()).await?;
+            self.apply_event_batch(&[row_ref], user_id, wallet_id, &mut std::collections::HashSet::new()).await?;
         }
 
         Ok(())

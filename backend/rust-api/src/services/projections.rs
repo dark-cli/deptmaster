@@ -159,7 +159,7 @@ impl Projections {
                         // Apply cleaned events after snapshot
                         let mut empty_undone_set = std::collections::HashSet::new();
                         let db = Database::new((*state.db_pool).clone());
-                        if db.apply_events_to_projections_impl(&events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
+                        if db.apply_event_batch(&events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
                             tracing::info!("Used snapshot optimization with UNDO: {} events after snapshot", events_after_snapshot.len());
                             true
                         } else {
@@ -175,7 +175,7 @@ impl Projections {
                 // No snapshot, apply all cleaned events
                 let db = Database::new((*state.db_pool).clone());
                 let mut undone_set = undone_event_ids.clone();
-                if db.apply_events_to_projections_impl(&cleaned_events, user_id, wallet_id, &mut undone_set).await.is_ok() {
+                if db.apply_event_batch(&cleaned_events, user_id, wallet_id, &mut undone_set).await.is_ok() {
                     tracing::info!("Applied {} cleaned events after UNDO (no snapshot available)", cleaned_events.len());
                     true
                 } else {
@@ -223,7 +223,7 @@ impl Projections {
                         if db.restore_projections_from_snapshot(&snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok() {
                             // Apply events after snapshot
                             let mut empty_undone_set = std::collections::HashSet::new();
-                            if db.apply_events_to_projections_impl(&events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
+                            if db.apply_event_batch(&events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
                                 tracing::info!("Used snapshot for optimization: {} events after snapshot", events_after_snapshot.len());
                                 true
                             } else {
@@ -309,7 +309,7 @@ impl Projections {
 
             let rows_to_apply: Vec<_> = filtered.iter().map(|row| *row).collect();
             let db = Database::new((*state.db_pool).clone());
-            db.apply_events_to_projections_impl(&rows_to_apply, user_id, wallet_id, &mut undone_event_ids).await?;
+            db.apply_event_batch(&rows_to_apply, user_id, wallet_id, &mut undone_event_ids).await?;
         }
 
         tracing::info!("Projection rebuild completed for wallet {}", wallet_id);
