@@ -272,6 +272,7 @@ impl Database {
             let created_at: NaiveDateTime = row.get("created_at");
             let event_db_id: i64 = row.get("id");
 
+
             if event_type == "UNDO" {
                 continue;
             }

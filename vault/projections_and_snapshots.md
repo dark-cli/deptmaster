@@ -360,8 +360,8 @@ CREATE TABLE events (
     wallet_id UUID NOT NULL,            -- Scoped to wallet
     user_id UUID NOT NULL,              -- User who created event
     aggregate_type VARCHAR(50),         -- "contact", "transaction", "permission"
-    aggregate_id UUID NOT NULL,         -- Contact/transaction ID
-    event_type VARCHAR(50),             -- "CREATED", "UPDATED", "DELETED", "UNDO"
+    aggregate_id UUID NOT NULL,         -- Contact/transaction/group ID
+    event_type VARCHAR(50),             -- Event type (varies by aggregate_type)
     event_data JSONB,                   -- Event payload
     created_at TIMESTAMP,               -- When event occurred
     ...
@@ -369,6 +369,10 @@ CREATE TABLE events (
 ```
 
 ### Projection Tables
+
+#### Contact & Transaction Projections (Denormalized)
+Contacts and transactions have dedicated projection tables for fast queries:
+
 ```sql
 CREATE TABLE contacts_projection (
     id UUID PRIMARY KEY,                -- Contact ID

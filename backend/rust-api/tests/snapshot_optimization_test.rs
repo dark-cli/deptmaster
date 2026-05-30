@@ -862,3 +862,9 @@ async fn test_batch_processing_empty_wallet() {
     .unwrap();
     assert_eq!(contact_count, 0, "Should have no contacts in empty wallet");
 }
+
+// TODO: Permission Event Tests
+// Permission events are applied directly to operational tables during rebuild,
+// not to separate projection tables like contacts/transactions.
+// Tests need debugging - apply_event_batch permission handling not being invoked yet.
+// See: https://github.com/dark-cli/deptmaster/issues/XXX

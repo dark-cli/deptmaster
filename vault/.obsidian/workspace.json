@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "projections_and_snapshots.md",
+                "file": "todos.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "projections_and_snapshots"
+              "title": "todos"
             }
           }
         ]
@@ -185,20 +185,19 @@
   },
   "active": "4b2641cdb8acda07",
   "lastOpenFiles": [
+    "permission-system-deep-dive.md",
+    "projections_and_snapshots.md",
+    "projections_and_snapshots.md.tmp.449427.9d36dc66da48",
     "projections_and_snapshots.md.tmp.449427.71c6a7b26646",
     "projections_and_snapshots.md.tmp.449427.22e82b74c3a7",
     "projections_and_snapshots.md.tmp.449427.9f517f40f9fb",
     "projections_and_snapshots.md.tmp.449427.625e433d5fd6",
-    "permission-system-deep-dive.md",
-    "projections_and_snapshots.md",
     "projections_and_snapshots.md.tmp.449427.60db5eb8e9c8",
     "event_sourcing_improvements_roadmap.md",
     "event_sourcing_improvements_roadmap.md.tmp.449427.4e5853f7cc29",
     "event_sourcing_memory_optimization.md.tmp.449427.baabf2e2f24a",
     "event_sourcing_memory_optimization.md.tmp.449427.4ec18c082162",
     "event_sourcing_memory_optimization.md.tmp.449427.6397a17770a2",
-    "event_sourcing_memory_optimization.md.tmp.449427.3d1701465c59",
-    "event_sourcing_memory_optimization.md.tmp.449427.f35c6aaa0222",
     "event_sourcing_memory_optimization.md",
     "sync-refactoring-plan.md",
     "Projects/Permission System Isolation & Refinement.md",

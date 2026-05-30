@@ -189,7 +189,7 @@ Mobile (Flutter) TODOs have been split into a separate document for clarity:
 ## Code Cleanup & Technical Debt
 
 ### Dead Code - Direct Contact/Transaction Handlers (LEGACY)
-- [ ] Remove unused direct REST endpoints for contacts/transactions
+- [x] Remove unused direct REST endpoints for contacts/transactions
   - **Discovery**: Mobile client uses ONLY sync API (`POST /api/sync/events`), NOT direct handlers
   - Files affected:
     - `backend/rust-api/src/handlers/contacts.rs` - create_contact, update_contact, delete_contact, get_contacts
@@ -201,7 +201,7 @@ Mobile (Flutter) TODOs have been split into a separate document for clarity:
   - **Note**: Discovered May 27, 2026 - these endpoints have been dead for ~1 year, contributing to codebase bloat (~1000+ lines of unused code)
 
 ### Unused Dependencies
-- [ ] Remove Lettre (email library) — Declared in Cargo.toml, never used
+- [x] Remove Lettre (email library) — Declared in Cargo.toml, never used
   - Remove from `Cargo.toml`
   - Remove SMTP variables from `.env.example`
   - Update `architecture.md` (lists "Email: Lettre" in tech stack)
