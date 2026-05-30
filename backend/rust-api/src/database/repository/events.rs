@@ -605,6 +605,17 @@ impl Database {
         wallet_id: Uuid,
         created_at: NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
+        // Get the event's database ID for last_event_id tracking
+        let event_uuid = Uuid::parse_str(&event.id).map_err(|_| sqlx::Error::RowNotFound)?;
+        let event_db_id: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM events WHERE event_id = $1"
+        )
+        .bind(event_uuid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let event_db_id = event_db_id.unwrap_or(0);
+
         if event.event_type == "UNDO" {
             let event_data = &event.event_data;
             if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
@@ -707,14 +718,15 @@ impl Database {
                             r#"
                             INSERT INTO contacts_projection
                             (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $9, 0)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $9, $10)
                             ON CONFLICT (id) DO UPDATE SET
                                 name = EXCLUDED.name,
                                 username = EXCLUDED.username,
                                 phone = EXCLUDED.phone,
                                 email = EXCLUDED.email,
                                 notes = EXCLUDED.notes,
-                                updated_at = EXCLUDED.updated_at
+                                updated_at = EXCLUDED.updated_at,
+                                last_event_id = EXCLUDED.last_event_id
                             "#
                         )
                         .bind(aggregate_id)
@@ -726,6 +738,7 @@ impl Database {
                         .bind(event_data.get("email").and_then(|v| v.as_str()))
                         .bind(event_data.get("notes").and_then(|v| v.as_str()))
                         .bind(created_at)
+                        .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
 
@@ -777,7 +790,8 @@ impl Database {
                                 phone = COALESCE($3, phone),
                                 email = COALESCE($4, email),
                                 notes = COALESCE($5, notes),
-                                updated_at = $6
+                                updated_at = $6,
+                                last_event_id = $9
                             WHERE id = $7 AND wallet_id = $8
                             "#
                         )
@@ -789,26 +803,29 @@ impl Database {
                         .bind(created_at)
                         .bind(aggregate_id)
                         .bind(wallet_id)
+                        .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
                         self.apply_contact_group_ids_from_event_data_impl(wallet_id, aggregate_id, event_data).await?;
                     }
                     "DELETED" => {
                         sqlx::query(
-                            "UPDATE contacts_projection SET is_deleted = true, updated_at = $1 WHERE id = $2 AND wallet_id = $3"
+                            "UPDATE contacts_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE id = $2 AND wallet_id = $3"
                         )
                         .bind(created_at)
                         .bind(aggregate_id)
                         .bind(wallet_id)
+                        .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
 
                         let deleted_transactions = sqlx::query(
-                            "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE contact_id = $2 AND wallet_id = $3 AND is_deleted = false"
+                            "UPDATE transactions_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE contact_id = $2 AND wallet_id = $3 AND is_deleted = false"
                         )
                         .bind(created_at)
                         .bind(aggregate_id)
                         .bind(wallet_id)
+                        .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
 
@@ -863,7 +880,7 @@ impl Database {
                             r#"
                             INSERT INTO transactions_projection
                             (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $12, 0)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $12, $13)
                             ON CONFLICT (id) DO UPDATE SET
                                 contact_id = EXCLUDED.contact_id,
                                 type = EXCLUDED.type,
@@ -873,7 +890,8 @@ impl Database {
                                 description = EXCLUDED.description,
                                 transaction_date = EXCLUDED.transaction_date,
                                 due_date = EXCLUDED.due_date,
-                                updated_at = EXCLUDED.updated_at
+                                updated_at = EXCLUDED.updated_at,
+                                last_event_id = EXCLUDED.last_event_id
                             "#
                         )
                         .bind(aggregate_id)
@@ -888,6 +906,7 @@ impl Database {
                         .bind(transaction_date)
                         .bind(due_date)
                         .bind(created_at)
+                        .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
                     }
@@ -920,7 +939,8 @@ impl Database {
                             r#"
                             UPDATE transactions_projection
                             SET contact_id = $1, type = $2, direction = $3, amount = $4, currency = $5,
-                                description = $6, transaction_date = $7, due_date = $8, updated_at = $9
+                                description = $6, transaction_date = $7, due_date = $8, updated_at = $9,
+                                last_event_id = $12
                             WHERE id = $10 AND wallet_id = $11
                             "#
                         )
@@ -935,16 +955,18 @@ impl Database {
                         .bind(created_at)
                         .bind(aggregate_id)
                         .bind(wallet_id)
+                        .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
                     }
                     "DELETED" => {
                         sqlx::query(
-                            "UPDATE transactions_projection SET is_deleted = true, updated_at = $1 WHERE id = $2 AND wallet_id = $3"
+                            "UPDATE transactions_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE id = $2 AND wallet_id = $3"
                         )
                         .bind(created_at)
                         .bind(aggregate_id)
                         .bind(wallet_id)
+                        .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
                     }
