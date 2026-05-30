@@ -1190,35 +1190,35 @@ impl DomainEvent {
             DomainEvent::UserGroupCreated { wallet_id, .. } => {
                 vec![(Action::UserGroupCreate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::UserGroupUpdated { .. } => {
-                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
+            DomainEvent::UserGroupUpdated { wallet_id, .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::UserGroupDeleted { .. } => {
-                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
+            DomainEvent::UserGroupDeleted { wallet_id, .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::UserGroupMemberAdded { .. } => {
-                vec![(Action::UserGroupAddMember, Resource::AllUserGroups)]
+            DomainEvent::UserGroupMemberAdded { wallet_id, .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::UserGroupMemberRemoved { .. } => {
-                vec![(Action::UserGroupRemoveMember, Resource::AllUserGroups)]
+            DomainEvent::UserGroupMemberRemoved { wallet_id, .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(*wallet_id))]
             }
             DomainEvent::ContactGroupCreated { wallet_id, .. } => {
                 vec![(Action::ContactGroupCreate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::ContactGroupUpdated { .. } => {
-                vec![(Action::ContactGroupEdit, Resource::AllUserGroups)]
+            DomainEvent::ContactGroupUpdated { wallet_id, .. } => {
+                vec![(Action::ContactGroupUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::ContactGroupDeleted { .. } => {
-                vec![(Action::ContactGroupEdit, Resource::AllUserGroups)]
+            DomainEvent::ContactGroupDeleted { wallet_id, .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::ContactGroupMemberAdded { .. } => {
-                vec![(Action::ContactGroupAddMember, Resource::AllUserGroups)]
+            DomainEvent::ContactGroupMemberAdded { wallet_id, .. } => {
+                vec![(Action::ContactGroupUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::ContactGroupMemberRemoved { .. } => {
-                vec![(Action::ContactGroupRemoveMember, Resource::AllUserGroups)]
+            DomainEvent::ContactGroupMemberRemoved { wallet_id, .. } => {
+                vec![(Action::ContactGroupUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::PermissionMatrixSet { .. } => {
-                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
+            DomainEvent::PermissionMatrixSet { wallet_id, .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(*wallet_id))]
             }
         }
     }

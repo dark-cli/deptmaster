@@ -171,7 +171,7 @@ impl PermissionModel {
                         ));
                     }
                 }
-                Action::UserGroupEdit | Action::UserGroupAddMember | Action::UserGroupRemoveMember => {
+                Action::UserGroupUpdate => {
                     if !actions.contains(&Action::UserGroupRead) {
                         return Err(format!(
                             "Permission {} requires user_group:read",
@@ -179,7 +179,7 @@ impl PermissionModel {
                         ));
                     }
                 }
-                Action::ContactGroupEdit | Action::ContactGroupAddMember | Action::ContactGroupRemoveMember => {
+                Action::ContactGroupUpdate => {
                     if !actions.contains(&Action::ContactGroupRead) {
                         return Err(format!(
                             "Permission {} requires contact_group:read",

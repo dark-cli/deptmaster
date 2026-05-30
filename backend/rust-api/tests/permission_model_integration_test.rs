@@ -100,8 +100,7 @@ fn test_action_implication_chain() {
     assert!(Action::WalletDelete.implies(Action::WalletRead));
 
     // User group operations
-    assert!(Action::UserGroupAddMember.implies(Action::UserGroupRead));
-    assert!(Action::UserGroupRemoveMember.implies(Action::UserGroupRead));
+    assert!(Action::UserGroupUpdate.implies(Action::UserGroupRead));
 
     // Create does not imply read (create is standalone)
     assert!(!Action::ContactCreate.implies(Action::ContactRead));
@@ -126,7 +125,7 @@ fn test_resource_type_classification() {
 
 #[test]
 fn test_action_enum_completeness() {
-    // Verify all 13 actions are defined
+    // Verify all actions are defined
     let actions = vec![
         Action::ContactCreate,
         Action::ContactRead,
@@ -138,14 +137,10 @@ fn test_action_enum_completeness() {
         Action::TransactionDelete,
         Action::UserGroupCreate,
         Action::UserGroupRead,
-        Action::UserGroupAddMember,
-        Action::UserGroupRemoveMember,
-        Action::UserGroupEdit,
+        Action::UserGroupUpdate,
         Action::ContactGroupCreate,
         Action::ContactGroupRead,
-        Action::ContactGroupAddMember,
-        Action::ContactGroupRemoveMember,
-        Action::ContactGroupEdit,
+        Action::ContactGroupUpdate,
         Action::WalletRead,
         Action::WalletUpdate,
         Action::WalletDelete,
@@ -153,7 +148,7 @@ fn test_action_enum_completeness() {
         Action::EventsRead,
     ];
 
-    assert_eq!(actions.len(), 23, "Should have exactly 23 permission actions");
+    assert_eq!(actions.len(), 19, "Should have exactly 19 permission actions");
 
     // Verify all actions have string representations
     for action in &actions {
