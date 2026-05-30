@@ -399,12 +399,12 @@ pub async fn post_sync_events(
             | DomainEvent::WalletUserRoleChanged { data, .. }
             | DomainEvent::WalletUserRemoved { data, .. }
             | DomainEvent::UserGroupCreated { data, .. }
-            | DomainEvent::UserGroupRenamed { data, .. }
+            | DomainEvent::UserGroupUpdated { data, .. }
             | DomainEvent::UserGroupDeleted { data, .. }
             | DomainEvent::UserGroupMemberAdded { data, .. }
             | DomainEvent::UserGroupMemberRemoved { data, .. }
             | DomainEvent::ContactGroupCreated { data, .. }
-            | DomainEvent::ContactGroupRenamed { data, .. }
+            | DomainEvent::ContactGroupUpdated { data, .. }
             | DomainEvent::ContactGroupDeleted { data, .. }
             | DomainEvent::ContactGroupMemberAdded { data, .. }
             | DomainEvent::ContactGroupMemberRemoved { data, .. }

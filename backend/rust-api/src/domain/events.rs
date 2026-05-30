@@ -257,7 +257,7 @@ pub enum DomainEvent {
         #[serde(default)]
         data: serde_json::Value,
     },
-    UserGroupRenamed {
+    UserGroupUpdated {
         id: Uuid,
         aggregate_id: Uuid,
         wallet_id: Uuid,
@@ -317,7 +317,7 @@ pub enum DomainEvent {
         #[serde(default)]
         data: serde_json::Value,
     },
-    ContactGroupRenamed {
+    ContactGroupUpdated {
         id: Uuid,
         aggregate_id: Uuid,
         wallet_id: Uuid,
@@ -415,12 +415,12 @@ impl DomainEvent {
             DomainEvent::WalletUserRoleChanged { .. } => "WALLET_USER_ROLE_CHANGED",
             DomainEvent::WalletUserRemoved { .. } => "WALLET_USER_REMOVED",
             DomainEvent::UserGroupCreated { .. } => "USER_GROUP_CREATED",
-            DomainEvent::UserGroupRenamed { .. } => "USER_GROUP_RENAMED",
+            DomainEvent::UserGroupUpdated { .. } => "USER_GROUP_UPDATED",
             DomainEvent::UserGroupDeleted { .. } => "USER_GROUP_DELETED",
             DomainEvent::UserGroupMemberAdded { .. } => "USER_GROUP_MEMBER_ADDED",
             DomainEvent::UserGroupMemberRemoved { .. } => "USER_GROUP_MEMBER_REMOVED",
             DomainEvent::ContactGroupCreated { .. } => "CONTACT_GROUP_CREATED",
-            DomainEvent::ContactGroupRenamed { .. } => "CONTACT_GROUP_RENAMED",
+            DomainEvent::ContactGroupUpdated { .. } => "CONTACT_GROUP_UPDATED",
             DomainEvent::ContactGroupDeleted { .. } => "CONTACT_GROUP_DELETED",
             DomainEvent::ContactGroupMemberAdded { .. } => "CONTACT_GROUP_MEMBER_ADDED",
             DomainEvent::ContactGroupMemberRemoved { .. } => "CONTACT_GROUP_MEMBER_REMOVED",
@@ -443,12 +443,12 @@ impl DomainEvent {
             | DomainEvent::WalletUserRoleChanged { id, .. }
             | DomainEvent::WalletUserRemoved { id, .. }
             | DomainEvent::UserGroupCreated { id, .. }
-            | DomainEvent::UserGroupRenamed { id, .. }
+            | DomainEvent::UserGroupUpdated { id, .. }
             | DomainEvent::UserGroupDeleted { id, .. }
             | DomainEvent::UserGroupMemberAdded { id, .. }
             | DomainEvent::UserGroupMemberRemoved { id, .. }
             | DomainEvent::ContactGroupCreated { id, .. }
-            | DomainEvent::ContactGroupRenamed { id, .. }
+            | DomainEvent::ContactGroupUpdated { id, .. }
             | DomainEvent::ContactGroupDeleted { id, .. }
             | DomainEvent::ContactGroupMemberAdded { id, .. }
             | DomainEvent::ContactGroupMemberRemoved { id, .. }
@@ -470,12 +470,12 @@ impl DomainEvent {
             | DomainEvent::WalletUserRoleChanged { aggregate_id, .. }
             | DomainEvent::WalletUserRemoved { aggregate_id, .. }
             | DomainEvent::UserGroupCreated { aggregate_id, .. }
-            | DomainEvent::UserGroupRenamed { aggregate_id, .. }
+            | DomainEvent::UserGroupUpdated { aggregate_id, .. }
             | DomainEvent::UserGroupDeleted { aggregate_id, .. }
             | DomainEvent::UserGroupMemberAdded { aggregate_id, .. }
             | DomainEvent::UserGroupMemberRemoved { aggregate_id, .. }
             | DomainEvent::ContactGroupCreated { aggregate_id, .. }
-            | DomainEvent::ContactGroupRenamed { aggregate_id, .. }
+            | DomainEvent::ContactGroupUpdated { aggregate_id, .. }
             | DomainEvent::ContactGroupDeleted { aggregate_id, .. }
             | DomainEvent::ContactGroupMemberAdded { aggregate_id, .. }
             | DomainEvent::ContactGroupMemberRemoved { aggregate_id, .. }
@@ -497,12 +497,12 @@ impl DomainEvent {
             | DomainEvent::WalletUserRoleChanged { wallet_id, .. }
             | DomainEvent::WalletUserRemoved { wallet_id, .. }
             | DomainEvent::UserGroupCreated { wallet_id, .. }
-            | DomainEvent::UserGroupRenamed { wallet_id, .. }
+            | DomainEvent::UserGroupUpdated { wallet_id, .. }
             | DomainEvent::UserGroupDeleted { wallet_id, .. }
             | DomainEvent::UserGroupMemberAdded { wallet_id, .. }
             | DomainEvent::UserGroupMemberRemoved { wallet_id, .. }
             | DomainEvent::ContactGroupCreated { wallet_id, .. }
-            | DomainEvent::ContactGroupRenamed { wallet_id, .. }
+            | DomainEvent::ContactGroupUpdated { wallet_id, .. }
             | DomainEvent::ContactGroupDeleted { wallet_id, .. }
             | DomainEvent::ContactGroupMemberAdded { wallet_id, .. }
             | DomainEvent::ContactGroupMemberRemoved { wallet_id, .. }
@@ -524,12 +524,12 @@ impl DomainEvent {
             | DomainEvent::WalletUserRoleChanged { user_id, .. }
             | DomainEvent::WalletUserRemoved { user_id, .. }
             | DomainEvent::UserGroupCreated { user_id, .. }
-            | DomainEvent::UserGroupRenamed { user_id, .. }
+            | DomainEvent::UserGroupUpdated { user_id, .. }
             | DomainEvent::UserGroupDeleted { user_id, .. }
             | DomainEvent::UserGroupMemberAdded { user_id, .. }
             | DomainEvent::UserGroupMemberRemoved { user_id, .. }
             | DomainEvent::ContactGroupCreated { user_id, .. }
-            | DomainEvent::ContactGroupRenamed { user_id, .. }
+            | DomainEvent::ContactGroupUpdated { user_id, .. }
             | DomainEvent::ContactGroupDeleted { user_id, .. }
             | DomainEvent::ContactGroupMemberAdded { user_id, .. }
             | DomainEvent::ContactGroupMemberRemoved { user_id, .. }
@@ -551,12 +551,12 @@ impl DomainEvent {
             | DomainEvent::WalletUserRoleChanged { created_at, .. }
             | DomainEvent::WalletUserRemoved { created_at, .. }
             | DomainEvent::UserGroupCreated { created_at, .. }
-            | DomainEvent::UserGroupRenamed { created_at, .. }
+            | DomainEvent::UserGroupUpdated { created_at, .. }
             | DomainEvent::UserGroupDeleted { created_at, .. }
             | DomainEvent::UserGroupMemberAdded { created_at, .. }
             | DomainEvent::UserGroupMemberRemoved { created_at, .. }
             | DomainEvent::ContactGroupCreated { created_at, .. }
-            | DomainEvent::ContactGroupRenamed { created_at, .. }
+            | DomainEvent::ContactGroupUpdated { created_at, .. }
             | DomainEvent::ContactGroupDeleted { created_at, .. }
             | DomainEvent::ContactGroupMemberAdded { created_at, .. }
             | DomainEvent::ContactGroupMemberRemoved { created_at, .. }
@@ -578,12 +578,12 @@ impl DomainEvent {
             | DomainEvent::WalletUserRoleChanged { version, .. }
             | DomainEvent::WalletUserRemoved { version, .. }
             | DomainEvent::UserGroupCreated { version, .. }
-            | DomainEvent::UserGroupRenamed { version, .. }
+            | DomainEvent::UserGroupUpdated { version, .. }
             | DomainEvent::UserGroupDeleted { version, .. }
             | DomainEvent::UserGroupMemberAdded { version, .. }
             | DomainEvent::UserGroupMemberRemoved { version, .. }
             | DomainEvent::ContactGroupCreated { version, .. }
-            | DomainEvent::ContactGroupRenamed { version, .. }
+            | DomainEvent::ContactGroupUpdated { version, .. }
             | DomainEvent::ContactGroupDeleted { version, .. }
             | DomainEvent::ContactGroupMemberAdded { version, .. }
             | DomainEvent::ContactGroupMemberRemoved { version, .. }
@@ -640,7 +640,7 @@ impl DomainEvent {
                 | DomainEvent::UserGroupCreated {
                     idempotency_key, ..
                 }
-                | DomainEvent::UserGroupRenamed {
+                | DomainEvent::UserGroupUpdated {
                     idempotency_key, ..
                 }
                 | DomainEvent::UserGroupDeleted {
@@ -655,7 +655,7 @@ impl DomainEvent {
                 | DomainEvent::ContactGroupCreated {
                     idempotency_key, ..
                 }
-                | DomainEvent::ContactGroupRenamed {
+                | DomainEvent::ContactGroupUpdated {
                     idempotency_key, ..
                 }
                 | DomainEvent::ContactGroupDeleted {
@@ -1178,19 +1178,19 @@ impl DomainEvent {
                 )]
             }
             // Permission events - map to specific permission types
-            DomainEvent::WalletUserAdded { .. } => {
-                vec![(Action::UserGroupAddMember, Resource::AllUserGroups)]
+            DomainEvent::WalletUserAdded { wallet_id, .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::WalletUserRemoved { .. } => {
-                vec![(Action::UserGroupRemoveMember, Resource::AllUserGroups)]
+            DomainEvent::WalletUserRemoved { wallet_id, .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::WalletUserRoleChanged { .. } => {
-                vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
+            DomainEvent::WalletUserRoleChanged { wallet_id, .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(*wallet_id))]
             }
             DomainEvent::UserGroupCreated { wallet_id, .. } => {
                 vec![(Action::UserGroupCreate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::UserGroupRenamed { .. } => {
+            DomainEvent::UserGroupUpdated { .. } => {
                 vec![(Action::UserGroupEdit, Resource::AllUserGroups)]
             }
             DomainEvent::UserGroupDeleted { .. } => {
@@ -1205,7 +1205,7 @@ impl DomainEvent {
             DomainEvent::ContactGroupCreated { wallet_id, .. } => {
                 vec![(Action::ContactGroupCreate, Resource::Wallet(*wallet_id))]
             }
-            DomainEvent::ContactGroupRenamed { .. } => {
+            DomainEvent::ContactGroupUpdated { .. } => {
                 vec![(Action::ContactGroupEdit, Resource::AllUserGroups)]
             }
             DomainEvent::ContactGroupDeleted { .. } => {
@@ -1262,9 +1262,9 @@ where
         "CREATED" | "UPDATED" | "DELETED" | "UNDO" => Ok(s),
         // Permission events
         "WALLET_USER_ADDED" | "WALLET_USER_ROLE_CHANGED" | "WALLET_USER_REMOVED"
-        | "USER_GROUP_CREATED" | "USER_GROUP_RENAMED" | "USER_GROUP_DELETED"
+        | "USER_GROUP_CREATED" | "USER_GROUP_UPDATED" | "USER_GROUP_DELETED"
         | "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED"
-        | "CONTACT_GROUP_CREATED" | "CONTACT_GROUP_RENAMED" | "CONTACT_GROUP_DELETED"
+        | "CONTACT_GROUP_CREATED" | "CONTACT_GROUP_UPDATED" | "CONTACT_GROUP_DELETED"
         | "CONTACT_GROUP_MEMBER_ADDED" | "CONTACT_GROUP_MEMBER_REMOVED"
         | "PERMISSION_MATRIX_SET" => Ok(s),
         _ => Err(serde::de::Error::custom(format!(
@@ -1803,7 +1803,7 @@ impl SyncEventRequest {
                     .map(|s| s.to_string()),
                 data: self.event_data.clone(),
             }),
-            ("permission", "USER_GROUP_RENAMED") => Ok(DomainEvent::UserGroupRenamed {
+            ("permission", "USER_GROUP_UPDATED") => Ok(DomainEvent::UserGroupUpdated {
                 id,
                 aggregate_id,
                 wallet_id,
@@ -1875,7 +1875,7 @@ impl SyncEventRequest {
                     .map(|s| s.to_string()),
                 data: self.event_data.clone(),
             }),
-            ("permission", "CONTACT_GROUP_RENAMED") => Ok(DomainEvent::ContactGroupRenamed {
+            ("permission", "CONTACT_GROUP_UPDATED") => Ok(DomainEvent::ContactGroupUpdated {
                 id,
                 aggregate_id,
                 wallet_id,
