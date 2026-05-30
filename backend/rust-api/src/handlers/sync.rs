@@ -300,27 +300,49 @@ pub async fn post_sync_events(
     let perm_ctx = PermissionContext::new(wallet_id, user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
+    // BATCH PERMISSIONS: Collect all permissions from all events and check in one call
+    let mut all_perms = Vec::new();
+    let mut perm_to_event_idx: Vec<usize> = Vec::new();
+
+    for (event_idx, event) in events.iter().enumerate() {
+        let perms = event.required_permissions();
+        for perm in perms {
+            all_perms.push(perm);
+            perm_to_event_idx.push(event_idx);
+        }
+    }
+
+    // Check all permissions at once (single batch call)
+    let all_results = if all_perms.is_empty() {
+        Vec::new()
+    } else {
+        perm_model
+            .check_permissions(&perm_ctx, all_perms)
+            .await
+            .map_err(|_| responses::insufficient_permission_response())?
+    };
+
+    // Build a set of event indices that failed permission checks
+    let mut failed_perm_events = std::collections::HashSet::new();
+    for (perm_idx, &allowed) in all_results.iter().enumerate() {
+        if !allowed {
+            let event_idx = perm_to_event_idx[perm_idx];
+            failed_perm_events.insert(event_idx);
+        }
+    }
+
     // Process each event
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
 
-    for domain_event in events {
+    for (event_idx, domain_event) in events.into_iter().enumerate() {
         let event_id = domain_event.id();
         let aggregate_id = domain_event.aggregate_id();
 
-        // PERMISSION CHECK: Check required permissions for this event
-        let perms = domain_event.required_permissions();
-        if !perms.is_empty() {
-            let results = perm_model
-                .check_permissions(&perm_ctx, perms)
-                .await
-                .map_err(|_| responses::insufficient_permission_response())?;
-
-            // If any permission check failed, add event to conflicts
-            if !results.iter().all(|&allowed| allowed) {
-                conflicts.push(event_id.to_string());
-                continue;
-            }
+        // Check if this event failed permission checks
+        if failed_perm_events.contains(&event_idx) {
+            conflicts.push(event_id.to_string());
+            continue;
         }
 
         // Check idempotency
