@@ -49,19 +49,19 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
             aggregate_id: contact_id.to_string(),
             event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -81,19 +81,19 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
             aggregate_id: contact_id.to_string(),
             event_type: "UPDATED".to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -105,18 +105,18 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[12], // Undo event 13 (index 12)
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": event_ids[12] // Undo event 13 (index 12)
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(undo_event, wallet_id, user_id);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event]),
+        axum::Json(vec![domain_event]),
     ).await;
 
     // 4. Rebuild projections - should use snapshot optimization (snapshot exists before undone event)
@@ -165,19 +165,19 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
             aggregate_id: contact_id.to_string(),
             event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -196,18 +196,18 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[2], // Undo event 3 (index 2)
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": event_ids[2] // Undo event 3 (index 2)
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(undo_event, wallet_id, user_id);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event]),
+        axum::Json(vec![domain_event]),
     ).await;
 
     // 3. Rebuild projections - should use full rebuild (no snapshot before undone event)
@@ -252,19 +252,19 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
             aggregate_id: contact_id.to_string(),
             event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -276,19 +276,19 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
             aggregate_id: contact_id.to_string(),
             event_type: "UPDATED".to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -299,18 +299,18 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[11],
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": event_ids[11]
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(undo_event, wallet_id, user_id);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event]),
+        axum::Json(vec![domain_event]),
     ).await;
 
     // 4. Rebuild projections - cleaned event list should exclude UNDO and undone event
@@ -358,19 +358,19 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
             aggregate_id: contact_id.to_string(),
             event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -382,19 +382,19 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
             aggregate_id: contact_id.to_string(),
             event_type: "UPDATED".to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -405,8 +405,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[11], // Undo event 12
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": event_ids[11] // Undo event 12
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
@@ -418,18 +417,19 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[13], // Undo event 14
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": event_ids[13] // Undo event 14
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event1 = sync_request_to_domain_event(undo1, wallet_id, user_id);
+    let domain_event2 = sync_request_to_domain_event(undo2, wallet_id, user_id);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo1, undo2]),
+        axum::Json(vec![domain_event1, domain_event2]),
     ).await;
 
     // 4. Rebuild projections - should use snapshot optimization (snapshot at event 10, undone events are 12 and 14)
@@ -475,19 +475,19 @@ async fn test_undo_event_finds_position_by_id() {
             aggregate_id: contact_id.to_string(),
             event_type: if i == 0 { "CREATED" } else { "UPDATED" }.to_string(),
             event_data: json!({
-                "name": format!("Contact {}", i),
-                "timestamp": chrono::Utc::now().to_rfc3339()
+                "name": format!("Contact {}", i)
             }),
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
         event_ids.push(event.id.clone());
 
+        let domain_event = sync_request_to_domain_event(event, wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -507,18 +507,18 @@ async fn test_undo_event_finds_position_by_id() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[15], // Undo event 16 (index 15)
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": event_ids[15] // Undo event 16 (index 15)
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(undo_event, wallet_id, user_id);
     let _ = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![undo_event]),
+        axum::Json(vec![domain_event]),
     ).await;
 
     // 3. Rebuild projections - should use snapshot at event 10 (since undone event is at position 16)

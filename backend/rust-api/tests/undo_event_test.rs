@@ -61,12 +61,7 @@ async fn test_undo_event_validation() {
 
     let error = invalid_uuid_undo.to_domain_event(wallet_id, user_id, chrono::Utc::now());
     assert!(error.is_err(), "UNDO with invalid UUID should fail to convert");
-    assert!(error.unwrap_err().contains("UUID"), "Error should mention invalid UUID")
-    ).await;
-
-    // Should be rejected (validation error)
-    let response = result.unwrap().0;
-    assert!(response.conflicts.contains(&invalid_uuid_undo.id), "Invalid UUID UNDO event should be in conflicts");
+    assert!(error.unwrap_err().contains("UUID"), "Error should mention invalid UUID");
 
     // Test 3: UNDO event with valid structure should be accepted
     let original_event_id = Uuid::new_v4();
