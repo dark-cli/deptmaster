@@ -167,3 +167,5 @@ All tests passing:
 
 
 Status: Verified through test suite. Real-world benchmarks pending.
+
+Next: [../99-reference/01-glossary.md](../99-reference/01-glossary.md) — Reference: All terms defined

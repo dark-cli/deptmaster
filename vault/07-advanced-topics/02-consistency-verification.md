@@ -139,3 +139,5 @@ if snapshot.state_checksum != computed_checksum {
 ---
 
 Status: Implemented (tests passing, consistent behavior verified).
+
+Next: [03-performance-benchmarks.md](03-performance-benchmarks.md) — Measure performance trade-offs

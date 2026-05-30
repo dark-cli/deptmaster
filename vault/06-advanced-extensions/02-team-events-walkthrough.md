@@ -31,3 +31,5 @@ Use the User Events Walkthrough as your template, adapting:
 ---
 
 See: [01-user-events-walkthrough.md](01-user-events-walkthrough.md) for the complete walkthrough pattern.
+
+Next: [03-expense-events-walkthrough.md](03-expense-events-walkthrough.md) — Add Expense events following the same pattern

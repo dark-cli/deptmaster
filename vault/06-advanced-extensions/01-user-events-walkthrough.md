@@ -237,4 +237,4 @@ Total code added:
 All in one focused location.
 
 
-Next: [../07-advanced-topics/01-memory-bounds-analysis.md](../07-advanced-topics/01-memory-bounds-analysis.md) — Understand memory optimization in depth
+Next: [02-team-events-walkthrough.md](02-team-events-walkthrough.md) — Add Team events following the same pattern

@@ -124,3 +124,5 @@ With snapshot at event 500,000:
 
 
 See: Chapter 03 (Snapshots) for details.
+
+Next: [02-consistency-verification.md](02-consistency-verification.md) — How snapshots stay correct
