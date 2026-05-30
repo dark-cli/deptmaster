@@ -1,8 +1,8 @@
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
-use uuid::Uuid;
-use async_trait::async_trait;
 use sqlx::Row;
+use uuid::Uuid;
 
 // ============ EVENT APPLIER TRAIT ============
 
@@ -604,30 +604,72 @@ impl DomainEvent {
             created_at: self.created_at(),
             version: self.version(),
             idempotency_key: match self {
-                DomainEvent::ContactCreated { idempotency_key, .. }
-                | DomainEvent::ContactUpdated { idempotency_key, .. }
-                | DomainEvent::ContactDeleted { idempotency_key, .. }
-                | DomainEvent::ContactUndone { idempotency_key, .. }
-                | DomainEvent::TransactionCreated { idempotency_key, .. }
-                | DomainEvent::TransactionUpdated { idempotency_key, .. }
-                | DomainEvent::TransactionDeleted { idempotency_key, .. }
-                | DomainEvent::TransactionUndone { idempotency_key, .. }
-                | DomainEvent::WalletUserAdded { idempotency_key, .. }
-                | DomainEvent::WalletUserRoleChanged { idempotency_key, .. }
-                | DomainEvent::WalletUserRemoved { idempotency_key, .. }
-                | DomainEvent::UserGroupCreated { idempotency_key, .. }
-                | DomainEvent::UserGroupRenamed { idempotency_key, .. }
-                | DomainEvent::UserGroupDeleted { idempotency_key, .. }
-                | DomainEvent::UserGroupMemberAdded { idempotency_key, .. }
-                | DomainEvent::UserGroupMemberRemoved { idempotency_key, .. }
-                | DomainEvent::ContactGroupCreated { idempotency_key, .. }
-                | DomainEvent::ContactGroupRenamed { idempotency_key, .. }
-                | DomainEvent::ContactGroupDeleted { idempotency_key, .. }
-                | DomainEvent::ContactGroupMemberAdded { idempotency_key, .. }
-                | DomainEvent::ContactGroupMemberRemoved { idempotency_key, .. }
-                | DomainEvent::PermissionMatrixSet { idempotency_key, .. } => {
-                    idempotency_key.clone()
+                DomainEvent::ContactCreated {
+                    idempotency_key, ..
                 }
+                | DomainEvent::ContactUpdated {
+                    idempotency_key, ..
+                }
+                | DomainEvent::ContactDeleted {
+                    idempotency_key, ..
+                }
+                | DomainEvent::ContactUndone {
+                    idempotency_key, ..
+                }
+                | DomainEvent::TransactionCreated {
+                    idempotency_key, ..
+                }
+                | DomainEvent::TransactionUpdated {
+                    idempotency_key, ..
+                }
+                | DomainEvent::TransactionDeleted {
+                    idempotency_key, ..
+                }
+                | DomainEvent::TransactionUndone {
+                    idempotency_key, ..
+                }
+                | DomainEvent::WalletUserAdded {
+                    idempotency_key, ..
+                }
+                | DomainEvent::WalletUserRoleChanged {
+                    idempotency_key, ..
+                }
+                | DomainEvent::WalletUserRemoved {
+                    idempotency_key, ..
+                }
+                | DomainEvent::UserGroupCreated {
+                    idempotency_key, ..
+                }
+                | DomainEvent::UserGroupRenamed {
+                    idempotency_key, ..
+                }
+                | DomainEvent::UserGroupDeleted {
+                    idempotency_key, ..
+                }
+                | DomainEvent::UserGroupMemberAdded {
+                    idempotency_key, ..
+                }
+                | DomainEvent::UserGroupMemberRemoved {
+                    idempotency_key, ..
+                }
+                | DomainEvent::ContactGroupCreated {
+                    idempotency_key, ..
+                }
+                | DomainEvent::ContactGroupRenamed {
+                    idempotency_key, ..
+                }
+                | DomainEvent::ContactGroupDeleted {
+                    idempotency_key, ..
+                }
+                | DomainEvent::ContactGroupMemberAdded {
+                    idempotency_key, ..
+                }
+                | DomainEvent::ContactGroupMemberRemoved {
+                    idempotency_key, ..
+                }
+                | DomainEvent::PermissionMatrixSet {
+                    idempotency_key, ..
+                } => idempotency_key.clone(),
             },
         }
     }
@@ -649,9 +691,18 @@ impl DomainEvent {
         created_at: chrono::NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
         match self.aggregate_type_enum() {
-            AggregateType::Contact => self.apply_contact_event(pool, wallet_id, user_id, event_db_id, created_at).await,
-            AggregateType::Transaction => self.apply_transaction_event(pool, wallet_id, user_id, event_db_id, created_at).await,
-            AggregateType::Permission => self.apply_permission_event(pool, wallet_id, user_id, event_db_id, created_at).await,
+            AggregateType::Contact => {
+                self.apply_contact_event(pool, wallet_id, user_id, event_db_id, created_at)
+                    .await
+            }
+            AggregateType::Transaction => {
+                self.apply_transaction_event(pool, wallet_id, user_id, event_db_id, created_at)
+                    .await
+            }
+            AggregateType::Permission => {
+                self.apply_permission_event(pool, wallet_id, user_id, event_db_id, created_at)
+                    .await
+            }
         }
     }
 
@@ -680,10 +731,12 @@ impl DomainEvent {
                     .bind(wallet_id)
                     .execute(pool)
                     .await?;
-                sqlx::query("DELETE FROM contact_groups WHERE wallet_id = $1 AND is_system = false")
-                    .bind(wallet_id)
-                    .execute(pool)
-                    .await?;
+                sqlx::query(
+                    "DELETE FROM contact_groups WHERE wallet_id = $1 AND is_system = false",
+                )
+                .bind(wallet_id)
+                .execute(pool)
+                .await?;
                 sqlx::query("DELETE FROM user_group_members WHERE user_group_id IN (SELECT id FROM user_groups WHERE wallet_id = $1 AND is_system = false)")
                     .bind(wallet_id)
                     .execute(pool)
@@ -711,7 +764,15 @@ impl DomainEvent {
         created_at: chrono::NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
         match self {
-            DomainEvent::ContactCreated { aggregate_id, name, username, phone, email, notes, .. } => {
+            DomainEvent::ContactCreated {
+                aggregate_id,
+                name,
+                username,
+                phone,
+                email,
+                notes,
+                ..
+            } => {
                 sqlx::query(
                     r#"
                     INSERT INTO contacts_projection
@@ -741,7 +802,15 @@ impl DomainEvent {
                 .await?;
                 Ok(())
             }
-            DomainEvent::ContactUpdated { aggregate_id, name, username, phone, email, notes, .. } => {
+            DomainEvent::ContactUpdated {
+                aggregate_id,
+                name,
+                username,
+                phone,
+                email,
+                notes,
+                ..
+            } => {
                 let current = sqlx::query(
                     "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
                 )
@@ -774,7 +843,7 @@ impl DomainEvent {
                             updated_at = $7,
                             last_event_id = $9
                         WHERE id = $1 AND wallet_id = $8
-                        "#
+                        "#,
                     )
                     .bind(aggregate_id)
                     .bind(final_name)
@@ -863,7 +932,7 @@ impl DomainEvent {
                         due_date = EXCLUDED.due_date,
                         updated_at = EXCLUDED.updated_at,
                         last_event_id = EXCLUDED.last_event_id
-                    "#
+                    "#,
                 )
                 .bind(aggregate_id)
                 .bind(wallet_id)
@@ -906,16 +975,20 @@ impl DomainEvent {
                     let current_contact_id: Uuid = current_row.get("contact_id");
                     let current_amount: i64 = current_row.get("amount");
                     let current_direction: String = current_row.get("direction");
-                    let current_transaction_type: Option<String> = current_row.get("transaction_type");
+                    let current_transaction_type: Option<String> =
+                        current_row.get("transaction_type");
                     let current_currency: Option<String> = current_row.get("currency");
                     let current_description: Option<String> = current_row.get("description");
-                    let current_transaction_date: Option<DateTime<Utc>> = current_row.get("transaction_date");
+                    let current_transaction_date: Option<DateTime<Utc>> =
+                        current_row.get("transaction_date");
                     let current_due_date: Option<DateTime<Utc>> = current_row.get("due_date");
 
                     let final_contact_id = contact_id.unwrap_or(current_contact_id);
                     let final_amount = amount.unwrap_or(current_amount);
                     let final_direction = direction.as_ref().unwrap_or(&current_direction);
-                    let final_transaction_type = transaction_type.as_ref().or(current_transaction_type.as_ref());
+                    let final_transaction_type = transaction_type
+                        .as_ref()
+                        .or(current_transaction_type.as_ref());
                     let final_currency = currency.as_ref().or(current_currency.as_ref());
                     let final_description = description.as_ref().or(current_description.as_ref());
                     let final_transaction_date = transaction_date.or(current_transaction_date);
@@ -935,7 +1008,7 @@ impl DomainEvent {
                             updated_at = $10,
                             last_event_id = $11
                         WHERE id = $1 AND wallet_id = $12
-                        "#
+                        "#,
                     )
                     .bind(aggregate_id)
                     .bind(final_contact_id)
@@ -984,16 +1057,23 @@ impl DomainEvent {
         _created_at: chrono::NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
         match self {
-            DomainEvent::WalletUserAdded { aggregate_id: _, data, .. } => {
+            DomainEvent::WalletUserAdded {
+                aggregate_id: _,
+                data,
+                ..
+            } => {
                 if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                        let role = data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
+                        let role = data
+                            .get("role")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("member");
                         let _ = sqlx::query(
                             r#"
                             INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
                             VALUES ($1, $2, $3, NOW())
                             ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3
-                            "#
+                            "#,
                         )
                         .bind(wallet_id)
                         .bind(perm_user_id)
@@ -1025,7 +1105,7 @@ impl DomainEvent {
                 if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                         let _ = sqlx::query(
-                            "DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
+                            "DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
                         )
                         .bind(wallet_id)
                         .bind(perm_user_id)
@@ -1035,7 +1115,9 @@ impl DomainEvent {
                 }
                 Ok(())
             }
-            DomainEvent::UserGroupCreated { aggregate_id, data, .. } => {
+            DomainEvent::UserGroupCreated {
+                aggregate_id, data, ..
+            } => {
                 let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let _ = sqlx::query(
                     "INSERT INTO user_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
@@ -1054,12 +1136,16 @@ impl DomainEvent {
 
     /// Get required permissions for this event (type-driven)
     /// Permission events require Admin or Owner role
-    pub fn required_permissions(&self) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
+    pub fn required_permissions(
+        &self,
+    ) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
         use crate::permissions::{Action, Resource};
 
         match self {
             // Contact events
-            DomainEvent::ContactCreated { .. } => vec![(Action::ContactCreate, Resource::AllContacts)],
+            DomainEvent::ContactCreated { .. } => {
+                vec![(Action::ContactCreate, Resource::AllContacts)]
+            }
             DomainEvent::ContactUpdated { aggregate_id, .. } => {
                 vec![(Action::ContactUpdate, Resource::Contact(*aggregate_id))]
             }
@@ -1070,15 +1156,26 @@ impl DomainEvent {
                 vec![(Action::ContactUpdate, Resource::Contact(*aggregate_id))]
             }
             // Transaction events
-            DomainEvent::TransactionCreated { .. } => vec![(Action::TransactionCreate, Resource::AllTransactions)],
+            DomainEvent::TransactionCreated { contact_id, .. } => {
+                vec![(Action::TransactionCreate, Resource::Contact(*contact_id))]
+            }
             DomainEvent::TransactionUpdated { aggregate_id, .. } => {
-                vec![(Action::TransactionUpdate, Resource::Transaction(*aggregate_id))]
+                vec![(
+                    Action::TransactionUpdate,
+                    Resource::Transaction(*aggregate_id),
+                )]
             }
             DomainEvent::TransactionDeleted { aggregate_id, .. } => {
-                vec![(Action::TransactionDelete, Resource::Transaction(*aggregate_id))]
+                vec![(
+                    Action::TransactionDelete,
+                    Resource::Transaction(*aggregate_id),
+                )]
             }
             DomainEvent::TransactionUndone { aggregate_id, .. } => {
-                vec![(Action::TransactionUpdate, Resource::Transaction(*aggregate_id))]
+                vec![(
+                    Action::TransactionUpdate,
+                    Resource::Transaction(*aggregate_id),
+                )]
             }
             // Permission events - map to specific permission types
             DomainEvent::WalletUserAdded { .. } => {
@@ -1223,28 +1320,63 @@ impl SyncEventRequest {
     pub fn validate_data(&self) -> Option<String> {
         match (self.aggregate_type.as_str(), self.event_type.as_str()) {
             ("contact", "UNDO") | ("transaction", "UNDO") => {
-                if self.event_data.get("undone_event_id").and_then(|v| v.as_str()).is_none() {
-                    return Some("UNDO events must have 'undone_event_id' in event_data".to_string());
+                if self
+                    .event_data
+                    .get("undone_event_id")
+                    .and_then(|v| v.as_str())
+                    .is_none()
+                {
+                    return Some(
+                        "UNDO events must have 'undone_event_id' in event_data".to_string(),
+                    );
                 }
-                if let Some(undone_id) = self.event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                if let Some(undone_id) = self
+                    .event_data
+                    .get("undone_event_id")
+                    .and_then(|v| v.as_str())
+                {
                     if Uuid::parse_str(undone_id).is_err() {
-                        return Some("UNDO event 'undone_event_id' must be a valid UUID".to_string());
+                        return Some(
+                            "UNDO event 'undone_event_id' must be a valid UUID".to_string(),
+                        );
                     }
                 }
             }
             ("contact", "CREATED") => {
-                if self.event_data.get("name").and_then(|v| v.as_str()).is_none() {
-                    return Some("CREATED contact events must have 'name' in event_data".to_string());
+                if self
+                    .event_data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .is_none()
+                {
+                    return Some(
+                        "CREATED contact events must have 'name' in event_data".to_string(),
+                    );
                 }
             }
             ("transaction", "CREATED") => {
-                if self.event_data.get("amount").and_then(|v| v.as_i64()).is_none() {
+                if self
+                    .event_data
+                    .get("amount")
+                    .and_then(|v| v.as_i64())
+                    .is_none()
+                {
                     return Some("CREATED transaction must have 'amount'".to_string());
                 }
-                if self.event_data.get("direction").and_then(|v| v.as_str()).is_none() {
+                if self
+                    .event_data
+                    .get("direction")
+                    .and_then(|v| v.as_str())
+                    .is_none()
+                {
                     return Some("CREATED transaction must have 'direction'".to_string());
                 }
-                if self.event_data.get("contact_id").and_then(|v| v.as_str()).is_none() {
+                if self
+                    .event_data
+                    .get("contact_id")
+                    .and_then(|v| v.as_str())
+                    .is_none()
+                {
                     return Some("CREATED transaction must have 'contact_id'".to_string());
                 }
             }
@@ -1254,7 +1386,9 @@ impl SyncEventRequest {
     }
 
     /// Get required permissions for this event
-    pub fn required_permissions(&self) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
+    pub fn required_permissions(
+        &self,
+    ) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
         use crate::permissions::{Action, Resource};
 
         match (self.aggregate_type.as_str(), self.event_type.as_str()) {
@@ -1282,7 +1416,9 @@ impl SyncEventRequest {
                 }
             }
             // Transaction events
-            ("transaction", "CREATED") => vec![(Action::TransactionCreate, Resource::AllTransactions)],
+            ("transaction", "CREATED") => {
+                vec![(Action::TransactionCreate, Resource::AllTransactions)]
+            }
             ("transaction", "UPDATED") => {
                 if let Ok(id) = Uuid::parse_str(&self.aggregate_id) {
                     vec![(Action::TransactionUpdate, Resource::Transaction(id))]
@@ -1316,15 +1452,16 @@ impl SyncEventRequest {
         user_id: Uuid,
         created_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<DomainEvent, String> {
-        let id = Uuid::parse_str(&self.id)
-            .map_err(|_| "Invalid event ID UUID".to_string())?;
+        let id = Uuid::parse_str(&self.id).map_err(|_| "Invalid event ID UUID".to_string())?;
         let aggregate_id = Uuid::parse_str(&self.aggregate_id)
             .map_err(|_| "Invalid aggregate ID UUID".to_string())?;
 
         match (self.aggregate_type.as_str(), self.event_type.as_str()) {
             // Contact events
             ("contact", "CREATED") => {
-                let name = self.event_data.get("name")
+                let name = self
+                    .event_data
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "CREATED contact requires 'name'".to_string())?
                     .to_string();
@@ -1336,47 +1473,99 @@ impl SyncEventRequest {
                     user_id,
                     created_at,
                     version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    idempotency_key: self
+                        .event_data
+                        .get("idempotency_key")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     name,
-                    username: self.event_data.get("username").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    phone: self.event_data.get("phone").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    email: self.event_data.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    notes: self.event_data.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    username: self
+                        .event_data
+                        .get("username")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    phone: self
+                        .event_data
+                        .get("phone")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    email: self
+                        .event_data
+                        .get("email")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    notes: self
+                        .event_data
+                        .get("notes")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                 })
             }
-            ("contact", "UPDATED") => {
-                Ok(DomainEvent::ContactUpdated {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    name: self.event_data.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    username: self.event_data.get("username").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    phone: self.event_data.get("phone").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    email: self.event_data.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    notes: self.event_data.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                })
-            }
-            ("contact", "DELETED") => {
-                Ok(DomainEvent::ContactDeleted {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    comment: self.event_data.get("comment").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                })
-            }
+            ("contact", "UPDATED") => Ok(DomainEvent::ContactUpdated {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                name: self
+                    .event_data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                username: self
+                    .event_data
+                    .get("username")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                phone: self
+                    .event_data
+                    .get("phone")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                email: self
+                    .event_data
+                    .get("email")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                notes: self
+                    .event_data
+                    .get("notes")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            }),
+            ("contact", "DELETED") => Ok(DomainEvent::ContactDeleted {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                comment: self
+                    .event_data
+                    .get("comment")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            }),
             ("contact", "UNDO") => {
-                let undone_event_id = self.event_data.get("undone_event_id")
+                let undone_event_id = self
+                    .event_data
+                    .get("undone_event_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "UNDO contact requires 'undone_event_id'".to_string())
-                    .and_then(|s| Uuid::parse_str(s).map_err(|_| "Invalid undone_event_id UUID".to_string()))?;
+                    .and_then(|s| {
+                        Uuid::parse_str(s).map_err(|_| "Invalid undone_event_id UUID".to_string())
+                    })?;
 
                 Ok(DomainEvent::ContactUndone {
                     id,
@@ -1385,23 +1574,35 @@ impl SyncEventRequest {
                     user_id,
                     created_at,
                     version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    idempotency_key: self
+                        .event_data
+                        .get("idempotency_key")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     undone_event_id,
                 })
             }
 
             // Transaction events
             ("transaction", "CREATED") => {
-                let contact_id = self.event_data.get("contact_id")
+                let contact_id = self
+                    .event_data
+                    .get("contact_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "CREATED transaction requires 'contact_id'".to_string())
-                    .and_then(|s| Uuid::parse_str(s).map_err(|_| "Invalid contact_id UUID".to_string()))?;
+                    .and_then(|s| {
+                        Uuid::parse_str(s).map_err(|_| "Invalid contact_id UUID".to_string())
+                    })?;
 
-                let amount = self.event_data.get("amount")
+                let amount = self
+                    .event_data
+                    .get("amount")
                     .and_then(|v| v.as_i64())
                     .ok_or_else(|| "CREATED transaction requires 'amount'".to_string())?;
 
-                let direction = self.event_data.get("direction")
+                let direction = self
+                    .event_data
+                    .get("direction")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "CREATED transaction requires 'direction'".to_string())?
                     .to_string();
@@ -1413,53 +1614,121 @@ impl SyncEventRequest {
                     user_id,
                     created_at,
                     version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    idempotency_key: self
+                        .event_data
+                        .get("idempotency_key")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     contact_id,
                     amount,
                     direction,
-                    transaction_type: self.event_data.get("transaction_type").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    currency: self.event_data.get("currency").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    description: self.event_data.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    transaction_date: self.event_data.get("transaction_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
-                    due_date: self.event_data.get("due_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
+                    transaction_type: self
+                        .event_data
+                        .get("transaction_type")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    currency: self
+                        .event_data
+                        .get("currency")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    description: self
+                        .event_data
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    transaction_date: self
+                        .event_data
+                        .get("transaction_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| dt.with_timezone(&chrono::Utc)),
+                    due_date: self
+                        .event_data
+                        .get("due_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| dt.with_timezone(&chrono::Utc)),
                 })
             }
-            ("transaction", "UPDATED") => {
-                Ok(DomainEvent::TransactionUpdated {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    contact_id: self.event_data.get("contact_id").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok()),
-                    amount: self.event_data.get("amount").and_then(|v| v.as_i64()),
-                    direction: self.event_data.get("direction").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    transaction_type: self.event_data.get("transaction_type").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    currency: self.event_data.get("currency").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    description: self.event_data.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    transaction_date: self.event_data.get("transaction_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
-                    due_date: self.event_data.get("due_date").and_then(|v| v.as_str()).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|dt| dt.with_timezone(&chrono::Utc)),
-                })
-            }
-            ("transaction", "DELETED") => {
-                Ok(DomainEvent::TransactionDeleted {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    comment: self.event_data.get("comment").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                })
-            }
+            ("transaction", "UPDATED") => Ok(DomainEvent::TransactionUpdated {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                contact_id: self
+                    .event_data
+                    .get("contact_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| Uuid::parse_str(s).ok()),
+                amount: self.event_data.get("amount").and_then(|v| v.as_i64()),
+                direction: self
+                    .event_data
+                    .get("direction")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                transaction_type: self
+                    .event_data
+                    .get("transaction_type")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                currency: self
+                    .event_data
+                    .get("currency")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                description: self
+                    .event_data
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                transaction_date: self
+                    .event_data
+                    .get("transaction_date")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&chrono::Utc)),
+                due_date: self
+                    .event_data
+                    .get("due_date")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&chrono::Utc)),
+            }),
+            ("transaction", "DELETED") => Ok(DomainEvent::TransactionDeleted {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                comment: self
+                    .event_data
+                    .get("comment")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            }),
             ("transaction", "UNDO") => {
-                let undone_event_id = self.event_data.get("undone_event_id")
+                let undone_event_id = self
+                    .event_data
+                    .get("undone_event_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "UNDO transaction requires 'undone_event_id'".to_string())
-                    .and_then(|s| Uuid::parse_str(s).map_err(|_| "Invalid undone_event_id UUID".to_string()))?;
+                    .and_then(|s| {
+                        Uuid::parse_str(s).map_err(|_| "Invalid undone_event_id UUID".to_string())
+                    })?;
 
                 Ok(DomainEvent::TransactionUndone {
                     id,
@@ -1468,96 +1737,114 @@ impl SyncEventRequest {
                     user_id,
                     created_at,
                     version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    idempotency_key: self
+                        .event_data
+                        .get("idempotency_key")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     undone_event_id,
                 })
             }
 
             // Permission events
-            ("permission", "WALLET_USER_ADDED") => {
-                Ok(DomainEvent::WalletUserAdded {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "WALLET_USER_ROLE_CHANGED") => {
-                Ok(DomainEvent::WalletUserRoleChanged {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "WALLET_USER_REMOVED") => {
-                Ok(DomainEvent::WalletUserRemoved {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "USER_GROUP_CREATED") => {
-                Ok(DomainEvent::UserGroupCreated {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "USER_GROUP_RENAMED") => {
-                Ok(DomainEvent::UserGroupRenamed {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "USER_GROUP_DELETED") => {
-                Ok(DomainEvent::UserGroupDeleted {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "USER_GROUP_MEMBER_ADDED") => {
-                Ok(DomainEvent::UserGroupMemberAdded {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
+            ("permission", "WALLET_USER_ADDED") => Ok(DomainEvent::WalletUserAdded {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "WALLET_USER_ROLE_CHANGED") => Ok(DomainEvent::WalletUserRoleChanged {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "WALLET_USER_REMOVED") => Ok(DomainEvent::WalletUserRemoved {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "USER_GROUP_CREATED") => Ok(DomainEvent::UserGroupCreated {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "USER_GROUP_RENAMED") => Ok(DomainEvent::UserGroupRenamed {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "USER_GROUP_DELETED") => Ok(DomainEvent::UserGroupDeleted {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "USER_GROUP_MEMBER_ADDED") => Ok(DomainEvent::UserGroupMemberAdded {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
             ("permission", "USER_GROUP_MEMBER_REMOVED") => {
                 Ok(DomainEvent::UserGroupMemberRemoved {
                     id,
@@ -1566,46 +1853,56 @@ impl SyncEventRequest {
                     user_id,
                     created_at,
                     version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    idempotency_key: self
+                        .event_data
+                        .get("idempotency_key")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     data: self.event_data.clone(),
                 })
             }
-            ("permission", "CONTACT_GROUP_CREATED") => {
-                Ok(DomainEvent::ContactGroupCreated {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "CONTACT_GROUP_RENAMED") => {
-                Ok(DomainEvent::ContactGroupRenamed {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
-            ("permission", "CONTACT_GROUP_DELETED") => {
-                Ok(DomainEvent::ContactGroupDeleted {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
+            ("permission", "CONTACT_GROUP_CREATED") => Ok(DomainEvent::ContactGroupCreated {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "CONTACT_GROUP_RENAMED") => Ok(DomainEvent::ContactGroupRenamed {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
+            ("permission", "CONTACT_GROUP_DELETED") => Ok(DomainEvent::ContactGroupDeleted {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
             ("permission", "CONTACT_GROUP_MEMBER_ADDED") => {
                 Ok(DomainEvent::ContactGroupMemberAdded {
                     id,
@@ -1614,7 +1911,11 @@ impl SyncEventRequest {
                     user_id,
                     created_at,
                     version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    idempotency_key: self
+                        .event_data
+                        .get("idempotency_key")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     data: self.event_data.clone(),
                 })
             }
@@ -1626,24 +1927,33 @@ impl SyncEventRequest {
                     user_id,
                     created_at,
                     version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    idempotency_key: self
+                        .event_data
+                        .get("idempotency_key")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                     data: self.event_data.clone(),
                 })
             }
-            ("permission", "PERMISSION_MATRIX_SET") => {
-                Ok(DomainEvent::PermissionMatrixSet {
-                    id,
-                    aggregate_id,
-                    wallet_id,
-                    user_id,
-                    created_at,
-                    version: self.version,
-                    idempotency_key: self.event_data.get("idempotency_key").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    data: self.event_data.clone(),
-                })
-            }
+            ("permission", "PERMISSION_MATRIX_SET") => Ok(DomainEvent::PermissionMatrixSet {
+                id,
+                aggregate_id,
+                wallet_id,
+                user_id,
+                created_at,
+                version: self.version,
+                idempotency_key: self
+                    .event_data
+                    .get("idempotency_key")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                data: self.event_data.clone(),
+            }),
 
-            _ => Err(format!("Unknown event type: {} / {}", self.aggregate_type, self.event_type)),
+            _ => Err(format!(
+                "Unknown event type: {} / {}",
+                self.aggregate_type, self.event_type
+            )),
         }
     }
 }
