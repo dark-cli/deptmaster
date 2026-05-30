@@ -808,10 +808,146 @@ impl DomainEvent {
         event_db_id: i64,
         created_at: chrono::NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
-        // Transaction event application logic (similar to contact)
-        // Simplified for brevity - would contain full CREATED/UPDATED/DELETED logic
         match self {
-            DomainEvent::TransactionUndone { .. } => Ok(()),
+            DomainEvent::TransactionCreated {
+                aggregate_id,
+                contact_id,
+                amount,
+                direction,
+                transaction_type,
+                currency,
+                description,
+                transaction_date,
+                due_date,
+                ..
+            } => {
+                sqlx::query(
+                    r#"
+                    INSERT INTO transactions_projection (
+                        id, wallet_id, user_id, contact_id, amount, direction,
+                        transaction_type, currency, description, transaction_date, due_date,
+                        created_at, updated_at, is_deleted, last_event_id
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, false, $13
+                    )
+                    ON CONFLICT (id) DO UPDATE SET
+                        contact_id = EXCLUDED.contact_id,
+                        amount = EXCLUDED.amount,
+                        direction = EXCLUDED.direction,
+                        transaction_type = EXCLUDED.transaction_type,
+                        currency = EXCLUDED.currency,
+                        description = EXCLUDED.description,
+                        transaction_date = EXCLUDED.transaction_date,
+                        due_date = EXCLUDED.due_date,
+                        updated_at = EXCLUDED.updated_at,
+                        last_event_id = EXCLUDED.last_event_id
+                    "#
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .bind(user_id)
+                .bind(contact_id)
+                .bind(amount)
+                .bind(direction)
+                .bind(transaction_type)
+                .bind(currency)
+                .bind(description)
+                .bind(transaction_date)
+                .bind(due_date)
+                .bind(created_at)
+                .bind(event_db_id)
+                .execute(pool)
+                .await?;
+                Ok(())
+            }
+            DomainEvent::TransactionUpdated {
+                aggregate_id,
+                contact_id,
+                amount,
+                direction,
+                transaction_type,
+                currency,
+                description,
+                transaction_date,
+                due_date,
+                ..
+            } => {
+                let current = sqlx::query(
+                    "SELECT contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .fetch_optional(pool)
+                .await?;
+
+                if let Some(current_row) = current {
+                    let current_contact_id: Uuid = current_row.get("contact_id");
+                    let current_amount: i64 = current_row.get("amount");
+                    let current_direction: String = current_row.get("direction");
+                    let current_transaction_type: Option<String> = current_row.get("transaction_type");
+                    let current_currency: Option<String> = current_row.get("currency");
+                    let current_description: Option<String> = current_row.get("description");
+                    let current_transaction_date: Option<DateTime<Utc>> = current_row.get("transaction_date");
+                    let current_due_date: Option<DateTime<Utc>> = current_row.get("due_date");
+
+                    let final_contact_id = contact_id.unwrap_or(current_contact_id);
+                    let final_amount = amount.unwrap_or(current_amount);
+                    let final_direction = direction.as_ref().unwrap_or(&current_direction);
+                    let final_transaction_type = transaction_type.as_ref().or(current_transaction_type.as_ref());
+                    let final_currency = currency.as_ref().or(current_currency.as_ref());
+                    let final_description = description.as_ref().or(current_description.as_ref());
+                    let final_transaction_date = transaction_date.or(current_transaction_date);
+                    let final_due_date = due_date.or(current_due_date);
+
+                    sqlx::query(
+                        r#"
+                        UPDATE transactions_projection SET
+                            contact_id = $2,
+                            amount = $3,
+                            direction = $4,
+                            transaction_type = $5,
+                            currency = $6,
+                            description = $7,
+                            transaction_date = $8,
+                            due_date = $9,
+                            updated_at = $10,
+                            last_event_id = $11
+                        WHERE id = $1 AND wallet_id = $12
+                        "#
+                    )
+                    .bind(aggregate_id)
+                    .bind(final_contact_id)
+                    .bind(final_amount)
+                    .bind(final_direction)
+                    .bind(final_transaction_type)
+                    .bind(final_currency)
+                    .bind(final_description)
+                    .bind(final_transaction_date)
+                    .bind(final_due_date)
+                    .bind(created_at)
+                    .bind(event_db_id)
+                    .bind(wallet_id)
+                    .execute(pool)
+                    .await?;
+                }
+                Ok(())
+            }
+            DomainEvent::TransactionDeleted { aggregate_id, .. } => {
+                sqlx::query(
+                    "UPDATE transactions_projection SET is_deleted = true, updated_at = $2, last_event_id = $4 WHERE id = $1 AND wallet_id = $3"
+                )
+                .bind(aggregate_id)
+                .bind(created_at)
+                .bind(wallet_id)
+                .bind(event_db_id)
+                .execute(pool)
+                .await?;
+                Ok(())
+            }
+            DomainEvent::TransactionUndone { .. } => {
+                // UNDO events are skipped at a higher level, but if we get here, just return
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
