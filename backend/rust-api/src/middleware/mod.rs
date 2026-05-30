@@ -11,4 +11,4 @@ pub use auth::{Claims, AuthUser};
 #[allow(unused_imports)]
 pub use rate_limit::RateLimiter;
 #[allow(unused_imports)]
-pub use wallet_context::{WalletContext, get_wallet_context, require_wallet_role};
+pub use wallet_context::{WalletContext, get_wallet_context};

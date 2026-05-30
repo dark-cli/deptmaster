@@ -34,6 +34,36 @@ impl WalletRole {
     pub fn bypasses_permissions(&self) -> bool {
         matches!(self, WalletRole::Owner | WalletRole::Admin)
     }
+
+    /// Check if this role is Owner
+    pub fn is_owner(&self) -> bool {
+        matches!(self, WalletRole::Owner)
+    }
+
+    /// Check if this role is Admin
+    pub fn is_admin(&self) -> bool {
+        matches!(self, WalletRole::Admin)
+    }
+
+    /// Check if this role is at least Admin (Owner or Admin)
+    pub fn is_admin_or_higher(&self) -> bool {
+        matches!(self, WalletRole::Owner | WalletRole::Admin)
+    }
+
+    /// Check if this role meets or exceeds required level (0=member, 1=admin, 2=owner)
+    pub fn can_perform(&self, required: WalletRole) -> bool {
+        let self_level = match self {
+            WalletRole::Member => 0,
+            WalletRole::Admin => 1,
+            WalletRole::Owner => 2,
+        };
+        let required_level = match required {
+            WalletRole::Member => 0,
+            WalletRole::Admin => 1,
+            WalletRole::Owner => 2,
+        };
+        self_level >= required_level
+    }
 }
 
 impl fmt::Display for WalletRole {

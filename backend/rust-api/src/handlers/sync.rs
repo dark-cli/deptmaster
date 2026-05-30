@@ -120,18 +120,13 @@ fn can_read_event(
     }
 }
 
-/// Get permission context from wallet role string
+/// Get permission context from wallet role
 fn get_permission_context(
     wallet_id: Uuid,
     user_id: Uuid,
-    user_role: &str,
+    user_role: WalletRole,
 ) -> PermissionContext {
-    let role = match user_role {
-        "owner" => WalletRole::Owner,
-        "admin" => WalletRole::Admin,
-        _ => WalletRole::Member,
-    };
-    PermissionContext::new(wallet_id, user_id, role)
+    PermissionContext::new(wallet_id, user_id, user_role)
 }
 
 // ============ PUBLIC ENDPOINTS ============
@@ -157,7 +152,7 @@ pub async fn get_sync_hash(
         })?;
 
     // Get permission boundaries once
-    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, &wallet_context.user_role);
+    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
@@ -252,7 +247,7 @@ pub async fn get_sync_events(
     })?;
 
     // Get permission boundaries once
-    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, &wallet_context.user_role);
+    let perm_ctx = get_permission_context(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
@@ -316,7 +311,7 @@ pub async fn post_sync_events(
     let db = Database::new((*state.db_pool).clone());
 
     // Get permission context once
-    let perm_ctx = get_permission_context(wallet_id, user_id, &wallet_context.user_role);
+    let perm_ctx = get_permission_context(wallet_id, user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     // Preflight: collect permission checks
@@ -324,7 +319,7 @@ pub async fn post_sync_events(
     for event in &events {
         match event.aggregate_type.as_str() {
             "permission" => {
-                if !matches!(wallet_context.user_role.as_str(), "owner" | "admin") {
+                if !wallet_context.user_role.is_admin_or_higher() {
                     return Err(responses::insufficient_permission_response());
                 }
             }

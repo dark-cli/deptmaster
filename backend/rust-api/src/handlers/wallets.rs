@@ -1084,7 +1084,7 @@ pub async fn get_my_permissions(
     let wallet_id = wallet_context.wallet_id;
 
     // Owner/admin have all actions
-    let actions: Vec<String> = if wallet_context.user_role == "owner" || wallet_context.user_role == "admin" {
+    let actions: Vec<String> = if wallet_context.user_role.is_admin_or_higher() {
         vec![
             "contact:create".into(), "contact:read".into(), "contact:update".into(), "contact:delete".into(),
             "transaction:create".into(), "transaction:read".into(), "transaction:update".into(), "transaction:delete".into(), "transaction:close".into(),

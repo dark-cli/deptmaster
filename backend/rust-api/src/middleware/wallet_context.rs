@@ -12,17 +12,16 @@ use sqlx::Row;
 use uuid::Uuid;
 use crate::AppState;
 use crate::middleware::auth::AuthUser;
+use crate::permissions::WalletRole;
 
 #[derive(Clone, Debug)]
 pub struct WalletContext {
     pub wallet_id: Uuid,
-    #[allow(dead_code)]
-    pub user_role: String, // 'owner', 'admin', 'member' (for future require_wallet_role)
+    pub user_role: WalletRole,
 }
 
 impl WalletContext {
-    #[allow(dead_code)]
-    pub fn new(wallet_id: Uuid, user_role: String) -> Self {
+    pub fn new(wallet_id: Uuid, user_role: WalletRole) -> Self {
         Self { wallet_id, user_role }
     }
 }
@@ -96,7 +95,9 @@ pub async fn wallet_context_middleware(
     })?;
 
     let user_role = match wallet_user {
-        Some(role) => role,
+        Some(role_str) => {
+            WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member)
+        },
         None => {
             tracing::warn!("User {} does not have access to wallet {}", auth_user.user_id, wallet_id);
             // Unique code so clients only drop local events when server explicitly says permission denied (not network errors).
@@ -141,20 +142,3 @@ pub fn get_wallet_context(req: &Request) -> Option<WalletContext> {
     req.extensions().get::<WalletContext>().cloned()
 }
 
-/// Helper to require specific role
-#[allow(dead_code)]
-pub fn require_wallet_role(context: &WalletContext, required_role: &str) -> Result<(), StatusCode> {
-    let role_hierarchy = ["member", "admin", "owner"];
-    let user_role_level = role_hierarchy.iter()
-        .position(|&r| r == context.user_role.as_str())
-        .unwrap_or(0);
-    let required_role_level = role_hierarchy.iter()
-        .position(|&r| r == required_role)
-        .unwrap_or(0);
-
-    if user_role_level >= required_role_level {
-        Ok(())
-    } else {
-        Err(StatusCode::FORBIDDEN)
-    }
-}
