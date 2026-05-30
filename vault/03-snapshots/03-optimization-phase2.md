@@ -255,6 +255,18 @@ Batch 500: events 499001-500000
 
 UNDO + batching: rebuild is fast and memory-efficient.
 
+## Tags
+`#optimization` `#phase-2` `#batching` `#batch-processing` `#memory-bounds`
+
+## Related Topics
+- **Phase 1 (tracking):** [02-optimization-phase1.md](02-optimization-phase1.md)
+- **Why snapshots:** [01-why-snapshots.md](01-why-snapshots.md)
+- **Snapshot tables:** [04-snapshot-tables-schema.md](04-snapshot-tables-schema.md)
+- **UNDO with batching:** [../04-permissions-and-undo/01-undo-events.md](../04-permissions-and-undo/01-undo-events.md)
+- **Memory bounds analysis:** [../07-advanced-topics/01-memory-bounds-analysis.md](../07-advanced-topics/01-memory-bounds-analysis.md)
+- **Performance benchmarks:** [../07-advanced-topics/03-performance-benchmarks.md](../07-advanced-topics/03-performance-benchmarks.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: batch processing, memory bounds, phase 2)
+
 ---
 
 Next: [04-snapshot-tables-schema.md](04-snapshot-tables-schema.md) — Understand snapshot table structure

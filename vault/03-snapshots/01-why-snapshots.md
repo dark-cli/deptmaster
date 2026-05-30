@@ -203,6 +203,18 @@ Now that you understand why snapshots exist, the next chapters explain **how** t
 - **Phase 1:** Tracking (last_event_id index prevents reprocessing)
 - **Phase 2:** Batching (process events in 1,000-event batches to keep memory bounded)
 
+## Tags
+`#snapshots` `#optimization` `#memory-bounds` `#performance` `#checkpoints`
+
+## Related Topics
+- **Phase 1 (tracking):** [02-optimization-phase1.md](02-optimization-phase1.md)
+- **Phase 2 (batching):** [03-optimization-phase2.md](03-optimization-phase2.md)
+- **Snapshot storage:** [04-snapshot-tables-schema.md](04-snapshot-tables-schema.md)
+- **Projection rebuilds:** [../02-projections/03-projection-rebuilds.md](../02-projections/03-projection-rebuilds.md)
+- **UNDO events (trigger rebuilds):** [../04-permissions-and-undo/01-undo-events.md](../04-permissions-and-undo/01-undo-events.md)
+- **Memory analysis:** [../07-advanced-topics/01-memory-bounds-analysis.md](../07-advanced-topics/01-memory-bounds-analysis.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: snapshot, batch processing, watermark)
+
 ---
 
 Next: [02-optimization-phase1.md](02-optimization-phase1.md) — Understand Phase 1 optimization (tracking)

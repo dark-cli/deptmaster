@@ -246,6 +246,15 @@ The moment a full rebuild starts (usually because UNDO events are present).
 
 All projections are cleared and reprocessed.
 
+## Tags
+`#reference` `#glossary` `#definitions` `#terms` `#terminology`
+
+## How to Use This Glossary
+1. **Find the term** you don't understand
+2. **Read the definition** to understand what it means
+3. **Follow the "See in:" links** to see it used in context
+4. **Check related terms** for connected concepts
+
 ---
 
 Use this glossary whenever you encounter unfamiliar terms in the documentation.

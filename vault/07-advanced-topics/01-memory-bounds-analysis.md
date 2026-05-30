@@ -122,6 +122,17 @@ With snapshot at event 500,000:
   Memory: 10 MB, Time: 5 seconds
 ```
 
+## Tags
+`#memory` `#optimization` `#performance` `#analysis` `#O(n²)` `#batching`
+
+## Related Topics
+- **Phase 1 (tracking):** [../03-snapshots/02-optimization-phase1.md](../03-snapshots/02-optimization-phase1.md)
+- **Phase 2 (batching):** [../03-snapshots/03-optimization-phase2.md](../03-snapshots/03-optimization-phase2.md)
+- **Snapshots overview:** [../03-snapshots/01-why-snapshots.md](../03-snapshots/01-why-snapshots.md)
+- **Performance benchmarks:** [03-performance-benchmarks.md](03-performance-benchmarks.md)
+- **Consistency verification:** [02-consistency-verification.md](02-consistency-verification.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: batch processing, memory bounds, watermark)
+
 ---
 
 See: Chapter 03 (Snapshots) for details.

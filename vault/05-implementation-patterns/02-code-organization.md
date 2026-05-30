@@ -213,6 +213,17 @@ Database
 
 **Key principle:** Domain logic (events) doesn't depend on HTTP or database details. Event handlers are pure: given an event and a database pool, they apply the event.
 
+## Tags
+`#code-organization` `#architecture` `#file-structure` `#dependencies`
+
+## Related Topics
+- **Adding new event types:** [01-adding-new-event-type.md](01-adding-new-event-type.md)
+- **Testing patterns:** [03-testing-event-handlers.md](03-testing-event-handlers.md)
+- **DomainEvent enum:** [../01-events/03-type-driven-handlers.md](../01-events/03-type-driven-handlers.md)
+- **Handler implementation:** [../01-events/01-what-are-events.md](../01-events/01-what-are-events.md)
+- **User events example:** [../06-advanced-extensions/01-user-events-walkthrough.md](../06-advanced-extensions/01-user-events-walkthrough.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: repository, handler, domain)
+
 ---
 
 Next: [03-testing-event-handlers.md](03-testing-event-handlers.md) — Learn how to test event handlers

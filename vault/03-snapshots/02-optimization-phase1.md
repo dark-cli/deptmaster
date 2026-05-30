@@ -189,6 +189,18 @@ UNDO requires processing all events because:
 
 After rebuild completes, Phase 1 kicks in again for subsequent syncs.
 
+## Tags
+`#optimization` `#phase-1` `#tracking` `#last-event-id` `#watermark` `#memory`
+
+## Related Topics
+- **Why snapshots:** [01-why-snapshots.md](01-why-snapshots.md)
+- **Phase 2 (batching):** [03-optimization-phase2.md](03-optimization-phase2.md)
+- **Snapshot tables:** [04-snapshot-tables-schema.md](04-snapshot-tables-schema.md)
+- **Projection rebuilds:** [../02-projections/03-projection-rebuilds.md](../02-projections/03-projection-rebuilds.md)
+- **UNDO rebuild behavior:** [../04-permissions-and-undo/01-undo-events.md](../04-permissions-and-undo/01-undo-events.md)
+- **Memory bounds analysis:** [../07-advanced-topics/01-memory-bounds-analysis.md](../07-advanced-topics/01-memory-bounds-analysis.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: last_event_id, watermark, phase 1)
+
 ---
 
 Next: [03-optimization-phase2.md](03-optimization-phase2.md) — Understand Phase 2 optimization (batching)

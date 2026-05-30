@@ -311,6 +311,18 @@ Validation layer rejects at boundary (deserialization)
 Never reaches handler
 ```
 
+## Tags
+`#permissions` `#sync-flow` `#event-application` `#handlers` `#batching`
+
+## Related Topics
+- **Permission events:** [02-permission-events.md](02-permission-events.md)
+- **UNDO events:** [01-undo-events.md](01-undo-events.md)
+- **Type-driven handlers:** [../01-events/03-type-driven-handlers.md](../01-events/03-type-driven-handlers.md)
+- **Event types (permission):** [../01-events/02-event-types-reference.md](../01-events/02-event-types-reference.md)
+- **Batch processing:** [../03-snapshots/03-optimization-phase2.md](../03-snapshots/03-optimization-phase2.md)
+- **Snapshot restoration:** [../03-snapshots/04-snapshot-tables-schema.md](../03-snapshots/04-snapshot-tables-schema.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: handler, idempotency, batching)
+
 ---
 
 Next: [../05-implementation-patterns/01-adding-new-event-type.md](../05-implementation-patterns/01-adding-new-event-type.md) — Learn how to add new event types to the system

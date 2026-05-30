@@ -236,6 +236,17 @@ Total code added:
 
 All in one focused location.
 
+## Tags
+`#user-aggregate` `#walkthrough` `#complete-example` `#implementation` `#120-lines`
+
+## Related Topics
+- **Quick guide (5 steps):** [../05-implementation-patterns/01-adding-new-event-type.md](../05-implementation-patterns/01-adding-new-event-type.md)
+- **Code organization:** [../05-implementation-patterns/02-code-organization.md](../05-implementation-patterns/02-code-organization.md)
+- **Testing patterns:** [../05-implementation-patterns/03-testing-event-handlers.md](../05-implementation-patterns/03-testing-event-handlers.md)
+- **Type-driven handlers:** [../01-events/03-type-driven-handlers.md](../01-events/03-type-driven-handlers.md)
+- **Team events (similar):** [02-team-events-walkthrough.md](02-team-events-walkthrough.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md)
+
 ---
 
 Next: [../07-advanced-topics/01-memory-bounds-analysis.md](../07-advanced-topics/01-memory-bounds-analysis.md) — Understand memory optimization in depth

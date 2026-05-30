@@ -179,6 +179,16 @@ This table:
 
 Next time you query "who are all my contacts?", you get the answer from the projection—no replay needed.
 
+## Tags
+`#events` `#event-sourcing` `#architecture` `#immutable-history`
+
+## Related Topics
+- **How handlers process events:** [03-type-driven-handlers.md](03-type-driven-handlers.md)
+- **Where events are applied:** [../02-projections/01-what-are-projections.md](../02-projections/01-what-are-projections.md)
+- **UNDO events (special case):** [../04-permissions-and-undo/01-undo-events.md](../04-permissions-and-undo/01-undo-events.md)
+- **Event types catalog:** [02-event-types-reference.md](02-event-types-reference.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: event, aggregate, event sourcing)
+
 ---
 
 Next: [02-event-types-reference.md](02-event-types-reference.md) — See all event types defined

@@ -165,6 +165,17 @@ All tests passing:
 - `test_permission_events_with_undo`: Full rebuild with 15 events = <100ms
 - `test_permission_events_with_snapshot`: 20 events with snapshot = <100ms
 
+## Tags
+`#performance` `#benchmarks` `#memory` `#throughput` `#latency` `#scalability`
+
+## Related Topics
+- **Memory bounds analysis:** [01-memory-bounds-analysis.md](01-memory-bounds-analysis.md)
+- **Consistency verification:** [02-consistency-verification.md](02-consistency-verification.md)
+- **Phase 1 optimization:** [../03-snapshots/02-optimization-phase1.md](../03-snapshots/02-optimization-phase1.md)
+- **Phase 2 optimization:** [../03-snapshots/03-optimization-phase2.md](../03-snapshots/03-optimization-phase2.md)
+- **Snapshot overview:** [../03-snapshots/01-why-snapshots.md](../03-snapshots/01-why-snapshots.md)
+- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: throughput, latency, memory bound)
+
 ---
 
 Status: Verified through test suite. Real-world benchmarks pending.
