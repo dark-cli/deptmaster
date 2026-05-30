@@ -139,6 +139,64 @@ impl PermissionModel {
         Ok(results)
     }
 
+    /// Check event permissions and return list of denied event IDs
+    ///
+    /// This method handles the full permission checking workflow for events:
+    /// 1. Extracts required permissions from each event
+    /// 2. Batches all permission checks into a single call
+    /// 3. Returns only the event IDs that were denied
+    ///
+    /// # Arguments
+    /// * `ctx` - Permission context (who, what wallet, what role)
+    /// * `events` - List of domain events to check
+    ///
+    /// # Returns
+    /// * `Ok(Vec<Uuid>)` - List of event IDs that failed permission checks (empty = all allowed)
+    pub async fn get_denied_event_ids(
+        &self,
+        ctx: &PermissionContext,
+        events: &[crate::domain::DomainEvent],
+    ) -> Result<Vec<Uuid>, DbError> {
+        if events.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Collect all permissions with event index mapping
+        let mut all_perms = Vec::new();
+        let mut perm_to_event_idx: Vec<usize> = Vec::new();
+
+        for (event_idx, event) in events.iter().enumerate() {
+            let perms = event.required_permissions();
+            for perm in perms {
+                all_perms.push(perm);
+                perm_to_event_idx.push(event_idx);
+            }
+        }
+
+        // If no permissions required, all events are allowed
+        if all_perms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Check all permissions at once (single batch call)
+        let all_results = self.check_permissions(ctx, all_perms).await?;
+
+        // Build list of denied event IDs
+        let mut denied_event_ids = Vec::new();
+        for (perm_idx, &allowed) in all_results.iter().enumerate() {
+            if !allowed {
+                let event_idx = perm_to_event_idx[perm_idx];
+                let event_id = events[event_idx].id();
+                // Use a HashSet to avoid duplicates (event might have multiple permissions)
+                if !denied_event_ids.contains(&event_id) {
+                    denied_event_ids.push(event_id);
+                }
+            }
+        }
+
+        Ok(denied_event_ids)
+    }
+
     /// Validate permission dependency requirements
     /// E.g., write requires read, update requires read, etc.
     ///

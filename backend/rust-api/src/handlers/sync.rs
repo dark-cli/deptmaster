@@ -300,47 +300,24 @@ pub async fn post_sync_events(
     let perm_ctx = PermissionContext::new(wallet_id, user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    // BATCH PERMISSIONS: Collect all permissions from all events and check in one call
-    let mut all_perms = Vec::new();
-    let mut perm_to_event_idx: Vec<usize> = Vec::new();
+    // Check all event permissions at once (batched by PermissionModel)
+    let denied_event_ids = perm_model
+        .get_denied_event_ids(&perm_ctx, &events)
+        .await
+        .map_err(|_| responses::insufficient_permission_response())?;
 
-    for (event_idx, event) in events.iter().enumerate() {
-        let perms = event.required_permissions();
-        for perm in perms {
-            all_perms.push(perm);
-            perm_to_event_idx.push(event_idx);
-        }
-    }
-
-    // Check all permissions at once (single batch call)
-    let all_results = if all_perms.is_empty() {
-        Vec::new()
-    } else {
-        perm_model
-            .check_permissions(&perm_ctx, all_perms)
-            .await
-            .map_err(|_| responses::insufficient_permission_response())?
-    };
-
-    // Build a set of event indices that failed permission checks
-    let mut failed_perm_events = std::collections::HashSet::new();
-    for (perm_idx, &allowed) in all_results.iter().enumerate() {
-        if !allowed {
-            let event_idx = perm_to_event_idx[perm_idx];
-            failed_perm_events.insert(event_idx);
-        }
-    }
+    let denied_set: HashSet<Uuid> = denied_event_ids.into_iter().collect();
 
     // Process each event
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
 
-    for (event_idx, domain_event) in events.into_iter().enumerate() {
+    for domain_event in events {
         let event_id = domain_event.id();
         let aggregate_id = domain_event.aggregate_id();
 
-        // Check if this event failed permission checks
-        if failed_perm_events.contains(&event_idx) {
+        // Check if this event was denied by permission check
+        if denied_set.contains(&event_id) {
             conflicts.push(event_id.to_string());
             continue;
         }
