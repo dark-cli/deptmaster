@@ -319,17 +319,5 @@ pub enum DomainEvent {
 }
 ```
 
-## Tags
-`#implementation` `#how-to` `#event-handlers` `#extending` `#50-lines`
-
-## Related Topics
-- **Type-driven handler architecture:** [../01-events/03-type-driven-handlers.md](../01-events/03-type-driven-handlers.md)
-- **Event types catalog:** [../01-events/02-event-types-reference.md](../01-events/02-event-types-reference.md)
-- **Code organization:** [02-code-organization.md](02-code-organization.md)
-- **Testing handlers:** [03-testing-event-handlers.md](03-testing-event-handlers.md)
-- **User aggregate example:** [../06-advanced-extensions/01-user-events-walkthrough.md](../06-advanced-extensions/01-user-events-walkthrough.md)
-- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: aggregate, event variant, handler)
-
----
 
 Next: [02-code-organization.md](02-code-organization.md) — Understand where code lives

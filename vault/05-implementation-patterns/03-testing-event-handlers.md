@@ -220,18 +220,5 @@ All tests passing (13/13):
 - Permission event UNDO handling
 - Permission events with snapshots
 
-## Tags
-`#testing` `#unit-tests` `#integration-tests` `#handlers` `#patterns`
-
-## Related Topics
-- **Adding new event types:** [01-adding-new-event-type.md](01-adding-new-event-type.md)
-- **Code organization:** [02-code-organization.md](02-code-organization.md)
-- **Type-driven handlers:** [../01-events/03-type-driven-handlers.md](../01-events/03-type-driven-handlers.md)
-- **UNDO events (test examples):** [../04-permissions-and-undo/01-undo-events.md](../04-permissions-and-undo/01-undo-events.md)
-- **Snapshots (test examples):** [../03-snapshots/01-why-snapshots.md](../03-snapshots/01-why-snapshots.md)
-- **User events example:** [../06-advanced-extensions/01-user-events-walkthrough.md](../06-advanced-extensions/01-user-events-walkthrough.md)
-- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: idempotency, unit test, integration test)
-
----
 
 Next: [../06-advanced-extensions/01-user-events-walkthrough.md](../06-advanced-extensions/01-user-events-walkthrough.md) — Complete walkthrough of adding User events

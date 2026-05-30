@@ -64,15 +64,6 @@ This gives us:
 
 That's it. Everything else is details.
 
-## Tags
-`#event-sourcing` `#getting-started` `#overview` `#entry-point`
-
-## See Also
-- **First-time readers:** Start with [02-system-overview.md](02-system-overview.md)
-- **Looking for specifics:** Use Quick Navigation above or check [99-reference/01-glossary.md](../99-reference/01-glossary.md)
-- **Want to jump to code:** See [05-implementation-patterns/02-code-organization.md](../05-implementation-patterns/02-code-organization.md)
-- **Need a quick reference:** [99-reference/01-glossary.md](../99-reference/01-glossary.md) - All terms defined
-
 ---
 
 Next: [02-system-overview.md](02-system-overview.md)

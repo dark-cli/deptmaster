@@ -173,17 +173,5 @@ Events are immutable, so rebuilding is deterministic and safe.
 
 (This is why rebuilds are atomic—they complete all-or-nothing.)
 
-## Tags
-`#projections` `#materialized-views` `#current-state` `#performance`
-
-## Related Topics
-- **Events that build projections:** [../01-events/02-event-types-reference.md](../01-events/02-event-types-reference.md)
-- **How projections are rebuilt:** [03-projection-rebuilds.md](03-projection-rebuilds.md)
-- **Snapshots (for fast rebuilds):** [../03-snapshots/01-why-snapshots.md](../03-snapshots/01-why-snapshots.md)
-- **Permission system (different pattern):** [../04-permissions-and-undo/02-permission-events.md](../04-permissions-and-undo/02-permission-events.md)
-- **Type-driven handlers (apply events):** [../01-events/03-type-driven-handlers.md](../01-events/03-type-driven-handlers.md)
-- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: projection, materialized view, aggregate)
-
----
 
 Next: [02-projection-tables-schema.md](02-projection-tables-schema.md) — Understand the projection tables in detail

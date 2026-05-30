@@ -4,11 +4,11 @@
     "type": "split",
     "children": [
       {
-        "id": "fc0437dea8c53903",
+        "id": "1f3b7eaacd16a5cb",
         "type": "tabs",
         "children": [
           {
-            "id": "626eb4b973f90aa1",
+            "id": "1b21b235138f2619",
             "type": "leaf",
             "state": {
               "type": "graph",
@@ -179,19 +179,19 @@
       "bases:Create new base": false
     }
   },
-  "active": "626eb4b973f90aa1",
+  "active": "1b21b235138f2619",
   "lastOpenFiles": [
-    "07-advanced-topics/03-performance-benchmarks.md.tmp.449427.97ed92804836",
-    "03-snapshots/03-optimization-phase2.md.tmp.449427.03658adfa722",
-    "03-snapshots/02-optimization-phase1.md.tmp.449427.00ae6bf0b546",
-    "05-implementation-patterns/03-testing-event-handlers.md.tmp.449427.acc566602e70",
-    "05-implementation-patterns/02-code-organization.md.tmp.449427.371446daa23a",
-    "04-permissions-and-undo/03-permission-sync-flow.md.tmp.449427.962338ec2e9b",
-    "04-permissions-and-undo/02-permission-events.md.tmp.449427.075eeae7dea0",
-    "99-reference/01-glossary.md.tmp.449427.a72ece885244",
-    "07-advanced-topics/01-memory-bounds-analysis.md.tmp.449427.e036e2b04828",
-    "06-advanced-extensions/01-user-events-walkthrough.md.tmp.449427.d1dde593e71a",
-    "05-implementation-patterns/01-adding-new-event-type.md.tmp.449427.c383a6b4cade",
+    "MEMORY.md",
+    "07-advanced-topics/sedJpfOmu",
+    "06-advanced-extensions/sed2f8zLR",
+    "05-implementation-patterns/sedhAvg0M",
+    "05-implementation-patterns/sedEeIUWC",
+    "05-implementation-patterns/sedLDEuGZ",
+    "04-permissions-and-undo/sedcw5163",
+    "04-permissions-and-undo/sedjJ3Chh",
+    "04-permissions-and-undo/sedcvyGQN",
+    "04-permissions-and-undo/sed4KUCI6",
+    "04-permissions-and-undo/sedSmHA74",
     "TODO.md",
     "07-advanced-topics/03-performance-benchmarks.md",
     "07-advanced-topics/02-consistency-verification.md",

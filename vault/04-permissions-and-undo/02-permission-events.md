@@ -336,18 +336,5 @@ Process events:
 Result: Alice is reinvited with viewer role (downgraded from admin)
 ```
 
-## Tags
-`#permissions` `#permission-events` `#operational-tables` `#wallet-users` `#groups`
-
-## Related Topics
-- **UNDO events (affect permissions):** [01-undo-events.md](01-undo-events.md)
-- **Permission sync flow:** [03-permission-sync-flow.md](03-permission-sync-flow.md)
-- **Permission clearing during rebuild:** [../02-projections/03-projection-rebuilds.md](../02-projections/03-projection-rebuilds.md)
-- **Event types (permission events):** [../01-events/02-event-types-reference.md](../01-events/02-event-types-reference.md)
-- **Type-driven handlers:** [../01-events/03-type-driven-handlers.md](../01-events/03-type-driven-handlers.md)
-- **Testing permissions:** [../05-implementation-patterns/03-testing-event-handlers.md](../05-implementation-patterns/03-testing-event-handlers.md)
-- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: permission, role, wallet_users)
-
----
 
 Next: [03-permission-sync-flow.md](03-permission-sync-flow.md) — Understand how permission events flow through the system

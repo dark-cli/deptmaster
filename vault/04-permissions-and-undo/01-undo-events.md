@@ -249,17 +249,5 @@ Later user wants to undo (Event 2)
 
 Both lead to the same result (transaction not in projections), but UNDO is used for the "historical correction" use case.
 
-## Tags
-`#undo` `#rebuild` `#permissions` `#immutable-history` `#soft-delete`
-
-## Related Topics
-- **Permission events (also affected by UNDO):** [02-permission-events.md](02-permission-events.md)
-- **Projection rebuilds (triggered by UNDO):** [../02-projections/03-projection-rebuilds.md](../02-projections/03-projection-rebuilds.md)
-- **Snapshots with UNDO:** [../03-snapshots/01-why-snapshots.md](../03-snapshots/01-why-snapshots.md)
-- **Event types (including UNDO):** [../01-events/02-event-types-reference.md](../01-events/02-event-types-reference.md)
-- **Testing UNDO:** [../05-implementation-patterns/03-testing-event-handlers.md](../05-implementation-patterns/03-testing-event-handlers.md)
-- **Glossary:** [../99-reference/01-glossary.md](../99-reference/01-glossary.md) (see: UNDO, rebuild, watermark)
-
----
 
 Next: [02-permission-events.md](02-permission-events.md) — Understand permission events and how they differ
