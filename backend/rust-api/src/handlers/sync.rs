@@ -301,28 +301,49 @@ pub async fn post_sync_events(
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     // PERMISSION CHECK: Pattern matching on DomainEvent types (no strings)
+    // All checks go through PermissionModel with WalletSuperPermission fallback
     let mut permission_checks: Vec<(Action, Resource)> = Vec::new();
 
     for domain_event in &events {
         match domain_event {
-            // Permission events require admin/owner - enforce via role check
-            DomainEvent::WalletUserAdded { .. }
-            | DomainEvent::WalletUserRoleChanged { .. }
-            | DomainEvent::WalletUserRemoved { .. }
-            | DomainEvent::UserGroupCreated { .. }
-            | DomainEvent::UserGroupRenamed { .. }
-            | DomainEvent::UserGroupDeleted { .. }
-            | DomainEvent::UserGroupMemberAdded { .. }
-            | DomainEvent::UserGroupMemberRemoved { .. }
-            | DomainEvent::ContactGroupCreated { .. }
-            | DomainEvent::ContactGroupRenamed { .. }
-            | DomainEvent::ContactGroupDeleted { .. }
-            | DomainEvent::ContactGroupMemberAdded { .. }
-            | DomainEvent::ContactGroupMemberRemoved { .. }
-            | DomainEvent::PermissionMatrixSet { .. } => {
-                if !wallet_context.user_role.is_admin_or_higher() {
-                    return Err(responses::insufficient_permission_response());
-                }
+            // Permission events - map to their required permissions
+            DomainEvent::WalletUserAdded { .. } => {
+                permission_checks.push((Action::UserGroupAddMember, Resource::AllUserGroups));
+            }
+            DomainEvent::WalletUserRemoved { .. } => {
+                permission_checks.push((Action::UserGroupRemoveMember, Resource::AllUserGroups));
+            }
+            DomainEvent::WalletUserRoleChanged { .. } => {
+                permission_checks.push((Action::UserGroupEdit, Resource::AllUserGroups));
+            }
+            DomainEvent::UserGroupCreated { .. } => {
+                permission_checks.push((Action::UserGroupCreate, Resource::Wallet(wallet_id)));
+            }
+            DomainEvent::UserGroupRenamed { .. }
+            | DomainEvent::UserGroupDeleted { .. } => {
+                permission_checks.push((Action::UserGroupEdit, Resource::AllUserGroups));
+            }
+            DomainEvent::UserGroupMemberAdded { .. } => {
+                permission_checks.push((Action::UserGroupAddMember, Resource::AllUserGroups));
+            }
+            DomainEvent::UserGroupMemberRemoved { .. } => {
+                permission_checks.push((Action::UserGroupRemoveMember, Resource::AllUserGroups));
+            }
+            DomainEvent::ContactGroupCreated { .. } => {
+                permission_checks.push((Action::ContactGroupCreate, Resource::Wallet(wallet_id)));
+            }
+            DomainEvent::ContactGroupRenamed { .. }
+            | DomainEvent::ContactGroupDeleted { .. } => {
+                permission_checks.push((Action::ContactGroupEdit, Resource::AllUserGroups));
+            }
+            DomainEvent::ContactGroupMemberAdded { .. } => {
+                permission_checks.push((Action::ContactGroupAddMember, Resource::AllUserGroups));
+            }
+            DomainEvent::ContactGroupMemberRemoved { .. } => {
+                permission_checks.push((Action::ContactGroupRemoveMember, Resource::AllUserGroups));
+            }
+            DomainEvent::PermissionMatrixSet { .. } => {
+                permission_checks.push((Action::UserGroupEdit, Resource::AllUserGroups));
             }
 
             // Transaction events require ContactRead permission
