@@ -15,6 +15,7 @@ use crate::{permissions::{Action, PermissionContext, PermissionModel, Resource, 
 use crate::database::repository::Database;
 use crate::database::models::EventRow;
 use crate::services::projections::Projections;
+use crate::domain::DomainEvent;
 use sha2::{Sha256, Digest};
 
 // Re-exports for backward compatibility with tests and other modules
@@ -498,50 +499,45 @@ pub async fn post_sync_events(
 
         match insert_result {
             Ok(_) => {
-                // Event inserted successfully - now apply it and calculate total_debt
                 accepted.push(event.id.clone());
-                
-                // Apply this event to projections
-                let db = Database::new((*state.db_pool).clone());
-                if let Err(e) = db.apply_event_to_projections(event_id, user_id, wallet_id).await {
-                    tracing::error!("Error applying event to projections: {:?}", e);
-                    // Continue anyway - event is inserted
-                } else {
-                    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, &event.aggregate_type);
-                }
-                
-                // If this is an UNDO event, trigger a full rebuild to ensure consistency (wallet-scoped)
-                if event.event_type == "UNDO" {
-                    tracing::info!("UNDO event processed, triggering full projection rebuild for wallet {}", wallet_id);
-                    if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
-                        tracing::error!("Error rebuilding projections after UNDO: {:?}", e);
-                    }
-                }
-                
-                // Calculate total_debt AFTER this event is applied
-                let total_debt_after = calculate_total_debt(&state, wallet_id).await;
-                
-                // Update this event with total_debt (so event log shows correct running total)
-                // For now, skip total_debt update as it requires raw SQL jsonb_set
-                // TODO: Add update_event method to repository for this use case
 
-                // Save snapshot if needed (every 10 events or after UNDO)
+                // Load event as DomainEvent and apply using strongly-typed structure
                 if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
-                    let event_count = db.get_event_count_for_wallet(wallet_id).await;
-                    let should_save = crate::services::snapshots::should_create_snapshot(event_count)
-                        || event.event_type == "UNDO";
+                    if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
+                        let event_model = crate::database::models::Event::from(event_row.clone());
+                        if let Ok(domain_event) = DomainEvent::from_event(&event_model) {
+                            // Apply event using polymorphic DomainEvent structure
+                            if let Err(e) = domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await {
+                                tracing::error!("Error applying event to projections: {:?}", e);
+                            } else {
+                                websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, &event_row.aggregate_type);
+                            }
 
-                    if should_save {
-                        // Create snapshot JSON from current projections
-                        if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
-                            let _ = crate::services::snapshots::save_snapshot(
-                                &*state.db_pool,
-                                db_id,
-                                event_count,
-                                snapshot_json.0,
-                                snapshot_json.1,
-                                wallet_id,
-                            ).await;
+                            // If UNDO event, rebuild entire wallet projections for consistency
+                            if event.event_type == "UNDO" {
+                                tracing::info!("UNDO event processed, triggering full projection rebuild for wallet {}", wallet_id);
+                                if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
+                                    tracing::error!("Error rebuilding projections after UNDO: {:?}", e);
+                                }
+                            }
+
+                            // Save snapshot if needed
+                            let event_count = db.get_event_count_for_wallet(wallet_id).await;
+                            let should_save = crate::services::snapshots::should_create_snapshot(event_count)
+                                || event.event_type == "UNDO";
+
+                            if should_save {
+                                if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
+                                    let _ = crate::services::snapshots::save_snapshot(
+                                        &*state.db_pool,
+                                        db_id,
+                                        event_count,
+                                        snapshot_json.0,
+                                        snapshot_json.1,
+                                        wallet_id,
+                                    ).await;
+                                }
+                            }
                         }
                     }
                 }
