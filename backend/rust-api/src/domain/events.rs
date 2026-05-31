@@ -230,99 +230,6 @@ impl EventData {
         }
     }
 
-    /// Permission metadata for each event type (pure data lookup, no computation)
-    pub fn permission_metadata(
-        &self,
-        aggregate_id: Uuid,
-        wallet_id: Uuid,
-    ) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
-        use crate::permissions::{Action, Resource};
-
-        match self {
-            // Contact events
-            EventData::ContactCreated { .. } => {
-                vec![(Action::ContactCreate, Resource::AllContacts)]
-            }
-            EventData::ContactUpdated { .. } => {
-                vec![(Action::ContactUpdate, Resource::Contact(aggregate_id))]
-            }
-            EventData::ContactDeleted { .. } => {
-                vec![(Action::ContactDelete, Resource::Contact(aggregate_id))]
-            }
-            EventData::ContactUndone { .. } => {
-                vec![(Action::ContactUpdate, Resource::Contact(aggregate_id))]
-            }
-            // Transaction events
-            EventData::TransactionCreated { contact_id, .. } => {
-                if let Ok(cid) = Uuid::parse_str(contact_id) {
-                    vec![(Action::TransactionCreate, Resource::Contact(cid))]
-                } else {
-                    vec![]
-                }
-            }
-            EventData::TransactionUpdated { .. } => {
-                vec![(
-                    Action::TransactionUpdate,
-                    Resource::Transaction(aggregate_id),
-                )]
-            }
-            EventData::TransactionDeleted { .. } => {
-                vec![(
-                    Action::TransactionDelete,
-                    Resource::Transaction(aggregate_id),
-                )]
-            }
-            EventData::TransactionUndone { .. } => {
-                vec![(
-                    Action::TransactionUpdate,
-                    Resource::Transaction(aggregate_id),
-                )]
-            }
-            // Permission events
-            EventData::WalletUserAdded { .. } => {
-                vec![(Action::WalletUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::WalletUserRemoved { .. } => {
-                vec![(Action::WalletUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::WalletUserRoleChanged { .. } => {
-                vec![(Action::WalletUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::UserGroupCreated { .. } => {
-                vec![(Action::UserGroupCreate, Resource::Wallet(wallet_id))]
-            }
-            EventData::UserGroupUpdated { .. } => {
-                vec![(Action::UserGroupUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::UserGroupDeleted { .. } => {
-                vec![(Action::WalletUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::UserGroupMemberAdded { .. } => {
-                vec![(Action::UserGroupUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::UserGroupMemberRemoved { .. } => {
-                vec![(Action::UserGroupUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::ContactGroupCreated { .. } => {
-                vec![(Action::ContactGroupCreate, Resource::Wallet(wallet_id))]
-            }
-            EventData::ContactGroupUpdated { .. } => {
-                vec![(Action::ContactGroupUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::ContactGroupDeleted { .. } => {
-                vec![(Action::WalletUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::ContactGroupMemberAdded { .. } => {
-                vec![(Action::ContactGroupUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::ContactGroupMemberRemoved { .. } => {
-                vec![(Action::ContactGroupUpdate, Resource::Wallet(wallet_id))]
-            }
-            EventData::PermissionMatrixSet { .. } => {
-                vec![(Action::UserGroupUpdate, Resource::Wallet(wallet_id))]
-            }
-        }
-    }
 }
 
 // ============ EVENT APPLIER TRAIT ============
@@ -409,12 +316,94 @@ impl DomainEvent {
     }
 
 
-    /// Get required permissions for this event (delegates to EventData's permission metadata)
-    pub fn required_permissions(
-        &self,
-    ) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
-        self.event_data
-            .permission_metadata(self.aggregate_id, self.wallet_id)
+    /// Get permission metadata for this event
+    pub fn permission_metadata(&self) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
+        use crate::permissions::{Action, Resource};
+
+        match &self.event_data {
+            // Contact events
+            EventData::ContactCreated { .. } => {
+                vec![(Action::ContactCreate, Resource::AllContacts)]
+            }
+            EventData::ContactUpdated { .. } => {
+                vec![(Action::ContactUpdate, Resource::Contact(self.aggregate_id))]
+            }
+            EventData::ContactDeleted { .. } => {
+                vec![(Action::ContactDelete, Resource::Contact(self.aggregate_id))]
+            }
+            EventData::ContactUndone { .. } => {
+                vec![(Action::ContactUpdate, Resource::Contact(self.aggregate_id))]
+            }
+            // Transaction events
+            EventData::TransactionCreated { contact_id, .. } => {
+                if let Ok(cid) = Uuid::parse_str(contact_id) {
+                    vec![(Action::TransactionCreate, Resource::Contact(cid))]
+                } else {
+                    vec![]
+                }
+            }
+            EventData::TransactionUpdated { .. } => {
+                vec![(
+                    Action::TransactionUpdate,
+                    Resource::Transaction(self.aggregate_id),
+                )]
+            }
+            EventData::TransactionDeleted { .. } => {
+                vec![(
+                    Action::TransactionDelete,
+                    Resource::Transaction(self.aggregate_id),
+                )]
+            }
+            EventData::TransactionUndone { .. } => {
+                vec![(
+                    Action::TransactionUpdate,
+                    Resource::Transaction(self.aggregate_id),
+                )]
+            }
+            // Permission events
+            EventData::WalletUserAdded { .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::WalletUserRemoved { .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::WalletUserRoleChanged { .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::UserGroupCreated { .. } => {
+                vec![(Action::UserGroupCreate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::UserGroupUpdated { .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::UserGroupDeleted { .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::UserGroupMemberAdded { .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::UserGroupMemberRemoved { .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::ContactGroupCreated { .. } => {
+                vec![(Action::ContactGroupCreate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::ContactGroupUpdated { .. } => {
+                vec![(Action::ContactGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::ContactGroupDeleted { .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::ContactGroupMemberAdded { .. } => {
+                vec![(Action::ContactGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::ContactGroupMemberRemoved { .. } => {
+                vec![(Action::ContactGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::PermissionMatrixSet { .. } => {
+                vec![(Action::UserGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+        }
     }
 }
 

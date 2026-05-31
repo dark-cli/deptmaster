@@ -167,7 +167,7 @@ impl PermissionModel {
         let mut perm_to_event_idx: Vec<usize> = Vec::new();
 
         for (event_idx, event) in events.iter().enumerate() {
-            let perms = event.required_permissions();
+            let perms = event.permission_metadata();
             for perm in perms {
                 all_perms.push(perm);
                 perm_to_event_idx.push(event_idx);
