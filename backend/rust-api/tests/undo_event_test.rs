@@ -481,11 +481,12 @@ async fn test_undo_event_with_snapshot_rebuild() {
             events_to_undo.push(event.id.clone());
         }
 
+        let domain_event = sync_request_to_domain_event(event.clone(), wallet_id, user_id);
         let _ = post_sync_events(
             axum::extract::State(app_state.clone()),
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
-            axum::Json(vec![event]),
+            axum::Json(vec![domain_event]),
         ).await;
     }
 
@@ -566,11 +567,12 @@ async fn test_undo_synced_at_window_validation() {
         version: 1,
     };
 
+    let domain_event = sync_request_to_domain_event(create_event.clone(), wallet_id, user_id);
     let response = post_sync_events(
         axum::extract::State(app_state.clone()),
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
-        axum::Json(vec![create_event]),
+        axum::Json(vec![domain_event]),
     ).await.unwrap().0;
 
     assert!(response.accepted.contains(&event_id.to_string()), "Event should be accepted");
