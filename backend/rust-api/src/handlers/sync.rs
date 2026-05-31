@@ -328,7 +328,7 @@ pub async fn post_sync_events(
 
     // Process unique events only
     let mut accepted = Vec::new();
-    let mut conflicts = duplicate_event_ids; // Start with duplicates found in batch
+    let mut skipped = duplicate_event_ids; // Duplicates found in batch
 
     for domain_event in unique_events {
         let event_id = domain_event.id();
@@ -346,7 +346,7 @@ pub async fn post_sync_events(
 
         if existing.is_some() {
             // Already synced before - idempotent, skip without error
-            conflicts.push(event_id.to_string());
+            skipped.push(event_id.to_string());
             continue;
         }
 
@@ -438,7 +438,7 @@ pub async fn post_sync_events(
             domain_event.version(),
             None,
         ).await.is_err() {
-            conflicts.push(event_id.to_string());
+            skipped.push(event_id.to_string());
             continue;
         }
 
@@ -500,7 +500,7 @@ pub async fn post_sync_events(
         }
     }
 
-    Ok(Json(SyncEventsResponse { accepted, conflicts }))
+    Ok(Json(SyncEventsResponse { accepted, conflicts: skipped }))
 }
 
 /// Insert permission event directly (used by wallet management handlers)
