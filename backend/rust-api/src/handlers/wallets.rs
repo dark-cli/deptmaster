@@ -10,7 +10,8 @@ use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::handlers::responses::insufficient_permission_response;
-use crate::permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole};
+use crate::permissions::{PermissionContext, PermissionModel, Resource, WalletRole};
+use crate::domain::DomainEvent;
 use crate::websocket;
 use crate::database::repository::{DatabaseRepository, Database};
 use crate::database::error::DbError;
@@ -109,15 +110,14 @@ async fn check_wallet_role(
     }
 }
 
-/// Check if user can perform an action on a resource using PermissionModel
-/// For members only (owners/admins bypass all checks)
-async fn check_permission_matrix(
+/// Check if user can perform an operation by checking a synthetic event permission
+/// Uses the permission event system for consistent permission checking
+async fn check_event_permissions(
     state: &AppState,
     wallet_id: Uuid,
     auth_user: &AuthUser,
     user_role: WalletRole,
-    action: Action,
-    resource: Resource,
+    event: &DomainEvent,
 ) -> Result<bool, (StatusCode, Json<serde_json::Value>)> {
     // Owner/Admin bypass all checks
     if user_role.is_admin_or_higher() {
@@ -127,8 +127,8 @@ async fn check_permission_matrix(
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    perm_model
-        .can_perform(&perm_ctx, action, resource)
+    let denied = perm_model
+        .get_denied_event_ids(&perm_ctx, &[event.clone()])
         .await
         .map_err(|e| {
             tracing::error!("Permission check error: {:?}", e);
@@ -136,7 +136,9 @@ async fn check_permission_matrix(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "Failed to check permissions"})),
             )
-        })
+        })?;
+
+    Ok(denied.is_empty())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2081,32 +2083,30 @@ pub async fn add_contact_group_member(
     })?;
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
     if !role.is_admin_or_higher() {
-        let can_edit_contact = check_permission_matrix(
-            &state,
-            wallet_uuid,
-            &auth_user,
-            role,
-            Action::ContactUpdate,
-            Resource::Contact(contact_uuid),
-        )
-        .await?;
+        // Check permission using event-based system
+        let check_event = DomainEvent::ContactGroupMemberAdded {
+            id: Uuid::new_v4(),
+            aggregate_id: group_uuid,
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            created_at: chrono::Utc::now(),
+            version: 1,
+            idempotency_key: None,
+            data: serde_json::json!({
+                "contact_id": contact_uuid.to_string(),
+                "group_id": group_uuid.to_string(),
+            }),
+        };
 
-        let can_edit_group = check_permission_matrix(
-            &state,
-            wallet_uuid,
-            &auth_user,
-            role,
-            Action::ContactUpdate,
-            Resource::ContactGroup(group_uuid),
-        )
-        .await?;
+        let can_edit = check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event)
+            .await?;
 
-        if !can_edit_contact && !can_edit_group {
+        if !can_edit {
             tracing::warn!(
                 contact_id = %payload.contact_id,
                 group_id = %group_id,
                 user_id = %auth_user.user_id,
-                "add_contact_group_member: permission denied (contact:edit on contact or on group required)"
+                "add_contact_group_member: permission denied"
             );
             return Err(insufficient_permission_response());
         }
@@ -2187,32 +2187,30 @@ pub async fn remove_contact_group_member(
     })?;
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
     if !role.is_admin_or_higher() {
-        let can_edit_contact = check_permission_matrix(
-            &state,
-            wallet_uuid,
-            &auth_user,
-            role,
-            Action::ContactUpdate,
-            Resource::Contact(contact_uuid),
-        )
-        .await?;
+        // Check permission using event-based system
+        let check_event = DomainEvent::ContactGroupMemberRemoved {
+            id: Uuid::new_v4(),
+            aggregate_id: group_uuid,
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            created_at: chrono::Utc::now(),
+            version: 1,
+            idempotency_key: None,
+            data: serde_json::json!({
+                "contact_id": contact_uuid.to_string(),
+                "group_id": group_uuid.to_string(),
+            }),
+        };
 
-        let can_edit_group = check_permission_matrix(
-            &state,
-            wallet_uuid,
-            &auth_user,
-            role,
-            Action::ContactUpdate,
-            Resource::ContactGroup(group_uuid),
-        )
-        .await?;
+        let can_edit = check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event)
+            .await?;
 
-        if !can_edit_contact && !can_edit_group {
+        if !can_edit {
             tracing::warn!(
                 contact_id = %contact_id,
                 group_id = %group_id,
                 user_id = %auth_user.user_id,
-                "remove_contact_group_member: permission denied (contact:edit on contact or on group required)"
+                "remove_contact_group_member: permission denied"
             );
             return Err(insufficient_permission_response());
         }

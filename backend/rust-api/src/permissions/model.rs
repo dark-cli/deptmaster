@@ -140,28 +140,6 @@ impl PermissionModel {
         Ok(results)
     }
 
-    /// Check if a user can perform a single action on a resource
-    ///
-    /// # Arguments
-    /// * `ctx` - Permission context (who, what wallet, what role)
-    /// * `action` - The action to check
-    /// * `resource` - The resource being accessed
-    ///
-    /// # Returns
-    /// * `Ok(true)` - Permission allowed
-    /// * `Ok(false)` - Permission denied
-    pub async fn can_perform(
-        &self,
-        ctx: &PermissionContext,
-        action: Action,
-        resource: Resource,
-    ) -> Result<bool, DbError> {
-        let results = self
-            .check_permissions(ctx, vec![(action, resource)])
-            .await?;
-        Ok(results.first().copied().unwrap_or(false))
-    }
-
     /// Check event permissions and return list of denied event IDs
     ///
     /// This method handles the full permission checking workflow for events:
