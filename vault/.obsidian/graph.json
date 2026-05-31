@@ -9,7 +9,7 @@
   "colorGroups": [],
   "collapse-display": false,
   "showArrow": false,
-  "textFadeMultiplier": 0,
+  "textFadeMultiplier": -1.1,
   "nodeSizeMultiplier": 2.468,
   "lineSizeMultiplier": 1.90145454545455,
   "collapse-forces": false,

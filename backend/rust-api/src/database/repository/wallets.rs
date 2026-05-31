@@ -42,6 +42,10 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        // Create empty initial snapshot for consistent UNDO handling
+        // This ensures all events are guaranteed to be newer than at least one snapshot
+        let _ = crate::services::snapshots::create_initial_empty_snapshot(&self.pool, id).await;
+
         Ok(())
     }
 

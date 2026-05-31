@@ -13,6 +13,16 @@ pub struct ProjectionSnapshot {
     pub created_at: chrono::NaiveDateTime,
 }
 
+/// Lightweight snapshot metadata (no JSON data)
+#[derive(Debug, Clone, FromRow)]
+pub struct SnapshotMetadata {
+    pub id: i64,
+    pub snapshot_index: i64,
+    pub last_event_id: i64,
+    pub event_count: i64,
+    pub created_at: chrono::NaiveDateTime,
+}
+
 impl<'r> FromRow<'r, PgRow> for ProjectionSnapshot {
     fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
         Ok(ProjectionSnapshot {
@@ -273,4 +283,72 @@ pub async fn create_snapshot_json(
         .collect();
 
     Ok((serde_json::json!(contacts_json), serde_json::json!(transactions_json)))
+}
+
+/// Get snapshot metadata only (lightweight, no JSON data)
+/// Returns snapshots ordered by snapshot_index DESC (newest first)
+pub async fn get_snapshot_metadata_for_wallet(
+    pool: &PgPool,
+    wallet_id: uuid::Uuid,
+) -> Result<Vec<SnapshotMetadata>, sqlx::Error> {
+    let snapshots = sqlx::query_as::<_, SnapshotMetadata>(
+        r#"
+        SELECT id, snapshot_index, last_event_id, event_count, created_at
+        FROM projection_snapshots
+        WHERE wallet_id = $1
+        ORDER BY snapshot_index DESC
+        "#
+    )
+    .bind(wallet_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(snapshots)
+}
+
+/// Get full snapshot by ID (loads JSON data)
+pub async fn get_snapshot_by_id(
+    pool: &PgPool,
+    snapshot_id: i64,
+) -> Result<Option<ProjectionSnapshot>, sqlx::Error> {
+    let snapshot = sqlx::query_as::<_, ProjectionSnapshot>(
+        r#"
+        SELECT id, snapshot_index, last_event_id, event_count,
+               contacts_snapshot, transactions_snapshot, created_at
+        FROM projection_snapshots
+        WHERE id = $1
+        "#
+    )
+    .bind(snapshot_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(snapshot)
+}
+
+/// Create an empty initial snapshot for a wallet (event_count=0, last_event_id=0)
+/// This ensures all events are guaranteed to be newer than at least one snapshot
+pub async fn create_initial_empty_snapshot(
+    pool: &PgPool,
+    wallet_id: uuid::Uuid,
+) -> Result<(), sqlx::Error> {
+    let empty_contacts = serde_json::json!([]);
+    let empty_transactions = serde_json::json!([]);
+
+    sqlx::query(
+        r#"
+        INSERT INTO projection_snapshots
+        (snapshot_index, last_event_id, event_count, contacts_snapshot, transactions_snapshot, wallet_id)
+        VALUES (0, 0, 0, $1, $2, $3)
+        ON CONFLICT DO NOTHING
+        "#
+    )
+    .bind(empty_contacts)
+    .bind(empty_transactions)
+    .bind(wallet_id)
+    .execute(pool)
+    .await?;
+
+    tracing::info!("Created initial empty snapshot for wallet {}", wallet_id);
+    Ok(())
 }

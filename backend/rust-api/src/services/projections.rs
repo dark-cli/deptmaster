@@ -46,9 +46,19 @@ impl Projections {
 
         let has_existing_projections = max_processed_id.is_some() && max_processed_id != Some(0);
 
+        // Check if UNDO events exist anywhere in wallet (before deciding Phase 1 cutoff)
+        let has_undo_events_in_wallet = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE wallet_id = $1 AND event_type = 'UNDO')"
+        )
+        .bind(wallet_id)
+        .fetch_one(&*state.db_pool)
+        .await?;
+
+        // If UNDO events exist, load ALL events for smart snapshot search
+        // Otherwise use Phase 1 optimization (load only new events)
+        let load_offset = if has_undo_events_in_wallet { 0 } else { max_processed_id.unwrap_or(0) };
+
         // Get events for this wallet ordered by timestamp
-        // If projections exist, load only new events (Phase 1 optimization)
-        // If rebuilding from scratch, load all events
         let events = sqlx::query(
             r#"
             SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
@@ -58,7 +68,7 @@ impl Projections {
             "#
         )
         .bind(wallet_id)
-        .bind(max_processed_id.unwrap_or(0))
+        .bind(load_offset)
         .fetch_all(&*state.db_pool)
         .await?;
 
@@ -78,11 +88,12 @@ impl Projections {
             event_id_to_position.insert(event_id, (index + 1) as i64);
         }
 
-        // Check for UNDO events
+        // Check for UNDO events in the currently loaded events
         let has_undo_events = events.iter().any(|row| {
             let event_type: String = row.get("event_type");
             event_type == "UNDO"
         });
+
 
         // Clear projections and permission data if UNDO events exist (they require full rebuild)
         // or if doing full rebuild (checked later in snapshot path)
@@ -163,13 +174,56 @@ impl Projections {
             // Find the minimum undone event position (earliest undone event)
             let min_undone_position = undone_event_positions.iter().min().copied();
 
-            // Step 4: Search snapshot stack for snapshot with event_count < undone_event_count (wallet-scoped)
-            let snapshot = if let Some(target_count) = min_undone_position {
-                snapshots::get_snapshot_before_event_count(
-                    &*state.db_pool,
-                    target_count,
-                    wallet_id,
-                ).await.ok().flatten()
+            // Step 4: Search for suitable snapshot using metadata (lightweight, ordered by newest first)
+            // Load snapshot metadata (without JSON data) ordered by most recent first
+            let snapshot_metadata = snapshots::get_snapshot_metadata_for_wallet(
+                &*state.db_pool,
+                wallet_id,
+            ).await.ok().unwrap_or_default();
+
+            // Find first suitable snapshot by searching metadata (usually found in first 1-2 iterations)
+            let suitable_snapshot_id = if let Some(min_pos) = min_undone_position {
+                // Undone event was found in loaded events, search by event_count
+                snapshot_metadata
+                    .iter()
+                    .find(|snap| snap.event_count < min_pos)
+                    .map(|snap| snap.id)
+            } else {
+                // Undone event not in loaded events (likely before Phase 1 cutoff)
+                // Get minimum undone event database ID for comparison
+                if !undone_event_ids.is_empty() {
+                    let undone_vec: Vec<Uuid> = undone_event_ids.iter().copied().collect();
+                    let min_undone_db_id: Option<i64> = sqlx::query_scalar(
+                        "SELECT MIN(id) FROM events WHERE event_id = ANY($1)"
+                    )
+                    .bind(undone_vec)
+                    .fetch_optional(&*state.db_pool)
+                    .await
+                    .ok()
+                    .flatten();
+
+                    if let Some(undone_db_id) = min_undone_db_id {
+                        // Find snapshot older than the undone event
+                        snapshot_metadata
+                            .iter()
+                            .find(|snap| snap.last_event_id < undone_db_id)
+                            .map(|snap| snap.id)
+                    } else {
+                        // Can't find undone event - use the oldest snapshot (for safety)
+                        snapshot_metadata.last().map(|snap| snap.id)
+                    }
+                } else {
+                    // No undone events - should not happen, but handle gracefully
+                    snapshot_metadata.last().map(|snap| snap.id)
+                }
+            };
+
+            // Load full snapshot only if we found a suitable one
+            let snapshot = if let Some(snapshot_id) = suitable_snapshot_id {
+                snapshots::get_snapshot_by_id(&*state.db_pool, snapshot_id)
+                    .await
+                    .ok()
+                    .flatten()
             } else {
                 None
             };
