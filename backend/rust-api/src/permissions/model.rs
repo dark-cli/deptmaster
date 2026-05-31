@@ -187,7 +187,7 @@ impl PermissionModel {
         for (perm_idx, &allowed) in all_results.iter().enumerate() {
             if !allowed {
                 let event_idx = perm_to_event_idx[perm_idx];
-                let event_id = events[event_idx].id();
+                let event_id = events[event_idx].id;
                 // Use a HashSet to avoid duplicates (event might have multiple permissions)
                 if !denied_event_ids.contains(&event_id) {
                     denied_event_ids.push(event_id);

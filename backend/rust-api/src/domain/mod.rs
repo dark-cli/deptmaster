@@ -1,3 +1,3 @@
 pub mod events;
 
-pub use events::{DomainEvent, SyncEventRequest};
+pub use events::{DomainEvent, EventData, SyncEventRequest};

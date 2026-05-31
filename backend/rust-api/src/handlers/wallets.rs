@@ -2084,7 +2084,7 @@ pub async fn add_contact_group_member(
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
     if !role.is_admin_or_higher() {
         // Check permission using event-based system
-        let check_event = DomainEvent::ContactGroupMemberAdded {
+        let check_event = DomainEvent {
             id: Uuid::new_v4(),
             aggregate_id: group_uuid,
             wallet_id: wallet_uuid,
@@ -2092,10 +2092,12 @@ pub async fn add_contact_group_member(
             created_at: chrono::Utc::now(),
             version: 1,
             idempotency_key: None,
-            data: serde_json::json!({
-                "contact_id": contact_uuid.to_string(),
-                "group_id": group_uuid.to_string(),
-            }),
+            event_data: crate::domain::EventData::ContactGroupMemberAdded {
+                data: serde_json::json!({
+                    "contact_id": contact_uuid.to_string(),
+                    "group_id": group_uuid.to_string(),
+                }),
+            },
         };
 
         let can_edit = check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event)
@@ -2188,7 +2190,7 @@ pub async fn remove_contact_group_member(
     let role = get_wallet_role(&state, wallet_uuid, &auth_user).await?;
     if !role.is_admin_or_higher() {
         // Check permission using event-based system
-        let check_event = DomainEvent::ContactGroupMemberRemoved {
+        let check_event = DomainEvent {
             id: Uuid::new_v4(),
             aggregate_id: group_uuid,
             wallet_id: wallet_uuid,
@@ -2196,10 +2198,12 @@ pub async fn remove_contact_group_member(
             created_at: chrono::Utc::now(),
             version: 1,
             idempotency_key: None,
-            data: serde_json::json!({
-                "contact_id": contact_uuid.to_string(),
-                "group_id": group_uuid.to_string(),
-            }),
+            event_data: crate::domain::EventData::ContactGroupMemberRemoved {
+                data: serde_json::json!({
+                    "contact_id": contact_uuid.to_string(),
+                    "group_id": group_uuid.to_string(),
+                }),
+            },
         };
 
         let can_edit = check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event)

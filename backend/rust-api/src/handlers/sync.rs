@@ -17,7 +17,7 @@ use crate::permissions::{PermissionContext, PermissionModel};
 use crate::database::repository::Database;
 use crate::database::models::EventRow;
 use crate::services::projections::Projections;
-use crate::domain::DomainEvent;
+use crate::domain::{DomainEvent, EventData};
 use sha2::{Sha256, Digest};
 use std::collections::{HashMap, HashSet};
 
@@ -317,7 +317,7 @@ pub async fn post_sync_events(
     let mut duplicate_event_ids = Vec::new();
 
     for event in events {
-        let event_id = event.id();
+        let event_id = event.id;
         if !seen_ids.insert(event_id) {
             // Duplicate within batch - skip processing
             duplicate_event_ids.push(event_id.to_string());
@@ -331,8 +331,8 @@ pub async fn post_sync_events(
     let mut skipped = duplicate_event_ids; // Duplicates found in batch
 
     for domain_event in unique_events {
-        let event_id = domain_event.id();
-        let aggregate_id = domain_event.aggregate_id();
+        let event_id = domain_event.id;
+        let aggregate_id = domain_event.aggregate_id;
 
         // Check idempotency: if event already exists, skip silently (idempotent operation)
         let existing = db.get_event_by_id_impl(event_id)
@@ -350,8 +350,9 @@ pub async fn post_sync_events(
             continue;
         }
 
-        // Extract event data (payload only, no metadata)
-        let event_data = domain_event.to_event_data();
+        // Serialize event_data directly (EventData enum serializes itself)
+        let event_data = serde_json::to_value(&domain_event.event_data)
+            .unwrap_or_else(|_| serde_json::json!({}));
 
         // Insert event
         let aggregate_type = domain_event.aggregate_type();
@@ -365,7 +366,7 @@ pub async fn post_sync_events(
             event_data,
             wallet_id,
             user_id,
-            domain_event.version(),
+            domain_event.version,
             None,
         ).await.is_err() {
             skipped.push(event_id.to_string());
@@ -380,26 +381,26 @@ pub async fn post_sync_events(
                 if let Err(e) = domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await {
                     tracing::error!("Error applying event: {:?}", e);
                 } else {
-                    // Broadcast using pattern matching on DomainEvent
-                    let broadcast_type = match domain_event {
-                        DomainEvent::ContactCreated { .. }
-                        | DomainEvent::ContactUpdated { .. }
-                        | DomainEvent::ContactDeleted { .. }
-                        | DomainEvent::ContactUndone { .. } => "contact",
+                    // Broadcast using event_data discriminant
+                    let broadcast_type = match &domain_event.event_data {
+                        EventData::ContactCreated { .. }
+                        | EventData::ContactUpdated { .. }
+                        | EventData::ContactDeleted { .. }
+                        | EventData::ContactUndone { .. } => "contact",
 
-                        DomainEvent::TransactionCreated { .. }
-                        | DomainEvent::TransactionUpdated { .. }
-                        | DomainEvent::TransactionDeleted { .. }
-                        | DomainEvent::TransactionUndone { .. } => "transaction",
+                        EventData::TransactionCreated { .. }
+                        | EventData::TransactionUpdated { .. }
+                        | EventData::TransactionDeleted { .. }
+                        | EventData::TransactionUndone { .. } => "transaction",
 
                         _ => "permission",
                     };
                     websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, broadcast_type);
                 }
 
-                // Handle UNDO: full wallet rebuild (using pattern matching)
-                match domain_event {
-                    DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. } => {
+                // Handle UNDO: full wallet rebuild
+                match &domain_event.event_data {
+                    EventData::ContactUndone { .. } | EventData::TransactionUndone { .. } => {
                         tracing::info!("UNDO event processed, rebuilding wallet projections");
                         if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
                             tracing::error!("Error rebuilding projections: {:?}", e);
@@ -411,7 +412,7 @@ pub async fn post_sync_events(
                 // Save snapshot if needed
                 let event_count = db.get_event_count_for_wallet(wallet_id).await;
                 let should_snapshot = snapshots::should_create_snapshot_with_interval(event_count, state.config.snapshot_interval)
-                    || matches!(domain_event, DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. });
+                    || matches!(&domain_event.event_data, EventData::ContactUndone { .. } | EventData::TransactionUndone { .. });
 
                 if should_snapshot {
                     if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
