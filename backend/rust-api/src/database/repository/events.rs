@@ -438,7 +438,7 @@ impl Database {
                 }
             } else if aggregate_type == "transaction" {
                 match event_type.as_str() {
-                    "CREATED" | "TRANSACTION_CREATED" => {
+                    "CREATED" => {
                         let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
                         let contact_id = Uuid::parse_str(contact_id_str).ok();
 
@@ -598,13 +598,15 @@ impl Database {
             } else if aggregate_type == "permission" {
                 // Permission events are applied to operational tables (wallet_users, user_groups, etc.)
                 // They don't have a separate projection table since they're normalized and frequently queried
+                // Permission event data is nested in a "data" field because EventData variants use generic Value
                 tracing::info!("Processing permission event: {}", event_type);
+                let data = event_data.get("data").unwrap_or(&event_data);
                 match event_type.as_str() {
                     "WALLET_USER_ADDED" => {
-                        let user_id_str = event_data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         tracing::info!("WALLET_USER_ADDED: inserting user {}", user_id_str);
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            let role = event_data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
+                            let role = data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
                             let result = sqlx::query(
                                 r#"
                                 INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
@@ -627,9 +629,9 @@ impl Database {
                         }
                     }
                     "WALLET_USER_ROLE_CHANGED" => {
-                        let user_id_str = event_data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            if let Some(role) = event_data.get("role").and_then(|v| v.as_str()) {
+                            if let Some(role) = data.get("role").and_then(|v| v.as_str()) {
                                 let _ = sqlx::query(
                                     "UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3"
                                 )
@@ -642,7 +644,7 @@ impl Database {
                         }
                     }
                     "WALLET_USER_REMOVED" => {
-                        let user_id_str = event_data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                             let _ = sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
                                 .bind(wallet_id)
@@ -652,7 +654,7 @@ impl Database {
                         }
                     }
                     "USER_GROUP_CREATED" => {
-                        let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         let _ = sqlx::query(
                             "INSERT INTO user_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
                         )
@@ -663,7 +665,7 @@ impl Database {
                         .await;
                     }
                     "USER_GROUP_RENAMED" => {
-                        let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         let _ = sqlx::query(
                             "UPDATE user_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
                         )
@@ -681,7 +683,7 @@ impl Database {
                             .await;
                     }
                     "USER_GROUP_MEMBER_ADDED" => {
-                        let user_id_str = event_data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                             let _ = sqlx::query(
                                 "INSERT INTO user_group_members (user_id, user_group_id) VALUES ($1, $2) ON CONFLICT (user_id, user_group_id) DO NOTHING"
@@ -693,7 +695,7 @@ impl Database {
                         }
                     }
                     "USER_GROUP_MEMBER_REMOVED" => {
-                        let user_id_str = event_data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                             let _ = sqlx::query("DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2")
                                 .bind(perm_user_id)
@@ -703,7 +705,7 @@ impl Database {
                         }
                     }
                     "CONTACT_GROUP_CREATED" => {
-                        let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         let _ = sqlx::query(
                             "INSERT INTO contact_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
                         )
@@ -714,7 +716,7 @@ impl Database {
                         .await;
                     }
                     "CONTACT_GROUP_RENAMED" => {
-                        let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
                         let _ = sqlx::query(
                             "UPDATE contact_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
                         )

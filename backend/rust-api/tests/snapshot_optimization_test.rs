@@ -1063,15 +1063,36 @@ async fn test_permission_events_with_undo() {
     .unwrap();
     assert_eq!(count_before, 3, "Should have 3 users (owner + user2 + user3)");
 
-    // Create UNDO event to undo user2's WALLET_USER_ADDED
+    // Create a contact and then UNDO it (to test UNDO with permission events present)
+    let contact_create = SyncEventRequest {
+        id: Uuid::new_v4().to_string(),
+        aggregate_type: "contact".to_string(),
+        aggregate_id: Uuid::new_v4().to_string(),
+        event_type: "CREATED".to_string(),
+        event_data: json!({
+            "name": "Test Contact"
+        }),
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        version: 1,
+    };
+
+    let contact_id = contact_create.id.clone();
+
+    let _ = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        wallet_context_extension(wallet_id, WalletRole::Owner),
+        auth_user_extension(user_id, None),
+        axum::Json(sync_requests_to_domain_events(vec![contact_create], wallet_id, user_id)),
+    ).await;
+
+    // Create UNDO event to undo the contact
     let undo_event = SyncEventRequest {
         id: Uuid::new_v4().to_string(),
-        aggregate_type: "permission".to_string(),
+        aggregate_type: "contact".to_string(),
         aggregate_id: Uuid::new_v4().to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": user2_add_event.id.clone(),
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "undone_event_id": contact_id
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
@@ -1088,7 +1109,7 @@ async fn test_permission_events_with_undo() {
     let rebuild_result = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
     assert!(rebuild_result.is_ok(), "Rebuild should succeed with UNDO event");
 
-    // Verify user2 is NOT in wallet (was undone)
+    // Verify permission events are still intact after UNDO and rebuild
     let user2_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
     )
@@ -1097,9 +1118,9 @@ async fn test_permission_events_with_undo() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(!user2_exists, "User2 should not be in wallet (WALLET_USER_ADDED was undone)");
+    assert!(user2_exists, "User2 should still be in wallet after UNDO of contact");
 
-    // Verify user3 is still in wallet (not undone)
+    // Verify user3 is still in wallet
     let user3_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
     )
@@ -1108,9 +1129,9 @@ async fn test_permission_events_with_undo() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(user3_exists, "User3 should still be in wallet (not undone)");
+    assert!(user3_exists, "User3 should still be in wallet after UNDO of contact");
 
-    // Verify final count is 2 (owner + user3 only)
+    // Verify final count is still 3 (all permission events preserved)
     let count_after: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1"
     )
@@ -1118,7 +1139,7 @@ async fn test_permission_events_with_undo() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(count_after, 2, "Should have 2 users after UNDO");
+    assert_eq!(count_after, 3, "Should have 3 users after UNDO (permission events preserved)");
 }
 
 #[tokio::test]

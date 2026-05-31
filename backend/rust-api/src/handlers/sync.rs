@@ -350,9 +350,14 @@ pub async fn post_sync_events(
             continue;
         }
 
-        // Serialize event_data directly (EventData enum serializes itself)
-        let event_data = serde_json::to_value(&domain_event.event_data)
+        // Serialize event_data: remove the serde(tag) "type" field since event_type is stored separately
+        let mut event_data = serde_json::to_value(&domain_event.event_data)
             .unwrap_or_else(|_| serde_json::json!({}));
+
+        // Remove the serde tag discriminator field (not needed since event_type is stored separately)
+        if let Some(obj) = event_data.as_object_mut() {
+            obj.remove("type");
+        }
 
         // Insert event
         let aggregate_type = domain_event.aggregate_type();
