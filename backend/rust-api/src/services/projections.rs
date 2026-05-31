@@ -67,8 +67,9 @@ impl Projections {
             event_type == "UNDO"
         });
 
-        // Phase 3: If UNDO found but we used Phase 1 cutoff, reload ALL events
-        // This ensures we have complete history for smart snapshot search
+        // Phase 3: If UNDO found but we used Phase 1 cutoff, reload events from after the last snapshot
+        // This is critical: when UNDO events reference older events, we need them in memory
+        // to properly find snapshot boundaries and apply the cleaned event sequence
         if has_undo_in_loaded && max_processed_id.is_some() {
             tracing::info!("UNDO events detected in Phase 1 window, reloading full event history");
             events = sqlx::query(
