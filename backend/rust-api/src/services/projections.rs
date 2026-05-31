@@ -46,20 +46,9 @@ impl Projections {
 
         let has_existing_projections = max_processed_id.is_some() && max_processed_id != Some(0);
 
-        // Check if UNDO events exist anywhere in wallet (before deciding Phase 1 cutoff)
-        let has_undo_events_in_wallet = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM events WHERE wallet_id = $1 AND event_type = 'UNDO')"
-        )
-        .bind(wallet_id)
-        .fetch_one(&*state.db_pool)
-        .await?;
-
-        // If UNDO events exist, load ALL events for smart snapshot search
-        // Otherwise use Phase 1 optimization (load only new events)
-        let load_offset = if has_undo_events_in_wallet { 0 } else { max_processed_id.unwrap_or(0) };
-
-        // Get events for this wallet ordered by timestamp
-        let events = sqlx::query(
+        // Phase 1: Use optimization - load only new events (after last processed)
+        // This saves unnecessary full reloads in the common case (no UNDO events)
+        let mut events = sqlx::query(
             r#"
             SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
             FROM events
@@ -68,9 +57,32 @@ impl Projections {
             "#
         )
         .bind(wallet_id)
-        .bind(load_offset)
+        .bind(max_processed_id.unwrap_or(0))
         .fetch_all(&*state.db_pool)
         .await?;
+
+        // Phase 2: Check if UNDO exists in Phase 1 loaded events (no extra query)
+        let has_undo_in_loaded = events.iter().any(|row| {
+            let event_type: String = row.get("event_type");
+            event_type == "UNDO"
+        });
+
+        // Phase 3: If UNDO found but we used Phase 1 cutoff, reload ALL events
+        // This ensures we have complete history for smart snapshot search
+        if has_undo_in_loaded && max_processed_id.is_some() {
+            tracing::info!("UNDO events detected in Phase 1 window, reloading full event history");
+            events = sqlx::query(
+                r#"
+                SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
+                FROM events
+                WHERE wallet_id = $1 AND id > 0
+                ORDER BY created_at ASC
+                "#
+            )
+            .bind(wallet_id)
+            .fetch_all(&*state.db_pool)
+            .await?;
+        }
 
         // Early return if no new events and projections already exist (Phase 1 optimization win)
         if events.is_empty() && has_existing_projections {
