@@ -21,9 +21,6 @@ use crate::AppState;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
-// Re-exports for backward compatibility
-pub use crate::domain::RawEvent;
-
 // ============ RESPONSE TYPES ============
 
 #[derive(Serialize)]
@@ -534,18 +531,6 @@ pub async fn insert_permission_event_and_apply(
         )
         .await
         .map_err(|_| sqlx::Error::RowNotFound)?;
-
-    // Build synthetic RawEvent from inserted event and convert to DomainEvent
-    let created_at = chrono::Utc::now();
-    let _sync_request = RawEvent {
-        id: event_id.to_string(),
-        aggregate_type: "permission".to_string(),
-        aggregate_id: aggregate_id.to_string(),
-        event_type: event_type.to_string(),
-        event_data: event_data.clone(),
-        timestamp: created_at.to_rfc3339(),
-        version: 1,
-    };
 
     // Event stored, broadcast permission change
     websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "permission");
