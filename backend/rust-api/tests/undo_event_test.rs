@@ -1,6 +1,6 @@
 use debt_tracker_api::config::Config;
-use debt_tracker_api::domain::DomainEvent;
-use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
+use debt_tracker_api::domain::{DomainEvent, RawEvent};
+use debt_tracker_api::handlers::sync::post_sync_events;
 use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::services::projections::Projections;
 use debt_tracker_api::websocket;
@@ -31,7 +31,7 @@ async fn test_undo_event_validation() {
 
     // Test 1: UNDO event without 'undone_event_id' should be rejected at deserialization
     // (In programmatic test, we test that to_domain_event() returns error)
-    let invalid_undo = SyncEventRequest {
+    let invalid_undo = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: Uuid::new_v4().to_string(),
@@ -53,7 +53,7 @@ async fn test_undo_event_validation() {
     );
 
     // Test 2: UNDO event with invalid UUID in 'undone_event_id' should be rejected at deserialization
-    let invalid_uuid_undo = SyncEventRequest {
+    let invalid_uuid_undo = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: Uuid::new_v4().to_string(),
@@ -77,7 +77,7 @@ async fn test_undo_event_validation() {
 
     // Test 3: UNDO event with valid structure should be accepted
     let original_event_id = Uuid::new_v4();
-    let valid_undo = SyncEventRequest {
+    let valid_undo = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: Uuid::new_v4().to_string(),
@@ -116,7 +116,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     let contact_id = Uuid::new_v4();
 
     // 1. Create a contact via CREATED event
-    let created_event = SyncEventRequest {
+    let created_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -139,7 +139,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     .await;
 
     // 2. Update the contact via UPDATED event
-    let updated_event = SyncEventRequest {
+    let updated_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -172,7 +172,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     assert_eq!(name_after_update, "Updated Name");
 
     // 3. Create UNDO event for the UPDATE
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -227,7 +227,7 @@ async fn test_undo_event_syncs_correctly() {
     let contact_id = Uuid::new_v4();
 
     // 1. Create original event
-    let original_event = SyncEventRequest {
+    let original_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -250,7 +250,7 @@ async fn test_undo_event_syncs_correctly() {
     .await;
 
     // 2. Client creates UNDO event and syncs to server
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -326,7 +326,7 @@ async fn test_event_validation_rejects_invalid_undo() {
     // This test only validates that correctly-structured UNDO events are accepted.
 
     // Test: UNDO event with non-existent 'undone_event_id' is still accepted (validation only checks structure)
-    let valid_structure = SyncEventRequest {
+    let valid_structure = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: Uuid::new_v4().to_string(),
@@ -372,7 +372,7 @@ async fn test_multiple_undo_events() {
     let contact_id = Uuid::new_v4();
 
     // 1. Create multiple events
-    let event1 = SyncEventRequest {
+    let event1 = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -384,7 +384,7 @@ async fn test_multiple_undo_events() {
         version: 1,
     };
 
-    let event2 = SyncEventRequest {
+    let event2 = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -396,7 +396,7 @@ async fn test_multiple_undo_events() {
         version: 1,
     };
 
-    let event3 = SyncEventRequest {
+    let event3 = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -420,7 +420,7 @@ async fn test_multiple_undo_events() {
     .await;
 
     // 2. Create multiple UNDO events for different original events
-    let undo1 = SyncEventRequest {
+    let undo1 = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -432,7 +432,7 @@ async fn test_multiple_undo_events() {
         version: 1,
     };
 
-    let undo2 = SyncEventRequest {
+    let undo2 = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -492,7 +492,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
     // 1. Create events to trigger snapshot (every 10 events)
     let mut events_to_undo: Vec<String> = Vec::new();
     for i in 0..15 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -527,7 +527,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
     assert!(snapshot_count > 0, "Snapshot should be created at event 10");
 
     // 2. Create UNDO event for an event before latest snapshot (event 3)
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -585,7 +585,7 @@ async fn test_undo_synced_at_window_validation() {
 
     // 1. Create and sync an event
     let event_id = Uuid::new_v4();
-    let create_event = SyncEventRequest {
+    let create_event = RawEvent {
         id: event_id.to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -631,7 +631,7 @@ async fn test_undo_synced_at_window_validation() {
 
     // 3. Create UNDO event shortly after (should be accepted - within 5 second window)
     let undo_event_id = Uuid::new_v4();
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: undo_event_id.to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),

@@ -7,8 +7,8 @@
 // 5. Multiple UNDO events with snapshot optimization
 
 use debt_tracker_api::config::Config;
-use debt_tracker_api::domain::DomainEvent;
-use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
+use debt_tracker_api::domain::{DomainEvent, RawEvent};
+use debt_tracker_api::handlers::sync::post_sync_events;
 use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::services::projections::Projections;
 use debt_tracker_api::websocket;
@@ -43,7 +43,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 
     // 1. Create 10 events to trigger snapshot creation
     for i in 0..10 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -77,7 +77,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 
     // 2. Create 5 more events after snapshot
     for i in 10..15 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -102,7 +102,7 @@ async fn test_snapshot_optimization_with_undo_after_snapshot() {
 
     // 3. Create UNDO event for event 12 (which is after the snapshot at event 10)
     // With new algorithm, should use snapshot optimization
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -164,7 +164,7 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
 
     // 1. Create 5 events (not enough to trigger snapshot)
     for i in 0..5 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -197,7 +197,7 @@ async fn test_full_rebuild_when_undo_before_all_snapshots() {
     assert_eq!(snapshot_count, 0, "No snapshot should exist yet");
 
     // 2. Create UNDO event for event 2 (before any snapshot)
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -253,7 +253,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
 
     // 1. Create 10 events to trigger snapshot
     for i in 0..10 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -278,7 +278,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
 
     // 2. Create 3 more events
     for i in 10..13 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -302,7 +302,7 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
     }
 
     // 3. Create UNDO event for event 12 (index 12)
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -361,7 +361,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
 
     // 1. Create 10 events to trigger snapshot
     for i in 0..10 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -386,7 +386,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
 
     // 2. Create 5 more events after snapshot
     for i in 10..15 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -410,7 +410,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
     }
 
     // 3. Create multiple UNDO events for events after snapshot
-    let undo1 = SyncEventRequest {
+    let undo1 = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -422,7 +422,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         version: 1,
     };
 
-    let undo2 = SyncEventRequest {
+    let undo2 = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -480,7 +480,7 @@ async fn test_undo_event_finds_position_by_id() {
 
     // 1. Create 20 events (2 snapshots should be created at events 10 and 20)
     for i in 0..20 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -517,7 +517,7 @@ async fn test_undo_event_finds_position_by_id() {
 
     // 2. Create UNDO event for event 15 (which is after snapshot at event 10, but before snapshot at event 20)
     // Algorithm should find event 15's position by ID and use snapshot at event 10
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),

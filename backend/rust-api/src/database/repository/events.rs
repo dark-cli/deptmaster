@@ -1,7 +1,7 @@
 use crate::database::error::DbError;
 use crate::database::models::*;
 use crate::database::repository::Database;
-use crate::handlers::sync::SyncEventRequest;
+use crate::domain::RawEvent;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -863,7 +863,7 @@ impl Database {
 
     pub async fn apply_single_event_to_projections_impl(
         &self,
-        event: &SyncEventRequest,
+        event: &RawEvent,
         aggregate_id: Uuid,
         user_id: Uuid,
         wallet_id: Uuid,
@@ -1295,7 +1295,7 @@ impl Database {
 
     pub async fn apply_permission_event_impl(
         &self,
-        event: &SyncEventRequest,
+        event: &RawEvent,
         wallet_id: Uuid,
         created_at: NaiveDateTime,
     ) -> Result<(), sqlx::Error> {

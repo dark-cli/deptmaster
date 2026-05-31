@@ -191,9 +191,9 @@ pub fn create_test_app_state(
     }
 }
 
-/// Convert SyncEventRequest to DomainEvent for testing
+/// Convert RawEvent to DomainEvent for testing
 pub fn sync_request_to_domain_event(
-    request: debt_tracker_api::handlers::sync::SyncEventRequest,
+    request: debt_tracker_api::domain::RawEvent,
     wallet_id: Uuid,
     user_id: Uuid,
 ) -> debt_tracker_api::domain::DomainEvent {
@@ -203,9 +203,9 @@ pub fn sync_request_to_domain_event(
         .expect("Test event should be valid")
 }
 
-/// Convert Vec<SyncEventRequest> to Vec<DomainEvent> for testing
+/// Convert Vec<RawEvent> to Vec<DomainEvent> for testing
 pub fn sync_requests_to_domain_events(
-    requests: Vec<debt_tracker_api::handlers::sync::SyncEventRequest>,
+    requests: Vec<debt_tracker_api::domain::RawEvent>,
     wallet_id: Uuid,
     user_id: Uuid,
 ) -> Vec<debt_tracker_api::domain::DomainEvent> {

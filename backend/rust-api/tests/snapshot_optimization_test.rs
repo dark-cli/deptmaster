@@ -7,8 +7,8 @@
 // 5. Fallback to full rebuild when snapshot optimization fails
 
 use debt_tracker_api::config::Config;
-use debt_tracker_api::domain::DomainEvent;
-use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
+use debt_tracker_api::domain::{DomainEvent, RawEvent};
+use debt_tracker_api::handlers::sync::post_sync_events;
 use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::services::projections::Projections;
 use debt_tracker_api::websocket;
@@ -41,7 +41,7 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
 
     // 1. Create 10 events to trigger snapshot creation
     for i in 0..10 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -78,7 +78,7 @@ async fn test_snapshot_optimization_used_when_no_undo_events() {
 
     // 2. Create 3 more events (no UNDO events)
     for i in 10..13 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -161,7 +161,7 @@ async fn test_full_rebuild_used_when_undo_events_present() {
     // 1. Create 10 events to trigger snapshot creation
     let mut event_ids = Vec::new();
     for i in 0..10 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -199,7 +199,7 @@ async fn test_full_rebuild_used_when_undo_events_present() {
 
     // 2. Create UNDO event for event 6 (which is BEFORE the snapshot at event 10)
     // With new algorithm: should use FULL rebuild because no snapshot exists before event 6
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -259,7 +259,7 @@ async fn test_snapshot_restoration_correctness() {
 
     // 1. Create 10 events to trigger snapshot
     for i in 0..10 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -304,7 +304,7 @@ async fn test_snapshot_restoration_correctness() {
 
     // 2. Create 2 more events
     for i in 10..12 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -367,7 +367,7 @@ async fn test_fallback_to_full_rebuild_when_no_snapshot() {
 
     // 1. Create 5 events (not enough to trigger snapshot)
     for i in 0..5 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -439,7 +439,7 @@ async fn test_snapshot_optimization_with_transactions() {
     // 1. Create 10 transaction events to trigger snapshot
     for i in 0..10 {
         let transaction_id = Uuid::new_v4();
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "transaction".to_string(),
             aggregate_id: transaction_id.to_string(),
@@ -482,7 +482,7 @@ async fn test_snapshot_optimization_with_transactions() {
     // 2. Create 2 more transaction events (no UNDO)
     for i in 10..12 {
         let transaction_id = Uuid::new_v4();
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "transaction".to_string(),
             aggregate_id: transaction_id.to_string(),
@@ -559,7 +559,7 @@ async fn test_batch_processing_with_small_batch_size() {
 
     // Create 15 events (3 batches of 5 each with batch size 5)
     for i in 0..15 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -650,7 +650,7 @@ async fn test_batch_processing_with_large_batch_size() {
 
     // Create 25 events (should fit in 1 batch with batch size 1000)
     for i in 0..25 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -729,7 +729,7 @@ async fn test_batch_processing_with_transactions() {
     let contact_id = Uuid::new_v4();
 
     // First, create a contact via event
-    let contact_event = SyncEventRequest {
+    let contact_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -757,7 +757,7 @@ async fn test_batch_processing_with_transactions() {
     // Create 10 transaction events (multiple batches of 3)
     for i in 0..10 {
         let transaction_id = Uuid::new_v4();
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "transaction".to_string(),
             aggregate_id: transaction_id.to_string(),
@@ -844,7 +844,7 @@ async fn test_batch_processing_with_undo_events() {
 
     // Create 8 events and track their IDs
     for i in 0..8 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -872,7 +872,7 @@ async fn test_batch_processing_with_undo_events() {
     }
 
     // Create UNDO event for event 3 (index 2)
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
@@ -990,7 +990,7 @@ async fn test_batch_processing_with_permission_events() {
 
     // Create 10 permission events (WALLET_USER_ADDED events for the same user multiple times with role changes)
     for i in 0..10 {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "permission".to_string(),
             aggregate_id: user2_id.to_string(),
@@ -1130,7 +1130,7 @@ async fn test_permission_events_with_undo() {
     };
 
     // Create WALLET_USER_ADDED event for user2
-    let user2_add_event = SyncEventRequest {
+    let user2_add_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "permission".to_string(),
         aggregate_id: user2_id.to_string(),
@@ -1157,7 +1157,7 @@ async fn test_permission_events_with_undo() {
     .await;
 
     // Create WALLET_USER_ADDED event for user3
-    let user3_add_event = SyncEventRequest {
+    let user3_add_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "permission".to_string(),
         aggregate_id: user3_id.to_string(),
@@ -1196,7 +1196,7 @@ async fn test_permission_events_with_undo() {
     );
 
     // Create a contact and then UNDO it (to test UNDO with permission events present)
-    let contact_create = SyncEventRequest {
+    let contact_create = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: Uuid::new_v4().to_string(),
@@ -1223,7 +1223,7 @@ async fn test_permission_events_with_undo() {
     .await;
 
     // Create UNDO event to undo the contact
-    let undo_event = SyncEventRequest {
+    let undo_event = RawEvent {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: Uuid::new_v4().to_string(),
@@ -1314,7 +1314,7 @@ async fn test_permission_events_with_snapshot() {
     // Create 15 contacts to trigger snapshot creation
     for i in 0..15 {
         let contact_id = Uuid::new_v4();
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "contact".to_string(),
             aggregate_id: contact_id.to_string(),
@@ -1359,7 +1359,7 @@ async fn test_permission_events_with_snapshot() {
     ];
 
     for new_user_id in &new_users {
-        let event = SyncEventRequest {
+        let event = RawEvent {
             id: Uuid::new_v4().to_string(),
             aggregate_type: "permission".to_string(),
             aggregate_id: new_user_id.to_string(),

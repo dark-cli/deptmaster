@@ -22,7 +22,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
 // Re-exports for backward compatibility
-pub use crate::domain::SyncEventRequest;
+pub use crate::domain::RawEvent;
 
 // ============ RESPONSE TYPES ============
 
@@ -535,9 +535,9 @@ pub async fn insert_permission_event_and_apply(
         .await
         .map_err(|_| sqlx::Error::RowNotFound)?;
 
-    // Build synthetic SyncEventRequest from inserted event and convert to DomainEvent
+    // Build synthetic RawEvent from inserted event and convert to DomainEvent
     let created_at = chrono::Utc::now();
-    let _sync_request = SyncEventRequest {
+    let _sync_request = RawEvent {
         id: event_id.to_string(),
         aggregate_type: "permission".to_string(),
         aggregate_id: aggregate_id.to_string(),

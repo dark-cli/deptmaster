@@ -483,7 +483,7 @@ where
 
 /// Sync event request with validation at deserialization boundary.
 #[derive(Debug, Clone, Deserialize)]
-pub struct SyncEventRequest {
+pub struct RawEvent {
     #[serde(deserialize_with = "deserialize_uuid_string")]
     pub id: String,
     #[serde(deserialize_with = "deserialize_aggregate_type")]
@@ -498,7 +498,7 @@ pub struct SyncEventRequest {
     pub version: i32,
 }
 
-impl SyncEventRequest {
+impl RawEvent {
     /// Validate event data
     pub fn validate_data(&self) -> Option<String> {
         match (self.aggregate_type.as_str(), self.event_type.as_str()) {
@@ -625,7 +625,7 @@ impl SyncEventRequest {
         }
     }
 
-    /// Convert SyncEventRequest to strongly-typed DomainEvent
+    /// Convert RawEvent to strongly-typed DomainEvent
     pub fn to_domain_event(
         &self,
         wallet_id: Uuid,
