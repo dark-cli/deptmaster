@@ -350,78 +350,8 @@ pub async fn post_sync_events(
             continue;
         }
 
-        // Build event_data JSON from DomainEvent (serialize the data fields only)
-        let event_data = match &domain_event {
-            DomainEvent::ContactCreated { name, username, phone, email, notes, .. } => {
-                serde_json::json!({
-                    "name": name,
-                    "username": username,
-                    "phone": phone,
-                    "email": email,
-                    "notes": notes,
-                })
-            }
-            DomainEvent::ContactUpdated { name, username, phone, email, notes, .. } => {
-                serde_json::json!({
-                    "name": name,
-                    "username": username,
-                    "phone": phone,
-                    "email": email,
-                    "notes": notes,
-                })
-            }
-            DomainEvent::ContactDeleted { comment, .. } => {
-                serde_json::json!({"comment": comment})
-            }
-            DomainEvent::ContactUndone { undone_event_id, .. } => {
-                serde_json::json!({"undone_event_id": undone_event_id.to_string()})
-            }
-            DomainEvent::TransactionCreated { contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date, .. } => {
-                serde_json::json!({
-                    "contact_id": contact_id.to_string(),
-                    "amount": amount,
-                    "direction": direction,
-                    "transaction_type": transaction_type,
-                    "currency": currency,
-                    "description": description,
-                    "transaction_date": transaction_date,
-                    "due_date": due_date,
-                })
-            }
-            DomainEvent::TransactionUpdated { contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date, .. } => {
-                serde_json::json!({
-                    "contact_id": contact_id,
-                    "amount": amount,
-                    "direction": direction,
-                    "transaction_type": transaction_type,
-                    "currency": currency,
-                    "description": description,
-                    "transaction_date": transaction_date,
-                    "due_date": due_date,
-                })
-            }
-            DomainEvent::TransactionDeleted { comment, .. } => {
-                serde_json::json!({"comment": comment})
-            }
-            DomainEvent::TransactionUndone { undone_event_id, .. } => {
-                serde_json::json!({"undone_event_id": undone_event_id.to_string()})
-            }
-            // Permission events already have data field
-            DomainEvent::WalletUserAdded { data, .. }
-            | DomainEvent::WalletUserRoleChanged { data, .. }
-            | DomainEvent::WalletUserRemoved { data, .. }
-            | DomainEvent::UserGroupCreated { data, .. }
-            | DomainEvent::UserGroupUpdated { data, .. }
-            | DomainEvent::UserGroupDeleted { data, .. }
-            | DomainEvent::UserGroupMemberAdded { data, .. }
-            | DomainEvent::UserGroupMemberRemoved { data, .. }
-            | DomainEvent::ContactGroupCreated { data, .. }
-            | DomainEvent::ContactGroupUpdated { data, .. }
-            | DomainEvent::ContactGroupDeleted { data, .. }
-            | DomainEvent::ContactGroupMemberAdded { data, .. }
-            | DomainEvent::ContactGroupMemberRemoved { data, .. }
-            | DomainEvent::PermissionMatrixSet { data, .. } => data.clone(),
-        };
+        // Extract event data (payload only, no metadata)
+        let event_data = domain_event.to_event_data();
 
         // Insert event
         let aggregate_type = domain_event.aggregate_type();
