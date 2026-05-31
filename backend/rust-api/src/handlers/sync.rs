@@ -311,15 +311,30 @@ pub async fn post_sync_events(
         return Err(responses::insufficient_permission_response());
     }
 
-    // Process each event
-    let mut accepted = Vec::new();
-    let mut conflicts = Vec::new();
+    // Deduplicate within the batch (check for duplicate event_ids in the incoming request)
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut deduplicated_events = Vec::new();
+    let mut batch_duplicates = Vec::new();
 
-    for domain_event in events {
+    for event in events {
+        let event_id = event.id();
+        if !seen_ids.insert(event_id) {
+            // Duplicate within batch
+            batch_duplicates.push(event_id.to_string());
+        } else {
+            deduplicated_events.push(event);
+        }
+    }
+
+    // Process deduplicated events
+    let mut accepted = Vec::new();
+    let mut conflicts = batch_duplicates; // Start with batch duplicates
+
+    for domain_event in deduplicated_events {
         let event_id = domain_event.id();
         let aggregate_id = domain_event.aggregate_id();
 
-        // Check idempotency
+        // Check idempotency: if event already exists, skip silently (idempotent operation)
         let existing = db.get_event_by_id_impl(event_id)
             .await
             .map_err(|_| {
@@ -329,7 +344,8 @@ pub async fn post_sync_events(
                 )
             })?;
 
-        if let Some(_existing_event) = existing {
+        if existing.is_some() {
+            // Already synced before - idempotent, skip without error
             conflicts.push(event_id.to_string());
             continue;
         }
