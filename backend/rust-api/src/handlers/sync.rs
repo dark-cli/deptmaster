@@ -306,7 +306,10 @@ pub async fn post_sync_events(
         .await
         .map_err(|_| responses::insufficient_permission_response())?;
 
-    let denied_set: HashSet<Uuid> = denied_event_ids.into_iter().collect();
+    // All-or-nothing: if ANY event is denied, reject the entire batch
+    if !denied_event_ids.is_empty() {
+        return Err(responses::insufficient_permission_response());
+    }
 
     // Process each event
     let mut accepted = Vec::new();
@@ -315,12 +318,6 @@ pub async fn post_sync_events(
     for domain_event in events {
         let event_id = domain_event.id();
         let aggregate_id = domain_event.aggregate_id();
-
-        // Check if this event was denied by permission check
-        if denied_set.contains(&event_id) {
-            conflicts.push(event_id.to_string());
-            continue;
-        }
 
         // Check idempotency
         let existing = db.get_event_by_id_impl(event_id)
