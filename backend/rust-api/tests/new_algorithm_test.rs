@@ -292,14 +292,14 @@ async fn test_cleaned_event_list_removes_undo_and_undone_events() {
         ).await;
     }
 
-    // 3. Create UNDO event for event 11 (index 11)
+    // 3. Create UNDO event for event 12 (index 12)
     let undo_event = SyncEventRequest {
         id: Uuid::new_v4().to_string(),
         aggregate_type: "contact".to_string(),
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[11]
+            "undone_event_id": event_ids[12]
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
@@ -405,7 +405,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[11] // Undo event 12
+            "undone_event_id": event_ids[12] // Undo event 12
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
@@ -417,7 +417,7 @@ async fn test_multiple_undo_events_with_snapshot_optimization() {
         aggregate_id: contact_id.to_string(),
         event_type: "UNDO".to_string(),
         event_data: json!({
-            "undone_event_id": event_ids[13] // Undo event 14
+            "undone_event_id": event_ids[14] // Undo event 14
         }),
         timestamp: chrono::Utc::now().to_rfc3339(),
         version: 1,
