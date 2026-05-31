@@ -467,18 +467,19 @@ pub async fn post_sync_events(
 
                 // Save snapshot if needed
                 let event_count = db.get_event_count_for_wallet(wallet_id).await;
-                let should_snapshot = snapshots::should_create_snapshot(event_count)
+                let should_snapshot = snapshots::should_create_snapshot_with_interval(event_count, state.config.snapshot_interval)
                     || matches!(domain_event, DomainEvent::ContactUndone { .. } | DomainEvent::TransactionUndone { .. });
 
                 if should_snapshot {
                     if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
-                        let _ = snapshots::save_snapshot(
+                        let _ = snapshots::save_snapshot_with_limit(
                             &*state.db_pool,
                             db_id,
                             event_count,
                             snapshot_json.0,
                             snapshot_json.1,
                             wallet_id,
+                            state.config.max_snapshots_per_wallet,
                         ).await;
                     }
                 }

@@ -13,6 +13,8 @@ pub struct Config {
     pub rate_limit_requests: u32,
     pub rate_limit_window: u64,
     pub event_rebuild_batch_size: usize,
+    pub max_snapshots_per_wallet: i64,
+    pub snapshot_interval: i64,
 }
 
 impl Config {
@@ -55,6 +57,14 @@ impl Config {
                 .unwrap_or_else(|_| "1000".to_string())
                 .parse()
                 .unwrap_or(1000),
+            max_snapshots_per_wallet: env::var("MAX_SNAPSHOTS_PER_WALLET")
+                .unwrap_or_else(|_| "5".to_string())
+                .parse()
+                .unwrap_or(5),
+            snapshot_interval: env::var("SNAPSHOT_INTERVAL")
+                .unwrap_or_else(|_| "10".to_string())
+                .parse()
+                .unwrap_or(10),
         })
     }
 
