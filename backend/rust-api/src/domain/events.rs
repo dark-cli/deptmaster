@@ -186,7 +186,20 @@ impl EventData {
             | EventData::TransactionUpdated { .. }
             | EventData::TransactionDeleted { .. }
             | EventData::TransactionUndone { .. } => AggregateType::Transaction,
-            _ => AggregateType::Permission,
+            EventData::WalletUserAdded { .. }
+            | EventData::WalletUserRoleChanged { .. }
+            | EventData::WalletUserRemoved { .. }
+            | EventData::UserGroupCreated { .. }
+            | EventData::UserGroupUpdated { .. }
+            | EventData::UserGroupDeleted { .. }
+            | EventData::UserGroupMemberAdded { .. }
+            | EventData::UserGroupMemberRemoved { .. }
+            | EventData::ContactGroupCreated { .. }
+            | EventData::ContactGroupUpdated { .. }
+            | EventData::ContactGroupDeleted { .. }
+            | EventData::ContactGroupMemberAdded { .. }
+            | EventData::ContactGroupMemberRemoved { .. }
+            | EventData::PermissionMatrixSet { .. } => AggregateType::Permission,
         }
     }
 
