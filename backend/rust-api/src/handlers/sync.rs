@@ -375,58 +375,67 @@ pub async fn post_sync_events(
 
         accepted.push(event_id.to_string());
 
-        // Apply event using strongly-typed DomainEvent (already validated at boundary)
-        if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
-            if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
-                if let Err(e) = domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await {
-                    tracing::error!("Error applying event: {:?}", e);
-                } else {
-                    // Broadcast using event_data discriminant
-                    let broadcast_type = match &domain_event.event_data {
-                        EventData::ContactCreated { .. }
-                        | EventData::ContactUpdated { .. }
-                        | EventData::ContactDeleted { .. }
-                        | EventData::ContactUndone { .. } => "contact",
+        // Apply event to projections via database layer
+        let rows: Vec<_> = sqlx::query(
+            "SELECT id, event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, created_at, event_version FROM events WHERE event_id = $1 AND wallet_id = $2"
+        )
+        .bind(event_id)
+        .bind(wallet_id)
+        .fetch_all(&*state.db_pool)
+        .await
+        .unwrap_or_default();
 
-                        EventData::TransactionCreated { .. }
-                        | EventData::TransactionUpdated { .. }
-                        | EventData::TransactionDeleted { .. }
-                        | EventData::TransactionUndone { .. } => "transaction",
+        if !rows.is_empty() {
+            let row_refs: Vec<_> = rows.iter().collect();
+            let mut undone_set = std::collections::HashSet::new();
+            if let Err(e) = db.apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set).await {
+                tracing::error!("Error applying event: {:?}", e);
+            }
+        }
 
-                        _ => "permission",
-                    };
-                    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, broadcast_type);
+        // Broadcast using event_data discriminant
+        let broadcast_type = match &domain_event.event_data {
+            EventData::ContactCreated { .. }
+            | EventData::ContactUpdated { .. }
+            | EventData::ContactDeleted { .. }
+            | EventData::ContactUndone { .. } => "contact",
+
+            EventData::TransactionCreated { .. }
+            | EventData::TransactionUpdated { .. }
+            | EventData::TransactionDeleted { .. }
+            | EventData::TransactionUndone { .. } => "transaction",
+
+            _ => "permission",
+        };
+        websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, broadcast_type);
+
+        // Handle UNDO: full wallet rebuild
+        match &domain_event.event_data {
+            EventData::ContactUndone { .. } | EventData::TransactionUndone { .. } => {
+                tracing::info!("UNDO event processed, rebuilding wallet projections");
+                if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
+                    tracing::error!("Error rebuilding projections: {:?}", e);
                 }
+            }
+            _ => {}
+        }
 
-                // Handle UNDO: full wallet rebuild
-                match &domain_event.event_data {
-                    EventData::ContactUndone { .. } | EventData::TransactionUndone { .. } => {
-                        tracing::info!("UNDO event processed, rebuilding wallet projections");
-                        if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
-                            tracing::error!("Error rebuilding projections: {:?}", e);
-                        }
-                    }
-                    _ => {}
-                }
+        // Save snapshot if needed
+        let event_count = db.get_event_count_for_wallet(wallet_id).await;
+        let should_snapshot = snapshots::should_create_snapshot_with_interval(event_count, state.config.snapshot_interval)
+            || matches!(&domain_event.event_data, EventData::ContactUndone { .. } | EventData::TransactionUndone { .. });
 
-                // Save snapshot if needed
-                let event_count = db.get_event_count_for_wallet(wallet_id).await;
-                let should_snapshot = snapshots::should_create_snapshot_with_interval(event_count, state.config.snapshot_interval)
-                    || matches!(&domain_event.event_data, EventData::ContactUndone { .. } | EventData::TransactionUndone { .. });
-
-                if should_snapshot {
-                    if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
-                        let _ = snapshots::save_snapshot_with_limit(
-                            &*state.db_pool,
-                            db_id,
-                            event_count,
-                            snapshot_json.0,
-                            snapshot_json.1,
-                            wallet_id,
-                            state.config.max_snapshots_per_wallet,
-                        ).await;
-                    }
-                }
+        if should_snapshot {
+            if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
+                let _ = snapshots::save_snapshot_with_limit(
+                    &*state.db_pool,
+                    1,
+                    event_count,
+                    snapshot_json.0,
+                    snapshot_json.1,
+                    wallet_id,
+                    state.config.max_snapshots_per_wallet,
+                ).await;
             }
         }
     }
@@ -461,7 +470,7 @@ pub async fn insert_permission_event_and_apply(
 
     // Build synthetic SyncEventRequest from inserted event and convert to DomainEvent
     let created_at = chrono::Utc::now();
-    let sync_request = SyncEventRequest {
+    let _sync_request = SyncEventRequest {
         id: event_id.to_string(),
         aggregate_type: "permission".to_string(),
         aggregate_id: aggregate_id.to_string(),
@@ -471,15 +480,8 @@ pub async fn insert_permission_event_and_apply(
         version: 1,
     };
 
-    // Apply using DomainEvent (converted from SyncEventRequest)
-    if let Ok(domain_event) = sync_request.to_domain_event(wallet_id, user_id, created_at) {
-        if let Ok(Some(db_id)) = db.get_event_db_id_by_uuid(event_id).await {
-            if let Ok(Some(event_row)) = db.get_event_by_id_impl(event_id).await {
-                domain_event.apply_self(&*state.db_pool, wallet_id, user_id, db_id, event_row.created_at).await?;
-                websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "permission");
-            }
-        }
-    }
+    // Event stored, broadcast permission change
+    websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "permission");
 
     Ok(())
 }
