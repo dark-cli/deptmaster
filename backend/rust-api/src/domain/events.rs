@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 // ============ AGGREGATE TYPE ENUM ============
 
-/// Strongly-typed aggregate types. Use instead of string matching.
+/// Strongly typed aggregate types. Use instead of string matching.
 /// Add new types here as the system grows (user, team, etc.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AggregateType {
@@ -35,8 +35,8 @@ impl AggregateType {
 
 // ============ EVENT DATA PAYLOAD ============
 
-/// Strongly-typed event data payload. Each variant carries only its specific fields.
-/// Serialized with #[serde(tag = "type")] so each variant is discriminated by a "type" field.
+/// Strongly typed event data payload. Each variant carries only its specific fields.
+/// Serialized with #[serde(tag = "type")], so each variant is discriminated by a "type" field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventData {
@@ -403,72 +403,6 @@ impl DomainEvent {
     }
 }
 
-// ============ HTTP REQUEST TYPES ============
-
-/// Custom deserializer for UUID strings - validates format
-fn deserialize_uuid_string<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    Uuid::parse_str(&s).map_err(serde::de::Error::custom)?;
-    Ok(s)
-}
-
-/// Custom deserializer for aggregate_type - validates against allowed values
-fn deserialize_aggregate_type<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    match s.as_str() {
-        "contact" | "transaction" | "permission" => Ok(s),
-        _ => Err(serde::de::Error::custom(format!(
-            "Invalid aggregate_type '{}'. Must be one of: contact, transaction, permission",
-            s
-        ))),
-    }
-}
-
-/// Custom deserializer for event_type - validates against allowed values
-fn deserialize_event_type<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    match s.as_str() {
-        "CREATED" | "UPDATED" | "DELETED" | "UNDO" => Ok(s),
-        "WALLET_USER_ADDED"
-        | "WALLET_USER_ROLE_CHANGED"
-        | "WALLET_USER_REMOVED"
-        | "USER_GROUP_CREATED"
-        | "USER_GROUP_UPDATED"
-        | "USER_GROUP_DELETED"
-        | "USER_GROUP_MEMBER_ADDED"
-        | "USER_GROUP_MEMBER_REMOVED"
-        | "CONTACT_GROUP_CREATED"
-        | "CONTACT_GROUP_UPDATED"
-        | "CONTACT_GROUP_DELETED"
-        | "CONTACT_GROUP_MEMBER_ADDED"
-        | "CONTACT_GROUP_MEMBER_REMOVED"
-        | "PERMISSION_MATRIX_SET" => Ok(s),
-        _ => Err(serde::de::Error::custom(format!(
-            "Invalid event_type '{}'. Must be a valid event type",
-            s
-        ))),
-    }
-}
-
-/// Custom deserializer for RFC3339 timestamp string - validates format
-fn deserialize_timestamp<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    DateTime::parse_from_rfc3339(&s)
-        .map_err(|_| serde::de::Error::custom("Invalid RFC3339 timestamp format"))?;
-    Ok(s)
-}
 
 /// Custom deserializer for DateTime<Utc> from RFC3339 string
 fn deserialize_datetime_utc<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
@@ -480,4 +414,3 @@ where
         .map(|dt| dt.with_timezone(&Utc))
         .map_err(|_| serde::de::Error::custom("Invalid RFC3339 timestamp format"))
 }
-
