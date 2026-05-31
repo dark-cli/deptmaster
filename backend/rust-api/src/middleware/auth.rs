@@ -1,3 +1,4 @@
+use crate::AppState;
 use axum::{
     extract::{Request, State},
     http::{header::AUTHORIZATION, StatusCode},
@@ -5,10 +6,9 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -43,7 +43,11 @@ pub async fn auth_middleware(
     }
 
     // Extract token from Authorization header
-    let auth_header = match req.headers().get(AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+    let auth_header = match req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+    {
         Some(h) => h,
         None => return Ok(auth_declined_response()),
     };
@@ -73,7 +77,7 @@ pub async fn auth_middleware(
 
     // Determine if this token belongs to an active admin.
     let is_admin = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)"
+        "SELECT EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)",
     )
     .bind(user_id)
     .fetch_one(&*state.db_pool)
@@ -83,7 +87,7 @@ pub async fn auth_middleware(
     // Verify user exists (regular user or active admin).
     if !is_admin {
         let user_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)"
+            "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)",
         )
         .bind(user_id)
         .fetch_one(&*state.db_pool)
@@ -134,10 +138,7 @@ pub async fn auth_middleware(
 // Extractor to get authenticated user from request
 // Reserved for future use when additional auth checks are needed
 #[allow(dead_code)]
-pub async fn require_auth(
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+pub async fn require_auth(req: Request, next: Next) -> Result<Response, StatusCode> {
     let _auth_user = req
         .extensions()
         .get::<AuthUser>()

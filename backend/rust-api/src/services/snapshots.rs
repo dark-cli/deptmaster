@@ -1,5 +1,5 @@
-use sqlx::{PgPool, Row, postgres::PgRow, FromRow};
 use serde::{Deserialize, Serialize};
+use sqlx::{postgres::PgRow, FromRow, PgPool, Row};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +99,11 @@ pub async fn save_snapshot_with_limit(
     .execute(pool)
     .await?;
 
-    tracing::info!("Saved projection snapshot #{} (event count: {})", next_index, event_count);
+    tracing::info!(
+        "Saved projection snapshot #{} (event count: {})",
+        next_index,
+        event_count
+    );
 
     // Cleanup old snapshots for this wallet
     cleanup_old_snapshots_with_limit(pool, wallet_id, max_snapshots).await?;
@@ -122,7 +126,7 @@ pub async fn get_snapshot_before_event(
         WHERE last_event_id < $1 AND wallet_id = $2
         ORDER BY snapshot_index DESC
         LIMIT 1
-        "#
+        "#,
     )
     .bind(event_id)
     .bind(wallet_id)
@@ -146,7 +150,7 @@ pub async fn get_latest_snapshot(
         WHERE wallet_id = $1
         ORDER BY snapshot_index DESC
         LIMIT 1
-        "#
+        "#,
     )
     .bind(wallet_id)
     .fetch_optional(pool)
@@ -156,7 +160,10 @@ pub async fn get_latest_snapshot(
 }
 
 /// Cleanup old snapshots, keeping only the last max_snapshots for a wallet
-pub async fn cleanup_old_snapshots(pool: &PgPool, wallet_id: uuid::Uuid) -> Result<(), sqlx::Error> {
+pub async fn cleanup_old_snapshots(
+    pool: &PgPool,
+    wallet_id: uuid::Uuid,
+) -> Result<(), sqlx::Error> {
     cleanup_old_snapshots_with_limit(pool, wallet_id, DEFAULT_MAX_SNAPSHOTS).await
 }
 
@@ -167,10 +174,11 @@ pub async fn cleanup_old_snapshots_with_limit(
     max_snapshots: i64,
 ) -> Result<(), sqlx::Error> {
     // Get count of snapshots for this wallet
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
-        .bind(wallet_id)
-        .fetch_one(pool)
-        .await?;
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
+            .bind(wallet_id)
+            .fetch_one(pool)
+            .await?;
 
     if count <= max_snapshots {
         return Ok(());
@@ -188,14 +196,18 @@ pub async fn cleanup_old_snapshots_with_limit(
             ORDER BY snapshot_index ASC
             LIMIT $2
         )
-        "#
+        "#,
     )
     .bind(wallet_id)
     .bind(to_delete)
     .execute(pool)
     .await?;
 
-    tracing::info!("Cleaned up {} old snapshots, kept {}", to_delete, max_snapshots);
+    tracing::info!(
+        "Cleaned up {} old snapshots, kept {}",
+        to_delete,
+        max_snapshots
+    );
 
     Ok(())
 }
@@ -212,16 +224,11 @@ pub fn should_create_snapshot_with_interval(event_count: i64, snapshot_interval:
 
 /// Get event ID from events table by event_id UUID
 #[allow(dead_code)] // Reserved for future event lookup functionality
-pub async fn get_event_db_id(
-    pool: &PgPool,
-    event_id: Uuid,
-) -> Result<Option<i64>, sqlx::Error> {
-    let id = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT id FROM events WHERE event_id = $1"
-    )
-    .bind(event_id)
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_event_db_id(pool: &PgPool, event_id: Uuid) -> Result<Option<i64>, sqlx::Error> {
+    let id = sqlx::query_scalar::<_, Option<i64>>("SELECT id FROM events WHERE event_id = $1")
+        .bind(event_id)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(id.flatten())
 }
@@ -241,7 +248,7 @@ pub async fn get_snapshot_before_event_count(
         WHERE event_count < $1 AND wallet_id = $2
         ORDER BY snapshot_index DESC
         LIMIT 1
-        "#
+        "#,
     )
     .bind(target_count)
     .bind(wallet_id)
@@ -263,7 +270,7 @@ pub async fn create_snapshot_json(
         FROM contacts_projection
         WHERE wallet_id = $1 AND is_deleted = false
         ORDER BY created_at
-        "#
+        "#,
     )
     .bind(wallet_id)
     .fetch_all(pool)
@@ -293,7 +300,7 @@ pub async fn create_snapshot_json(
         FROM transactions_projection
         WHERE wallet_id = $1 AND is_deleted = false
         ORDER BY created_at
-        "#
+        "#,
     )
     .bind(wallet_id)
     .fetch_all(pool)
@@ -319,7 +326,10 @@ pub async fn create_snapshot_json(
         })
         .collect();
 
-    Ok((serde_json::json!(contacts_json), serde_json::json!(transactions_json)))
+    Ok((
+        serde_json::json!(contacts_json),
+        serde_json::json!(transactions_json),
+    ))
 }
 
 /// Get snapshot metadata only (lightweight, no JSON data)
@@ -334,7 +344,7 @@ pub async fn get_snapshot_metadata_for_wallet(
         FROM projection_snapshots
         WHERE wallet_id = $1
         ORDER BY snapshot_index DESC
-        "#
+        "#,
     )
     .bind(wallet_id)
     .fetch_all(pool)
@@ -354,7 +364,7 @@ pub async fn get_snapshot_by_id(
                contacts_snapshot, transactions_snapshot, created_at
         FROM projection_snapshots
         WHERE id = $1
-        "#
+        "#,
     )
     .bind(snapshot_id)
     .fetch_optional(pool)

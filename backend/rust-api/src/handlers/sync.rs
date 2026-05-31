@@ -1,24 +1,24 @@
 use axum::{
-    extract::{Query, State, Extension},
+    extract::{Extension, Query, State},
     http::StatusCode,
     response::Json,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
-use crate::AppState;
-use crate::websocket;
-use crate::services::snapshots;
+use crate::database::models::EventRow;
+use crate::database::repository::Database;
+use crate::domain::{DomainEvent, EventData};
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::permissions::{PermissionContext, PermissionModel};
-use crate::database::repository::Database;
-use crate::database::models::EventRow;
 use crate::services::projections::Projections;
-use crate::domain::{DomainEvent, EventData};
-use sha2::{Sha256, Digest};
+use crate::services::snapshots;
+use crate::websocket;
+use crate::AppState;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
 // Re-exports for backward compatibility
@@ -69,9 +69,7 @@ fn build_transaction_contact_map(
         match event.aggregate_type.as_str() {
             "transaction" => {
                 // Try to get contact_id from event_data first
-                if let Some(contact_id_str) = event.data
-                    .get("contact_id")
-                    .and_then(|v| v.as_str())
+                if let Some(contact_id_str) = event.data.get("contact_id").and_then(|v| v.as_str())
                 {
                     if let Ok(contact_id) = Uuid::parse_str(contact_id_str) {
                         result.insert(event.aggregate_id, contact_id);
@@ -127,38 +125,45 @@ pub async fn get_sync_hash(
     let db = Database::new((*state.db_pool).clone());
 
     // Fetch all events
-    let events = db.get_all_events_for_wallet(wallet_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching events: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to fetch events"})),
-            )
-        })?;
+    let events = db.get_all_events_for_wallet(wallet_id).await.map_err(|e| {
+        tracing::error!("Error fetching events: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch events"})),
+        )
+    })?;
 
     // Get permission boundaries once
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
+    let readable_contacts = perm_model
+        .get_readable_contacts(&perm_ctx)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
 
-    let readable_transaction_contacts = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
+    let readable_transaction_contacts = perm_model
+        .get_readable_transaction_contacts(&perm_ctx)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
 
     // Get transaction contact map for filtering
     let missing_ids: Vec<Uuid> = events
         .iter()
-        .filter(|e| e.aggregate_type == "transaction" && e.data.get("contact_id").and_then(|v| v.as_str()).is_none())
+        .filter(|e| {
+            e.aggregate_type == "transaction"
+                && e.data.get("contact_id").and_then(|v| v.as_str()).is_none()
+        })
         .map(|e| e.aggregate_id)
         .collect();
 
@@ -175,20 +180,40 @@ pub async fn get_sync_hash(
     // Filter events by permission and compute hash
     let mut hasher = Sha256::new();
     for event in &events {
-        if can_read_event(event, &readable_contacts, &readable_transaction_contacts, &transaction_map) {
+        if can_read_event(
+            event,
+            &readable_contacts,
+            &readable_transaction_contacts,
+            &transaction_map,
+        ) {
             hasher.update(event.event_id.to_string().as_bytes());
             hasher.update(event.created_at.to_string().as_bytes());
         }
     }
 
     let hash = format!("{:x}", hasher.finalize());
-    let event_count = events.iter()
-        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts, &transaction_map))
+    let event_count = events
+        .iter()
+        .filter(|e| {
+            can_read_event(
+                e,
+                &readable_contacts,
+                &readable_transaction_contacts,
+                &transaction_map,
+            )
+        })
         .count() as i64;
 
     let last_timestamp = events
         .iter()
-        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts, &transaction_map))
+        .filter(|e| {
+            can_read_event(
+                e,
+                &readable_contacts,
+                &readable_transaction_contacts,
+                &transaction_map,
+            )
+        })
         .last()
         .map(|e| e.created_at);
 
@@ -236,24 +261,33 @@ pub async fn get_sync_events(
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    let readable_contacts = perm_model.get_readable_contacts(&perm_ctx).await.map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
+    let readable_contacts = perm_model
+        .get_readable_contacts(&perm_ctx)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
 
-    let readable_transaction_contacts = perm_model.get_readable_transaction_contacts(&perm_ctx).await.map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
+    let readable_transaction_contacts = perm_model
+        .get_readable_transaction_contacts(&perm_ctx)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to check permissions"})),
+            )
+        })?;
 
     // Get transaction contact map
     let missing_ids: Vec<Uuid> = events
         .iter()
-        .filter(|e| e.aggregate_type == "transaction" && e.data.get("contact_id").and_then(|v| v.as_str()).is_none())
+        .filter(|e| {
+            e.aggregate_type == "transaction"
+                && e.data.get("contact_id").and_then(|v| v.as_str()).is_none()
+        })
         .map(|e| e.aggregate_id)
         .collect();
 
@@ -270,7 +304,14 @@ pub async fn get_sync_events(
     // Convert to response, filtering by permission
     let sync_events: Vec<SyncEvent> = events
         .into_iter()
-        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts, &transaction_map))
+        .filter(|e| {
+            can_read_event(
+                e,
+                &readable_contacts,
+                &readable_transaction_contacts,
+                &transaction_map,
+            )
+        })
         .map(|row| SyncEvent {
             id: row.event_id.to_string(),
             aggregate_type: row.aggregate_type,
@@ -335,14 +376,12 @@ pub async fn post_sync_events(
         let aggregate_id = domain_event.aggregate_id;
 
         // Check idempotency: if event already exists, skip silently (idempotent operation)
-        let existing = db.get_event_by_id_impl(event_id)
-            .await
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "Database error"})),
-                )
-            })?;
+        let existing = db.get_event_by_id_impl(event_id).await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
 
         if existing.is_some() {
             // Already synced before - idempotent, skip without error
@@ -363,17 +402,21 @@ pub async fn post_sync_events(
         let aggregate_type = domain_event.aggregate_type();
         let event_type = domain_event.event_type();
 
-        if db.insert_event_impl(
-            event_id,
-            aggregate_id,
-            aggregate_type.to_string(),
-            event_type.to_string(),
-            event_data,
-            wallet_id,
-            user_id,
-            domain_event.version,
-            None,
-        ).await.is_err() {
+        if db
+            .insert_event_impl(
+                event_id,
+                aggregate_id,
+                aggregate_type.to_string(),
+                event_type.to_string(),
+                event_data,
+                wallet_id,
+                user_id,
+                domain_event.version,
+                None,
+            )
+            .await
+            .is_err()
+        {
             skipped.push(event_id.to_string());
             continue;
         }
@@ -393,7 +436,10 @@ pub async fn post_sync_events(
         if !rows.is_empty() {
             let row_refs: Vec<_> = rows.iter().collect();
             let mut undone_set = std::collections::HashSet::new();
-            if let Err(e) = db.apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set).await {
+            if let Err(e) = db
+                .apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set)
+                .await
+            {
                 tracing::error!("Error applying event: {:?}", e);
             }
         }
@@ -418,7 +464,9 @@ pub async fn post_sync_events(
         match &domain_event.event_data {
             EventData::ContactUndone { .. } | EventData::TransactionUndone { .. } => {
                 tracing::info!("UNDO event processed, rebuilding wallet projections");
-                if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
+                if let Err(e) =
+                    Projections::rebuild_projections_from_events(&state, wallet_id).await
+                {
                     tracing::error!("Error rebuilding projections: {:?}", e);
                 }
             }
@@ -427,11 +475,18 @@ pub async fn post_sync_events(
 
         // Save snapshot if needed
         let event_count = db.get_event_count_for_wallet(wallet_id).await;
-        let should_snapshot = snapshots::should_create_snapshot_with_interval(event_count, state.config.snapshot_interval)
-            || matches!(&domain_event.event_data, EventData::ContactUndone { .. } | EventData::TransactionUndone { .. });
+        let should_snapshot = snapshots::should_create_snapshot_with_interval(
+            event_count,
+            state.config.snapshot_interval,
+        ) || matches!(
+            &domain_event.event_data,
+            EventData::ContactUndone { .. } | EventData::TransactionUndone { .. }
+        );
 
         if should_snapshot {
-            if let Ok(snapshot_json) = snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await {
+            if let Ok(snapshot_json) =
+                snapshots::create_snapshot_json(&*state.db_pool, wallet_id).await
+            {
                 let _ = snapshots::save_snapshot_with_limit(
                     &*state.db_pool,
                     1,
@@ -440,12 +495,16 @@ pub async fn post_sync_events(
                     snapshot_json.1,
                     wallet_id,
                     state.config.max_snapshots_per_wallet,
-                ).await;
+                )
+                .await;
             }
         }
     }
 
-    Ok(Json(SyncEventsResponse { accepted, conflicts: skipped }))
+    Ok(Json(SyncEventsResponse {
+        accepted,
+        conflicts: skipped,
+    }))
 }
 
 /// Insert permission event directly (used by wallet management handlers)
@@ -461,17 +520,20 @@ pub async fn insert_permission_event_and_apply(
     let db = Database::new((*state.db_pool).clone());
 
     // Insert event
-    let _ = db.insert_event_impl(
-        event_id,
-        aggregate_id,
-        "permission".to_string(),
-        event_type.to_string(),
-        event_data.clone(),
-        wallet_id,
-        user_id,
-        1,
-        None,
-    ).await.map_err(|_| sqlx::Error::RowNotFound)?;
+    let _ = db
+        .insert_event_impl(
+            event_id,
+            aggregate_id,
+            "permission".to_string(),
+            event_type.to_string(),
+            event_data.clone(),
+            wallet_id,
+            user_id,
+            1,
+            None,
+        )
+        .await
+        .map_err(|_| sqlx::Error::RowNotFound)?;
 
     // Build synthetic SyncEventRequest from inserted event and convert to DomainEvent
     let created_at = chrono::Utc::now();

@@ -1,3 +1,5 @@
+use crate::middleware::auth::Claims;
+use crate::AppState;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
@@ -7,13 +9,11 @@ use axum::{
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use std::collections::HashSet;
 use tokio::sync::broadcast;
 use uuid::Uuid;
-use crate::AppState;
-use crate::middleware::auth::Claims;
 
 /// Wallet-scoped broadcast channel.
 /// The first element is the wallet_id the message is for.
@@ -52,22 +52,20 @@ pub async fn websocket_handler(
     let decoding_key = DecodingKey::from_secret(state.config.jwt_secret.as_ref());
     let validation = Validation::new(Algorithm::HS256);
 
-    let token_data = decode::<Claims>(&token, &decoding_key, &validation)
-        .map_err(|e| {
-            tracing::warn!("WebSocket token validation failed: {:?}", e);
-            StatusCode::UNAUTHORIZED
-        })?;
+    let token_data = decode::<Claims>(&token, &decoding_key, &validation).map_err(|e| {
+        tracing::warn!("WebSocket token validation failed: {:?}", e);
+        StatusCode::UNAUTHORIZED
+    })?;
 
     let claims = token_data.claims;
-    let user_id = Uuid::parse_str(&claims.user_id)
-        .map_err(|e| {
-            tracing::warn!("WebSocket invalid user_id in token: {:?}", e);
-            StatusCode::UNAUTHORIZED
-        })?;
+    let user_id = Uuid::parse_str(&claims.user_id).map_err(|e| {
+        tracing::warn!("WebSocket invalid user_id in token: {:?}", e);
+        StatusCode::UNAUTHORIZED
+    })?;
 
     // WebSocket is only for regular users (admins must not create events / subscribe to realtime).
     let user_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)"
+        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)",
     )
     .bind(user_id)
     .fetch_one(&*state.db_pool)
@@ -81,31 +79,36 @@ pub async fn websocket_handler(
         tracing::warn!("WebSocket connection attempt for invalid user: {}", user_id);
         return Err(StatusCode::UNAUTHORIZED);
     }
-    
+
     tracing::info!("WebSocket connection authenticated for user: {}", user_id);
 
     // Load wallets the user is a member of. We use this to filter wallet-scoped broadcasts.
-    let wallet_ids: Vec<Uuid> = sqlx::query_scalar::<_, Uuid>(
-        "SELECT wallet_id FROM wallet_users WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("WebSocket database error loading user wallets: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let wallet_ids: Vec<Uuid> =
+        sqlx::query_scalar::<_, Uuid>("SELECT wallet_id FROM wallet_users WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_all(&*state.db_pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("WebSocket database error loading user wallets: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
     let allowed_wallet_ids: HashSet<Uuid> = wallet_ids.into_iter().collect();
 
     // Stage 2: Client must tell us which wallet is currently open; we restrict realtime to that wallet only.
     let active_wallet_id: Uuid = match query.wallet_id.as_deref() {
         None => {
-            tracing::warn!("WebSocket connection attempt without wallet_id (user={})", user_id);
+            tracing::warn!(
+                "WebSocket connection attempt without wallet_id (user={})",
+                user_id
+            );
             return Err(StatusCode::BAD_REQUEST);
         }
         Some(s) if s.trim().is_empty() => {
-            tracing::warn!("WebSocket connection attempt with empty wallet_id (user={})", user_id);
+            tracing::warn!(
+                "WebSocket connection attempt with empty wallet_id (user={})",
+                user_id
+            );
             return Err(StatusCode::BAD_REQUEST);
         }
         Some(s) => {
@@ -114,14 +117,20 @@ pub async fn websocket_handler(
                 StatusCode::BAD_REQUEST
             })?;
             if !allowed_wallet_ids.contains(&parsed) {
-                tracing::warn!("WebSocket user {} tried to subscribe to wallet {} without access", user_id, parsed);
+                tracing::warn!(
+                    "WebSocket user {} tried to subscribe to wallet {} without access",
+                    user_id,
+                    parsed
+                );
                 return Err(StatusCode::FORBIDDEN);
             }
             parsed
         }
     };
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, allowed_wallet_ids, active_wallet_id)))
+    Ok(ws.on_upgrade(move |socket| {
+        handle_socket(socket, state, allowed_wallet_ids, active_wallet_id)
+    }))
 }
 
 async fn handle_socket(
@@ -169,12 +178,15 @@ async fn handle_socket(
 /// Broadcast a realtime message scoped to a specific wallet.
 ///
 /// Only websocket connections belonging to users that are members of `wallet_id` will receive it.
-pub fn broadcast_wallet_change(channel: &BroadcastChannel, wallet_id: Uuid, event_type: &str, data: &str) {
+pub fn broadcast_wallet_change(
+    channel: &BroadcastChannel,
+    wallet_id: Uuid,
+    event_type: &str,
+    data: &str,
+) {
     let message = format!(
         r#"{{"type":"{}","wallet_id":"{}","data":{}}}"#,
-        event_type,
-        wallet_id,
-        data
+        event_type, wallet_id, data
     );
     let _ = channel.send((wallet_id, message));
 }

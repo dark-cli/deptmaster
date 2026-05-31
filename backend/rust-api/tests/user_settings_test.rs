@@ -23,11 +23,14 @@ async fn test_create_and_retrieve_user_settings() {
         updated_at: chrono::Local::now().naive_local(),
     };
 
-    db.upsert_user_settings(user_id, &settings).await
+    db.upsert_user_settings(user_id, &settings)
+        .await
         .expect("Failed to upsert settings");
 
     // Retrieve and verify
-    let retrieved = db.get_user_settings(user_id).await
+    let retrieved = db
+        .get_user_settings(user_id)
+        .await
         .expect("Failed to get settings");
     assert!(retrieved.is_some());
     let retrieved_settings = retrieved.unwrap();
@@ -58,7 +61,8 @@ async fn test_update_user_settings() {
         updated_at: chrono::Local::now().naive_local(),
     };
 
-    db.upsert_user_settings(user_id, &initial_settings).await
+    db.upsert_user_settings(user_id, &initial_settings)
+        .await
         .expect("Failed to upsert initial settings");
 
     // Update settings
@@ -74,11 +78,14 @@ async fn test_update_user_settings() {
         updated_at: chrono::Local::now().naive_local(),
     };
 
-    db.upsert_user_settings(user_id, &updated_settings).await
+    db.upsert_user_settings(user_id, &updated_settings)
+        .await
         .expect("Failed to update settings");
 
     // Verify updates
-    let retrieved = db.get_user_settings(user_id).await
+    let retrieved = db
+        .get_user_settings(user_id)
+        .await
         .expect("Failed to get settings");
     assert!(retrieved.is_some());
     let retrieved_settings = retrieved.unwrap();
@@ -97,11 +104,14 @@ async fn test_upsert_individual_setting() {
     let user_id = create_test_user(&pool).await;
 
     // Upsert individual setting (should create with defaults)
-    db.upsert_user_setting(user_id, "dark_mode", "false").await
+    db.upsert_user_setting(user_id, "dark_mode", "false")
+        .await
         .expect("Failed to upsert setting");
 
     // Verify
-    let retrieved = db.get_user_settings(user_id).await
+    let retrieved = db
+        .get_user_settings(user_id)
+        .await
         .expect("Failed to get settings");
     assert!(retrieved.is_some());
     let retrieved_settings = retrieved.unwrap();
@@ -111,11 +121,14 @@ async fn test_upsert_individual_setting() {
     assert_eq!(retrieved_settings.flip_colors, false);
 
     // Update another setting
-    db.upsert_user_setting(user_id, "default_direction", "take").await
+    db.upsert_user_setting(user_id, "default_direction", "take")
+        .await
         .expect("Failed to update setting");
 
     // Verify both are persisted
-    let retrieved = db.get_user_settings(user_id).await
+    let retrieved = db
+        .get_user_settings(user_id)
+        .await
         .expect("Failed to get settings");
     let settings = retrieved.unwrap();
     assert_eq!(settings.dark_mode, false);
@@ -141,11 +154,14 @@ async fn test_get_user_settings_all_key_value_format() {
         updated_at: chrono::Local::now().naive_local(),
     };
 
-    db.upsert_user_settings(user_id, &settings).await
+    db.upsert_user_settings(user_id, &settings)
+        .await
         .expect("Failed to upsert settings");
 
     // Get as key-value pairs (backwards compatibility format)
-    let pairs = db.get_user_settings_all(user_id).await
+    let pairs = db
+        .get_user_settings_all(user_id)
+        .await
         .expect("Failed to get all settings");
     assert!(!pairs.is_empty());
 
@@ -157,8 +173,18 @@ async fn test_get_user_settings_all_key_value_format() {
 
     // Verify values
     let map: std::collections::HashMap<String, Option<String>> = pairs.into_iter().collect();
-    assert_eq!(map.get("dark_mode").and_then(|v| v.as_ref()).map(|s| s.as_str()), Some("true"));
-    assert_eq!(map.get("default_direction").and_then(|v| v.as_ref()).map(|s| s.as_str()), Some("give"));
+    assert_eq!(
+        map.get("dark_mode")
+            .and_then(|v| v.as_ref())
+            .map(|s| s.as_str()),
+        Some("true")
+    );
+    assert_eq!(
+        map.get("default_direction")
+            .and_then(|v| v.as_ref())
+            .map(|s| s.as_str()),
+        Some("give")
+    );
 }
 
 #[tokio::test]
@@ -169,7 +195,9 @@ async fn test_user_settings_not_found() {
     let non_existent_user_id = Uuid::new_v4();
 
     // Try to get settings for non-existent user
-    let retrieved = db.get_user_settings(non_existent_user_id).await
+    let retrieved = db
+        .get_user_settings(non_existent_user_id)
+        .await
         .expect("Failed to query settings");
     assert!(retrieved.is_none());
 }

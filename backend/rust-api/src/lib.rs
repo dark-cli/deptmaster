@@ -1,20 +1,20 @@
 // Library root - exports for testing
 
-pub mod config;
-pub mod handlers;
-pub mod database;
-pub mod websocket;
-pub mod services;
 pub mod background;
-pub mod utils;
+pub mod config;
+pub mod database;
+pub mod domain;
+pub mod handlers;
 pub mod middleware;
 pub mod models;
 pub mod permissions;
-pub mod domain;
+pub mod services;
+pub mod utils;
+pub mod websocket;
 use database::DatabasePool;
+use middleware::rate_limit::RateLimiter;
 use std::sync::Arc;
 use websocket::BroadcastChannel;
-use middleware::rate_limit::RateLimiter;
 
 pub use config::Config;
 pub use handlers::*;

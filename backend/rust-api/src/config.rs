@@ -26,8 +26,9 @@ impl Config {
             .collect();
 
         Ok(Self {
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker".to_string()),
+            database_url: env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker".to_string()
+            }),
             port: env::var("PORT")
                 .unwrap_or_else(|_| "8000".to_string())
                 .parse()
@@ -72,8 +73,9 @@ impl Config {
         // Check if we're in production mode
         let is_production = env::var("ENVIRONMENT")
             .unwrap_or_else(|_| "development".to_string())
-            .to_lowercase() == "production";
-        
+            .to_lowercase()
+            == "production";
+
         let show_dev_warnings = env::var("SHOW_DEV_WARNINGS")
             .unwrap_or_else(|_| "false".to_string())
             .parse()
@@ -89,31 +91,41 @@ impl Config {
 
         // Validate JWT secret strength
         if should_warn && self.jwt_secret.len() < 32 {
-            tracing::warn!("⚠️  JWT_SECRET is less than 32 characters. Use a stronger secret in production!");
+            tracing::warn!(
+                "⚠️  JWT_SECRET is less than 32 characters. Use a stronger secret in production!"
+            );
         }
 
         // Validate TLS config if enabled
         if self.enable_tls {
             if self.tls_cert_path.is_none() || self.tls_key_path.is_none() {
-                return Err(anyhow::anyhow!("TLS enabled but TLS_CERT_PATH or TLS_KEY_PATH not set"));
+                return Err(anyhow::anyhow!(
+                    "TLS enabled but TLS_CERT_PATH or TLS_KEY_PATH not set"
+                ));
             }
         }
 
         // Validate database URL and check for TLS
         if should_warn && !self.database_url.contains("sslmode") {
-            tracing::warn!("⚠️  Database URL does not specify sslmode. For production, use sslmode=require");
+            tracing::warn!(
+                "⚠️  Database URL does not specify sslmode. For production, use sslmode=require"
+            );
         } else if should_warn && self.database_url.contains("sslmode=disable") {
             tracing::warn!("⚠️  Database connection is using sslmode=disable. This is insecure for production!");
         }
 
         // Validate rate limiting settings (0 = disabled, for local dev/testing)
         if self.rate_limit_requests > 0 && self.rate_limit_window == 0 {
-            return Err(anyhow::anyhow!("RATE_LIMIT_WINDOW must be > 0 when rate limiting is enabled"));
+            return Err(anyhow::anyhow!(
+                "RATE_LIMIT_WINDOW must be > 0 when rate limiting is enabled"
+            ));
         }
 
         // Validate CORS settings
         if should_warn && self.allowed_origins.contains(&"*".to_string()) {
-            tracing::warn!("⚠️  CORS is set to allow all origins (*). This is insecure for production!");
+            tracing::warn!(
+                "⚠️  CORS is set to allow all origins (*). This is insecure for production!"
+            );
         }
 
         // Validate JWT expiration
@@ -126,13 +138,13 @@ impl Config {
 
         Ok(())
     }
-    
+
     // Check if database should use TLS
     pub fn database_requires_tls(&self) -> bool {
         // Check if DATABASE_URL contains sslmode=require or sslmode=prefer
-        self.database_url.contains("sslmode=require") || 
-        self.database_url.contains("sslmode=prefer") ||
-        self.database_url.contains("sslmode=verify-full") ||
-        self.database_url.contains("sslmode=verify-ca")
+        self.database_url.contains("sslmode=require")
+            || self.database_url.contains("sslmode=prefer")
+            || self.database_url.contains("sslmode=verify-full")
+            || self.database_url.contains("sslmode=verify-ca")
     }
 }

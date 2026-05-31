@@ -25,7 +25,6 @@
 /// if allowed[0] { /* can create contact */ }
 /// if allowed[1] { /* can read transaction */ }
 /// ```
-
 pub mod action;
 pub mod context;
 pub mod model;

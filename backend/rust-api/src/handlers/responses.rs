@@ -1,5 +1,4 @@
 /// Common HTTP response builders for handlers
-
 use axum::http::StatusCode;
 use axum::Json;
 

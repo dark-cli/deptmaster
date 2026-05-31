@@ -1,12 +1,12 @@
 use sqlx::PgPool;
-use uuid::Uuid;
 use std::collections::HashSet;
+use uuid::Uuid;
 
-use crate::database::error::DbError;
 use super::action::Action;
 use super::context::PermissionContext;
-use super::resource::Resource;
 use super::queries;
+use super::resource::Resource;
+use crate::database::error::DbError;
 
 /// Resolve allowed actions for a user on a resource
 /// Uses single JOIN query for efficiency

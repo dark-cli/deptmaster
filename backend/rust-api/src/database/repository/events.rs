@@ -1,12 +1,12 @@
-use uuid::Uuid;
-use chrono::{DateTime, Utc, NaiveDateTime};
-use serde_json::Value;
-use sqlx::Row;
-use sha2::{Sha256, Digest};
-use crate::database::models::*;
 use crate::database::error::DbError;
+use crate::database::models::*;
 use crate::database::repository::Database;
 use crate::handlers::sync::SyncEventRequest;
+use chrono::{DateTime, NaiveDateTime, Utc};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use sqlx::Row;
+use uuid::Uuid;
 
 // Helper struct for mapping database columns to EventRow fields
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -56,7 +56,7 @@ impl Database {
             FROM events
             WHERE wallet_id = $1
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_all(&self.pool)
@@ -77,7 +77,7 @@ impl Database {
             FROM events
             WHERE wallet_id = $1 AND created_at > $2
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(wallet_id)
         .bind(since_timestamp)
@@ -94,7 +94,7 @@ impl Database {
                    wallet_id, user_id, created_at, event_version, idempotency_key
             FROM events
             WHERE event_id = $1
-            "#
+            "#,
         )
         .bind(event_id)
         .fetch_optional(&self.pool)
@@ -154,7 +154,7 @@ impl Database {
             FROM events
             WHERE wallet_id = $1
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_all(&self.pool)
@@ -180,11 +180,9 @@ impl Database {
     }
 
     pub async fn get_latest_event_id_impl(&self) -> Result<Option<i64>, DbError> {
-        let id = sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT MAX(id) FROM events"
-        )
-        .fetch_one(&self.pool)
-        .await?;
+        let id = sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(id) FROM events")
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(id)
     }
@@ -256,7 +254,9 @@ impl Database {
                 let event_type: String = row.get("event_type");
                 if event_type == "UNDO" {
                     let event_data: Value = row.get("event_data");
-                    if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if let Some(undone_id_str) =
+                        event_data.get("undone_event_id").and_then(|v| v.as_str())
+                    {
                         if let Ok(undone_id) = Uuid::parse_str(undone_id_str) {
                             undone_event_ids.insert(undone_id);
                         }
@@ -274,7 +274,11 @@ impl Database {
             let created_at: NaiveDateTime = row.get("created_at");
             let event_db_id: i64 = row.get("id");
 
-            tracing::info!("apply_event_batch processing: type={}/{}", aggregate_type, event_type);
+            tracing::info!(
+                "apply_event_batch processing: type={}/{}",
+                aggregate_type,
+                event_type
+            );
 
             if event_type == "UNDO" {
                 continue;
@@ -287,7 +291,10 @@ impl Database {
             if aggregate_type == "contact" {
                 match event_type.as_str() {
                     "CREATED" => {
-                        let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = event_data
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         let username = event_data.get("username").and_then(|v| v.as_str());
                         let phone = event_data.get("phone").and_then(|v| v.as_str());
                         let email = event_data.get("email").and_then(|v| v.as_str());
@@ -376,11 +383,26 @@ impl Database {
                             let current_email: Option<String> = current_row.get("email");
                             let current_notes: Option<String> = current_row.get("notes");
 
-                            let name = event_data.get("name").and_then(|v| v.as_str()).unwrap_or(&current_name);
-                            let username = event_data.get("username").and_then(|v| v.as_str()).or(current_username.as_deref());
-                            let phone = event_data.get("phone").and_then(|v| v.as_str()).or(current_phone.as_deref());
-                            let email = event_data.get("email").and_then(|v| v.as_str()).or(current_email.as_deref());
-                            let notes = event_data.get("notes").and_then(|v| v.as_str()).or(current_notes.as_deref());
+                            let name = event_data
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(&current_name);
+                            let username = event_data
+                                .get("username")
+                                .and_then(|v| v.as_str())
+                                .or(current_username.as_deref());
+                            let phone = event_data
+                                .get("phone")
+                                .and_then(|v| v.as_str())
+                                .or(current_phone.as_deref());
+                            let email = event_data
+                                .get("email")
+                                .and_then(|v| v.as_str())
+                                .or(current_email.as_deref());
+                            let notes = event_data
+                                .get("notes")
+                                .and_then(|v| v.as_str())
+                                .or(current_notes.as_deref());
 
                             sqlx::query(
                                 r#"
@@ -393,7 +415,7 @@ impl Database {
                                     updated_at = $7,
                                     last_event_id = $9
                                 WHERE id = $1 AND wallet_id = $8
-                                "#
+                                "#,
                             )
                             .bind(aggregate_id)
                             .bind(name)
@@ -407,7 +429,12 @@ impl Database {
                             .execute(&self.pool)
                             .await?;
                         }
-                        self.apply_contact_group_ids_from_event_data_impl(wallet_id, aggregate_id, &event_data).await?;
+                        self.apply_contact_group_ids_from_event_data_impl(
+                            wallet_id,
+                            aggregate_id,
+                            &event_data,
+                        )
+                        .await?;
                     }
                     "DELETED" => {
                         sqlx::query(
@@ -431,7 +458,11 @@ impl Database {
                         .await?;
 
                         if deleted_transactions.rows_affected() > 0 {
-                            tracing::info!("Deleted {} transaction(s) for deleted contact {}", deleted_transactions.rows_affected(), aggregate_id);
+                            tracing::info!(
+                                "Deleted {} transaction(s) for deleted contact {}",
+                                deleted_transactions.rows_affected(),
+                                aggregate_id
+                            );
                         }
                     }
                     _ => {}
@@ -439,7 +470,10 @@ impl Database {
             } else if aggregate_type == "transaction" {
                 match event_type.as_str() {
                     "CREATED" => {
-                        let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let contact_id_str = event_data
+                            .get("contact_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         let contact_id = Uuid::parse_str(contact_id_str).ok();
 
                         if let Some(cid) = contact_id {
@@ -452,19 +486,39 @@ impl Database {
                             .await?;
 
                             if !contact_exists {
-                                tracing::warn!("Skipping transaction creation for deleted contact {}", cid);
+                                tracing::warn!(
+                                    "Skipping transaction creation for deleted contact {}",
+                                    cid
+                                );
                                 continue;
                             }
-                            let tx_type = event_data.get("type").and_then(|v| v.as_str()).unwrap_or("money");
-                            let direction = event_data.get("direction").and_then(|v| v.as_str()).unwrap_or("lent");
-                            let amount = event_data.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
-                            let currency = event_data.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
-                            let description = event_data.get("description").and_then(|v| v.as_str());
-                            let transaction_date_str = event_data.get("transaction_date").and_then(|v| v.as_str()).unwrap_or("");
+                            let tx_type = event_data
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("money");
+                            let direction = event_data
+                                .get("direction")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("lent");
+                            let amount = event_data
+                                .get("amount")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0);
+                            let currency = event_data
+                                .get("currency")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("USD");
+                            let description =
+                                event_data.get("description").and_then(|v| v.as_str());
+                            let transaction_date_str = event_data
+                                .get("transaction_date")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
                             let due_date_str = event_data.get("due_date").and_then(|v| v.as_str());
 
                             let transaction_date = if !transaction_date_str.is_empty() {
-                                chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d").ok()
+                                chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d")
+                                    .ok()
                             } else {
                                 Some(created_at.date())
                             };
@@ -525,22 +579,42 @@ impl Database {
                             let current_direction: String = current_row.get("direction");
                             let current_amount: i64 = current_row.get("amount");
                             let current_currency: String = current_row.get("currency");
-                            let current_description: Option<String> = current_row.get("description");
-                            let current_transaction_date: chrono::NaiveDate = current_row.get("transaction_date");
-                            let current_due_date: Option<chrono::NaiveDate> = current_row.get("due_date");
+                            let current_description: Option<String> =
+                                current_row.get("description");
+                            let current_transaction_date: chrono::NaiveDate =
+                                current_row.get("transaction_date");
+                            let current_due_date: Option<chrono::NaiveDate> =
+                                current_row.get("due_date");
 
-                            let contact_id_str = event_data.get("contact_id").and_then(|v| v.as_str());
+                            let contact_id_str =
+                                event_data.get("contact_id").and_then(|v| v.as_str());
                             let contact_id = contact_id_str
                                 .and_then(|s| Uuid::parse_str(s).ok())
                                 .unwrap_or(current_contact_id);
 
-                            let tx_type = event_data.get("type").and_then(|v| v.as_str()).unwrap_or(&current_type);
-                            let direction = event_data.get("direction").and_then(|v| v.as_str()).unwrap_or(&current_direction);
-                            let amount = event_data.get("amount").and_then(|v| v.as_i64()).unwrap_or(current_amount);
-                            let currency = event_data.get("currency").and_then(|v| v.as_str()).unwrap_or(&current_currency);
-                            let description = event_data.get("description").and_then(|v| v.as_str()).or(current_description.as_deref());
+                            let tx_type = event_data
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(&current_type);
+                            let direction = event_data
+                                .get("direction")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(&current_direction);
+                            let amount = event_data
+                                .get("amount")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(current_amount);
+                            let currency = event_data
+                                .get("currency")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(&current_currency);
+                            let description = event_data
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .or(current_description.as_deref());
 
-                            let transaction_date_str = event_data.get("transaction_date").and_then(|v| v.as_str());
+                            let transaction_date_str =
+                                event_data.get("transaction_date").and_then(|v| v.as_str());
                             let transaction_date = transaction_date_str
                                 .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
                                 .unwrap_or(current_transaction_date);
@@ -564,7 +638,7 @@ impl Database {
                                     updated_at = $10,
                                     last_event_id = $12
                                 WHERE id = $1 AND wallet_id = $11
-                                "#
+                                "#,
                             )
                             .bind(aggregate_id)
                             .bind(contact_id)
@@ -603,10 +677,14 @@ impl Database {
                 let data = event_data.get("data").unwrap_or(&event_data);
                 match event_type.as_str() {
                     "WALLET_USER_ADDED" => {
-                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str =
+                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         tracing::info!("WALLET_USER_ADDED: inserting user {}", user_id_str);
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            let role = data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
+                            let role = data
+                                .get("role")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("member");
                             let result = sqlx::query(
                                 r#"
                                 INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
@@ -629,7 +707,8 @@ impl Database {
                         }
                     }
                     "WALLET_USER_ROLE_CHANGED" => {
-                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str =
+                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                             if let Some(role) = data.get("role").and_then(|v| v.as_str()) {
                                 let _ = sqlx::query(
@@ -644,13 +723,16 @@ impl Database {
                         }
                     }
                     "WALLET_USER_REMOVED" => {
-                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str =
+                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            let _ = sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
-                                .bind(wallet_id)
-                                .bind(perm_user_id)
-                                .execute(&self.pool)
-                                .await;
+                            let _ = sqlx::query(
+                                "DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
+                            )
+                            .bind(wallet_id)
+                            .bind(perm_user_id)
+                            .execute(&self.pool)
+                            .await;
                         }
                     }
                     "USER_GROUP_CREATED" => {
@@ -683,7 +765,8 @@ impl Database {
                             .await;
                     }
                     "USER_GROUP_MEMBER_ADDED" => {
-                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str =
+                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                             let _ = sqlx::query(
                                 "INSERT INTO user_group_members (user_id, user_group_id) VALUES ($1, $2) ON CONFLICT (user_id, user_group_id) DO NOTHING"
@@ -695,7 +778,8 @@ impl Database {
                         }
                     }
                     "USER_GROUP_MEMBER_REMOVED" => {
-                        let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let user_id_str =
+                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                         if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                             let _ = sqlx::query("DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2")
                                 .bind(perm_user_id)
@@ -755,7 +839,7 @@ impl Database {
             SELECT event_id, aggregate_type, aggregate_id, event_type, event_data, created_at, id
             FROM events
             WHERE event_id = $1 AND wallet_id = $2
-            "#
+            "#,
         )
         .bind(event_uuid)
         .bind(wallet_id)
@@ -765,7 +849,13 @@ impl Database {
         if let Some(row) = event_row {
             let row_ref: &sqlx::postgres::PgRow = &row;
             // TODO: Use type-driven approach (apply_event_batch_type_driven) once all handlers are complete
-            self.apply_event_batch(&[row_ref], user_id, wallet_id, &mut std::collections::HashSet::new()).await?;
+            self.apply_event_batch(
+                &[row_ref],
+                user_id,
+                wallet_id,
+                &mut std::collections::HashSet::new(),
+            )
+            .await?;
         }
 
         Ok(())
@@ -781,25 +871,25 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         // Get the event's database ID for last_event_id tracking
         let event_uuid = Uuid::parse_str(&event.id).map_err(|_| sqlx::Error::RowNotFound)?;
-        let event_db_id: Option<i64> = sqlx::query_scalar(
-            "SELECT id FROM events WHERE event_id = $1"
-        )
-        .bind(event_uuid)
-        .fetch_optional(&self.pool)
-        .await?;
+        let event_db_id: Option<i64> =
+            sqlx::query_scalar("SELECT id FROM events WHERE event_id = $1")
+                .bind(event_uuid)
+                .fetch_optional(&self.pool)
+                .await?;
 
         let event_db_id = event_db_id.unwrap_or(0);
 
         if event.event_type == "UNDO" {
             let event_data = &event.event_data;
-            if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+            if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str())
+            {
                 if let Ok(undone_event_id) = Uuid::parse_str(undone_id_str) {
                     let undone_event = sqlx::query(
                         r#"
                         SELECT aggregate_type, aggregate_id, event_type
                         FROM events
                         WHERE event_id = $1
-                        "#
+                        "#,
                     )
                     .bind(undone_event_id)
                     .fetch_optional(&self.pool)
@@ -810,12 +900,18 @@ impl Database {
                         let undone_aggregate_id: Uuid = undone_row.get("aggregate_id");
                         let undone_event_type: String = undone_row.get("event_type");
 
-                        tracing::info!("Processing UNDO: removing {} {} event for aggregate {}",
-                            undone_event_type, undone_aggregate_type, undone_aggregate_id);
+                        tracing::info!(
+                            "Processing UNDO: removing {} {} event for aggregate {}",
+                            undone_event_type,
+                            undone_aggregate_type,
+                            undone_aggregate_id
+                        );
 
                         match undone_aggregate_type.as_str() {
                             "transaction" => {
-                                if undone_event_type == "CREATED" || undone_event_type == "TRANSACTION_CREATED" {
+                                if undone_event_type == "CREATED"
+                                    || undone_event_type == "TRANSACTION_CREATED"
+                                {
                                     let deleted = sqlx::query(
                                         "DELETE FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
                                     )
@@ -824,9 +920,14 @@ impl Database {
                                     .execute(&self.pool)
                                     .await?;
 
-                                    tracing::info!("Deleted {} transaction(s) from projection", deleted.rows_affected());
+                                    tracing::info!(
+                                        "Deleted {} transaction(s) from projection",
+                                        deleted.rows_affected()
+                                    );
                                 } else if undone_event_type == "UPDATED" {
-                                    tracing::warn!("UNDO of transaction UPDATED event - triggering rebuild");
+                                    tracing::warn!(
+                                        "UNDO of transaction UPDATED event - triggering rebuild"
+                                    );
                                 }
                             }
                             "contact" => {
@@ -839,20 +940,34 @@ impl Database {
                                     .execute(&self.pool)
                                     .await?;
 
-                                    tracing::info!("Deleted {} contact(s) from projection", deleted.rows_affected());
+                                    tracing::info!(
+                                        "Deleted {} contact(s) from projection",
+                                        deleted.rows_affected()
+                                    );
                                 } else if undone_event_type == "UPDATED" {
-                                    tracing::warn!("UNDO of contact UPDATED event - triggering rebuild");
+                                    tracing::warn!(
+                                        "UNDO of contact UPDATED event - triggering rebuild"
+                                    );
                                 }
                             }
                             _ => {
-                                tracing::warn!("UNDO event for unknown aggregate type: {}", undone_aggregate_type);
+                                tracing::warn!(
+                                    "UNDO event for unknown aggregate type: {}",
+                                    undone_aggregate_type
+                                );
                             }
                         }
                     } else {
-                        tracing::warn!("UNDO event references non-existent event: {}", undone_id_str);
+                        tracing::warn!(
+                            "UNDO event references non-existent event: {}",
+                            undone_id_str
+                        );
                     }
                 } else {
-                    tracing::warn!("UNDO event has invalid undone_event_id UUID: {}", undone_id_str);
+                    tracing::warn!(
+                        "UNDO event has invalid undone_event_id UUID: {}",
+                        undone_id_str
+                    );
                 }
             } else {
                 tracing::warn!("UNDO event missing undone_event_id in event_data");
@@ -868,7 +983,7 @@ impl Database {
                 WHERE event_type = 'UNDO'
                 AND event_data->>'undone_event_id' = $1
             )
-            "#
+            "#,
         )
         .bind(event_id.to_string())
         .fetch_one(&self.pool)
@@ -881,14 +996,14 @@ impl Database {
         let event_data = &event.event_data;
 
         match event.aggregate_type.as_str() {
-            "contact" => {
-                match event.event_type.as_str() {
-                    "CREATED" => {
-                        let name = event_data.get("name")
-                            .and_then(|v| v.as_str())
-                            .ok_or_else(|| sqlx::Error::RowNotFound)?;
+            "contact" => match event.event_type.as_str() {
+                "CREATED" => {
+                    let name = event_data
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
 
-                        sqlx::query(
+                    sqlx::query(
                             r#"
                             INSERT INTO contacts_projection
                             (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
@@ -916,7 +1031,7 @@ impl Database {
                         .execute(&self.pool)
                         .await?;
 
-                        if let Some(all_contacts_id) = sqlx::query_scalar::<_, Uuid>(
+                    if let Some(all_contacts_id) = sqlx::query_scalar::<_, Uuid>(
                             "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
                         )
                         .bind(wallet_id)
@@ -931,10 +1046,10 @@ impl Database {
                             .execute(&self.pool)
                             .await;
                         }
-                        if let Some(arr) = event_data.get("group_ids").and_then(|v| v.as_array()) {
-                            for g in arr {
-                                if let Some(s) = g.as_str().and_then(|s| Uuid::parse_str(s).ok()) {
-                                    let in_wallet = sqlx::query_scalar::<_, bool>(
+                    if let Some(arr) = event_data.get("group_ids").and_then(|v| v.as_array()) {
+                        for g in arr {
+                            if let Some(s) = g.as_str().and_then(|s| Uuid::parse_str(s).ok()) {
+                                let in_wallet = sqlx::query_scalar::<_, bool>(
                                         "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
                                     )
                                     .bind(s)
@@ -942,22 +1057,22 @@ impl Database {
                                     .fetch_one(&self.pool)
                                     .await
                                     .unwrap_or(false);
-                                    if in_wallet {
-                                        let _ = sqlx::query(
+                                if in_wallet {
+                                    let _ = sqlx::query(
                                             "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                                         )
                                         .bind(aggregate_id)
                                         .bind(s)
                                         .execute(&self.pool)
                                         .await;
-                                    }
                                 }
                             }
                         }
                     }
-                    "UPDATED" => {
-                        sqlx::query(
-                            r#"
+                }
+                "UPDATED" => {
+                    sqlx::query(
+                        r#"
                             UPDATE contacts_projection
                             SET name = COALESCE($1, name),
                                 username = COALESCE($2, username),
@@ -967,23 +1082,28 @@ impl Database {
                                 updated_at = $6,
                                 last_event_id = $9
                             WHERE id = $7 AND wallet_id = $8
-                            "#
-                        )
-                        .bind(event_data.get("name").and_then(|v| v.as_str()))
-                        .bind(event_data.get("username").and_then(|v| v.as_str()))
-                        .bind(event_data.get("phone").and_then(|v| v.as_str()))
-                        .bind(event_data.get("email").and_then(|v| v.as_str()))
-                        .bind(event_data.get("notes").and_then(|v| v.as_str()))
-                        .bind(created_at)
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .bind(event_db_id)
-                        .execute(&self.pool)
-                        .await?;
-                        self.apply_contact_group_ids_from_event_data_impl(wallet_id, aggregate_id, event_data).await?;
-                    }
-                    "DELETED" => {
-                        sqlx::query(
+                            "#,
+                    )
+                    .bind(event_data.get("name").and_then(|v| v.as_str()))
+                    .bind(event_data.get("username").and_then(|v| v.as_str()))
+                    .bind(event_data.get("phone").and_then(|v| v.as_str()))
+                    .bind(event_data.get("email").and_then(|v| v.as_str()))
+                    .bind(event_data.get("notes").and_then(|v| v.as_str()))
+                    .bind(created_at)
+                    .bind(aggregate_id)
+                    .bind(wallet_id)
+                    .bind(event_db_id)
+                    .execute(&self.pool)
+                    .await?;
+                    self.apply_contact_group_ids_from_event_data_impl(
+                        wallet_id,
+                        aggregate_id,
+                        event_data,
+                    )
+                    .await?;
+                }
+                "DELETED" => {
+                    sqlx::query(
                             "UPDATE contacts_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE id = $2 AND wallet_id = $3"
                         )
                         .bind(created_at)
@@ -993,7 +1113,7 @@ impl Database {
                         .execute(&self.pool)
                         .await?;
 
-                        let deleted_transactions = sqlx::query(
+                    let deleted_transactions = sqlx::query(
                             "UPDATE transactions_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE contact_id = $2 AND wallet_id = $3 AND is_deleted = false"
                         )
                         .bind(created_at)
@@ -1003,22 +1123,25 @@ impl Database {
                         .execute(&self.pool)
                         .await?;
 
-                        if deleted_transactions.rows_affected() > 0 {
-                            tracing::info!("Deleted {} transaction(s) for deleted contact {}", deleted_transactions.rows_affected(), aggregate_id);
-                        }
+                    if deleted_transactions.rows_affected() > 0 {
+                        tracing::info!(
+                            "Deleted {} transaction(s) for deleted contact {}",
+                            deleted_transactions.rows_affected(),
+                            aggregate_id
+                        );
                     }
-                    _ => {}
                 }
-            }
-            "transaction" => {
-                match event.event_type.as_str() {
-                    "CREATED" => {
-                        let contact_id = event_data.get("contact_id")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| Uuid::parse_str(s).ok())
-                            .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                _ => {}
+            },
+            "transaction" => match event.event_type.as_str() {
+                "CREATED" => {
+                    let contact_id = event_data
+                        .get("contact_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
 
-                        let contact_exists = sqlx::query_scalar::<_, bool>(
+                    let contact_exists = sqlx::query_scalar::<_, bool>(
                             "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
                         )
                         .bind(contact_id)
@@ -1026,31 +1149,39 @@ impl Database {
                         .fetch_one(&self.pool)
                         .await?;
 
-                        if !contact_exists {
-                            tracing::warn!("Skipping transaction creation for deleted contact {}", contact_id);
-                            return Ok(());
-                        }
+                    if !contact_exists {
+                        tracing::warn!(
+                            "Skipping transaction creation for deleted contact {}",
+                            contact_id
+                        );
+                        return Ok(());
+                    }
 
-                        let amount = event_data.get("amount")
-                            .and_then(|v| v.as_i64())
-                            .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                        let direction = event_data.get("direction")
-                            .and_then(|v| v.as_str())
-                            .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                        let txn_type = event_data.get("type")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("money");
+                    let amount = event_data
+                        .get("amount")
+                        .and_then(|v| v.as_i64())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let direction = event_data
+                        .get("direction")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let txn_type = event_data
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("money");
 
-                        let transaction_date = event_data.get("transaction_date")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-                            .unwrap_or_else(|| created_at.date());
+                    let transaction_date = event_data
+                        .get("transaction_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                        .unwrap_or_else(|| created_at.date());
 
-                        let due_date = event_data.get("due_date")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+                    let due_date = event_data
+                        .get("due_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
-                        sqlx::query(
+                    sqlx::query(
                             r#"
                             INSERT INTO transactions_projection
                             (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
@@ -1083,33 +1214,39 @@ impl Database {
                         .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
-                    }
-                    "UPDATED" => {
-                        let amount = event_data.get("amount")
-                            .and_then(|v| v.as_i64())
-                            .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                        let direction = event_data.get("direction")
-                            .and_then(|v| v.as_str())
-                            .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                        let txn_type = event_data.get("type")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("money");
+                }
+                "UPDATED" => {
+                    let amount = event_data
+                        .get("amount")
+                        .and_then(|v| v.as_i64())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let direction = event_data
+                        .get("direction")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let txn_type = event_data
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("money");
 
-                        let contact_id = event_data.get("contact_id")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| Uuid::parse_str(s).ok())
-                            .ok_or_else(|| sqlx::Error::RowNotFound)?;
+                    let contact_id = event_data
+                        .get("contact_id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        .ok_or_else(|| sqlx::Error::RowNotFound)?;
 
-                        let transaction_date = event_data.get("transaction_date")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-                            .unwrap_or_else(|| created_at.date());
+                    let transaction_date = event_data
+                        .get("transaction_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                        .unwrap_or_else(|| created_at.date());
 
-                        let due_date = event_data.get("due_date")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+                    let due_date = event_data
+                        .get("due_date")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
-                        sqlx::query(
+                    sqlx::query(
                             r#"
                             UPDATE transactions_projection
                             SET contact_id = $1, type = $2, direction = $3, amount = $4, currency = $5,
@@ -1132,9 +1269,9 @@ impl Database {
                         .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
-                    }
-                    "DELETED" => {
-                        sqlx::query(
+                }
+                "DELETED" => {
+                    sqlx::query(
                             "UPDATE transactions_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE id = $2 AND wallet_id = $3"
                         )
                         .bind(created_at)
@@ -1143,12 +1280,12 @@ impl Database {
                         .bind(event_db_id)
                         .execute(&self.pool)
                         .await?;
-                    }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
             "permission" => {
-                self.apply_permission_event_impl(event, wallet_id, created_at).await?;
+                self.apply_permission_event_impl(event, wallet_id, created_at)
+                    .await?;
             }
             _ => {}
         }
@@ -1165,16 +1302,21 @@ impl Database {
         let event_data = &event.event_data;
         match event.event_type.as_str() {
             "WALLET_USER_ADDED" => {
-                let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                let user_id = event_data
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                let role = event_data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
+                let role = event_data
+                    .get("role")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("member");
                 sqlx::query(
                     r#"
                     INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
                     VALUES ($1, $2, $3, $4)
                     ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3, subscribed_at = $4
-                    "#
+                    "#,
                 )
                 .bind(wallet_id)
                 .bind(user_id)
@@ -1184,12 +1326,17 @@ impl Database {
                 .await?;
             }
             "WALLET_USER_ROLE_CHANGED" => {
-                let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                let user_id = event_data
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                let role = event_data.get("role").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+                let role = event_data
+                    .get("role")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query(
-                    "UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3"
+                    "UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3",
                 )
                 .bind(role)
                 .bind(wallet_id)
@@ -1198,7 +1345,9 @@ impl Database {
                 .await?;
             }
             "WALLET_USER_REMOVED" => {
-                let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                let user_id = event_data
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
@@ -1208,8 +1357,12 @@ impl Database {
                     .await?;
             }
             "USER_GROUP_CREATED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let name = event_data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query(
                     "INSERT INTO user_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
                 )
@@ -1220,8 +1373,12 @@ impl Database {
                 .await?;
             }
             "USER_GROUP_RENAMED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let name = event_data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query(
                     "UPDATE user_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
                 )
@@ -1232,7 +1389,8 @@ impl Database {
                 .await?;
             }
             "USER_GROUP_DELETED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
                 sqlx::query("DELETE FROM user_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false")
                     .bind(group_id)
                     .bind(wallet_id)
@@ -1240,8 +1398,11 @@ impl Database {
                     .await?;
             }
             "USER_GROUP_MEMBER_ADDED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let user_id = event_data
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query(
@@ -1253,19 +1414,28 @@ impl Database {
                 .await?;
             }
             "USER_GROUP_MEMBER_REMOVED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let user_id = event_data.get("user_id").and_then(|v| v.as_str())
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let user_id = event_data
+                    .get("user_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                sqlx::query("DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2")
-                    .bind(user_id)
-                    .bind(group_id)
-                    .execute(&self.pool)
-                    .await?;
+                sqlx::query(
+                    "DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2",
+                )
+                .bind(user_id)
+                .bind(group_id)
+                .execute(&self.pool)
+                .await?;
             }
             "CONTACT_GROUP_CREATED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let name = event_data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query(
                     "INSERT INTO contact_groups (id, wallet_id, name, type, is_system) VALUES ($1, $2, $3, 'static', false) ON CONFLICT (id) DO UPDATE SET name = $3"
                 )
@@ -1276,8 +1446,12 @@ impl Database {
                 .await?;
             }
             "CONTACT_GROUP_RENAMED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let name = event_data.get("name").and_then(|v| v.as_str()).ok_or_else(|| sqlx::Error::RowNotFound)?;
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let name = event_data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query(
                     "UPDATE contact_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
                 )
@@ -1288,7 +1462,8 @@ impl Database {
                 .await?;
             }
             "CONTACT_GROUP_DELETED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
                 sqlx::query("DELETE FROM contact_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false")
                     .bind(group_id)
                     .bind(wallet_id)
@@ -1296,8 +1471,11 @@ impl Database {
                     .await?;
             }
             "CONTACT_GROUP_MEMBER_ADDED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let contact_id = event_data.get("contact_id").and_then(|v| v.as_str())
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let contact_id = event_data
+                    .get("contact_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query(
@@ -1309,8 +1487,11 @@ impl Database {
                 .await?;
             }
             "CONTACT_GROUP_MEMBER_REMOVED" => {
-                let group_id = Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
-                let contact_id = event_data.get("contact_id").and_then(|v| v.as_str())
+                let group_id =
+                    Uuid::parse_str(&event.aggregate_id).map_err(|_| sqlx::Error::RowNotFound)?;
+                let contact_id = event_data
+                    .get("contact_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
                 sqlx::query("DELETE FROM contact_group_members WHERE contact_id = $1 AND contact_group_id = $2")
@@ -1320,15 +1501,24 @@ impl Database {
                     .await?;
             }
             "PERMISSION_MATRIX_SET" => {
-                let user_group_id = event_data.get("user_group_id").and_then(|v| v.as_str())
+                let user_group_id = event_data
+                    .get("user_group_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                let contact_group_id = event_data.get("contact_group_id").and_then(|v| v.as_str())
+                let contact_group_id = event_data
+                    .get("contact_group_id")
+                    .and_then(|v| v.as_str())
                     .and_then(|s| Uuid::parse_str(s).ok())
                     .ok_or_else(|| sqlx::Error::RowNotFound)?;
-                let action_names: Vec<String> = event_data.get("action_names")
+                let action_names: Vec<String> = event_data
+                    .get("action_names")
                     .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 sqlx::query("DELETE FROM group_permission_matrix WHERE user_group_id = $1 AND contact_group_id = $2")
                     .bind(user_group_id)
@@ -1336,10 +1526,11 @@ impl Database {
                     .execute(&self.pool)
                     .await?;
                 for name in &action_names {
-                    let action_id: Option<i16> = sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = $1")
-                        .bind(name)
-                        .fetch_optional(&self.pool)
-                        .await?;
+                    let action_id: Option<i16> =
+                        sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = $1")
+                            .bind(name)
+                            .fetch_optional(&self.pool)
+                            .await?;
                     if let Some(aid) = action_id {
                         sqlx::query(
                             "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
@@ -1384,7 +1575,7 @@ impl Database {
                 SELECT aggregate_type, aggregate_id
                 FROM events
                 WHERE event_id = ANY($1) AND event_type = 'CREATED'
-                "#
+                "#,
             )
             .bind(&undone_event_ids_vec[..])
             .fetch_all(&self.pool)
@@ -1407,23 +1598,41 @@ impl Database {
 
         if let Some(contacts_array) = snapshot.contacts_snapshot.as_array() {
             for contact_json in contacts_array {
-                let id_str = contact_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let id_str = contact_json
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if let Ok(contact_id) = uuid::Uuid::parse_str(id_str) {
                     if undone_contact_ids.contains(&contact_id) {
                         continue;
                     }
-                    let name = contact_json.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let name = contact_json
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     let username = contact_json.get("username").and_then(|v| v.as_str());
                     let phone = contact_json.get("phone").and_then(|v| v.as_str());
                     let email = contact_json.get("email").and_then(|v| v.as_str());
                     let notes = contact_json.get("notes").and_then(|v| v.as_str());
-                    let created_at_str = contact_json.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
-                    let updated_at_str = contact_json.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+                    let created_at_str = contact_json
+                        .get("created_at")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let updated_at_str = contact_json
+                        .get("updated_at")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
-                    let created_at = chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%d %H:%M:%S%.f")
-                        .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
-                    let updated_at = chrono::NaiveDateTime::parse_from_str(updated_at_str, "%Y-%m-%d %H:%M:%S%.f")
-                        .unwrap_or(created_at);
+                    let created_at = chrono::NaiveDateTime::parse_from_str(
+                        created_at_str,
+                        "%Y-%m-%d %H:%M:%S%.f",
+                    )
+                    .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
+                    let updated_at = chrono::NaiveDateTime::parse_from_str(
+                        updated_at_str,
+                        "%Y-%m-%d %H:%M:%S%.f",
+                    )
+                    .unwrap_or(created_at);
 
                     sqlx::query(
                         r#"
@@ -1450,23 +1659,52 @@ impl Database {
 
         if let Some(transactions_array) = snapshot.transactions_snapshot.as_array() {
             for transaction_json in transactions_array {
-                let id_str = transaction_json.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let id_str = transaction_json
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if let Ok(transaction_id) = uuid::Uuid::parse_str(id_str) {
                     if undone_transaction_ids.contains(&transaction_id) {
                         continue;
                     }
 
-                    let contact_id_str = transaction_json.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
+                    let contact_id_str = transaction_json
+                        .get("contact_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     if let Ok(contact_id) = uuid::Uuid::parse_str(contact_id_str) {
-                        let tx_type = transaction_json.get("type").and_then(|v| v.as_str()).unwrap_or("money");
-                        let direction = transaction_json.get("direction").and_then(|v| v.as_str()).unwrap_or("lent");
-                        let amount = transaction_json.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
-                        let currency = transaction_json.get("currency").and_then(|v| v.as_str()).unwrap_or("USD");
-                        let description = transaction_json.get("description").and_then(|v| v.as_str());
-                        let transaction_date_str = transaction_json.get("transaction_date").and_then(|v| v.as_str()).unwrap_or("");
-                        let due_date_str = transaction_json.get("due_date").and_then(|v| v.as_str());
-                        let created_at_str = transaction_json.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
-                        let updated_at_str = transaction_json.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+                        let tx_type = transaction_json
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("money");
+                        let direction = transaction_json
+                            .get("direction")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("lent");
+                        let amount = transaction_json
+                            .get("amount")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0);
+                        let currency = transaction_json
+                            .get("currency")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("USD");
+                        let description =
+                            transaction_json.get("description").and_then(|v| v.as_str());
+                        let transaction_date_str = transaction_json
+                            .get("transaction_date")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let due_date_str =
+                            transaction_json.get("due_date").and_then(|v| v.as_str());
+                        let created_at_str = transaction_json
+                            .get("created_at")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let updated_at_str = transaction_json
+                            .get("updated_at")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
                         let transaction_date = if !transaction_date_str.is_empty() {
                             chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d").ok()
@@ -1474,14 +1712,19 @@ impl Database {
                             None
                         };
 
-                        let due_date = due_date_str.and_then(|d| {
-                            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
-                        });
+                        let due_date = due_date_str
+                            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
-                        let created_at = chrono::NaiveDateTime::parse_from_str(created_at_str, "%Y-%m-%d %H:%M:%S%.f")
-                            .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
-                        let updated_at = chrono::NaiveDateTime::parse_from_str(updated_at_str, "%Y-%m-%d %H:%M:%S%.f")
-                            .unwrap_or(created_at);
+                        let created_at = chrono::NaiveDateTime::parse_from_str(
+                            created_at_str,
+                            "%Y-%m-%d %H:%M:%S%.f",
+                        )
+                        .unwrap_or_else(|_| chrono::Utc::now().naive_utc());
+                        let updated_at = chrono::NaiveDateTime::parse_from_str(
+                            updated_at_str,
+                            "%Y-%m-%d %H:%M:%S%.f",
+                        )
+                        .unwrap_or(created_at);
 
                         if let Some(txn_date) = transaction_date {
                             sqlx::query(
@@ -1532,19 +1775,11 @@ impl Database {
         .await?;
         Ok(rows
             .iter()
-            .map(|r| {
-                (
-                    r.get::<Uuid, _>("id"),
-                    r.get::<Uuid, _>("contact_id"),
-                )
-            })
+            .map(|r| (r.get::<Uuid, _>("id"), r.get::<Uuid, _>("contact_id")))
             .collect())
     }
 
-    pub async fn calculate_total_debt(
-        &self,
-        wallet_id: Uuid,
-    ) -> i64 {
+    pub async fn calculate_total_debt(&self, wallet_id: Uuid) -> i64 {
         let result = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COALESCE(SUM(
@@ -1566,7 +1801,11 @@ impl Database {
         match result {
             Ok(total) => total,
             Err(e) => {
-                tracing::error!("calculate_total_debt failed for wallet {}: {:?}", wallet_id, e);
+                tracing::error!(
+                    "calculate_total_debt failed for wallet {}: {:?}",
+                    wallet_id,
+                    e
+                );
                 0
             }
         }
@@ -1587,13 +1826,14 @@ impl Database {
             .unwrap_or(0)
     }
 
-    pub async fn get_event_db_id_by_uuid(&self, event_id: Uuid) -> Result<Option<i64>, sqlx::Error> {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT id FROM events WHERE event_id = $1"
-        )
-        .bind(event_id)
-        .fetch_optional(&self.pool)
-        .await
+    pub async fn get_event_db_id_by_uuid(
+        &self,
+        event_id: Uuid,
+    ) -> Result<Option<i64>, sqlx::Error> {
+        sqlx::query_scalar::<_, i64>("SELECT id FROM events WHERE event_id = $1")
+            .bind(event_id)
+            .fetch_optional(&self.pool)
+            .await
     }
 
     /// Check if a user can read a specific event based on permission filtering

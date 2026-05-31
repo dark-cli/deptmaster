@@ -1,8 +1,8 @@
+use crate::config::Config;
+use crate::database::DatabasePool;
+use std::sync::Arc;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::info;
-use std::sync::Arc;
-use crate::database::DatabasePool;
-use crate::config::Config;
 
 pub struct BackgroundScheduler {
     #[allow(dead_code)]
@@ -14,10 +14,7 @@ pub struct BackgroundScheduler {
 }
 
 impl BackgroundScheduler {
-    pub async fn new(
-        db_pool: DatabasePool,
-        config: Arc<Config>,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(db_pool: DatabasePool, config: Arc<Config>) -> anyhow::Result<Self> {
         let scheduler = JobScheduler::new().await?;
 
         // projection_snapshots are wallet-scoped and already capped on save: we keep only

@@ -1,9 +1,9 @@
-use uuid::Uuid;
+use crate::database::error::DbError;
+use crate::database::repository::Database;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::Row;
-use crate::database::error::DbError;
-use crate::database::repository::Database;
+use uuid::Uuid;
 
 impl Database {
     pub async fn create_projection_snapshot_impl(
@@ -38,7 +38,7 @@ impl Database {
             WHERE wallet_id = $1
             ORDER BY created_at DESC
             LIMIT 1
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_optional(&self.pool)
@@ -53,7 +53,11 @@ impl Database {
         }))
     }
 
-    pub async fn delete_old_snapshots_impl(&self, wallet_id: Uuid, keep_count: i64) -> Result<(), DbError> {
+    pub async fn delete_old_snapshots_impl(
+        &self,
+        wallet_id: Uuid,
+        keep_count: i64,
+    ) -> Result<(), DbError> {
         sqlx::query(
             r#"
             DELETE FROM projection_snapshots
@@ -65,7 +69,7 @@ impl Database {
                 ORDER BY created_at DESC
                 LIMIT 1 OFFSET $2
               )
-            "#
+            "#,
         )
         .bind(wallet_id)
         .bind(keep_count)
@@ -75,4 +79,3 @@ impl Database {
         Ok(())
     }
 }
-

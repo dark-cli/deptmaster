@@ -1,18 +1,18 @@
+use crate::middleware::auth::AuthUser;
+use crate::permissions::WalletRole;
+use crate::AppState;
+use axum::extract::FromRequestParts;
 use axum::{
+    async_trait,
     extract::Request,
+    extract::State,
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
-    async_trait,
-    extract::State,
 };
-use axum::extract::FromRequestParts;
 use sqlx::Row;
 use uuid::Uuid;
-use crate::AppState;
-use crate::middleware::auth::AuthUser;
-use crate::permissions::WalletRole;
 
 #[derive(Clone, Debug)]
 pub struct WalletContext {
@@ -22,7 +22,10 @@ pub struct WalletContext {
 
 impl WalletContext {
     pub fn new(wallet_id: Uuid, user_role: WalletRole) -> Self {
-        Self { wallet_id, user_role }
+        Self {
+            wallet_id,
+            user_role,
+        }
     }
 }
 
@@ -43,7 +46,8 @@ pub async fn wallet_context_middleware(
     // Extract wallet_id from path parameter
     let wallet_id_str = {
         let segments: Vec<&str> = req.uri().path().split('/').collect();
-        segments.iter()
+        segments
+            .iter()
             .position(|&s| s == "wallets")
             .and_then(|pos| segments.get(pos + 1).map(|s| s.to_string()))
     };
@@ -53,15 +57,14 @@ pub async fn wallet_context_middleware(
         StatusCode::BAD_REQUEST
     })?;
 
-    let wallet_id = Uuid::parse_str(&wallet_id_str)
-        .map_err(|_| {
-            tracing::warn!("Invalid wallet_id format: {}", wallet_id_str);
-            StatusCode::BAD_REQUEST
-        })?;
+    let wallet_id = Uuid::parse_str(&wallet_id_str).map_err(|_| {
+        tracing::warn!("Invalid wallet_id format: {}", wallet_id_str);
+        StatusCode::BAD_REQUEST
+    })?;
 
     // Verify wallet exists and is active
     let wallet_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)"
+        "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)",
     )
     .bind(wallet_id)
     .fetch_one(&*state.db_pool)
@@ -82,7 +85,7 @@ pub async fn wallet_context_middleware(
         SELECT role
         FROM wallet_users
         WHERE wallet_id = $1 AND user_id = $2
-        "#
+        "#,
     )
     .bind(wallet_id)
     .bind(auth_user.user_id)
@@ -95,11 +98,13 @@ pub async fn wallet_context_middleware(
     })?;
 
     let user_role = match wallet_user {
-        Some(role_str) => {
-            WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member)
-        },
+        Some(role_str) => WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member),
         None => {
-            tracing::warn!("User {} does not have access to wallet {}", auth_user.user_id, wallet_id);
+            tracing::warn!(
+                "User {} does not have access to wallet {}",
+                auth_user.user_id,
+                wallet_id
+            );
             // Unique code so clients only drop local events when server explicitly says permission denied (not network errors).
             let body = serde_json::json!({
                 "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
@@ -127,7 +132,10 @@ where
 {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(parts: &mut axum::http::request::Parts, _state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
         parts
             .extensions
             .get::<WalletContext>()
@@ -141,4 +149,3 @@ where
 pub fn get_wallet_context(req: &Request) -> Option<WalletContext> {
     req.extensions().get::<WalletContext>().cloned()
 }
-

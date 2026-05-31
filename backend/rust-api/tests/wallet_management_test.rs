@@ -9,14 +9,14 @@
 // 7. Removing users from wallets
 // 8. Updating user roles in wallets
 
-use debt_tracker_api::handlers::wallets;
+use chrono;
 use debt_tracker_api::config::Config;
+use debt_tracker_api::handlers::wallets;
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::websocket;
-use uuid::Uuid;
 use std::sync::Arc;
-use chrono;
+use uuid::Uuid;
 
 mod test_helpers;
 use test_helpers::*;
@@ -35,7 +35,7 @@ async fn test_create_wallet() {
         r#"
         INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#
+        "#,
     )
     .bind(wallet_id)
     .bind("Test Wallet")
@@ -51,7 +51,7 @@ async fn test_create_wallet() {
 
     // Verify wallet exists
     let wallet_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)"
+        "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)",
     )
     .bind(wallet_id)
     .fetch_one(&pool)
@@ -68,19 +68,18 @@ async fn test_list_wallets() {
     let wallet2_id = create_test_wallet(&pool, "Wallet 2").await;
     add_user_to_wallet(&pool, user_id, wallet1_id, "owner").await;
     add_user_to_wallet(&pool, user_id, wallet2_id, "admin").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
-    let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
+    let app_state =
+        test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
-    let result = wallets::list_wallets(
-        axum::extract::State(app_state),
-    ).await;
+    let result = wallets::list_wallets(axum::extract::State(app_state)).await;
 
     assert!(result.is_ok());
     let response = result.unwrap();
     assert!(response.wallets.len() >= 2);
-    
+
     let wallet_names: Vec<String> = response.wallets.iter().map(|w| w.name.clone()).collect();
     assert!(wallet_names.contains(&"Wallet 1".to_string()));
     assert!(wallet_names.contains(&"Wallet 2".to_string()));
@@ -90,15 +89,17 @@ async fn test_list_wallets() {
 async fn test_get_wallet() {
     let pool = setup_test_db().await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
-    let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
+    let app_state =
+        test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let result = wallets::get_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-    ).await;
+    )
+    .await;
 
     assert!(result.is_ok());
     let wallet = result.unwrap();
@@ -113,10 +114,11 @@ async fn test_update_wallet() {
     let acting_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Original Name").await;
     add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
-    let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
+    let app_state =
+        test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let update_request = wallets::UpdateWalletRequest {
         name: Some("Updated Name".to_string()),
@@ -127,22 +129,25 @@ async fn test_update_wallet() {
     let result = wallets::update_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: "testuser".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser {
+            user_id: acting_user_id,
+            username: "testuser".to_string(),
+            is_admin: false,
+        }),
         axum::Json(update_request),
-    ).await;
+    )
+    .await;
 
     assert!(result.is_ok());
     let (status, _) = result.unwrap();
     assert_eq!(status, axum::http::StatusCode::OK);
 
     // Verify wallet was updated
-    let wallet_name: String = sqlx::query_scalar(
-        "SELECT name FROM wallets WHERE id = $1"
-    )
-    .bind(wallet_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let wallet_name: String = sqlx::query_scalar("SELECT name FROM wallets WHERE id = $1")
+        .bind(wallet_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(wallet_name, "Updated Name");
 }
 
@@ -152,29 +157,33 @@ async fn test_delete_wallet() {
     let acting_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, acting_user_id, wallet_id, "owner").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
-    let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
+    let app_state =
+        test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let result = wallets::delete_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: "testuser".to_string(), is_admin: false }),
-    ).await;
+        axum::extract::Extension(AuthUser {
+            user_id: acting_user_id,
+            username: "testuser".to_string(),
+            is_admin: false,
+        }),
+    )
+    .await;
 
     assert!(result.is_ok());
     let (status, _) = result.unwrap();
     assert_eq!(status, axum::http::StatusCode::OK);
 
     // Verify wallet is soft deleted
-    let is_active: bool = sqlx::query_scalar(
-        "SELECT is_active FROM wallets WHERE id = $1"
-    )
-    .bind(wallet_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let is_active: bool = sqlx::query_scalar("SELECT is_active FROM wallets WHERE id = $1")
+        .bind(wallet_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert!(!is_active, "Wallet should be soft deleted");
 }
 
@@ -190,7 +199,8 @@ async fn test_add_user_to_wallet() {
 
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
-    let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
+    let app_state =
+        test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let add_request = wallets::AddUserToWalletRequest {
         username: target_username,
@@ -199,23 +209,27 @@ async fn test_add_user_to_wallet() {
     let result = wallets::add_user_to_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: "testuser".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser {
+            user_id: acting_user_id,
+            username: "testuser".to_string(),
+            is_admin: false,
+        }),
         axum::Json(add_request),
-    ).await;
+    )
+    .await;
 
     assert!(result.is_ok());
     let (status, _) = result.unwrap();
     assert_eq!(status, axum::http::StatusCode::CREATED);
 
     // Verify user was added to wallet
-    let user_role: String = sqlx::query_scalar(
-        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
-    )
-    .bind(wallet_id)
-    .bind(target_user_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let user_role: String =
+        sqlx::query_scalar("SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
+            .bind(wallet_id)
+            .bind(target_user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(user_role, "member");
 }
 
@@ -227,10 +241,11 @@ async fn test_update_wallet_user_role() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
     add_user_to_wallet(&pool, target_user_id, wallet_id, "member").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
-    let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
+    let app_state =
+        test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let update_request = wallets::UpdateWalletUserRequest {
         role: WalletRole::Admin,
@@ -239,23 +254,27 @@ async fn test_update_wallet_user_role() {
     let result = wallets::update_wallet_user(
         axum::extract::Path((wallet_id.to_string(), target_user_id.to_string())),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: "testuser".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser {
+            user_id: acting_user_id,
+            username: "testuser".to_string(),
+            is_admin: false,
+        }),
         axum::Json(update_request),
-    ).await;
+    )
+    .await;
 
     assert!(result.is_ok());
     let (status, _) = result.unwrap();
     assert_eq!(status, axum::http::StatusCode::OK);
 
     // Verify role was updated
-    let user_role: String = sqlx::query_scalar(
-        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
-    )
-    .bind(wallet_id)
-    .bind(target_user_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let user_role: String =
+        sqlx::query_scalar("SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
+            .bind(wallet_id)
+            .bind(target_user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(user_role, "admin");
 }
 
@@ -267,16 +286,22 @@ async fn test_remove_user_from_wallet() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
     add_user_to_wallet(&pool, target_user_id, wallet_id, "member").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
-    let app_state = test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
+    let app_state =
+        test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let result = wallets::remove_user_from_wallet(
         axum::extract::Path((wallet_id.to_string(), target_user_id.to_string())),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: acting_user_id, username: "testuser".to_string(), is_admin: false }),
-    ).await;
+        axum::extract::Extension(AuthUser {
+            user_id: acting_user_id,
+            username: "testuser".to_string(),
+            is_admin: false,
+        }),
+    )
+    .await;
 
     assert!(result.is_ok());
     let (status, _) = result.unwrap();
@@ -284,7 +309,7 @@ async fn test_remove_user_from_wallet() {
 
     // Verify user was removed from wallet
     let user_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
+        "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)",
     )
     .bind(wallet_id)
     .bind(target_user_id)

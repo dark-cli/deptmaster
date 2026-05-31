@@ -19,8 +19,10 @@ async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     let pool = setup_test_db().await;
 
     // Two users, two wallets. Use unique emails to avoid conflicts with previous test runs.
-    let user_a = create_test_user_with_email(&pool, &format!("user_a-{}@example.com", Uuid::new_v4())).await;
-    let user_b = create_test_user_with_email(&pool, &format!("user_b-{}@example.com", Uuid::new_v4())).await;
+    let user_a =
+        create_test_user_with_email(&pool, &format!("user_a-{}@example.com", Uuid::new_v4())).await;
+    let user_b =
+        create_test_user_with_email(&pool, &format!("user_b-{}@example.com", Uuid::new_v4())).await;
 
     let wallet_a = create_test_wallet(&pool, "Wallet A").await;
     let wallet_b = create_test_wallet(&pool, "Wallet B").await;
@@ -42,7 +44,11 @@ async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     let ok = wallets::update_wallet(
         axum::extract::Path(wallet_a.to_string()),
         axum::extract::State(app_state.clone()),
-        axum::extract::Extension(AuthUser { user_id: user_a, username: "user_a".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser {
+            user_id: user_a,
+            username: "user_a".to_string(),
+            is_admin: false,
+        }),
         axum::Json(update_request),
     )
     .await;
@@ -54,7 +60,10 @@ async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
         axum::extract::State(app_state.clone()),
     )
     .await;
-    assert!(view.is_ok(), "expected to be able to view wallet B at this stage");
+    assert!(
+        view.is_ok(),
+        "expected to be able to view wallet B at this stage"
+    );
 
     // Deny: user A cannot edit wallet B.
     let update_other = wallets::UpdateWalletRequest {
@@ -65,12 +74,18 @@ async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     let denied = wallets::update_wallet(
         axum::extract::Path(wallet_b.to_string()),
         axum::extract::State(app_state),
-        axum::extract::Extension(AuthUser { user_id: user_a, username: "user_a".to_string(), is_admin: false }),
+        axum::extract::Extension(AuthUser {
+            user_id: user_a,
+            username: "user_a".to_string(),
+            is_admin: false,
+        }),
         axum::Json(update_other),
     )
     .await;
-    assert!(denied.is_err(), "expected edit of other user's wallet to be denied");
+    assert!(
+        denied.is_err(),
+        "expected edit of other user's wallet to be denied"
+    );
     let (status, _body) = denied.err().unwrap();
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
 }
-

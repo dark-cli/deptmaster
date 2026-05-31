@@ -1,14 +1,14 @@
-use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
-use debt_tracker_api::AppState;
 use debt_tracker_api::config::Config;
-use debt_tracker_api::websocket;
-use debt_tracker_api::services::projections::Projections;
-use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::domain::DomainEvent;
-use sqlx::{PgPool, Row};
-use uuid::Uuid;
-use std::sync::Arc;
+use debt_tracker_api::handlers::sync::{post_sync_events, SyncEventRequest};
+use debt_tracker_api::permissions::WalletRole;
+use debt_tracker_api::services::projections::Projections;
+use debt_tracker_api::websocket;
+use debt_tracker_api::AppState;
 use serde_json::json;
+use sqlx::{PgPool, Row};
+use std::sync::Arc;
+use uuid::Uuid;
 
 mod test_helpers;
 use test_helpers::*;
@@ -43,8 +43,14 @@ async fn test_undo_event_validation() {
 
     // Verify that invalid UNDO events cannot be converted to DomainEvent
     let error = invalid_undo.to_domain_event(wallet_id, user_id, chrono::Utc::now());
-    assert!(error.is_err(), "UNDO without undone_event_id should fail to convert");
-    assert!(error.unwrap_err().contains("undone_event_id"), "Error should mention missing undone_event_id");
+    assert!(
+        error.is_err(),
+        "UNDO without undone_event_id should fail to convert"
+    );
+    assert!(
+        error.unwrap_err().contains("undone_event_id"),
+        "Error should mention missing undone_event_id"
+    );
 
     // Test 2: UNDO event with invalid UUID in 'undone_event_id' should be rejected at deserialization
     let invalid_uuid_undo = SyncEventRequest {
@@ -60,8 +66,14 @@ async fn test_undo_event_validation() {
     };
 
     let error = invalid_uuid_undo.to_domain_event(wallet_id, user_id, chrono::Utc::now());
-    assert!(error.is_err(), "UNDO with invalid UUID should fail to convert");
-    assert!(error.unwrap_err().contains("UUID"), "Error should mention invalid UUID");
+    assert!(
+        error.is_err(),
+        "UNDO with invalid UUID should fail to convert"
+    );
+    assert!(
+        error.unwrap_err().contains("UUID"),
+        "Error should mention invalid UUID"
+    );
 
     // Test 3: UNDO event with valid structure should be accepted
     let original_event_id = Uuid::new_v4();
@@ -79,7 +91,10 @@ async fn test_undo_event_validation() {
 
     // Verify that valid UNDO events can be converted to DomainEvent
     let undo_domain_event = valid_undo.to_domain_event(wallet_id, user_id, chrono::Utc::now());
-    assert!(undo_domain_event.is_ok(), "Valid UNDO event should convert successfully");
+    assert!(
+        undo_domain_event.is_ok(),
+        "Valid UNDO event should convert successfully"
+    );
 }
 
 #[tokio::test]
@@ -88,7 +103,7 @@ async fn test_undo_event_skips_undone_event_in_projections() {
     let user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
@@ -120,7 +135,8 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         request,
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event]),
-    ).await;
+    )
+    .await;
 
     // 2. Update the contact via UPDATED event
     let updated_event = SyncEventRequest {
@@ -142,17 +158,17 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         request,
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event]),
-    ).await;
+    )
+    .await;
 
     // Verify update was applied
-    let name_after_update: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
-    )
-    .bind(contact_id)
-    .bind(wallet_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let name_after_update: String =
+        sqlx::query_scalar("SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2")
+            .bind(contact_id)
+            .bind(wallet_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(name_after_update, "Updated Name");
 
     // 3. Create UNDO event for the UPDATE
@@ -175,20 +191,20 @@ async fn test_undo_event_skips_undone_event_in_projections() {
         request,
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event]),
-    ).await;
+    )
+    .await;
 
     // Rebuild projections to apply UNDO
     let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify projection shows original contact data (update was undone)
-    let name_after_undo: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
-    )
-    .bind(contact_id)
-    .bind(wallet_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let name_after_undo: String =
+        sqlx::query_scalar("SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2")
+            .bind(contact_id)
+            .bind(wallet_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(name_after_undo, "Original Name");
 }
 
@@ -198,7 +214,7 @@ async fn test_undo_event_syncs_correctly() {
     let user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
@@ -209,7 +225,7 @@ async fn test_undo_event_syncs_correctly() {
     };
 
     let contact_id = Uuid::new_v4();
-    
+
     // 1. Create original event
     let original_event = SyncEventRequest {
         id: Uuid::new_v4().to_string(),
@@ -230,7 +246,8 @@ async fn test_undo_event_syncs_correctly() {
         request,
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event]),
-    ).await;
+    )
+    .await;
 
     // 2. Client creates UNDO event and syncs to server
     let undo_event = SyncEventRequest {
@@ -253,11 +270,15 @@ async fn test_undo_event_syncs_correctly() {
         request,
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event]),
-    ).await;
+    )
+    .await;
 
     assert!(result.is_ok());
     let response = result.unwrap().0;
-    assert!(response.accepted.contains(&undo_event.id), "UNDO event should be accepted");
+    assert!(
+        response.accepted.contains(&undo_event.id),
+        "UNDO event should be accepted"
+    );
 
     // 4. Verify UNDO event is in database
     let undo_exists: bool = sqlx::query_scalar(
@@ -275,7 +296,7 @@ async fn test_undo_event_syncs_correctly() {
 
     // Verify contact doesn't exist (original event was undone)
     let contact_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2)"
+        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2)",
     )
     .bind(contact_id)
     .bind(wallet_id)
@@ -291,7 +312,7 @@ async fn test_event_validation_rejects_invalid_undo() {
     let user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
@@ -323,9 +344,13 @@ async fn test_event_validation_rejects_invalid_undo() {
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event]),
-    ).await;
+    )
+    .await;
     let response = result.unwrap().0;
-    assert!(response.accepted.contains(&valid_structure.id), "UNDO with valid structure should be accepted even if undone event doesn't exist");
+    assert!(
+        response.accepted.contains(&valid_structure.id),
+        "UNDO with valid structure should be accepted even if undone event doesn't exist"
+    );
 }
 
 #[tokio::test]
@@ -334,7 +359,7 @@ async fn test_multiple_undo_events() {
     let user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
@@ -345,7 +370,7 @@ async fn test_multiple_undo_events() {
     };
 
     let contact_id = Uuid::new_v4();
-    
+
     // 1. Create multiple events
     let event1 = SyncEventRequest {
         id: Uuid::new_v4().to_string(),
@@ -391,7 +416,8 @@ async fn test_multiple_undo_events() {
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event1, domain_event2, domain_event3]),
-    ).await;
+    )
+    .await;
 
     // 2. Create multiple UNDO events for different original events
     let undo1 = SyncEventRequest {
@@ -425,21 +451,24 @@ async fn test_multiple_undo_events() {
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_undo1, domain_undo2]),
-    ).await;
+    )
+    .await;
 
     // 3. Rebuild projections - all undone events should be skipped
     let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
 
     // 4. Verify state is correct (should have original name, both updates undone)
-    let name: String = sqlx::query_scalar(
-        "SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
-    )
-    .bind(contact_id)
-    .bind(wallet_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(name, "Original", "Both updates should be undone, leaving original name");
+    let name: String =
+        sqlx::query_scalar("SELECT name FROM contacts_projection WHERE id = $1 AND wallet_id = $2")
+            .bind(contact_id)
+            .bind(wallet_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        name, "Original",
+        "Both updates should be undone, leaving original name"
+    );
 }
 
 #[tokio::test]
@@ -448,7 +477,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
     let user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     add_user_to_wallet(&pool, user_id, wallet_id, "owner").await;
-    
+
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     let app_state = AppState {
@@ -459,7 +488,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
     };
 
     let contact_id = Uuid::new_v4();
-    
+
     // 1. Create events to trigger snapshot (every 10 events)
     let mut events_to_undo: Vec<String> = Vec::new();
     for i in 0..15 {
@@ -475,7 +504,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
             timestamp: chrono::Utc::now().to_rfc3339(),
             version: 1,
         };
-        
+
         if i < 5 {
             events_to_undo.push(event.id.clone());
         }
@@ -486,7 +515,8 @@ async fn test_undo_event_with_snapshot_rebuild() {
             wallet_context_extension(wallet_id, WalletRole::Owner),
             auth_user_extension(user_id, None),
             axum::Json(vec![domain_event]),
-        ).await;
+        )
+        .await;
     }
 
     // Verify snapshot was created (at event 10)
@@ -516,7 +546,8 @@ async fn test_undo_event_with_snapshot_rebuild() {
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_undo]),
-    ).await;
+    )
+    .await;
 
     // 3. Rebuild projections - should use snapshot and filter undone events
     let _ = Projections::rebuild_projections_from_events(&app_state, wallet_id).await;
@@ -524,7 +555,7 @@ async fn test_undo_event_with_snapshot_rebuild() {
     // 4. Verify rebuild filtered out undone events correctly
     // The contact should exist with a name from events after the undone one
     let contact_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2)"
+        "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2)",
     )
     .bind(contact_id)
     .bind(wallet_id)
@@ -572,23 +603,31 @@ async fn test_undo_synced_at_window_validation() {
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_event]),
-    ).await.unwrap().0;
+    )
+    .await
+    .unwrap()
+    .0;
 
-    assert!(response.accepted.contains(&event_id.to_string()), "Event should be accepted");
+    assert!(
+        response.accepted.contains(&event_id.to_string()),
+        "Event should be accepted"
+    );
 
     // 2. Verify event is in database with synced_at set (should be now)
-    let synced_at: chrono::NaiveDateTime = sqlx::query_scalar(
-        "SELECT synced_at FROM events WHERE event_id = $1 AND wallet_id = $2"
-    )
-    .bind(event_id)
-    .bind(wallet_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let synced_at: chrono::NaiveDateTime =
+        sqlx::query_scalar("SELECT synced_at FROM events WHERE event_id = $1 AND wallet_id = $2")
+            .bind(event_id)
+            .bind(wallet_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     let now = chrono::Utc::now().naive_utc();
     let time_diff = now.signed_duration_since(synced_at);
-    assert!(time_diff.num_seconds() <= 2, "synced_at should be very recent (within 2 seconds)");
+    assert!(
+        time_diff.num_seconds() <= 2,
+        "synced_at should be very recent (within 2 seconds)"
+    );
 
     // 3. Create UNDO event shortly after (should be accepted - within 5 second window)
     let undo_event_id = Uuid::new_v4();
@@ -610,7 +649,10 @@ async fn test_undo_synced_at_window_validation() {
         wallet_context_extension(wallet_id, WalletRole::Owner),
         auth_user_extension(user_id, None),
         axum::Json(vec![domain_undo]),
-    ).await.unwrap().0;
+    )
+    .await
+    .unwrap()
+    .0;
 
     assert!(
         response.accepted.contains(&undo_event_id.to_string()),

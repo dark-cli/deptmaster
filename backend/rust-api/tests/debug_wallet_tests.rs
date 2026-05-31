@@ -1,21 +1,22 @@
 // Debug tests to investigate wallet handler failures
 // Each test is completely isolated with fresh data
 
-use debt_tracker_api::handlers::wallets;
+use chrono::Utc;
 use debt_tracker_api::config::Config;
+use debt_tracker_api::handlers::wallets;
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::websocket;
 use sqlx::PgPool;
-use uuid::Uuid;
 use std::sync::Arc;
-use chrono::Utc;
+use uuid::Uuid;
 
 mod test_helpers;
 use test_helpers::*;
 
 async fn setup() -> PgPool {
-    let database_url = std::env::var("TEST_DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker_test".to_string());
+    let database_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker_test".to_string()
+    });
 
     let pool = sqlx::PgPool::connect(&database_url)
         .await
@@ -47,7 +48,7 @@ async fn test_get_wallet_isolated() {
 
     let insert_result = sqlx::query(
         "INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(wallet_id)
     .bind("Debug Test Wallet")
@@ -63,14 +64,13 @@ async fn test_get_wallet_isolated() {
     assert!(insert_result.is_ok(), "Failed to insert wallet");
 
     // Verify wallet exists in DB
-    let db_wallet: Option<(String, bool)> = sqlx::query_as(
-        "SELECT name, is_active FROM wallets WHERE id = $1"
-    )
-    .bind(wallet_id)
-    .fetch_optional(&pool)
-    .await
-    .expect("Failed to query")
-    .map(|(name, is_active)| (name, is_active));
+    let db_wallet: Option<(String, bool)> =
+        sqlx::query_as("SELECT name, is_active FROM wallets WHERE id = $1")
+            .bind(wallet_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("Failed to query")
+            .map(|(name, is_active)| (name, is_active));
 
     println!("DB wallet: {:?}", db_wallet);
     assert!(db_wallet.is_some(), "Wallet not found in DB");
@@ -85,7 +85,8 @@ async fn test_get_wallet_isolated() {
     let result = wallets::get_wallet(
         axum::extract::Path(wallet_id.to_string()),
         axum::extract::State(app_state),
-    ).await;
+    )
+    .await;
 
     match result {
         Ok(json) => {
@@ -110,7 +111,7 @@ async fn test_list_wallets_isolated() {
 
     let insert_result = sqlx::query(
         "INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(wallet_id)
     .bind("Debug List Test Wallet")
@@ -137,9 +138,7 @@ async fn test_list_wallets_isolated() {
     let app_state = create_app_state(pool);
 
     println!("Calling list_wallets handler");
-    let result = wallets::list_wallets(
-        axum::extract::State(app_state),
-    ).await;
+    let result = wallets::list_wallets(axum::extract::State(app_state)).await;
 
     match result {
         Ok(response) => {
@@ -147,7 +146,10 @@ async fn test_list_wallets_isolated() {
             for wallet in &response.wallets {
                 println!("  - {}: {}", wallet.id, wallet.name);
             }
-            assert!(response.wallets.len() > 0, "Should return at least one wallet");
+            assert!(
+                response.wallets.len() > 0,
+                "Should return at least one wallet"
+            );
         }
         Err((status, _json)) => {
             println!("Error! Status: {:?}", status);
@@ -169,17 +171,19 @@ async fn test_add_user_to_wallet_isolated() {
     let target_email = format!("debug-target-{}@example.com", Uuid::new_v4());
     let target_user_id = test_helpers::create_test_user_with_email(&pool, &target_email).await;
     let target_username = target_email.split('@').next().unwrap().to_string();
-    println!("Created target user: {} ({})", target_user_id, target_username);
+    println!(
+        "Created target user: {} ({})",
+        target_user_id, target_username
+    );
 
     // Verify target user exists
-    let user_exists: Option<String> = sqlx::query_scalar(
-        "SELECT username FROM users_projection WHERE id = $1"
-    )
-    .bind(target_user_id)
-    .fetch_optional(&pool)
-    .await
-    .expect("Failed to query")
-    .flatten();
+    let user_exists: Option<String> =
+        sqlx::query_scalar("SELECT username FROM users_projection WHERE id = $1")
+            .bind(target_user_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("Failed to query")
+            .flatten();
 
     println!("Target user in DB: {:?}", user_exists);
     assert!(user_exists.is_some(), "Target user not in DB");
@@ -193,15 +197,14 @@ async fn test_add_user_to_wallet_isolated() {
     println!("Added acting user as owner");
 
     // Verify wallet-user relationship
-    let user_role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
-    )
-    .bind(wallet_id)
-    .bind(acting_user_id)
-    .fetch_optional(&pool)
-    .await
-    .expect("Failed to query")
-    .flatten();
+    let user_role: Option<String> =
+        sqlx::query_scalar("SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
+            .bind(wallet_id)
+            .bind(acting_user_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("Failed to query")
+            .flatten();
 
     println!("Acting user role in wallet: {:?}", user_role);
     assert_eq!(user_role, Some("owner".to_string()));
@@ -220,10 +223,11 @@ async fn test_add_user_to_wallet_isolated() {
         axum::extract::Extension(AuthUser {
             user_id: acting_user_id,
             username: "acting".to_string(),
-            is_admin: false
+            is_admin: false,
         }),
         axum::Json(add_request),
-    ).await;
+    )
+    .await;
 
     println!("Handler result: {:?}", result);
     match result {
@@ -249,7 +253,7 @@ async fn test_repository_get_wallet() {
 
     let insert_result = sqlx::query(
         "INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(wallet_id)
     .bind("Debug Repo Test Wallet")
@@ -274,18 +278,18 @@ async fn test_repository_get_wallet() {
 
     println!("Repository result: {:?}", repo_result);
     match repo_result {
-        Ok(wallet_opt) => {
-            match wallet_opt {
-                Some(wallet) => {
-                    println!("Success! Wallet: id={}, name={}, is_active={}",
-                             wallet.id, wallet.name, wallet.is_active);
-                    assert_eq!(wallet.id, wallet_id);
-                    assert_eq!(wallet.name, "Debug Repo Test Wallet");
-                    assert!(wallet.is_active);
-                }
-                None => panic!("Repository returned None"),
+        Ok(wallet_opt) => match wallet_opt {
+            Some(wallet) => {
+                println!(
+                    "Success! Wallet: id={}, name={}, is_active={}",
+                    wallet.id, wallet.name, wallet.is_active
+                );
+                assert_eq!(wallet.id, wallet_id);
+                assert_eq!(wallet.name, "Debug Repo Test Wallet");
+                assert!(wallet.is_active);
             }
-        }
+            None => panic!("Repository returned None"),
+        },
         Err(e) => {
             println!("Repository error: {:?}", e);
             panic!("Repository failed");
@@ -304,7 +308,7 @@ async fn test_repository_list_wallets() {
 
     let insert_result = sqlx::query(
         "INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(wallet_id)
     .bind("Debug List Repo Test")
@@ -354,7 +358,10 @@ async fn test_add_user_detailed() {
     let target_email = format!("debug-add-user-{}@example.com", Uuid::new_v4());
     let target_user_id = test_helpers::create_test_user_with_email(&pool, &target_email).await;
     let target_username = target_email.split('@').next().unwrap().to_string();
-    println!("Step 2: Created target user: {} (username: {})", target_user_id, target_username);
+    println!(
+        "Step 2: Created target user: {} (username: {})",
+        target_user_id, target_username
+    );
 
     // Step 2: Create wallet
     let wallet_id = create_test_wallet(&pool, "Test Wallet for Add User").await;
@@ -371,7 +378,10 @@ async fn test_add_user_detailed() {
     println!("\nStep 5: Testing get_user_by_username...");
     match db.get_user_by_username(&target_username).await {
         Ok(Some(user)) => {
-            println!("  ✓ Found user: id={}, username={:?}", user.id, user.username);
+            println!(
+                "  ✓ Found user: id={}, username={:?}",
+                user.id, user.username
+            );
         }
         Ok(None) => {
             println!("  ✗ User not found!");
@@ -413,7 +423,10 @@ async fn test_add_user_detailed() {
 
     // Step 7: Test add_wallet_user directly (the underlying operation)
     println!("\nStep 8: Testing add_wallet_user directly...");
-    match db.add_wallet_user(wallet_id, target_user_id, "member".to_string()).await {
+    match db
+        .add_wallet_user(wallet_id, target_user_id, "member".to_string())
+        .await
+    {
         Ok(_) => {
             println!("  ✓ Successfully added user to wallet");
         }
@@ -425,15 +438,14 @@ async fn test_add_user_detailed() {
 
     // Step 8: Verify the user was added
     println!("\nStep 9: Verifying user was added...");
-    let user_role: Option<String> = sqlx::query_scalar(
-        "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2"
-    )
-    .bind(wallet_id)
-    .bind(target_user_id)
-    .fetch_optional(&pool)
-    .await
-    .expect("Failed to query")
-    .flatten();
+    let user_role: Option<String> =
+        sqlx::query_scalar("SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
+            .bind(wallet_id)
+            .bind(target_user_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("Failed to query")
+            .flatten();
 
     match user_role {
         Some(role) => {

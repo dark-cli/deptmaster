@@ -1,5 +1,5 @@
-use uuid::Uuid;
 use std::fmt;
+use uuid::Uuid;
 
 /// What resource is being accessed - type-safe resource identification
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -52,4 +52,3 @@ impl fmt::Display for Resource {
         }
     }
 }
-

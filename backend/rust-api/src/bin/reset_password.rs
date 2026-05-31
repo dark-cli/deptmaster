@@ -7,7 +7,7 @@ use std::env;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() < 3 {
         eprintln!("Usage: cargo run --bin reset_password -- <username> <new_password>");
         eprintln!("Example: cargo run --bin reset_password -- admin admin123");
@@ -24,9 +24,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Load environment variables
     dotenv::dotenv().ok();
-    
-    let database_url = env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker".to_string());
+
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker".to_string()
+    });
 
     let pool = sqlx::PgPool::connect(&database_url).await?;
 
@@ -34,12 +35,11 @@ async fn main() -> anyhow::Result<()> {
     let password_hash = hash(password, DEFAULT_COST)?;
 
     // Check if user exists
-    let user_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE username = $1)"
-    )
-    .bind(username)
-    .fetch_one(&pool)
-    .await?;
+    let user_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users_projection WHERE username = $1)")
+            .bind(username)
+            .fetch_one(&pool)
+            .await?;
 
     if user_exists {
         // Update existing user
@@ -48,17 +48,17 @@ async fn main() -> anyhow::Result<()> {
             .bind(username)
             .execute(&pool)
             .await?;
-        
+
         println!("✅ Password updated for user: {}", username);
     } else {
         // Create new user
-        use uuid::Uuid;
         use chrono::Utc;
-        
+        use uuid::Uuid;
+
         let user_id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO users_projection (id, username, password_hash, created_at, last_event_id) 
-             VALUES ($1, $2, $3, $4, 0)"
+             VALUES ($1, $2, $3, $4, 0)",
         )
         .bind(&user_id)
         .bind(username)
@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
         .bind(Utc::now())
         .execute(&pool)
         .await?;
-        
+
         println!("✅ User created: {}", username);
     }
 

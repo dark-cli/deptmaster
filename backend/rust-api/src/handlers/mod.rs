@@ -1,73 +1,32 @@
 pub mod admin;
-pub mod settings;
-pub mod auth;
 pub mod admin_auth;
+pub mod auth;
+pub mod responses;
+pub mod settings;
 pub mod sync;
 pub mod users;
 pub mod wallets;
-pub mod responses;
 
 pub use admin::{
-    admin_panel,
-    config_js,
-    favicon,
-    backfill_transaction_events,
-    get_events,
-    get_latest_event_id,
-    get_projection_status,
-    get_total_debt,
-    dev_clear_database,
+    admin_panel, backfill_transaction_events, config_js, dev_clear_database, favicon, get_events,
+    get_latest_event_id, get_projection_status, get_total_debt,
 };
-pub use settings::{get_settings, update_setting};
-pub use auth::{login, register};
 pub use admin_auth::admin_login;
-pub use sync::{
-    get_sync_hash,
-    get_sync_events,
-    post_sync_events,
-};
+pub use auth::{login, register};
+pub use settings::{get_settings, update_setting};
+pub use sync::{get_sync_events, get_sync_hash, post_sync_events};
 pub use users::{
-    get_users,
-    create_user,
-    delete_user,
-    change_password,
-    admin_change_password,
-    get_user_login_logs,
-    backup_user_data,
+    admin_change_password, backup_user_data, change_password, create_user, delete_user,
+    get_user_login_logs, get_users,
 };
 pub use wallets::{
-    create_wallet,
-    create_my_wallet,
-    list_wallets,
-    get_wallet,
-    update_wallet,
-    delete_wallet,
-    add_user_to_wallet,
-    list_wallet_users,
-    search_wallet_users,
-    create_wallet_invite,
-    join_wallet_by_code,
-    update_wallet_user,
-    remove_user_from_wallet,
-    list_user_wallets,
-    get_my_permissions,
-    get_my_wallet_settings,
-    put_my_wallet_settings,
-    list_user_groups,
-    create_user_group,
-    update_user_group,
-    delete_user_group,
-    list_user_group_members,
-    add_user_group_member,
-    remove_user_group_member,
-    list_contact_groups,
-    create_contact_group,
-    update_contact_group,
-    delete_contact_group,
-    list_contact_group_members,
-    add_contact_group_member,
-    remove_contact_group_member,
-    list_permission_actions,
-    get_permission_matrix,
-    put_permission_matrix,
+    add_contact_group_member, add_user_group_member, add_user_to_wallet, create_contact_group,
+    create_my_wallet, create_user_group, create_wallet, create_wallet_invite, delete_contact_group,
+    delete_user_group, delete_wallet, get_my_permissions, get_my_wallet_settings,
+    get_permission_matrix, get_wallet, join_wallet_by_code, list_contact_group_members,
+    list_contact_groups, list_permission_actions, list_user_group_members, list_user_groups,
+    list_user_wallets, list_wallet_users, list_wallets, put_my_wallet_settings,
+    put_permission_matrix, remove_contact_group_member, remove_user_from_wallet,
+    remove_user_group_member, search_wallet_users, update_contact_group, update_user_group,
+    update_wallet, update_wallet_user,
 };

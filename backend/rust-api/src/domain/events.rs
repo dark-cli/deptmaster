@@ -74,7 +74,7 @@ pub enum EventData {
 
     // Transaction events
     TransactionCreated {
-        contact_id: String,
+        contact_id: Uuid,
         amount: i64,
         direction: String,
         #[serde(default)]
@@ -90,7 +90,7 @@ pub enum EventData {
     },
     TransactionUpdated {
         #[serde(default)]
-        contact_id: Option<String>,
+        contact_id: Option<Uuid>,
         #[serde(default)]
         amount: Option<i64>,
         #[serde(default)]
@@ -229,7 +229,6 @@ impl EventData {
             EventData::PermissionMatrixSet { .. } => "PERMISSION_MATRIX_SET",
         }
     }
-
 }
 
 // ============ EVENT APPLIER TRAIT ============
@@ -315,9 +314,10 @@ impl DomainEvent {
             .map_err(|e| format!("Failed to deserialize event: {}", e))
     }
 
-
     /// Get permission metadata for this event
-    pub fn permission_metadata(&self) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
+    pub fn permission_metadata(
+        &self,
+    ) -> Vec<(crate::permissions::Action, crate::permissions::Resource)> {
         use crate::permissions::{Action, Resource};
 
         match &self.event_data {
@@ -336,11 +336,7 @@ impl DomainEvent {
             }
             // Transaction events
             EventData::TransactionCreated { contact_id, .. } => {
-                if let Ok(cid) = Uuid::parse_str(contact_id) {
-                    vec![(Action::TransactionCreate, Resource::Contact(cid))]
-                } else {
-                    vec![]
-                }
+                vec![(Action::TransactionCreate, Resource::Contact(*contact_id))]
             }
             EventData::TransactionUpdated { .. } => {
                 vec![(
@@ -442,11 +438,19 @@ where
     let s = String::deserialize(deserializer)?;
     match s.as_str() {
         "CREATED" | "UPDATED" | "DELETED" | "UNDO" => Ok(s),
-        "WALLET_USER_ADDED" | "WALLET_USER_ROLE_CHANGED" | "WALLET_USER_REMOVED"
-        | "USER_GROUP_CREATED" | "USER_GROUP_UPDATED" | "USER_GROUP_DELETED"
-        | "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED"
-        | "CONTACT_GROUP_CREATED" | "CONTACT_GROUP_UPDATED" | "CONTACT_GROUP_DELETED"
-        | "CONTACT_GROUP_MEMBER_ADDED" | "CONTACT_GROUP_MEMBER_REMOVED"
+        "WALLET_USER_ADDED"
+        | "WALLET_USER_ROLE_CHANGED"
+        | "WALLET_USER_REMOVED"
+        | "USER_GROUP_CREATED"
+        | "USER_GROUP_UPDATED"
+        | "USER_GROUP_DELETED"
+        | "USER_GROUP_MEMBER_ADDED"
+        | "USER_GROUP_MEMBER_REMOVED"
+        | "CONTACT_GROUP_CREATED"
+        | "CONTACT_GROUP_UPDATED"
+        | "CONTACT_GROUP_DELETED"
+        | "CONTACT_GROUP_MEMBER_ADDED"
+        | "CONTACT_GROUP_MEMBER_REMOVED"
         | "PERMISSION_MATRIX_SET" => Ok(s),
         _ => Err(serde::de::Error::custom(format!(
             "Invalid event_type '{}'. Must be a valid event type",
@@ -708,15 +712,18 @@ impl SyncEventRequest {
                 // Validate UUID format
                 Uuid::parse_str(undone_event_id)
                     .map_err(|_| "UNDO event 'undone_event_id' must be a valid UUID".to_string())?;
-                EventData::ContactUndone { undone_event_id: undone_event_id.to_string() }
+                EventData::ContactUndone {
+                    undone_event_id: undone_event_id.to_string(),
+                }
             }
             ("transaction", "CREATED") => {
-                let contact_id = self
+                let contact_id_str = self
                     .event_data
                     .get("contact_id")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| "CREATED transaction requires 'contact_id'".to_string())?
-                    .to_string();
+                    .ok_or_else(|| "CREATED transaction requires 'contact_id'".to_string())?;
+                let contact_id = Uuid::parse_str(contact_id_str)
+                    .map_err(|_| "Invalid contact_id UUID format".to_string())?;
                 let amount = self
                     .event_data
                     .get("amount")
@@ -765,7 +772,7 @@ impl SyncEventRequest {
                     .event_data
                     .get("contact_id")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                    .and_then(|s| Uuid::parse_str(s).ok()),
                 amount: self.event_data.get("amount").and_then(|v| v.as_i64()),
                 direction: self
                     .event_data
@@ -814,7 +821,9 @@ impl SyncEventRequest {
                 // Validate UUID format
                 Uuid::parse_str(undone_event_id)
                     .map_err(|_| "UNDO event 'undone_event_id' must be a valid UUID".to_string())?;
-                EventData::TransactionUndone { undone_event_id: undone_event_id.to_string() }
+                EventData::TransactionUndone {
+                    undone_event_id: undone_event_id.to_string(),
+                }
             }
             ("permission", "WALLET_USER_ADDED") => EventData::WalletUserAdded {
                 data: self.event_data.clone(),
@@ -852,9 +861,11 @@ impl SyncEventRequest {
             ("permission", "CONTACT_GROUP_MEMBER_ADDED") => EventData::ContactGroupMemberAdded {
                 data: self.event_data.clone(),
             },
-            ("permission", "CONTACT_GROUP_MEMBER_REMOVED") => EventData::ContactGroupMemberRemoved {
-                data: self.event_data.clone(),
-            },
+            ("permission", "CONTACT_GROUP_MEMBER_REMOVED") => {
+                EventData::ContactGroupMemberRemoved {
+                    data: self.event_data.clone(),
+                }
+            }
             ("permission", "PERMISSION_MATRIX_SET") => EventData::PermissionMatrixSet {
                 data: self.event_data.clone(),
             },

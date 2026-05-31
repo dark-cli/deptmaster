@@ -1,4 +1,6 @@
-use debt_tracker_api::permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole};
+use debt_tracker_api::permissions::{
+    Action, PermissionContext, PermissionModel, Resource, WalletRole,
+};
 use uuid::Uuid;
 
 #[test]
@@ -115,7 +117,10 @@ fn test_resource_type_classification() {
 
     // Specific resources have IDs
     assert_eq!(Resource::Contact(contact_id).id(), Some(contact_id));
-    assert_eq!(Resource::Transaction(transaction_id).id(), Some(transaction_id));
+    assert_eq!(
+        Resource::Transaction(transaction_id).id(),
+        Some(transaction_id)
+    );
     assert_eq!(Resource::Wallet(wallet_id).id(), Some(wallet_id));
 
     // Wildcard resources have no ID
@@ -148,12 +153,19 @@ fn test_action_enum_completeness() {
         Action::EventsRead,
     ];
 
-    assert_eq!(actions.len(), 19, "Should have exactly 19 permission actions");
+    assert_eq!(
+        actions.len(),
+        19,
+        "Should have exactly 19 permission actions"
+    );
 
     // Verify all actions have string representations
     for action in &actions {
         let as_str = action.as_str();
-        assert!(!as_str.is_empty(), "Action should have non-empty string representation");
+        assert!(
+            !as_str.is_empty(),
+            "Action should have non-empty string representation"
+        );
     }
 }
 
@@ -176,6 +188,9 @@ fn test_resource_enum_completeness() {
     // Verify Display trait is implemented for all resources
     for resource in &resources {
         let display = format!("{}", resource);
-        assert!(!display.is_empty(), "Resource should have non-empty display");
+        assert!(
+            !display.is_empty(),
+            "Resource should have non-empty display"
+        );
     }
 }

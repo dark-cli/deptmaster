@@ -1,8 +1,8 @@
-use uuid::Uuid;
-use sqlx::Row;
-use crate::AppState;
-use crate::services::snapshots;
 use crate::database::repository::Database;
+use crate::services::snapshots;
+use crate::AppState;
+use sqlx::Row;
+use uuid::Uuid;
 
 /// Projections: Handles all projection-related operations (rebuilds, snapshots, etc.)
 /// Consolidates projection logic into a single model for consistency and testability
@@ -20,11 +20,14 @@ impl Projections {
         state: &AppState,
         wallet_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        tracing::info!("Rebuilding projections from events for wallet {}...", wallet_id);
+        tracing::info!(
+            "Rebuilding projections from events for wallet {}...",
+            wallet_id
+        );
 
         // Get user ID (for this wallet, get the first user who has access)
         let user_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT user_id FROM wallet_users WHERE wallet_id = $1 LIMIT 1"
+            "SELECT user_id FROM wallet_users WHERE wallet_id = $1 LIMIT 1",
         )
         .bind(wallet_id)
         .fetch_one(&*state.db_pool)
@@ -54,7 +57,7 @@ impl Projections {
             FROM events
             WHERE wallet_id = $1 AND id > COALESCE($2, 0)
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(wallet_id)
         .bind(max_processed_id.unwrap_or(0))
@@ -92,10 +95,13 @@ impl Projections {
         }
 
         // Get last event info (used for snapshot lookup)
-        let last_event_db_id = events.last().and_then(|row| row.get::<Option<i64>, _>("id"));
+        let last_event_db_id = events
+            .last()
+            .and_then(|row| row.get::<Option<i64>, _>("id"));
 
         // Build a map of event_id (UUID) -> position (1-based index) for fast lookup
-        let mut event_id_to_position: std::collections::HashMap<Uuid, i64> = std::collections::HashMap::new();
+        let mut event_id_to_position: std::collections::HashMap<Uuid, i64> =
+            std::collections::HashMap::new();
         for (index, row) in events.iter().enumerate() {
             let event_id: Uuid = row.get("event_id");
             event_id_to_position.insert(event_id, (index + 1) as i64);
@@ -107,7 +113,6 @@ impl Projections {
             event_type == "UNDO"
         });
 
-
         // Clear projections and permission data if UNDO events exist (they require full rebuild)
         // or if doing full rebuild (checked later in snapshot path)
         if has_undo_events {
@@ -115,7 +120,7 @@ impl Projections {
 
             // Find the actual wallet owner (role = 'owner')
             let owner_user_id: Option<Uuid> = sqlx::query_scalar(
-                "SELECT user_id FROM wallet_users WHERE wallet_id = $1 AND role = 'owner' LIMIT 1"
+                "SELECT user_id FROM wallet_users WHERE wallet_id = $1 AND role = 'owner' LIMIT 1",
             )
             .bind(wallet_id)
             .fetch_optional(&*state.db_pool)
@@ -172,7 +177,9 @@ impl Projections {
                 let event_type: String = row.get("event_type");
                 if event_type == "UNDO" {
                     let event_data: serde_json::Value = row.get("event_data");
-                    if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                    if let Some(undone_id_str) =
+                        event_data.get("undone_event_id").and_then(|v| v.as_str())
+                    {
                         if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
                             undone_event_ids.insert(undone_id);
                             // Find the undone event's position using the map (fast lookup by ID)
@@ -189,10 +196,11 @@ impl Projections {
 
             // Step 4: Search for suitable snapshot using metadata (lightweight, ordered by newest first)
             // Load snapshot metadata (without JSON data) ordered by most recent first
-            let snapshot_metadata = snapshots::get_snapshot_metadata_for_wallet(
-                &*state.db_pool,
-                wallet_id,
-            ).await.ok().unwrap_or_default();
+            let snapshot_metadata =
+                snapshots::get_snapshot_metadata_for_wallet(&*state.db_pool, wallet_id)
+                    .await
+                    .ok()
+                    .unwrap_or_default();
 
             // Find first suitable snapshot by searching metadata (usually found in first 1-2 iterations)
             let suitable_snapshot_id = if let Some(min_pos) = min_undone_position {
@@ -206,14 +214,13 @@ impl Projections {
                 // Get minimum undone event database ID for comparison
                 if !undone_event_ids.is_empty() {
                     let undone_vec: Vec<Uuid> = undone_event_ids.iter().copied().collect();
-                    let min_undone_db_id: Option<i64> = sqlx::query_scalar(
-                        "SELECT MIN(id) FROM events WHERE event_id = ANY($1)"
-                    )
-                    .bind(undone_vec)
-                    .fetch_optional(&*state.db_pool)
-                    .await
-                    .ok()
-                    .flatten();
+                    let min_undone_db_id: Option<i64> =
+                        sqlx::query_scalar("SELECT MIN(id) FROM events WHERE event_id = ANY($1)")
+                            .bind(undone_vec)
+                            .fetch_optional(&*state.db_pool)
+                            .await
+                            .ok()
+                            .flatten();
 
                     if let Some(undone_db_id) = min_undone_db_id {
                         // Find snapshot older than the undone event
@@ -242,7 +249,8 @@ impl Projections {
             };
 
             // Step 5: Create cleaned event list (remove UNDO and undone events)
-            let cleaned_events: Vec<_> = events.iter()
+            let cleaned_events: Vec<_> = events
+                .iter()
                 .filter(|row| {
                     let event_id: Uuid = row.get("event_id");
                     let event_type: String = row.get("event_type");
@@ -266,10 +274,20 @@ impl Projections {
             if let Some(snapshot) = snapshot {
                 // Restore from snapshot (pass undone_event_ids to filter them out)
                 let db = Database::new((*state.db_pool).clone());
-                if db.restore_projections_from_snapshot(&snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok() {
+                if db
+                    .restore_projections_from_snapshot(
+                        &snapshot,
+                        user_id,
+                        wallet_id,
+                        &undone_event_ids,
+                    )
+                    .await
+                    .is_ok()
+                {
                     // Get events after the snapshot (from cleaned events)
                     let snapshot_last_db_id = snapshot.last_event_id;
-                    let events_after_snapshot: Vec<_> = cleaned_events.iter()
+                    let events_after_snapshot: Vec<_> = cleaned_events
+                        .iter()
                         .filter(|row| {
                             let event_db_id: Option<i64> = row.get("id");
                             event_db_id.map_or(false, |id| id > snapshot_last_db_id)
@@ -281,8 +299,20 @@ impl Projections {
                         // Apply cleaned events after snapshot
                         let mut empty_undone_set = std::collections::HashSet::new();
                         let db = Database::new((*state.db_pool).clone());
-                        if db.apply_event_batch(&events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
-                            tracing::info!("Used snapshot optimization with UNDO: {} events after snapshot", events_after_snapshot.len());
+                        if db
+                            .apply_event_batch(
+                                &events_after_snapshot,
+                                user_id,
+                                wallet_id,
+                                &mut empty_undone_set,
+                            )
+                            .await
+                            .is_ok()
+                        {
+                            tracing::info!(
+                                "Used snapshot optimization with UNDO: {} events after snapshot",
+                                events_after_snapshot.len()
+                            );
                             true
                         } else {
                             false
@@ -297,8 +327,15 @@ impl Projections {
                 // No snapshot, apply all cleaned events
                 let db = Database::new((*state.db_pool).clone());
                 let mut undone_set = undone_event_ids.clone();
-                if db.apply_event_batch(&cleaned_events, user_id, wallet_id, &mut undone_set).await.is_ok() {
-                    tracing::info!("Applied {} cleaned events after UNDO (no snapshot available)", cleaned_events.len());
+                if db
+                    .apply_event_batch(&cleaned_events, user_id, wallet_id, &mut undone_set)
+                    .await
+                    .is_ok()
+                {
+                    tracing::info!(
+                        "Applied {} cleaned events after UNDO (no snapshot available)",
+                        cleaned_events.len()
+                    );
                     true
                 } else {
                     false
@@ -307,16 +344,22 @@ impl Projections {
         } else {
             // No UNDO events - use snapshot optimization if available
             if let Some(last_id) = last_event_db_id {
-                tracing::info!("Attempting snapshot optimization: last_event_db_id={:?}", last_id);
-                if let Ok(Some(snapshot)) = snapshots::get_snapshot_before_event(
-                    &*state.db_pool,
-                    last_id,
-                    wallet_id,
-                ).await {
-                    tracing::info!("Found snapshot: last_event_id={}, event_count={}", snapshot.last_event_id, snapshot.event_count);
+                tracing::info!(
+                    "Attempting snapshot optimization: last_event_db_id={:?}",
+                    last_id
+                );
+                if let Ok(Some(snapshot)) =
+                    snapshots::get_snapshot_before_event(&*state.db_pool, last_id, wallet_id).await
+                {
+                    tracing::info!(
+                        "Found snapshot: last_event_id={}, event_count={}",
+                        snapshot.last_event_id,
+                        snapshot.event_count
+                    );
                     // Get events after the snapshot
                     let snapshot_last_db_id = snapshot.last_event_id;
-                    let events_after_snapshot: Vec<_> = events.iter()
+                    let events_after_snapshot: Vec<_> = events
+                        .iter()
                         .filter(|row| {
                             let event_db_id: Option<i64> = row.get("id");
                             event_db_id.map_or(false, |id| id > snapshot_last_db_id)
@@ -332,7 +375,9 @@ impl Projections {
                             let event_type: String = row.get("event_type");
                             if event_type == "UNDO" {
                                 let event_data: serde_json::Value = row.get("event_data");
-                                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                                if let Some(undone_id_str) =
+                                    event_data.get("undone_event_id").and_then(|v| v.as_str())
+                                {
                                     if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
                                         undone_event_ids.insert(undone_id);
                                     }
@@ -342,11 +387,32 @@ impl Projections {
 
                         // Restore projections from snapshot (filter out undone events)
                         let db = Database::new((*state.db_pool).clone());
-                        if db.restore_projections_from_snapshot(&snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok() {
+                        if db
+                            .restore_projections_from_snapshot(
+                                &snapshot,
+                                user_id,
+                                wallet_id,
+                                &undone_event_ids,
+                            )
+                            .await
+                            .is_ok()
+                        {
                             // Apply events after snapshot
                             let mut empty_undone_set = std::collections::HashSet::new();
-                            if db.apply_event_batch(&events_after_snapshot, user_id, wallet_id, &mut empty_undone_set).await.is_ok() {
-                                tracing::info!("Used snapshot for optimization: {} events after snapshot", events_after_snapshot.len());
+                            if db
+                                .apply_event_batch(
+                                    &events_after_snapshot,
+                                    user_id,
+                                    wallet_id,
+                                    &mut empty_undone_set,
+                                )
+                                .await
+                                .is_ok()
+                            {
+                                tracing::info!(
+                                    "Used snapshot for optimization: {} events after snapshot",
+                                    events_after_snapshot.len()
+                                );
                                 true
                             } else {
                                 false
@@ -362,7 +428,9 @@ impl Projections {
                             let event_type: String = row.get("event_type");
                             if event_type == "UNDO" {
                                 let event_data: serde_json::Value = row.get("event_data");
-                                if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                                if let Some(undone_id_str) =
+                                    event_data.get("undone_event_id").and_then(|v| v.as_str())
+                                {
                                     if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
                                         undone_event_ids.insert(undone_id);
                                     }
@@ -370,7 +438,14 @@ impl Projections {
                             }
                         }
                         let db = Database::new((*state.db_pool).clone());
-                        db.restore_projections_from_snapshot(&snapshot, user_id, wallet_id, &undone_event_ids).await.is_ok()
+                        db.restore_projections_from_snapshot(
+                            &snapshot,
+                            user_id,
+                            wallet_id,
+                            &undone_event_ids,
+                        )
+                        .await
+                        .is_ok()
                     }
                 } else {
                     tracing::info!("Snapshot not found or failed to restore");
@@ -416,10 +491,12 @@ impl Projections {
                     .execute(&*state.db_pool)
                     .await?;
 
-                sqlx::query("DELETE FROM contact_groups WHERE wallet_id = $1 AND is_system = false")
-                    .bind(wallet_id)
-                    .execute(&*state.db_pool)
-                    .await?;
+                sqlx::query(
+                    "DELETE FROM contact_groups WHERE wallet_id = $1 AND is_system = false",
+                )
+                .bind(wallet_id)
+                .execute(&*state.db_pool)
+                .await?;
 
                 sqlx::query("DELETE FROM user_group_members WHERE user_group_id IN (SELECT id FROM user_groups WHERE wallet_id = $1 AND is_system = false)")
                     .bind(wallet_id)
@@ -439,13 +516,16 @@ impl Projections {
             }
 
             // Collect undone event IDs if UNDO events exist
-            let mut undone_event_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+            let mut undone_event_ids: std::collections::HashSet<Uuid> =
+                std::collections::HashSet::new();
             if has_undo_events {
                 for row in &events {
                     let event_type: String = row.get("event_type");
                     if event_type == "UNDO" {
                         let event_data: serde_json::Value = row.get("event_data");
-                        if let Some(undone_id_str) = event_data.get("undone_event_id").and_then(|v| v.as_str()) {
+                        if let Some(undone_id_str) =
+                            event_data.get("undone_event_id").and_then(|v| v.as_str())
+                        {
                             if let Ok(undone_id) = uuid::Uuid::parse_str(undone_id_str) {
                                 undone_event_ids.insert(undone_id);
                             }
@@ -482,7 +562,8 @@ impl Projections {
                 }
 
                 // Filter out UNDO events from this batch
-                let filtered: Vec<_> = batch.iter()
+                let filtered: Vec<_> = batch
+                    .iter()
                     .filter(|row| {
                         let event_type: String = row.get("event_type");
                         event_type != "UNDO"
@@ -494,15 +575,24 @@ impl Projections {
                     let db = Database::new((*state.db_pool).clone());
                     // Keep using the old apply_event_batch while we complete the type-driven migration
                     // TODO: Migrate to apply_event_batch_type_driven once all event handlers are complete
-                    db.apply_event_batch(&filtered, user_id, wallet_id, &mut undone_event_ids).await?;
+                    db.apply_event_batch(&filtered, user_id, wallet_id, &mut undone_event_ids)
+                        .await?;
                     total_processed += filtered.len();
-                    tracing::debug!("Processed batch of {} events (total: {})", filtered.len(), total_processed);
+                    tracing::debug!(
+                        "Processed batch of {} events (total: {})",
+                        filtered.len(),
+                        total_processed
+                    );
                 }
 
                 offset += batch.len();
             }
 
-            tracing::info!("Completed full rebuild: processed {} events in batches of {}", total_processed, batch_size);
+            tracing::info!(
+                "Completed full rebuild: processed {} events in batches of {}",
+                total_processed,
+                batch_size
+            );
         }
 
         tracing::info!("Projection rebuild completed for wallet {}", wallet_id);

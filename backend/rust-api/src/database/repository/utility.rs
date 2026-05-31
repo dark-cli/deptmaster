@@ -1,9 +1,9 @@
-use uuid::Uuid;
-use serde_json::Value;
-use sqlx::Row;
-use chrono::NaiveDateTime;
 use crate::database::error::DbError;
 use crate::database::repository::Database;
+use chrono::NaiveDateTime;
+use serde_json::Value;
+use sqlx::Row;
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct TransactionWithoutEvent {
@@ -21,13 +21,16 @@ pub struct TransactionWithoutEvent {
 }
 
 impl Database {
-    pub async fn get_all_contacts_group_impl(&self, wallet_id: Uuid) -> Result<Option<Uuid>, DbError> {
+    pub async fn get_all_contacts_group_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Option<Uuid>, DbError> {
         let group_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT id FROM contact_groups
             WHERE wallet_id = $1 AND name = 'all_contacts'
             LIMIT 1
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_optional(&self.pool)
@@ -37,12 +40,11 @@ impl Database {
     }
 
     pub async fn count_events_impl(&self, wallet_id: Uuid) -> Result<i64, DbError> {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM events WHERE wallet_id = $1"
-        )
-        .bind(wallet_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM events WHERE wallet_id = $1")
+                .bind(wallet_id)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(count)
     }
@@ -62,16 +64,16 @@ impl Database {
     }
 
     pub async fn get_first_user_id_impl(&self) -> Result<Option<Uuid>, DbError> {
-        let id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM users_projection LIMIT 1"
-        )
-        .fetch_optional(&self.pool)
-        .await?;
+        let id = sqlx::query_scalar::<_, Uuid>("SELECT id FROM users_projection LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await?;
 
         Ok(id)
     }
 
-    pub async fn get_transactions_without_events_impl(&self) -> Result<Vec<TransactionWithoutEvent>, DbError> {
+    pub async fn get_transactions_without_events_impl(
+        &self,
+    ) -> Result<Vec<TransactionWithoutEvent>, DbError> {
         let rows = sqlx::query(
             r#"
             SELECT t.id, t.user_id, t.contact_id, t.type, t.direction, t.amount,
@@ -85,13 +87,14 @@ impl Database {
                 AND e.event_type = 'TRANSACTION_CREATED'
             )
             ORDER BY t.created_at
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
 
-        let transactions = rows.iter().map(|row| {
-            TransactionWithoutEvent {
+        let transactions = rows
+            .iter()
+            .map(|row| TransactionWithoutEvent {
                 id: row.get("id"),
                 user_id: row.get("user_id"),
                 contact_id: row.get("contact_id"),
@@ -103,8 +106,8 @@ impl Database {
                 transaction_date: row.get("transaction_date"),
                 due_date: row.get("due_date"),
                 created_at: row.get("created_at"),
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(transactions)
     }
@@ -133,13 +136,17 @@ impl Database {
         Ok(event_id)
     }
 
-    pub async fn update_transaction_last_event_id_impl(&self, transaction_id: Uuid, event_id: i64) -> Result<(), DbError> {
+    pub async fn update_transaction_last_event_id_impl(
+        &self,
+        transaction_id: Uuid,
+        event_id: i64,
+    ) -> Result<(), DbError> {
         sqlx::query(
             r#"
             UPDATE transactions_projection
             SET last_event_id = $1
             WHERE id = $2
-            "#
+            "#,
         )
         .bind(event_id)
         .bind(transaction_id)
@@ -158,16 +165,16 @@ impl Database {
               AND wallet_id = $1
             ORDER BY created_at DESC, id DESC
             LIMIT 1
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_optional(&self.pool)
         .await?;
 
         if let Some(debt_str) = result {
-            Ok(debt_str.parse::<i64>().unwrap_or_else(|_| {
-                serde_json::from_str::<i64>(&debt_str).unwrap_or(0)
-            }))
+            Ok(debt_str
+                .parse::<i64>()
+                .unwrap_or_else(|_| serde_json::from_str::<i64>(&debt_str).unwrap_or(0)))
         } else {
             let total = sqlx::query_scalar::<_, i64>(
                 r#"
@@ -211,4 +218,3 @@ impl Database {
         Ok(total)
     }
 }
-

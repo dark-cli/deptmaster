@@ -5,7 +5,9 @@
 //! Run with: cargo test --test app_instances_sync_test -- --ignored
 
 use axum::extract::Query;
-use debt_tracker_api::handlers::sync::{get_sync_events, get_sync_hash, SyncEvent, SyncEventsQuery};
+use debt_tracker_api::handlers::sync::{
+    get_sync_events, get_sync_hash, SyncEvent, SyncEventsQuery,
+};
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::middleware::wallet_context::WalletContext;
 use debt_tracker_api::permissions::WalletRole;
@@ -55,8 +57,10 @@ async fn test_sync_read_permission_filter_and_full_pull() {
     let pool = setup_test_db().await;
 
     // Users: owner (full access), member (limited contact:read via group "Limited")
-    let owner_id = create_test_user_with_email(&pool, &format!("owner-{}@test.local", Uuid::new_v4())).await;
-    let member_id = create_test_user_with_email(&pool, &format!("member-{}@test.local", Uuid::new_v4())).await;
+    let owner_id =
+        create_test_user_with_email(&pool, &format!("owner-{}@test.local", Uuid::new_v4())).await;
+    let member_id =
+        create_test_user_with_email(&pool, &format!("member-{}@test.local", Uuid::new_v4())).await;
 
     let wallet_id = create_test_wallet(&pool, "Shared Wallet").await;
     add_user_to_wallet(&pool, owner_id, wallet_id, "owner").await;
@@ -73,35 +77,44 @@ async fn test_sync_read_permission_filter_and_full_pull() {
     .await
     .expect("create Limited group");
 
-    let limited_cg_id: Uuid = sqlx::query_scalar("SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'Limited'")
-        .bind(wallet_id)
-        .fetch_one(&pool)
-        .await
-        .expect("get Limited group id");
+    let limited_cg_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'Limited'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get Limited group id");
 
     // Add contact:read for (all_users, Limited) only. Remove full access from (all_users, all_contacts) so member is restricted.
-    let all_users_id: Uuid = sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-        .bind(wallet_id)
-        .fetch_one(&pool)
-        .await
-        .expect("all_users id");
-    let all_contacts_id: Uuid = sqlx::query_scalar("SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'")
-        .bind(wallet_id)
-        .fetch_one(&pool)
-        .await
-        .expect("all_contacts id");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("all_users id");
+    let all_contacts_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("all_contacts id");
 
-    sqlx::query("DELETE FROM group_permission_matrix WHERE user_group_id = $1 AND contact_group_id = $2")
-        .bind(all_users_id)
-        .bind(all_contacts_id)
-        .execute(&pool)
-        .await
-        .ok();
+    sqlx::query(
+        "DELETE FROM group_permission_matrix WHERE user_group_id = $1 AND contact_group_id = $2",
+    )
+    .bind(all_users_id)
+    .bind(all_contacts_id)
+    .execute(&pool)
+    .await
+    .ok();
 
-    let contact_read_id: i16 = sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = 'contact:read'")
-        .fetch_one(&pool)
-        .await
-        .expect("contact:read action id");
+    let contact_read_id: i16 =
+        sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = 'contact:read'")
+            .fetch_one(&pool)
+            .await
+            .expect("contact:read action id");
     sqlx::query(
         "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id) VALUES ($1, $2, $3)",
     )
@@ -169,7 +182,8 @@ async fn test_sync_read_permission_filter_and_full_pull() {
     .await
     .expect("insert event B");
 
-    let config = Arc::new(Config::from_env().expect("Config::from_env (set TEST_DATABASE_URL etc.)"));
+    let config =
+        Arc::new(Config::from_env().expect("Config::from_env (set TEST_DATABASE_URL etc.)"));
     let broadcast_tx = debt_tracker_api::websocket::create_broadcast_channel();
     let app_state = create_test_app_state(pool, config, broadcast_tx);
 

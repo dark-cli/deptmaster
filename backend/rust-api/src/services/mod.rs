@@ -1,2 +1,2 @@
-pub mod snapshots;
 pub mod projections;
+pub mod snapshots;

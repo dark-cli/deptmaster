@@ -1,5 +1,5 @@
-use uuid::Uuid;
 use std::fmt;
+use uuid::Uuid;
 
 /// Wallet role - determines permission inheritance
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

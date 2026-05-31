@@ -1,19 +1,20 @@
 // Test helpers for setting up test database and data
 
-use sqlx::PgPool;
-use uuid::Uuid;
 use chrono::Utc;
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::middleware::wallet_context::WalletContext;
 use debt_tracker_api::permissions::WalletRole;
+use sqlx::PgPool;
 use std::str::FromStr;
+use uuid::Uuid;
 
 /// Connect to the test database and ensure migrations are applied.
 /// Does not reset or clear data: each test is isolated by creating its own user and wallet
 /// (via create_test_user / create_test_wallet), so tests can run in parallel safely.
 pub async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("TEST_DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker_test".to_string());
+    let database_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+        "postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker_test".to_string()
+    });
 
     let pool = sqlx::PgPool::connect(&database_url)
         .await
@@ -48,16 +49,20 @@ pub async fn ensure_wallet_has_system_groups(pool: &PgPool, wallet_id: Uuid) {
     .await
     .expect("create all_contacts");
 
-    let ug_id: Uuid = sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-        .bind(wallet_id)
-        .fetch_one(pool)
-        .await
-        .expect("get all_users id");
-    let cg_id: Uuid = sqlx::query_scalar("SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'")
-        .bind(wallet_id)
-        .fetch_one(pool)
-        .await
-        .expect("get all_contacts id");
+    let ug_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(pool)
+    .await
+    .expect("get all_users id");
+    let cg_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
+    )
+    .bind(wallet_id)
+    .fetch_one(pool)
+    .await
+    .expect("get all_contacts id");
 
     for act_id in 1..=10_i16 {
         sqlx::query(
@@ -91,7 +96,7 @@ pub async fn create_test_user_with_email(pool: &PgPool, email: &str) -> Uuid {
     .execute(pool)
     .await
     .expect("Failed to create test user");
-    
+
     user_id
 }
 
@@ -100,7 +105,7 @@ pub async fn create_test_wallet(pool: &PgPool, name: &str) -> Uuid {
     let now = Utc::now();
     sqlx::query(
         "INSERT INTO wallets (id, name, description, created_by, created_at, updated_at, is_active)
-         VALUES ($1, $2, $3, NULL, $4, $4, true)"
+         VALUES ($1, $2, $3, NULL, $4, $4, true)",
     )
     .bind(wallet_id)
     .bind(name)
@@ -109,7 +114,7 @@ pub async fn create_test_wallet(pool: &PgPool, name: &str) -> Uuid {
     .execute(pool)
     .await
     .expect("Failed to create test wallet");
-    
+
     wallet_id
 }
 
@@ -118,7 +123,7 @@ pub async fn add_user_to_wallet(pool: &PgPool, user_id: Uuid, wallet_id: Uuid, r
     sqlx::query(
         "INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3"
+         ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3",
     )
     .bind(wallet_id)
     .bind(user_id)
@@ -129,7 +134,12 @@ pub async fn add_user_to_wallet(pool: &PgPool, user_id: Uuid, wallet_id: Uuid, r
     .expect("Failed to add user to wallet");
 }
 
-pub async fn create_test_contact(pool: &PgPool, user_id: Uuid, wallet_id: Uuid, name: &str) -> Uuid {
+pub async fn create_test_contact(
+    pool: &PgPool,
+    user_id: Uuid,
+    wallet_id: Uuid,
+    name: &str,
+) -> Uuid {
     let contact_id = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO contacts_projection (id, user_id, wallet_id, name, is_deleted, created_at, updated_at, last_event_id) 
@@ -142,17 +152,23 @@ pub async fn create_test_contact(pool: &PgPool, user_id: Uuid, wallet_id: Uuid, 
     .execute(pool)
     .await
     .expect("Failed to create test contact");
-    
+
     contact_id
 }
 
 /// Create Extension<WalletContext> for calling handlers in tests
-pub fn wallet_context_extension(wallet_id: Uuid, role: WalletRole) -> axum::extract::Extension<WalletContext> {
+pub fn wallet_context_extension(
+    wallet_id: Uuid,
+    role: WalletRole,
+) -> axum::extract::Extension<WalletContext> {
     axum::extract::Extension(WalletContext::new(wallet_id, role))
 }
 
 /// Create Extension<AuthUser> for calling handlers that require auth in tests
-pub fn auth_user_extension(user_id: Uuid, username: Option<&str>) -> axum::extract::Extension<AuthUser> {
+pub fn auth_user_extension(
+    user_id: Uuid,
+    username: Option<&str>,
+) -> axum::extract::Extension<AuthUser> {
     axum::extract::Extension(AuthUser {
         user_id,
         username: username.unwrap_or("test_user").to_string(),
@@ -182,7 +198,8 @@ pub fn sync_request_to_domain_event(
     user_id: Uuid,
 ) -> debt_tracker_api::domain::DomainEvent {
     let now = Utc::now();
-    request.to_domain_event(wallet_id, user_id, now)
+    request
+        .to_domain_event(wallet_id, user_id, now)
         .expect("Test event should be valid")
 }
 
@@ -193,8 +210,11 @@ pub fn sync_requests_to_domain_events(
     user_id: Uuid,
 ) -> Vec<debt_tracker_api::domain::DomainEvent> {
     let now = Utc::now();
-    requests.into_iter()
-        .map(|req| req.to_domain_event(wallet_id, user_id, now)
-            .expect("Test event should be valid"))
+    requests
+        .into_iter()
+        .map(|req| {
+            req.to_domain_event(wallet_id, user_id, now)
+                .expect("Test event should be valid")
+        })
         .collect()
 }

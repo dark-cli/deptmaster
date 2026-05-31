@@ -1,17 +1,20 @@
-use uuid::Uuid;
-use crate::database::models::*;
 use crate::database::error::DbError;
+use crate::database::models::*;
 use crate::database::repository::Database;
+use uuid::Uuid;
 
 impl Database {
-    pub async fn get_contacts_for_wallet_impl(&self, wallet_id: Uuid) -> Result<Vec<Contact>, DbError> {
+    pub async fn get_contacts_for_wallet_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Vec<Contact>, DbError> {
         let contacts = sqlx::query_as::<_, Contact>(
             r#"
             SELECT id, name, phone, wallet_id, created_at, updated_at, version
             FROM contacts_projection
             WHERE wallet_id = $1 AND is_deleted = false
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_all(&self.pool)
@@ -20,13 +23,17 @@ impl Database {
         Ok(contacts)
     }
 
-    pub async fn get_contact_impl(&self, contact_id: Uuid, wallet_id: Uuid) -> Result<Option<Contact>, DbError> {
+    pub async fn get_contact_impl(
+        &self,
+        contact_id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<Option<Contact>, DbError> {
         let contact = sqlx::query_as::<_, Contact>(
             r#"
             SELECT id, name, phone, wallet_id, created_at, updated_at, version
             FROM contacts_projection
             WHERE id = $1 AND wallet_id = $2 AND is_deleted = false
-            "#
+            "#,
         )
         .bind(contact_id)
         .bind(wallet_id)
@@ -98,7 +105,11 @@ impl Database {
         Ok(query.rows_affected() > 0)
     }
 
-    pub async fn delete_contact_impl(&self, contact_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError> {
+    pub async fn delete_contact_impl(
+        &self,
+        contact_id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<bool, DbError> {
         let result = sqlx::query("UPDATE contacts_projection SET is_deleted = true, updated_at = NOW(), version = version + 1 WHERE id = $1 AND wallet_id = $2")
             .bind(contact_id)
             .bind(wallet_id)
@@ -118,7 +129,7 @@ impl Database {
             SELECT id, name, phone, wallet_id, created_at, updated_at, version
             FROM contacts_projection
             WHERE id = $1 AND wallet_id = $2 AND is_deleted = false
-            "#
+            "#,
         )
         .bind(contact_id)
         .bind(wallet_id)

@@ -1,8 +1,8 @@
-use uuid::Uuid;
-use chrono::NaiveDateTime;
-use crate::database::models::*;
 use crate::database::error::DbError;
+use crate::database::models::*;
 use crate::database::repository::Database;
+use chrono::NaiveDateTime;
+use uuid::Uuid;
 
 impl Database {
     pub async fn get_user_by_email_impl(&self, email: &str) -> Result<Option<User>, DbError> {
@@ -12,7 +12,7 @@ impl Database {
             FROM users_projection
             WHERE email = $1
             LIMIT 1
-            "#
+            "#,
         )
         .bind(email)
         .fetch_optional(&self.pool)
@@ -27,7 +27,7 @@ impl Database {
             SELECT id, email, username, password_hash, created_at
             FROM users_projection
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(user_id)
         .fetch_optional(&self.pool)
@@ -47,7 +47,7 @@ impl Database {
             INSERT INTO users_projection (id, username, email, password_hash, created_at)
             VALUES ($1, $2, $3, $4, NOW())
             ON CONFLICT (id) DO NOTHING
-            "#
+            "#,
         )
         .bind(id)
         .bind(&username)
@@ -59,7 +59,11 @@ impl Database {
         Ok(())
     }
 
-    pub async fn update_user_password_impl(&self, user_id: Uuid, password_hash: String) -> Result<bool, DbError> {
+    pub async fn update_user_password_impl(
+        &self,
+        user_id: Uuid,
+        password_hash: String,
+    ) -> Result<bool, DbError> {
         let result = sqlx::query("UPDATE users_projection SET password_hash = $1 WHERE id = $2")
             .bind(&password_hash)
             .bind(user_id)
@@ -102,7 +106,7 @@ impl Database {
             FROM users_projection
             WHERE username = $1
             LIMIT 1
-            "#
+            "#,
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -136,13 +140,15 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_all_users_impl(&self) -> Result<Vec<(Uuid, Option<String>, NaiveDateTime)>, DbError> {
+    pub async fn get_all_users_impl(
+        &self,
+    ) -> Result<Vec<(Uuid, Option<String>, NaiveDateTime)>, DbError> {
         let rows = sqlx::query_as::<_, (Uuid, Option<String>, NaiveDateTime)>(
             r#"
             SELECT id, username, created_at
             FROM users_projection
             ORDER BY created_at DESC
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -163,15 +169,37 @@ impl Database {
         &self,
         user_id: Uuid,
         limit: i64,
-    ) -> Result<Vec<(i64, Uuid, NaiveDateTime, Option<String>, Option<String>, bool, Option<String>)>, DbError> {
-        let rows = sqlx::query_as::<_, (i64, Uuid, NaiveDateTime, Option<String>, Option<String>, bool, Option<String>)>(
+    ) -> Result<
+        Vec<(
+            i64,
+            Uuid,
+            NaiveDateTime,
+            Option<String>,
+            Option<String>,
+            bool,
+            Option<String>,
+        )>,
+        DbError,
+    > {
+        let rows = sqlx::query_as::<
+            _,
+            (
+                i64,
+                Uuid,
+                NaiveDateTime,
+                Option<String>,
+                Option<String>,
+                bool,
+                Option<String>,
+            ),
+        >(
             r#"
             SELECT id, user_id, login_at, ip_address, user_agent, success, failure_reason
             FROM login_logs
             WHERE user_id = $1
             ORDER BY login_at DESC
             LIMIT $2
-            "#
+            "#,
         )
         .bind(user_id)
         .bind(limit)
@@ -191,7 +219,7 @@ impl Database {
                    default_due_date_days, default_due_date_switch, created_at, updated_at
             FROM user_settings
             WHERE user_id = $1
-            "#
+            "#,
         )
         .bind(user_id)
         .fetch_optional(&self.pool)
@@ -246,22 +274,33 @@ impl Database {
                    default_due_date_days, default_due_date_switch, created_at, updated_at
             FROM user_settings
             WHERE user_id = $1
-            "#
+            "#,
         )
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        let pairs = settings.map(|s| {
-            vec![
-                ("dark_mode".to_string(), Some(s.dark_mode.to_string())),
-                ("default_direction".to_string(), Some(s.default_direction)),
-                ("flip_colors".to_string(), Some(s.flip_colors.to_string())),
-                ("due_date_enabled".to_string(), Some(s.due_date_enabled.to_string())),
-                ("default_due_date_days".to_string(), Some(s.default_due_date_days.to_string())),
-                ("default_due_date_switch".to_string(), Some(s.default_due_date_switch.to_string())),
-            ]
-        }).unwrap_or_default();
+        let pairs = settings
+            .map(|s| {
+                vec![
+                    ("dark_mode".to_string(), Some(s.dark_mode.to_string())),
+                    ("default_direction".to_string(), Some(s.default_direction)),
+                    ("flip_colors".to_string(), Some(s.flip_colors.to_string())),
+                    (
+                        "due_date_enabled".to_string(),
+                        Some(s.due_date_enabled.to_string()),
+                    ),
+                    (
+                        "default_due_date_days".to_string(),
+                        Some(s.default_due_date_days.to_string()),
+                    ),
+                    (
+                        "default_due_date_switch".to_string(),
+                        Some(s.default_due_date_switch.to_string()),
+                    ),
+                ]
+            })
+            .unwrap_or_default();
 
         Ok(pairs)
     }
@@ -273,7 +312,8 @@ impl Database {
         setting_value: &str,
     ) -> Result<(), DbError> {
         // Get existing settings or create defaults
-        let mut settings = self.get_user_settings_impl(user_id)
+        let mut settings = self
+            .get_user_settings_impl(user_id)
             .await?
             .unwrap_or_else(|| UserSettings {
                 user_id,
@@ -286,7 +326,9 @@ impl Database {
             "default_direction" => settings.default_direction = setting_value.to_string(),
             "flip_colors" => settings.flip_colors = setting_value == "true",
             "due_date_enabled" => settings.due_date_enabled = setting_value == "true",
-            "default_due_date_days" => settings.default_due_date_days = setting_value.parse().unwrap_or(30),
+            "default_due_date_days" => {
+                settings.default_due_date_days = setting_value.parse().unwrap_or(30)
+            }
             "default_due_date_switch" => settings.default_due_date_switch = setting_value == "true",
             _ => {} // Ignore unknown keys
         }
@@ -295,14 +337,17 @@ impl Database {
         self.upsert_user_settings_impl(user_id, &settings).await
     }
 
-    pub async fn get_admin_by_username_impl(&self, username: &str) -> Result<Option<(Uuid, String, String, bool)>, DbError> {
+    pub async fn get_admin_by_username_impl(
+        &self,
+        username: &str,
+    ) -> Result<Option<(Uuid, String, String, bool)>, DbError> {
         let row = sqlx::query_as::<_, (Uuid, String, String, bool)>(
             r#"
             SELECT id, username, password_hash, is_active
             FROM admin_users
             WHERE username = $1
             LIMIT 1
-            "#
+            "#,
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -320,7 +365,11 @@ impl Database {
         Ok(())
     }
 
-    pub async fn search_users_impl(&self, pattern: &str, limit: i64) -> Result<Vec<(Uuid, String)>, DbError> {
+    pub async fn search_users_impl(
+        &self,
+        pattern: &str,
+        limit: i64,
+    ) -> Result<Vec<(Uuid, String)>, DbError> {
         let rows = sqlx::query_as::<_, (Uuid, String)>(
             "SELECT id, username FROM users_projection WHERE LOWER(username) LIKE LOWER($1) ORDER BY username LIMIT $2"
         )
@@ -332,4 +381,3 @@ impl Database {
         Ok(rows)
     }
 }
-

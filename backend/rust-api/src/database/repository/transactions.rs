@@ -1,13 +1,16 @@
-use uuid::Uuid;
-use chrono::NaiveDate;
-use std::collections::HashMap;
-use sqlx::Row;
-use crate::database::models::*;
 use crate::database::error::DbError;
+use crate::database::models::*;
 use crate::database::repository::Database;
+use chrono::NaiveDate;
+use sqlx::Row;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 impl Database {
-    pub async fn get_transactions_for_wallet_impl(&self, wallet_id: Uuid) -> Result<Vec<Transaction>, DbError> {
+    pub async fn get_transactions_for_wallet_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Vec<Transaction>, DbError> {
         let transactions = sqlx::query_as::<_, Transaction>(
             r#"
             SELECT id, from_contact_id, to_contact_id, amount, description, wallet_id, due_date, created_at, updated_at, version
@@ -23,7 +26,11 @@ impl Database {
         Ok(transactions)
     }
 
-    pub async fn get_transaction_impl(&self, transaction_id: Uuid, wallet_id: Uuid) -> Result<Option<Transaction>, DbError> {
+    pub async fn get_transaction_impl(
+        &self,
+        transaction_id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<Option<Transaction>, DbError> {
         let transaction = sqlx::query_as::<_, Transaction>(
             r#"
             SELECT id, from_contact_id, to_contact_id, amount, description, wallet_id, due_date, created_at, updated_at, version
@@ -79,7 +86,12 @@ impl Database {
         description: Option<String>,
         due_date: Option<NaiveDate>,
     ) -> Result<bool, DbError> {
-        if from_contact_id.is_none() && to_contact_id.is_none() && amount.is_none() && description.is_none() && due_date.is_none() {
+        if from_contact_id.is_none()
+            && to_contact_id.is_none()
+            && amount.is_none()
+            && description.is_none()
+            && due_date.is_none()
+        {
             return Ok(false);
         }
 
@@ -95,7 +107,7 @@ impl Database {
                 updated_at = NOW(),
                 version = version + 1
             WHERE id = $6 AND wallet_id = $7 AND is_deleted = false
-            "#
+            "#,
         )
         .bind(from_contact_id)
         .bind(to_contact_id)
@@ -110,7 +122,11 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
-    pub async fn delete_transaction_impl(&self, transaction_id: Uuid, wallet_id: Uuid) -> Result<bool, DbError> {
+    pub async fn delete_transaction_impl(
+        &self,
+        transaction_id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<bool, DbError> {
         let result = sqlx::query("UPDATE transactions_projection SET is_deleted = true, updated_at = NOW(), version = version + 1 WHERE id = $1 AND wallet_id = $2")
             .bind(transaction_id)
             .bind(wallet_id)
@@ -146,7 +162,7 @@ impl Database {
             SELECT COALESCE(SUM(amount), 0)
             FROM transactions_projection
             WHERE wallet_id = $1 AND is_deleted = false
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_one(&self.pool)
@@ -184,4 +200,3 @@ impl Database {
         Ok(map)
     }
 }
-

@@ -1,16 +1,12 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-};
+use crate::database::repository::{Database, DatabaseRepository};
+use crate::middleware::auth::Claims;
+use crate::AppState;
+use axum::{extract::State, http::StatusCode, response::Json};
+use bcrypt::verify;
+use chrono::{Duration, Utc};
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use bcrypt::verify;
-use jsonwebtoken::{encode, EncodingKey, Header, Algorithm};
-use chrono::{Utc, Duration};
-use crate::AppState;
-use crate::middleware::auth::Claims;
-use crate::database::repository::{DatabaseRepository, Database};
 
 #[derive(Deserialize)]
 pub struct AdminLoginRequest {
@@ -26,14 +22,19 @@ pub struct AdminAuthResponse {
 }
 
 // Generate JWT token for admin
-fn generate_admin_jwt_token(admin_id: &Uuid, username: &str, secret: &str, expiration_secs: u64) -> Result<String, jsonwebtoken::errors::Error> {
+fn generate_admin_jwt_token(
+    admin_id: &Uuid,
+    username: &str,
+    secret: &str,
+    expiration_secs: u64,
+) -> Result<String, jsonwebtoken::errors::Error> {
     let exp = (Utc::now() + Duration::seconds(expiration_secs as i64)).timestamp() as usize;
     let claims = Claims {
         user_id: admin_id.to_string(),
         username: username.to_string(),
         exp,
     };
-    
+
     let header = Header::new(Algorithm::HS256);
     let encoding_key = EncodingKey::from_secret(secret.as_ref());
     encode(&header, &claims, &encoding_key)
@@ -61,15 +62,13 @@ pub async fn admin_login(
     let db = Database::new((*state.db_pool).clone());
 
     // Find admin user by username
-    let admin = db.get_admin_by_username(username)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching admin user: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?;
+    let admin = db.get_admin_by_username(username).await.map_err(|e| {
+        tracing::error!("Error fetching admin user: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
 
     let (admin_id, username_result, password_hash, is_active) = match admin {
         Some(a) => a,
@@ -89,14 +88,13 @@ pub async fn admin_login(
     }
 
     // Verify password
-    let valid = verify(&payload.password, &password_hash)
-        .map_err(|e| {
-            tracing::error!("Error verifying password: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Authentication error"})),
-            )
-        })?;
+    let valid = verify(&payload.password, &password_hash).map_err(|e| {
+        tracing::error!("Error verifying password: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Authentication error"})),
+        )
+    })?;
 
     if !valid {
         return Err((

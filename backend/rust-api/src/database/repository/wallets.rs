@@ -1,9 +1,9 @@
-use uuid::Uuid;
+use crate::database::error::DbError;
+use crate::database::models::*;
+use crate::database::repository::Database;
 use chrono::Utc;
 use sqlx::Row;
-use crate::database::models::*;
-use crate::database::error::DbError;
-use crate::database::repository::Database;
+use uuid::Uuid;
 
 impl Database {
     pub async fn get_wallet_impl(&self, wallet_id: Uuid) -> Result<Option<Wallet>, DbError> {
@@ -12,7 +12,7 @@ impl Database {
             SELECT id, name, description, created_by, is_active, created_at, updated_at
             FROM wallets
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_optional(&self.pool)
@@ -66,14 +66,17 @@ impl Database {
         Ok(wallets)
     }
 
-    pub async fn list_wallet_users_impl(&self, wallet_id: Uuid) -> Result<Vec<WalletUser>, DbError> {
+    pub async fn list_wallet_users_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Vec<WalletUser>, DbError> {
         let users = sqlx::query_as::<_, WalletUser>(
             r#"
             SELECT id, wallet_id, user_id, role, created_at
             FROM wallet_users
             WHERE wallet_id = $1
             ORDER BY created_at ASC
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_all(&self.pool)
@@ -93,7 +96,7 @@ impl Database {
             INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
             VALUES ($1, $2, $3, NOW())
             ON CONFLICT (wallet_id, user_id) DO NOTHING
-            "#
+            "#,
         )
         .bind(wallet_id)
         .bind(user_id)
@@ -110,12 +113,13 @@ impl Database {
         user_id: Uuid,
         role: String,
     ) -> Result<bool, DbError> {
-        let result = sqlx::query("UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3")
-            .bind(&role)
-            .bind(wallet_id)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
+        let result =
+            sqlx::query("UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3")
+                .bind(&role)
+                .bind(wallet_id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -130,7 +134,7 @@ impl Database {
             SELECT role
             FROM wallet_users
             WHERE wallet_id = $1 AND user_id = $2
-            "#
+            "#,
         )
         .bind(wallet_id)
         .bind(user_id)
@@ -147,7 +151,7 @@ impl Database {
             FROM wallets
             WHERE is_active = true
             ORDER BY created_at DESC
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await?;
@@ -157,7 +161,7 @@ impl Database {
 
     pub async fn wallet_exists_impl(&self, wallet_id: Uuid) -> Result<bool, DbError> {
         let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)"
+            "SELECT EXISTS(SELECT 1 FROM wallets WHERE id = $1 AND is_active = true)",
         )
         .bind(wallet_id)
         .fetch_one(&self.pool)
@@ -167,12 +171,11 @@ impl Database {
     }
 
     pub async fn delete_wallet_impl(&self, wallet_id: Uuid) -> Result<bool, DbError> {
-        let result = sqlx::query(
-            "UPDATE wallets SET is_active = false, updated_at = NOW() WHERE id = $1"
-        )
-        .bind(wallet_id)
-        .execute(&self.pool)
-        .await?;
+        let result =
+            sqlx::query("UPDATE wallets SET is_active = false, updated_at = NOW() WHERE id = $1")
+                .bind(wallet_id)
+                .execute(&self.pool)
+                .await?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -242,7 +245,7 @@ impl Database {
             LEFT JOIN users_projection u ON u.id = wu.user_id
             WHERE wu.wallet_id = $1
             ORDER BY wu.created_at DESC
-            "#
+            "#,
         )
         .bind(wallet_id)
         .fetch_all(&self.pool)
@@ -265,7 +268,7 @@ impl Database {
 
     pub async fn count_wallet_owners_impl(&self, wallet_id: Uuid) -> Result<i64, DbError> {
         let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1 AND role = 'owner'"
+            "SELECT COUNT(*) FROM wallet_users WHERE wallet_id = $1 AND role = 'owner'",
         )
         .bind(wallet_id)
         .fetch_one(&self.pool)
@@ -320,7 +323,12 @@ impl Database {
         Ok(())
     }
 
-    pub async fn upsert_invite_code_impl(&self, wallet_id: Uuid, code: &str, created_by: Uuid) -> Result<(), DbError> {
+    pub async fn upsert_invite_code_impl(
+        &self,
+        wallet_id: Uuid,
+        code: &str,
+        created_by: Uuid,
+    ) -> Result<(), DbError> {
         sqlx::query(
             r#"
             INSERT INTO wallet_invite_codes (wallet_id, code, created_by, created_at)
@@ -329,7 +337,7 @@ impl Database {
             SET code = EXCLUDED.code,
                 created_at = NOW(),
                 created_by = EXCLUDED.created_by
-            "#
+            "#,
         )
         .bind(wallet_id)
         .bind(code)
@@ -340,14 +348,17 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_wallet_by_invite_code_impl(&self, code: &str) -> Result<Option<Uuid>, DbError> {
+    pub async fn get_wallet_by_invite_code_impl(
+        &self,
+        code: &str,
+    ) -> Result<Option<Uuid>, DbError> {
         let row: Option<(Uuid,)> = sqlx::query_as(
             r#"
             SELECT wallet_id
             FROM wallet_invite_codes
             WHERE code = $1
               AND created_at > NOW() - INTERVAL '5 minutes'
-            "#
+            "#,
         )
         .bind(code)
         .fetch_optional(&self.pool)
@@ -356,7 +367,11 @@ impl Database {
         Ok(row.map(|(wallet_id,)| wallet_id))
     }
 
-    pub async fn delete_invite_code_impl(&self, wallet_id: Uuid, code: &str) -> Result<(), DbError> {
+    pub async fn delete_invite_code_impl(
+        &self,
+        wallet_id: Uuid,
+        code: &str,
+    ) -> Result<(), DbError> {
         sqlx::query("DELETE FROM wallet_invite_codes WHERE wallet_id = $1 AND code = $2")
             .bind(wallet_id)
             .bind(code)
@@ -366,9 +381,13 @@ impl Database {
         Ok(())
     }
 
-    pub async fn wallet_user_exists_impl(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {
+    pub async fn wallet_user_exists_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<bool, DbError> {
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)"
+            "SELECT EXISTS(SELECT 1 FROM wallet_users WHERE wallet_id = $1 AND user_id = $2)",
         )
         .bind(wallet_id)
         .bind(user_id)
@@ -378,4 +397,3 @@ impl Database {
         Ok(exists)
     }
 }
-

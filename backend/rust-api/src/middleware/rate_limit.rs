@@ -44,7 +44,7 @@ impl RateLimiter {
     pub fn is_disabled(&self) -> bool {
         self.max_requests == 0
     }
-    
+
     pub async fn check_limit_auth(&self, key: &str) -> Result<(), StatusCode> {
         let mut limits = self.auth_limits.write().await;
         let now = Instant::now();
@@ -159,19 +159,22 @@ pub async fn rate_limit_middleware(
         return Ok(next.run(req).await);
     }
     let path = req.uri().path();
-    
+
     // Skip rate limiting for health checks, WebSocket upgrades, and static admin page
     // The admin page is static HTML and shouldn't be rate limited
     // Also skip /api/admin/* since the admin UI can burst-load data.
     if path == "/health" || path == "/ws" || path == "/admin" || path.starts_with("/api/admin/") {
         return Ok(next.run(req).await);
     }
-    
+
     // For authenticated requests, use a more lenient rate limit
     // Check if request has Authorization header (authenticated user)
-    let auth_header = req.headers().get(AUTHORIZATION).and_then(|h| h.to_str().ok());
+    let auth_header = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
     let is_authenticated = auth_header.is_some();
-    
+
     // Use different rate limits: authenticated users get higher limits
     // This prevents legitimate users from hitting limits while still protecting against abuse
     if is_authenticated {

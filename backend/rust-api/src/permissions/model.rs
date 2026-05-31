@@ -1,12 +1,12 @@
-use sqlx::PgPool;
-use uuid::Uuid;
 use crate::database::error::DbError;
+use sqlx::PgPool;
 use std::collections::HashSet;
+use uuid::Uuid;
 
 use super::action::Action;
 use super::context::PermissionContext;
-use super::resource::Resource;
 use super::resolver;
+use super::resource::Resource;
 
 /// Permission Model - Single source of truth for all permission checks
 ///
@@ -129,7 +129,8 @@ impl PermissionModel {
                     ctx,
                     Action::WalletSuperPermission,
                     &Resource::Wallet(ctx.wallet_id),
-                ).await?
+                )
+                .await?
             } else {
                 true
             };
@@ -208,42 +209,27 @@ impl PermissionModel {
             match action {
                 Action::ContactUpdate | Action::ContactDelete => {
                     if !actions.contains(&Action::ContactRead) {
-                        return Err(format!(
-                            "Permission {} requires contact:read",
-                            action
-                        ));
+                        return Err(format!("Permission {} requires contact:read", action));
                     }
                 }
                 Action::TransactionUpdate | Action::TransactionDelete => {
                     if !actions.contains(&Action::TransactionRead) {
-                        return Err(format!(
-                            "Permission {} requires transaction:read",
-                            action
-                        ));
+                        return Err(format!("Permission {} requires transaction:read", action));
                     }
                 }
                 Action::WalletUpdate | Action::WalletDelete => {
                     if !actions.contains(&Action::WalletRead) {
-                        return Err(format!(
-                            "Permission {} requires wallet:read",
-                            action
-                        ));
+                        return Err(format!("Permission {} requires wallet:read", action));
                     }
                 }
                 Action::UserGroupUpdate => {
                     if !actions.contains(&Action::UserGroupRead) {
-                        return Err(format!(
-                            "Permission {} requires user_group:read",
-                            action
-                        ));
+                        return Err(format!("Permission {} requires user_group:read", action));
                     }
                 }
                 Action::ContactGroupUpdate => {
                     if !actions.contains(&Action::ContactGroupRead) {
-                        return Err(format!(
-                            "Permission {} requires contact_group:read",
-                            action
-                        ));
+                        return Err(format!("Permission {} requires contact_group:read", action));
                     }
                 }
                 _ => {}

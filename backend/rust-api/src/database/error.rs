@@ -24,9 +24,7 @@ pub enum DbError {
 impl From<sqlx::Error> for DbError {
     fn from(err: sqlx::Error) -> Self {
         match err {
-            sqlx::Error::RowNotFound => {
-                DbError::NotFound("Row not found".to_string())
-            }
+            sqlx::Error::RowNotFound => DbError::NotFound("Row not found".to_string()),
             sqlx::Error::Database(db_err) => {
                 let msg = db_err.message().to_string();
                 let code = db_err.code().map(|c| c.as_ref().to_string());
@@ -36,9 +34,7 @@ impl From<sqlx::Error> for DbError {
                     _ => DbError::QueryError(msg),
                 }
             }
-            sqlx::Error::Decode(e) => {
-                DbError::SerializationError(e.to_string())
-            }
+            sqlx::Error::Decode(e) => DbError::SerializationError(e.to_string()),
             other => DbError::QueryError(other.to_string()),
         }
     }

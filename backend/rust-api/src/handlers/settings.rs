@@ -1,13 +1,8 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    extract::Extension,
-};
-use serde::{Deserialize, Serialize};
-use crate::AppState;
-use crate::database::repository::{DatabaseRepository, Database};
+use crate::database::repository::{Database, DatabaseRepository};
 use crate::middleware::auth::AuthUser;
+use crate::AppState;
+use axum::{extract::Extension, extract::State, http::StatusCode, response::Json};
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct UpdateSettingRequest {
@@ -38,7 +33,8 @@ pub async fn get_settings(
     let db = Database::new((*state.db_pool).clone());
 
     // Get all settings for this user
-    let settings = db.get_user_settings_all(auth_user.user_id)
+    let settings = db
+        .get_user_settings_all(auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("Error fetching settings: {:?}", e);
@@ -61,8 +57,12 @@ pub async fn get_settings(
             "default_direction" => default_direction = value.unwrap_or_else(|| "give".to_string()),
             "flip_colors" => flip_colors = value.as_deref().unwrap_or("false") == "true",
             "due_date_enabled" => due_date_enabled = value.as_deref().unwrap_or("false") == "true",
-            "default_due_date_days" => default_due_date_days = value.and_then(|v| v.parse().ok()).unwrap_or(30),
-            "default_due_date_switch" => default_due_date_switch = value.as_deref().unwrap_or("false") == "true",
+            "default_due_date_days" => {
+                default_due_date_days = value.and_then(|v| v.parse().ok()).unwrap_or(30)
+            }
+            "default_due_date_switch" => {
+                default_due_date_switch = value.as_deref().unwrap_or("false") == "true"
+            }
             _ => {}
         }
     }

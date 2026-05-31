@@ -1,20 +1,20 @@
+use crate::database::error::DbError;
+use crate::database::repository::{Database, DatabaseRepository};
+use crate::domain::DomainEvent;
+use crate::handlers::responses::insufficient_permission_response;
+use crate::handlers::sync;
+use crate::middleware::auth::AuthUser;
+use crate::middleware::wallet_context::WalletContext;
+use crate::permissions::{PermissionContext, PermissionModel, Resource, WalletRole};
+use crate::websocket;
+use crate::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::Json,
 };
-use serde::{Deserialize, Serialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
-use crate::AppState;
-use crate::handlers::sync;
-use crate::middleware::auth::AuthUser;
-use crate::middleware::wallet_context::WalletContext;
-use crate::handlers::responses::insufficient_permission_response;
-use crate::permissions::{PermissionContext, PermissionModel, Resource, WalletRole};
-use crate::domain::DomainEvent;
-use crate::websocket;
-use crate::database::repository::{DatabaseRepository, Database};
-use crate::database::error::DbError;
 
 // Custom deserializer for WalletRole from string
 fn deserialize_wallet_role<'de, D>(deserializer: D) -> Result<WalletRole, D::Error>
@@ -22,8 +22,9 @@ where
     D: Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    WalletRole::from_str(&s)
-        .ok_or_else(|| serde::de::Error::custom("Invalid wallet role. Must be 'owner', 'admin', or 'member'"))
+    WalletRole::from_str(&s).ok_or_else(|| {
+        serde::de::Error::custom("Invalid wallet role. Must be 'owner', 'admin', or 'member'")
+    })
 }
 
 /// Validate permission dependencies (e.g., Write implies Read)
@@ -33,21 +34,24 @@ fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
     // Rule 1: Write implies Read for same resource
     for action in actions {
         if let Some((resource, verb)) = action.split_once(':') {
-             // For wallet resource, 'manage_members' is a special verb
-             if resource == "wallet" {
-                 if verb == "update" || verb == "delete" || verb == "manage_members" {
-                     if !has_action("wallet:read") {
-                         return Err(format!("Permission '{}' requires 'wallet:read'", action));
-                     }
-                 }
-             } else {
-                 if ["create", "update", "delete", "close"].contains(&verb) {
-                     let read_action = format!("{}:read", resource);
-                     if !has_action(&read_action) {
-                         return Err(format!("Permission '{}' requires '{}'", action, read_action));
-                     }
-                 }
-             }
+            // For wallet resource, 'manage_members' is a special verb
+            if resource == "wallet" {
+                if verb == "update" || verb == "delete" || verb == "manage_members" {
+                    if !has_action("wallet:read") {
+                        return Err(format!("Permission '{}' requires 'wallet:read'", action));
+                    }
+                }
+            } else {
+                if ["create", "update", "delete", "close"].contains(&verb) {
+                    let read_action = format!("{}:read", resource);
+                    if !has_action(&read_action) {
+                        return Err(format!(
+                            "Permission '{}' requires '{}'",
+                            action, read_action
+                        ));
+                    }
+                }
+            }
         }
     }
 
@@ -55,7 +59,7 @@ fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
     // (Because you need to see the contact to see its transactions)
     if actions.iter().any(|a| a.starts_with("transaction:")) {
         if !has_action("contact:read") {
-             return Err("Transaction permissions require 'contact:read'".to_string());
+            return Err("Transaction permissions require 'contact:read'".to_string());
         }
     }
 
@@ -75,7 +79,8 @@ async fn check_wallet_role(
     }
 
     let db = Database::new((*state.db_pool).clone());
-    let role_str = db.get_wallet_user_role(wallet_id, auth_user.user_id)
+    let role_str = db
+        .get_wallet_user_role(wallet_id, auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("Error checking wallet role: {:?}", e);
@@ -218,15 +223,20 @@ pub async fn create_my_wallet(
 
     let db = Database::new((*state.db_pool).clone());
 
-    db.create_wallet(wallet_id, payload.name.clone(), payload.description.clone(), Some(user_id))
-        .await
-        .map_err(|e| {
-            tracing::error!("Error creating wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to create wallet"})),
-            )
-        })?;
+    db.create_wallet(
+        wallet_id,
+        payload.name.clone(),
+        payload.description.clone(),
+        Some(user_id),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating wallet: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create wallet"})),
+        )
+    })?;
 
     db.add_wallet_user(wallet_id, user_id, WalletRole::Owner.as_str().to_string())
         .await
@@ -253,27 +263,27 @@ pub async fn create_my_wallet(
 
     // Initialize default permissions (system groups and matrix)
     if let Err(e) = initialize_wallet_permissions(&db, wallet_id).await {
-        tracing::error!("Failed to initialize wallet permissions for {}: {:?}", wallet_id, e);
+        tracing::error!(
+            "Failed to initialize wallet permissions for {}: {:?}",
+            wallet_id,
+            e
+        );
     }
 
-    Ok((
-        StatusCode::CREATED,
-        Json(response),
-    ))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// Helper to initialize default permissions for a new wallet (all_users, all_contacts, matrix)
-async fn initialize_wallet_permissions(
-    db: &Database,
-    wallet_id: Uuid,
-) -> Result<(), DbError> {
+async fn initialize_wallet_permissions(db: &Database, wallet_id: Uuid) -> Result<(), DbError> {
     use crate::database::repository::DatabaseRepository;
 
     // 1. Create all_users system user group
     let ug_id = db.create_user_group(wallet_id, "all_users", true).await?;
 
     // 2. Create all_contacts system contact group
-    let cg_id = db.create_contact_group(wallet_id, "all_contacts", "static", true).await?;
+    let cg_id = db
+        .create_contact_group(wallet_id, "all_contacts", "static", true)
+        .await?;
 
     // 3. Grant default permissions: all_users can only READ contacts/transactions by default.
     // Events are always viewable (no permission). Explicitly exclude create/update/delete/close to force admins to grant them.
@@ -299,15 +309,20 @@ pub async fn create_wallet(
 
     let db = Database::new((*state.db_pool).clone());
 
-    db.create_wallet(wallet_id, payload.name.clone(), payload.description.clone(), Some(user_id))
-        .await
-        .map_err(|e| {
-            tracing::error!("Error creating wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to create wallet"})),
-            )
-        })?;
+    db.create_wallet(
+        wallet_id,
+        payload.name.clone(),
+        payload.description.clone(),
+        Some(user_id),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error creating wallet: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to create wallet"})),
+        )
+    })?;
 
     db.add_wallet_user(wallet_id, user_id, WalletRole::Owner.as_str().to_string())
         .await
@@ -335,13 +350,14 @@ pub async fn create_wallet(
 
     // Initialize default permissions (system groups and matrix)
     if let Err(e) = initialize_wallet_permissions(&db, wallet_id).await {
-        tracing::error!("Failed to initialize wallet permissions for {}: {:?}", wallet_id, e);
+        tracing::error!(
+            "Failed to initialize wallet permissions for {}: {:?}",
+            wallet_id,
+            e
+        );
     }
 
-    Ok((
-        StatusCode::CREATED,
-        Json(response),
-    ))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// List all wallets (Admin only)
@@ -350,15 +366,13 @@ pub async fn list_wallets(
 ) -> Result<Json<WalletListResponse>, (StatusCode, Json<serde_json::Value>)> {
     let db = Database::new((*state.db_pool).clone());
 
-    let wallets_db = db.get_all_active_wallets()
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching wallets: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to fetch wallets"})),
-            )
-        })?;
+    let wallets_db = db.get_all_active_wallets().await.map_err(|e| {
+        tracing::error!("Error fetching wallets: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch wallets"})),
+        )
+    })?;
 
     let wallets = wallets_db
         .into_iter()
@@ -390,15 +404,13 @@ pub async fn get_wallet(
 
     let db = Database::new((*state.db_pool).clone());
 
-    let wallet = db.get_wallet(wallet_uuid)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?;
+    let wallet = db.get_wallet(wallet_uuid).await.map_err(|e| {
+        tracing::error!("Error fetching wallet: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
 
     match wallet {
         Some(w) if w.is_active => Ok(Json(Wallet {
@@ -437,15 +449,13 @@ pub async fn update_wallet(
     let db = Database::new((*state.db_pool).clone());
 
     // Check if wallet exists
-    let wallet_exists = db.wallet_exists(wallet_uuid)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error checking wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?;
+    let wallet_exists = db.wallet_exists(wallet_uuid).await.map_err(|e| {
+        tracing::error!("Error checking wallet: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
 
     if !wallet_exists {
         return Err((
@@ -461,20 +471,21 @@ pub async fn update_wallet(
         ));
     }
 
-    let updated = db.update_wallet(
-        wallet_uuid,
-        payload.name.as_deref(),
-        payload.description.as_deref(),
-        payload.is_active,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Error updating wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to update wallet"})),
+    let updated = db
+        .update_wallet(
+            wallet_uuid,
+            payload.name.as_deref(),
+            payload.description.as_deref(),
+            payload.is_active,
         )
-    })?;
+        .await
+        .map_err(|e| {
+            tracing::error!("Error updating wallet: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to update wallet"})),
+            )
+        })?;
 
     if !updated {
         return Err((
@@ -516,15 +527,13 @@ pub async fn delete_wallet(
     let db = Database::new((*state.db_pool).clone());
 
     // Soft delete by setting is_active = false
-    db.delete_wallet(wallet_uuid)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error deleting wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to delete wallet"})),
-            )
-        })?;
+    db.delete_wallet(wallet_uuid).await.map_err(|e| {
+        tracing::error!("Error deleting wallet: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to delete wallet"})),
+        )
+    })?;
 
     // Broadcast change via WebSocket
     websocket::broadcast_wallet_change(
@@ -568,37 +577,35 @@ pub async fn add_user_to_wallet(
     let db = Database::new((*state.db_pool).clone());
 
     // Look up user by username
-    let user = db.get_user_by_username(username)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error looking up user: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?;
-
-    let user_uuid = user.ok_or_else(|| {
+    let user = db.get_user_by_username(username).await.map_err(|e| {
+        tracing::error!("Error looking up user: {:?}", e);
         (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "User not found."})),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
         )
-    })?.id;
+    })?;
+
+    let user_uuid = user
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User not found."})),
+            )
+        })?
+        .id;
 
     // New members get role 'member' (read-only by default). Change role later on the member.
     // POLICY: New invited users MUST start as 'member', never 'owner' or 'admin'.
     let role = WalletRole::Member;
 
     // Check if wallet exists
-    let wallet_exists = db.wallet_exists(wallet_uuid)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error checking wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?;
+    let wallet_exists = db.wallet_exists(wallet_uuid).await.map_err(|e| {
+        tracing::error!("Error checking wallet: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
 
     if !wallet_exists {
         return Err((
@@ -635,7 +642,8 @@ pub async fn add_user_to_wallet(
             "wallet_id": wallet_id,
             "user_id": user_uuid.to_string(),
             "role": role.as_str()
-        }).to_string(),
+        })
+        .to_string(),
     );
 
     Ok((
@@ -668,15 +676,13 @@ pub async fn search_wallet_users(
     let db = Database::new((*state.db_pool).clone());
     let pattern = format!("%{}%", q);
 
-    let users = db.search_users(&pattern, 20)
-        .await
-        .map_err(|e| {
-            tracing::error!("search_wallet_users: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Search failed"})),
-            )
-        })?;
+    let users = db.search_users(&pattern, 20).await.map_err(|e| {
+        tracing::error!("search_wallet_users: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Search failed"})),
+        )
+    })?;
 
     let list: Vec<UserSearchResult> = users
         .into_iter()
@@ -729,10 +735,7 @@ pub async fn create_wallet_invite(
             )
         })?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(CreateInviteResponse { code }),
-    ))
+    Ok((StatusCode::CREATED, Json(CreateInviteResponse { code })))
 }
 
 /// Join a wallet using an invite code. Current user is added as member.
@@ -757,7 +760,8 @@ pub async fn join_wallet_by_code(
 
     let db = Database::new((*state.db_pool).clone());
 
-    let wallet_uuid = db.get_wallet_by_invite_code(code)
+    let wallet_uuid = db
+        .get_wallet_by_invite_code(code)
         .await
         .map_err(|e| {
             tracing::error!("join_wallet_by_code lookup: {:?}", e);
@@ -777,7 +781,8 @@ pub async fn join_wallet_by_code(
     let _ = db.delete_invite_code(wallet_uuid, code).await;
 
     // Check if already a member
-    let already = db.wallet_user_exists(wallet_uuid, auth_user.user_id)
+    let already = db
+        .wallet_user_exists(wallet_uuid, auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("join_wallet_by_code check: {:?}", e);
@@ -790,13 +795,16 @@ pub async fn join_wallet_by_code(
     if already {
         return Ok((
             StatusCode::OK,
-            Json(serde_json::json!({"message": "Already a member of this wallet", "wallet_id": wallet_uuid.to_string()})),
+            Json(
+                serde_json::json!({"message": "Already a member of this wallet", "wallet_id": wallet_uuid.to_string()}),
+            ),
         ));
     }
 
     // POLICY: New invited users MUST start as 'member', never 'owner' or 'admin'.
     let role = WalletRole::Member;
-    let event_data = serde_json::json!({ "user_id": auth_user.user_id.to_string(), "role": role.as_str() });
+    let event_data =
+        serde_json::json!({ "user_id": auth_user.user_id.to_string(), "role": role.as_str() });
     sync::insert_permission_event_and_apply(
         &state,
         auth_user.user_id,
@@ -822,12 +830,15 @@ pub async fn join_wallet_by_code(
             "wallet_id": wallet_uuid.to_string(),
             "user_id": auth_user.user_id.to_string(),
             "role": role.as_str()
-        }).to_string(),
+        })
+        .to_string(),
     );
 
     Ok((
         StatusCode::CREATED,
-        Json(serde_json::json!({"message": "Joined wallet successfully", "wallet_id": wallet_uuid.to_string()})),
+        Json(
+            serde_json::json!({"message": "Joined wallet successfully", "wallet_id": wallet_uuid.to_string()}),
+        ),
     ))
 }
 
@@ -849,7 +860,8 @@ pub async fn list_wallet_users(
 
     let db = Database::new((*state.db_pool).clone());
 
-    let users_db = db.list_wallet_users_with_username(wallet_uuid)
+    let users_db = db
+        .list_wallet_users_with_username(wallet_uuid)
         .await
         .map_err(|e| {
             tracing::error!("Error fetching wallet users: {:?}", e);
@@ -926,7 +938,8 @@ pub async fn update_wallet_user(
             "wallet_id": wallet_id,
             "user_id": user_id,
             "role": payload.role.as_str()
-        }).to_string(),
+        })
+        .to_string(),
     );
 
     Ok((
@@ -962,7 +975,8 @@ pub async fn remove_user_from_wallet(
     if auth_user.user_id == user_uuid {
         let db = Database::new((*state.db_pool).clone());
 
-        let role_str = db.get_wallet_user_role(wallet_uuid, user_uuid)
+        let role_str = db
+            .get_wallet_user_role(wallet_uuid, user_uuid)
             .await
             .map_err(|e| {
                 tracing::error!("remove_user_from_wallet role check: {:?}", e);
@@ -975,15 +989,13 @@ pub async fn remove_user_from_wallet(
         if let Some(role_str) = role_str {
             if let Some(role) = WalletRole::from_str(&role_str) {
                 if role.is_owner() {
-                    let owner_count = db.count_wallet_owners(wallet_uuid)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!("remove_user_from_wallet owner count: {:?}", e);
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
-                            )
-                        })?;
+                    let owner_count = db.count_wallet_owners(wallet_uuid).await.map_err(|e| {
+                        tracing::error!("remove_user_from_wallet owner count: {:?}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({"error": "Failed to remove user from wallet"})),
+                        )
+                    })?;
                     if owner_count <= 1 {
                         return Err((
                             StatusCode::BAD_REQUEST,
@@ -1024,7 +1036,8 @@ pub async fn remove_user_from_wallet(
         &serde_json::json!({
             "wallet_id": wallet_id,
             "user_id": user_id
-        }).to_string(),
+        })
+        .to_string(),
     );
 
     Ok((
@@ -1042,15 +1055,13 @@ pub async fn list_user_wallets(
 
     let db = Database::new((*state.db_pool).clone());
 
-    let wallets_db = db.get_user_wallets(user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching user wallets: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to fetch wallets"})),
-            )
-        })?;
+    let wallets_db = db.get_user_wallets(user_id).await.map_err(|e| {
+        tracing::error!("Error fetching user wallets: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch wallets"})),
+        )
+    })?;
 
     let wallets = wallets_db
         .into_iter()
@@ -1087,9 +1098,19 @@ pub async fn get_my_permissions(
     // Owner/admin have all actions
     let actions: Vec<String> = if wallet_context.user_role.is_admin_or_higher() {
         vec![
-            "contact:create".into(), "contact:read".into(), "contact:update".into(), "contact:delete".into(),
-            "transaction:create".into(), "transaction:read".into(), "transaction:update".into(), "transaction:delete".into(), "transaction:close".into(),
-            "wallet:read".into(), "wallet:update".into(), "wallet:delete".into(), "wallet:manage_members".into(),
+            "contact:create".into(),
+            "contact:read".into(),
+            "contact:update".into(),
+            "contact:delete".into(),
+            "transaction:create".into(),
+            "transaction:read".into(),
+            "transaction:update".into(),
+            "transaction:delete".into(),
+            "transaction:close".into(),
+            "wallet:read".into(),
+            "wallet:update".into(),
+            "wallet:delete".into(),
+            "wallet:manage_members".into(),
             "events:read".into(),
         ]
     } else {
@@ -1164,7 +1185,8 @@ pub async fn get_my_wallet_settings(
 ) -> Result<Json<MyWalletSettingsResponse>, (StatusCode, Json<serde_json::Value>)> {
     let db = Database::new((*state.db_pool).clone());
 
-    let settings = db.get_wallet_user_settings(wallet_context.wallet_id, auth_user.user_id)
+    let settings = db
+        .get_wallet_user_settings(wallet_context.wallet_id, auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("Error fetching wallet settings: {:?}", e);
@@ -1327,7 +1349,8 @@ async fn get_wallet_role(
         return Ok(WalletRole::Admin);
     }
     let db = Database::new((*state.db_pool).clone());
-    let role_str = db.get_wallet_user_role(wallet_id, auth_user.user_id)
+    let role_str = db
+        .get_wallet_user_role(wallet_id, auth_user.user_id)
         .await
         .map_err(|e| {
             tracing::error!("get_wallet_role: {:?}", e);
@@ -1355,15 +1378,13 @@ async fn reject_system_user_group(
     group_id: Uuid,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let db = Database::new((*state.db_pool).clone());
-    let group = db.get_user_group(group_id, wallet_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("reject_system_user_group: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check group"})),
-            )
-        })?;
+    let group = db.get_user_group(group_id, wallet_id).await.map_err(|e| {
+        tracing::error!("reject_system_user_group: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check group"})),
+        )
+    })?;
 
     if let Some((_id, _name, is_system)) = group {
         if is_system {
@@ -1383,7 +1404,8 @@ async fn reject_system_contact_group(
     group_id: Uuid,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     let db = Database::new((*state.db_pool).clone());
-    let group = db.get_contact_group(group_id, wallet_id)
+    let group = db
+        .get_contact_group(group_id, wallet_id)
         .await
         .map_err(|e| {
             tracing::error!("reject_system_contact_group: {:?}", e);
@@ -1419,15 +1441,13 @@ pub async fn list_user_groups(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
     let db = Database::new((*state.db_pool).clone());
-    let groups = db.list_user_groups(wallet_uuid)
-        .await
-        .map_err(|e| {
-            tracing::error!("list_user_groups: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to list user groups"})),
-            )
-        })?;
+    let groups = db.list_user_groups(wallet_uuid).await.map_err(|e| {
+        tracing::error!("list_user_groups: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to list user groups"})),
+        )
+    })?;
 
     let list: Vec<UserGroupResponse> = groups
         .into_iter()
@@ -1628,7 +1648,8 @@ pub async fn list_user_group_members(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
     let db = Database::new((*state.db_pool).clone());
-    let members = db.list_user_group_members(group_uuid, wallet_uuid)
+    let members = db
+        .list_user_group_members(group_uuid, wallet_uuid)
         .await
         .map_err(|e| {
             tracing::error!("list_user_group_members: {:?}", e);
@@ -1667,7 +1688,7 @@ pub async fn add_user_group_member(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    
+
     let username = payload.username.trim();
     if username.is_empty() {
         return Err((
@@ -1682,7 +1703,8 @@ pub async fn add_user_group_member(
     let db = Database::new((*state.db_pool).clone());
 
     // Look up user by username
-    let user = db.get_user_by_username(username)
+    let user = db
+        .get_user_by_username(username)
         .await
         .map_err(|e| {
             tracing::error!("add_user_group_member lookup: {:?}", e);
@@ -1701,7 +1723,8 @@ pub async fn add_user_group_member(
     let user_uuid = user.id;
 
     // Check group exists in wallet
-    let group_exists = db.user_group_in_wallet(group_uuid, wallet_uuid)
+    let group_exists = db
+        .user_group_in_wallet(group_uuid, wallet_uuid)
         .await
         .map_err(|e| {
             tracing::error!("add_user_group_member: {:?}", e);
@@ -1719,7 +1742,8 @@ pub async fn add_user_group_member(
     }
 
     // User must be a member of the wallet
-    let in_wallet = db.wallet_user_exists(wallet_uuid, user_uuid)
+    let in_wallet = db
+        .wallet_user_exists(wallet_uuid, user_uuid)
         .await
         .map_err(|e| {
             tracing::error!("add_user_group_member: {:?}", e);
@@ -1826,15 +1850,13 @@ pub async fn list_contact_groups(
     let _ = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Member).await?;
 
     let db = Database::new((*state.db_pool).clone());
-    let groups = db.list_contact_groups(wallet_uuid)
-        .await
-        .map_err(|e| {
-            tracing::error!("list_contact_groups: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to list contact groups"})),
-            )
-        })?;
+    let groups = db.list_contact_groups(wallet_uuid).await.map_err(|e| {
+        tracing::error!("list_contact_groups: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to list contact groups"})),
+        )
+    })?;
 
     let list: Vec<ContactGroupResponse> = groups
         .into_iter()
@@ -2037,7 +2059,8 @@ pub async fn list_contact_group_members(
     let _ = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Member).await?;
 
     let db = Database::new((*state.db_pool).clone());
-    let members = db.list_contact_group_members(group_uuid, wallet_uuid)
+    let members = db
+        .list_contact_group_members(group_uuid, wallet_uuid)
         .await
         .map_err(|e| {
             tracing::error!("list_contact_group_members: {:?}", e);
@@ -2100,8 +2123,8 @@ pub async fn add_contact_group_member(
             },
         };
 
-        let can_edit = check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event)
-            .await?;
+        let can_edit =
+            check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event).await?;
 
         if !can_edit {
             tracing::warn!(
@@ -2116,7 +2139,8 @@ pub async fn add_contact_group_member(
     reject_system_contact_group(&state, wallet_uuid, group_uuid).await?;
 
     let db = Database::new((*state.db_pool).clone());
-    let group_exists = db.contact_group_in_wallet(group_uuid, wallet_uuid)
+    let group_exists = db
+        .contact_group_in_wallet(group_uuid, wallet_uuid)
         .await
         .map_err(|e| {
             tracing::error!("add_contact_group_member: {:?}", e);
@@ -2206,8 +2230,8 @@ pub async fn remove_contact_group_member(
             },
         };
 
-        let can_edit = check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event)
-            .await?;
+        let can_edit =
+            check_event_permissions(&state, wallet_uuid, &auth_user, role, &check_event).await?;
 
         if !can_edit {
             tracing::warn!(
@@ -2266,24 +2290,18 @@ pub async fn list_permission_actions(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
     let db = Database::new((*state.db_pool).clone());
-    let actions = db.get_all_permission_actions()
-        .await
-        .map_err(|e| {
-            tracing::error!("list_permission_actions: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to list permission actions"})),
-            )
-        })?;
+    let actions = db.get_all_permission_actions().await.map_err(|e| {
+        tracing::error!("list_permission_actions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to list permission actions"})),
+        )
+    })?;
 
     let list: Vec<PermissionActionResponse> = actions
         .into_iter()
         .filter(|(_id, name, _resource)| name != "events:read")
-        .map(|(id, name, resource)| PermissionActionResponse {
-            id,
-            name,
-            resource,
-        })
+        .map(|(id, name, resource)| PermissionActionResponse { id, name, resource })
         .collect();
     Ok(Json(list))
 }
@@ -2303,15 +2321,13 @@ pub async fn get_permission_matrix(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
     let db = Database::new((*state.db_pool).clone());
-    let matrix = db.get_permission_matrix(wallet_uuid)
-        .await
-        .map_err(|e| {
-            tracing::error!("get_permission_matrix: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to get permission matrix"})),
-            )
-        })?;
+    let matrix = db.get_permission_matrix(wallet_uuid).await.map_err(|e| {
+        tracing::error!("get_permission_matrix: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to get permission matrix"})),
+        )
+    })?;
 
     let list: Vec<MatrixEntry> = matrix
         .into_iter()
@@ -2349,7 +2365,12 @@ pub async fn put_permission_matrix(
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
     for entry in &payload.entries {
-        let action_names: Vec<String> = entry.action_names.iter().filter(|a| *a != "events:read").cloned().collect();
+        let action_names: Vec<String> = entry
+            .action_names
+            .iter()
+            .filter(|a| *a != "events:read")
+            .cloned()
+            .collect();
         if let Err(e) = validate_permission_dependencies(&action_names) {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -2371,7 +2392,8 @@ pub async fn put_permission_matrix(
         })?;
 
         let db = Database::new((*state.db_pool).clone());
-        let ug_ok = db.user_group_in_wallet(ug_id, wallet_uuid)
+        let ug_ok = db
+            .user_group_in_wallet(ug_id, wallet_uuid)
             .await
             .map_err(|e| {
                 tracing::error!("put_permission_matrix: {:?}", e);
@@ -2380,7 +2402,8 @@ pub async fn put_permission_matrix(
                     Json(serde_json::json!({"error": "Failed to update matrix"})),
                 )
             })?;
-        let cg_ok = db.contact_group_in_wallet(cg_id, wallet_uuid)
+        let cg_ok = db
+            .contact_group_in_wallet(cg_id, wallet_uuid)
             .await
             .map_err(|e| {
                 tracing::error!("put_permission_matrix: {:?}", e);
@@ -2393,7 +2416,9 @@ pub async fn put_permission_matrix(
         if !ug_ok || !cg_ok {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "User group or contact group not in this wallet"})),
+                Json(
+                    serde_json::json!({"error": "User group or contact group not in this wallet"}),
+                ),
             ));
         }
 
@@ -2420,5 +2445,7 @@ pub async fn put_permission_matrix(
         })?;
     }
 
-    Ok(Json(serde_json::json!({"message": "Permission matrix updated"})))
+    Ok(Json(
+        serde_json::json!({"message": "Permission matrix updated"}),
+    ))
 }

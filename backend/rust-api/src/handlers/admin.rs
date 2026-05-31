@@ -1,14 +1,14 @@
+use crate::AppState;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    response::{Json, Html},
+    response::{Html, Json},
 };
-use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Row, postgres::PgRow, QueryBuilder};
 use bcrypt::{hash, DEFAULT_COST};
-use uuid::Uuid;
 use chrono::Utc;
-use crate::AppState;
+use serde::{Deserialize, Serialize};
+use sqlx::{postgres::PgRow, FromRow, QueryBuilder, Row};
+use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct EventQuery {
@@ -18,9 +18,9 @@ pub struct EventQuery {
     aggregate_type: Option<String>,
     user_id: Option<String>,
     wallet_id: Option<String>, // Filter by wallet (admin)
-    search: Option<String>, // Search in event_data (comment, name, etc.)
+    search: Option<String>,    // Search in event_data (comment, name, etc.)
     date_from: Option<String>, // ISO date string
-    date_to: Option<String>, // ISO date string
+    date_to: Option<String>,   // ISO date string
 }
 
 #[derive(Deserialize)]
@@ -68,20 +68,20 @@ pub async fn admin_panel() -> Html<&'static str> {
 
 /// Serve favicon.ico
 pub async fn favicon() -> axum::response::Response {
-    use axum::response::{Response, IntoResponse};
-    use axum::http::{header, StatusCode};
     use axum::body::Body;
-    
+    use axum::http::{header, StatusCode};
+    use axum::response::{IntoResponse, Response};
+
     // Try to read favicon from multiple possible locations (relative to where server runs)
     // Server typically runs from rust-api directory, so paths are relative to that
     let favicon_paths = [
-        "../mobile/web/favicon.png",  // From rust-api directory
-        "mobile/web/favicon.png",     // From project root
+        "../mobile/web/favicon.png", // From rust-api directory
+        "mobile/web/favicon.png",    // From project root
         "static/admin/favicon.ico",
         "backend/rust-api/static/admin/favicon.ico",
         "../static/admin/favicon.ico",
     ];
-    
+
     for path in &favicon_paths {
         if let Ok(content) = std::fs::read(path) {
             // Determine content type based on file extension
@@ -90,7 +90,7 @@ pub async fn favicon() -> axum::response::Response {
             } else {
                 "image/x-icon"
             };
-            
+
             return Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, content_type)
@@ -99,7 +99,7 @@ pub async fn favicon() -> axum::response::Response {
                 .into_response();
         }
     }
-    
+
     // Return 404 if favicon not found
     Response::builder()
         .status(StatusCode::NOT_FOUND)
@@ -111,18 +111,18 @@ pub async fn favicon() -> axum::response::Response {
 /// Serve config.js with correct MIME type (optional config file)
 /// Returns empty JavaScript if file doesn't exist (to avoid MIME type errors)
 pub async fn config_js() -> axum::response::Response {
-    use axum::response::{Response, IntoResponse};
-    use axum::http::{header, StatusCode};
     use axum::body::Body;
-    
+    use axum::http::{header, StatusCode};
+    use axum::response::{IntoResponse, Response};
+
     // Try to read config.js if it exists, otherwise return empty JS
     // Path is relative to where the server runs (usually rust-api directory)
     let config_paths = [
-        "../static/admin/config.js",  // From rust-api directory
-        "static/admin/config.js",     // From project root
+        "../static/admin/config.js", // From rust-api directory
+        "static/admin/config.js",    // From project root
         "backend/rust-api/static/admin/config.js",
     ];
-    
+
     let mut found_content: Option<String> = None;
     for path in &config_paths {
         if let Ok(content) = std::fs::read_to_string(path) {
@@ -130,14 +130,17 @@ pub async fn config_js() -> axum::response::Response {
             break;
         }
     }
-    
+
     let content = found_content.unwrap_or_else(|| {
         "// Config file not found, using defaults\nwindow.ADMIN_CONFIG = {};".to_string()
     });
-    
+
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/javascript; charset=utf-8")
+        .header(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )
         .body(Body::from(content))
         .unwrap()
         .into_response()
@@ -154,7 +157,7 @@ pub async fn get_events(
     let mut query_builder: QueryBuilder<'_, sqlx::Postgres> = QueryBuilder::new(
         "SELECT e.event_id, e.aggregate_id, e.aggregate_type, e.event_type, e.user_id, COALESCE(u.username, a.username) AS username, e.created_at, e.event_data FROM events e LEFT JOIN users_projection u ON e.user_id = u.id LEFT JOIN admin_users a ON e.user_id = a.id AND a.is_active = true WHERE 1=1"
     );
-    
+
     // Filter by event_type (case-insensitive, supports multiple formats)
     if let Some(event_type) = &params.event_type {
         if !event_type.is_empty() {
@@ -164,7 +167,7 @@ pub async fn get_events(
             // - TRANSACTION_CREATED, TRANSACTION_UPDATED, TRANSACTION_DELETED
             // - CONTACT_CREATED, CONTACT_UPDATED, CONTACT_DELETED
             // - CREATED, UPDATED, DELETED (generic)
-            
+
             // Parse user-friendly format (CREATED_TRANSACTION) to extract action and aggregate
             let (action, aggregate_opt) = if event_type.contains("_") {
                 let parts: Vec<&str> = event_type.split("_").collect();
@@ -178,7 +181,7 @@ pub async fn get_events(
             } else {
                 (event_type.to_uppercase(), None)
             };
-            
+
             // Convert action to database format
             let db_action = if action == "CREATED" || action == "CREATE" {
                 "CREATED".to_string()
@@ -189,7 +192,7 @@ pub async fn get_events(
             } else {
                 action
             };
-            
+
             // Build query to match both specific and generic formats
             if let Some(aggregate) = aggregate_opt {
                 // User selected CREATED_TRANSACTION - match:
@@ -217,7 +220,7 @@ pub async fn get_events(
             }
         }
     }
-    
+
     // Filter by aggregate_type
     if let Some(aggregate_type) = &params.aggregate_type {
         if !aggregate_type.is_empty() {
@@ -225,7 +228,7 @@ pub async fn get_events(
             query_builder.push_bind(aggregate_type);
         }
     }
-    
+
     // Filter by user_id
     if let Some(user_id) = &params.user_id {
         if !user_id.is_empty() {
@@ -241,7 +244,7 @@ pub async fn get_events(
             query_builder.push_bind(wallet_id);
         }
     }
-    
+
     // Filter by date range
     if let Some(date_from) = &params.date_from {
         if !date_from.is_empty() {
@@ -250,7 +253,7 @@ pub async fn get_events(
             query_builder.push("::timestamp");
         }
     }
-    
+
     if let Some(date_to) = &params.date_to {
         if !date_to.is_empty() {
             query_builder.push(" AND e.created_at <= ");
@@ -258,7 +261,7 @@ pub async fn get_events(
             query_builder.push("::timestamp");
         }
     }
-    
+
     // Search in event_data (comment, name, etc.)
     if let Some(search) = &params.search {
         if !search.is_empty() {
@@ -272,16 +275,14 @@ pub async fn get_events(
             query_builder.push(")");
         }
     }
-    
+
     query_builder.push(" ORDER BY e.created_at DESC LIMIT ");
     query_builder.push_bind(limit);
     query_builder.push(" OFFSET ");
     query_builder.push_bind(offset);
-    
+
     let query = query_builder.build_query_as::<EventResponse>();
-    let events = query.fetch_all(&*state.db_pool)
-    .await
-    .map_err(|e| {
+    let events = query.fetch_all(&*state.db_pool).await.map_err(|e| {
         tracing::error!("Error fetching events: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -299,15 +300,13 @@ pub async fn get_latest_event_id(
     use crate::database::repository::{Database, DatabaseRepository};
 
     let db = Database::new((*state.db_pool).clone());
-    let latest_id = db.get_latest_event_id()
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching latest event ID: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-            )
-        })?;
+    let latest_id = db.get_latest_event_id().await.map_err(|e| {
+        tracing::error!("Error fetching latest event ID: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
 
     Ok(Json(serde_json::json!({
         "latest_event_id": latest_id,
@@ -327,7 +326,8 @@ pub async fn backfill_transaction_events(
     let db = Database::new((*state.db_pool).clone());
 
     // Get user ID
-    let user_id = db.get_first_user_id()
+    let user_id = db
+        .get_first_user_id()
         .await
         .map_err(|e| {
             tracing::error!("Error fetching user: {:?}", e);
@@ -344,15 +344,13 @@ pub async fn backfill_transaction_events(
         })?;
 
     // Get all transactions that don't have events
-    let transactions = db.get_transactions_without_events()
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching transactions: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?;
+    let transactions = db.get_transactions_without_events().await.map_err(|e| {
+        tracing::error!("Error fetching transactions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
 
     if transactions.is_empty() {
         return Ok(Json(serde_json::json!({
@@ -383,7 +381,10 @@ pub async fn backfill_transaction_events(
         });
 
         // Insert event
-        match db.insert_backfill_event(user_id, txn.id, event_data, txn.created_at).await {
+        match db
+            .insert_backfill_event(user_id, txn.id, event_data, txn.created_at)
+            .await
+        {
             Ok(eid) => {
                 // Update transaction's last_event_id
                 if let Err(e) = db.update_transaction_last_event_id(txn.id, eid).await {
@@ -412,15 +413,13 @@ pub async fn get_projection_status(
     use crate::database::repository::{Database, DatabaseRepository};
 
     let db = Database::new((*state.db_pool).clone());
-    let last_event = db.get_latest_event_id()
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching projection status: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Database error: {}", e)})),
-            )
-        })?;
+    let last_event = db.get_latest_event_id().await.map_err(|e| {
+        tracing::error!("Error fetching projection status: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Database error: {}", e)})),
+        )
+    })?;
 
     Ok(Json(ProjectionStatus {
         last_event_id: last_event,
@@ -442,17 +441,17 @@ pub async fn get_total_debt(
     let db = Database::new((*state.db_pool).clone());
     let wallet_id_param = params.get("wallet_id").and_then(|s| {
         let s = s.trim();
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     });
 
     let total_debt = if let Some(wid) = wallet_id_param {
         // Single wallet: use latest event total_debt when available, else projection
         match Uuid::parse_str(wid) {
-            Ok(wallet_id) => {
-                db.get_total_debt_for_wallet(wallet_id)
-                    .await
-                    .unwrap_or(0)
-            }
+            Ok(wallet_id) => db.get_total_debt_for_wallet(wallet_id).await.unwrap_or(0),
             Err(_) => {
                 return Err((
                     StatusCode::BAD_REQUEST,
@@ -462,9 +461,7 @@ pub async fn get_total_debt(
         }
     } else {
         // All wallets: always use projection sum so we get the sum of every wallet's total
-        db.get_total_debt_all_wallets()
-            .await
-            .unwrap_or(0)
+        db.get_total_debt_all_wallets().await.unwrap_or(0)
     };
 
     Ok(Json(serde_json::json!({
@@ -481,21 +478,19 @@ pub async fn rebuild_projections(
     use crate::services::projections::Projections;
 
     // Get wallet_id from query parameters
-    let wallet_id_str = params.get("wallet_id")
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "wallet_id query parameter is required"})),
-            )
-        })?;
+    let wallet_id_str = params.get("wallet_id").ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "wallet_id query parameter is required"})),
+        )
+    })?;
 
-    let wallet_id = uuid::Uuid::parse_str(wallet_id_str)
-        .map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
-            )
-        })?;
+    let wallet_id = uuid::Uuid::parse_str(wallet_id_str).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
 
     match Projections::rebuild_projections_from_events(&state, wallet_id).await {
         Ok(_) => Ok(Json(serde_json::json!({
@@ -517,12 +512,12 @@ pub async fn dev_clear_database(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     use std::env;
-    
+
     // Only allow in development mode
     let environment = env::var("ENVIRONMENT")
         .unwrap_or_else(|_| "development".to_string())
         .to_lowercase();
-    
+
     if environment == "production" {
         return Err((
             StatusCode::FORBIDDEN,
@@ -531,9 +526,9 @@ pub async fn dev_clear_database(
             })),
         ));
     }
-    
+
     tracing::info!("🧹 Dev clear database endpoint called - clearing all data...");
-    
+
     // Start a transaction to ensure atomicity
     let mut tx = state.db_pool.begin().await.map_err(|e| {
         tracing::error!("Error starting transaction: {:?}", e);
@@ -542,7 +537,7 @@ pub async fn dev_clear_database(
             Json(serde_json::json!({"error": format!("Database error: {}", e)})),
         )
     })?;
-    
+
     // Truncate all tables in correct order (respecting foreign key constraints)
     // Delete in reverse dependency order
     sqlx::query("TRUNCATE TABLE login_logs CASCADE")
@@ -555,7 +550,7 @@ pub async fn dev_clear_database(
                 Json(serde_json::json!({"error": format!("Database error: {}", e)})),
             )
         })?;
-    
+
     sqlx::query("TRUNCATE TABLE projection_snapshots CASCADE")
         .execute(&mut *tx)
         .await
@@ -566,7 +561,7 @@ pub async fn dev_clear_database(
                 Json(serde_json::json!({"error": format!("Database error: {}", e)})),
             )
         })?;
-    
+
     sqlx::query("TRUNCATE TABLE transactions_projection CASCADE")
         .execute(&mut *tx)
         .await
@@ -577,7 +572,7 @@ pub async fn dev_clear_database(
                 Json(serde_json::json!({"error": format!("Database error: {}", e)})),
             )
         })?;
-    
+
     sqlx::query("TRUNCATE TABLE contacts_projection CASCADE")
         .execute(&mut *tx)
         .await
@@ -588,7 +583,7 @@ pub async fn dev_clear_database(
                 Json(serde_json::json!({"error": format!("Database error: {}", e)})),
             )
         })?;
-    
+
     sqlx::query("TRUNCATE TABLE events CASCADE")
         .execute(&mut *tx)
         .await
@@ -599,7 +594,7 @@ pub async fn dev_clear_database(
                 Json(serde_json::json!({"error": format!("Database error: {}", e)})),
             )
         })?;
-    
+
     // Keep admin_users and users_projection, but clear all users except test user
     sqlx::query("DELETE FROM users_projection WHERE username != 'max'")
         .execute(&mut *tx)
@@ -611,7 +606,7 @@ pub async fn dev_clear_database(
                 Json(serde_json::json!({"error": format!("Database error: {}", e)})),
             )
         })?;
-    
+
     // Hash passwords using bcrypt
     // Hash password for regular user "max" with password "12345678"
     let max_password_hash = hash("12345678", DEFAULT_COST).map_err(|e| {
@@ -621,7 +616,7 @@ pub async fn dev_clear_database(
             Json(serde_json::json!({"error": format!("Database error: {}", e)})),
         )
     })?;
-    
+
     // Ensure test user "max" exists with password "12345678"
     sqlx::query(
         r#"
@@ -640,7 +635,7 @@ pub async fn dev_clear_database(
             Json(serde_json::json!({"error": format!("Database error: {}", e)})),
         )
     })?;
-    
+
     // Hash password for admin user "admin" with password "admin"
     let admin_password_hash = hash("admin", DEFAULT_COST).map_err(|e| {
         tracing::error!("Error hashing password for admin: {:?}", e);
@@ -649,7 +644,7 @@ pub async fn dev_clear_database(
             Json(serde_json::json!({"error": format!("Database error: {}", e)})),
         )
     })?;
-    
+
     // Ensure admin user "admin" exists with password "admin"
     let admin_id = Uuid::new_v4();
     sqlx::query(
@@ -671,7 +666,7 @@ pub async fn dev_clear_database(
             Json(serde_json::json!({"error": format!("Database error: {}", e)})),
         )
     })?;
-    
+
     // Commit transaction
     tx.commit().await.map_err(|e| {
         tracing::error!("Error committing transaction: {:?}", e);
@@ -680,9 +675,9 @@ pub async fn dev_clear_database(
             Json(serde_json::json!({"error": format!("Database error: {}", e)})),
         )
     })?;
-    
+
     tracing::info!("✅ Database cleared successfully");
-    
+
     Ok(Json(serde_json::json!({
         "message": "Database cleared successfully",
         "test_user": "max"
