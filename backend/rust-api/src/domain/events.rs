@@ -1227,60 +1227,29 @@ impl DomainEvent {
     pub fn to_event_data(&self) -> serde_json::Value {
         match self {
             DomainEvent::ContactCreated { name, username, phone, email, notes, .. } => {
-                serde_json::json!({
-                    "name": name,
-                    "username": username,
-                    "phone": phone,
-                    "email": email,
-                    "notes": notes,
-                })
+                Self::contact_created_data(name, username, phone, email, notes)
             }
             DomainEvent::ContactUpdated { name, username, phone, email, notes, .. } => {
-                serde_json::json!({
-                    "name": name,
-                    "username": username,
-                    "phone": phone,
-                    "email": email,
-                    "notes": notes,
-                })
+                Self::contact_updated_data(name, username, phone, email, notes)
             }
             DomainEvent::ContactDeleted { comment, .. } => {
-                serde_json::json!({"comment": comment})
+                Self::contact_deleted_data(comment)
             }
             DomainEvent::ContactUndone { undone_event_id, .. } => {
-                serde_json::json!({"undone_event_id": undone_event_id.to_string()})
+                Self::contact_undone_data(undone_event_id)
             }
             DomainEvent::TransactionCreated { contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date, .. } => {
-                serde_json::json!({
-                    "contact_id": contact_id.to_string(),
-                    "amount": amount,
-                    "direction": direction,
-                    "transaction_type": transaction_type,
-                    "currency": currency,
-                    "description": description,
-                    "transaction_date": transaction_date,
-                    "due_date": due_date,
-                })
+                Self::transaction_created_data(contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date)
             }
             DomainEvent::TransactionUpdated { contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date, .. } => {
-                serde_json::json!({
-                    "contact_id": contact_id,
-                    "amount": amount,
-                    "direction": direction,
-                    "transaction_type": transaction_type,
-                    "currency": currency,
-                    "description": description,
-                    "transaction_date": transaction_date,
-                    "due_date": due_date,
-                })
+                Self::transaction_updated_data(contact_id, amount, direction, transaction_type, currency, description, transaction_date, due_date)
             }
             DomainEvent::TransactionDeleted { comment, .. } => {
-                serde_json::json!({"comment": comment})
+                Self::transaction_deleted_data(comment)
             }
             DomainEvent::TransactionUndone { undone_event_id, .. } => {
-                serde_json::json!({"undone_event_id": undone_event_id.to_string()})
+                Self::transaction_undone_data(undone_event_id)
             }
-            // Permission events already have data field
             DomainEvent::WalletUserAdded { data, .. }
             | DomainEvent::WalletUserRoleChanged { data, .. }
             | DomainEvent::WalletUserRemoved { data, .. }
@@ -1296,6 +1265,70 @@ impl DomainEvent {
             | DomainEvent::ContactGroupMemberRemoved { data, .. }
             | DomainEvent::PermissionMatrixSet { data, .. } => data.clone(),
         }
+    }
+
+    // Contact event data extractors
+    fn contact_created_data(name: &str, username: &Option<String>, phone: &Option<String>, email: &Option<String>, notes: &Option<String>) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "username": username,
+            "phone": phone,
+            "email": email,
+            "notes": notes,
+        })
+    }
+
+    fn contact_updated_data(name: &Option<String>, username: &Option<String>, phone: &Option<String>, email: &Option<String>, notes: &Option<String>) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "username": username,
+            "phone": phone,
+            "email": email,
+            "notes": notes,
+        })
+    }
+
+    fn contact_deleted_data(comment: &Option<String>) -> serde_json::Value {
+        serde_json::json!({"comment": comment})
+    }
+
+    fn contact_undone_data(undone_event_id: &Uuid) -> serde_json::Value {
+        serde_json::json!({"undone_event_id": undone_event_id.to_string()})
+    }
+
+    // Transaction event data extractors
+    fn transaction_created_data(contact_id: &Uuid, amount: &i64, direction: &str, transaction_type: &Option<String>, currency: &Option<String>, description: &Option<String>, transaction_date: &Option<DateTime<Utc>>, due_date: &Option<DateTime<Utc>>) -> serde_json::Value {
+        serde_json::json!({
+            "contact_id": contact_id.to_string(),
+            "amount": amount,
+            "direction": direction,
+            "transaction_type": transaction_type,
+            "currency": currency,
+            "description": description,
+            "transaction_date": transaction_date,
+            "due_date": due_date,
+        })
+    }
+
+    fn transaction_updated_data(contact_id: &Option<Uuid>, amount: &Option<i64>, direction: &Option<String>, transaction_type: &Option<String>, currency: &Option<String>, description: &Option<String>, transaction_date: &Option<DateTime<Utc>>, due_date: &Option<DateTime<Utc>>) -> serde_json::Value {
+        serde_json::json!({
+            "contact_id": contact_id,
+            "amount": amount,
+            "direction": direction,
+            "transaction_type": transaction_type,
+            "currency": currency,
+            "description": description,
+            "transaction_date": transaction_date,
+            "due_date": due_date,
+        })
+    }
+
+    fn transaction_deleted_data(comment: &Option<String>) -> serde_json::Value {
+        serde_json::json!({"comment": comment})
+    }
+
+    fn transaction_undone_data(undone_event_id: &Uuid) -> serde_json::Value {
+        serde_json::json!({"undone_event_id": undone_event_id.to_string()})
     }
 }
 
