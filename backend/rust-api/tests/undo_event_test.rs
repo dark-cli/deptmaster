@@ -286,7 +286,6 @@ async fn test_undo_event_syncs_correctly() {
 }
 
 #[tokio::test]
-#[ignore] // Type-driven validation: invalid events can't be created as DomainEvent
 async fn test_event_validation_rejects_invalid_undo() {
     let pool = setup_test_db().await;
     let user_id = create_test_user(&pool).await;
