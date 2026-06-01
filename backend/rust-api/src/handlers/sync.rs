@@ -59,25 +59,17 @@ pub struct SyncEventsQuery {
 /// Build transaction_id -> contact_id map for permission filtering
 fn build_transaction_contact_map(
     events: &[EventRow],
-    db_map: &HashMap<Uuid, Uuid>,
+    _db_map: &HashMap<Uuid, Uuid>,
 ) -> HashMap<Uuid, Uuid> {
     let mut result = HashMap::new();
     for event in events {
-        match event.aggregate_type.as_str() {
-            "transaction" => {
-                // Try to get contact_id from event_data first
-                if let Some(contact_id_str) = event.data.get("contact_id").and_then(|v| v.as_str())
-                {
-                    if let Ok(contact_id) = Uuid::parse_str(contact_id_str) {
-                        result.insert(event.aggregate_id, contact_id);
-                    }
-                }
-                // Fall back to database map if not in event_data
-                else if let Some(&contact_id) = db_map.get(&event.aggregate_id) {
+        if event.aggregate_type == "transaction" {
+            // All transaction events (CREATED, UPDATED, etc.) must have contact_id in data
+            if let Some(contact_id_str) = event.data.get("contact_id").and_then(|v| v.as_str()) {
+                if let Ok(contact_id) = Uuid::parse_str(contact_id_str) {
                     result.insert(event.aggregate_id, contact_id);
                 }
             }
-            _ => {}
         }
     }
     result
@@ -154,25 +146,8 @@ pub async fn get_sync_hash(
             )
         })?;
 
-    // Get transaction contact map for filtering
-    let missing_ids: Vec<Uuid> = events
-        .iter()
-        .filter(|e| {
-            e.aggregate_type == "transaction"
-                && e.data.get("contact_id").and_then(|v| v.as_str()).is_none()
-        })
-        .map(|e| e.aggregate_id)
-        .collect();
-
-    let db_map = if missing_ids.is_empty() {
-        HashMap::new()
-    } else {
-        db.get_transaction_contact_map(wallet_id, &missing_ids)
-            .await
-            .unwrap_or_default()
-    };
-
-    let transaction_map = build_transaction_contact_map(&events, &db_map);
+    // Build transaction contact map from events (all transactions now have contact_id in event_data)
+    let transaction_map = build_transaction_contact_map(&events, &HashMap::new());
 
     // Filter events by permission and compute hash
     let mut hasher = Sha256::new();
@@ -278,25 +253,8 @@ pub async fn get_sync_events(
             )
         })?;
 
-    // Get transaction contact map
-    let missing_ids: Vec<Uuid> = events
-        .iter()
-        .filter(|e| {
-            e.aggregate_type == "transaction"
-                && e.data.get("contact_id").and_then(|v| v.as_str()).is_none()
-        })
-        .map(|e| e.aggregate_id)
-        .collect();
-
-    let db_map = if missing_ids.is_empty() {
-        HashMap::new()
-    } else {
-        db.get_transaction_contact_map(wallet_id, &missing_ids)
-            .await
-            .unwrap_or_default()
-    };
-
-    let transaction_map = build_transaction_contact_map(&events, &db_map);
+    // Build transaction contact map from events (all transactions now have contact_id in event_data)
+    let transaction_map = build_transaction_contact_map(&events, &HashMap::new());
 
     // Convert to response, filtering by permission
     let sync_events: Vec<SyncEvent> = events

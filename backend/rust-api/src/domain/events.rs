@@ -89,8 +89,7 @@ pub enum EventData {
         due_date: Option<String>,
     },
     TransactionUpdated {
-        #[serde(default)]
-        contact_id: Option<Uuid>,
+        contact_id: Uuid,
         #[serde(default)]
         amount: Option<i64>,
         #[serde(default)]
