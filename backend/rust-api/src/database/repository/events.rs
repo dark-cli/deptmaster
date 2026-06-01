@@ -1,5 +1,5 @@
 use crate::database::error::DbError;
-use crate::database::models::*;
+use crate::database::models::event::{Event, EventRow};
 use crate::database::repository::Database;
 use crate::domain::events::DomainEvent;
 use chrono::{DateTime, NaiveDateTime, Utc};

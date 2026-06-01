@@ -344,7 +344,7 @@ impl DomainEvent {
     }
 
     /// Convert a generic Event to DomainEvent
-    pub fn from_event(event: &crate::database::models::Event) -> Result<Self, String> {
+    pub fn from_event(event: &crate::database::models::event::Event) -> Result<Self, String> {
         // Use strongly-typed discriminator to ensure we handle all event types
         let discriminator = EventDiscriminator::from_database(&event.aggregate_type, &event.event_type)?;
 
