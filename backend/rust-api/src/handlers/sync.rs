@@ -19,7 +19,7 @@ use crate::services::snapshots;
 use crate::websocket;
 use crate::AppState;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 // ============ RESPONSE TYPES ============
 
@@ -56,28 +56,11 @@ pub struct SyncEventsQuery {
 
 // ============ INTERNAL HELPERS ============
 
-/// Build transaction_id -> contact_id map for permission filtering
-fn build_transaction_contact_map(
-    events: &[EventRow],
-) -> HashMap<Uuid, Uuid> {
-    events
-        .iter()
-        .filter(|e| e.aggregate_type == "transaction")
-        .filter_map(|event| {
-            let contact_id_str = event.data.get("contact_id")?.as_str()?;
-            let contact_id = Uuid::parse_str(contact_id_str)
-                .expect("transaction event contact_id must be valid UUID");
-            Some((event.aggregate_id, contact_id))
-        })
-        .collect()
-}
-
 /// Check if user can read an event based on permission boundaries
 fn can_read_event(
     event: &EventRow,
     contact_ids: &Option<HashSet<Uuid>>,
     transaction_contact_ids: &Option<HashSet<Uuid>>,
-    transaction_map: &HashMap<Uuid, Uuid>,
 ) -> bool {
     match event.aggregate_type.as_str() {
         "permission" => true,
@@ -86,13 +69,20 @@ fn can_read_event(
             Some(set) => set.contains(&event.aggregate_id),
         },
         "transaction" => {
-            if let Some(&contact_id) = transaction_map.get(&event.aggregate_id) {
-                match transaction_contact_ids {
-                    None => true,
-                    Some(set) => set.contains(&contact_id),
-                }
-            } else {
-                false
+            let contact_id_str = match event.data.get("contact_id") {
+                Some(val) => match val.as_str() {
+                    Some(s) => s,
+                    None => return false,
+                },
+                None => return false,
+            };
+            let contact_id = match Uuid::parse_str(contact_id_str) {
+                Ok(id) => id,
+                Err(_) => return false,
+            };
+            match transaction_contact_ids {
+                None => true,
+                Some(set) => set.contains(&contact_id),
             }
         }
         _ => false,
@@ -143,9 +133,6 @@ pub async fn get_sync_hash(
             )
         })?;
 
-    // Build transaction contact map from events (all transactions must have contact_id in event_data)
-    let transaction_map = build_transaction_contact_map(&events);
-
     // Filter events by permission and compute hash
     let mut hasher = Sha256::new();
     for event in &events {
@@ -153,7 +140,6 @@ pub async fn get_sync_hash(
             event,
             &readable_contacts,
             &readable_transaction_contacts,
-            &transaction_map,
         ) {
             hasher.update(event.event_id.to_string().as_bytes());
             hasher.update(event.created_at.to_string().as_bytes());
@@ -168,7 +154,6 @@ pub async fn get_sync_hash(
                 e,
                 &readable_contacts,
                 &readable_transaction_contacts,
-                &transaction_map,
             )
         })
         .count() as i64;
@@ -180,7 +165,6 @@ pub async fn get_sync_hash(
                 e,
                 &readable_contacts,
                 &readable_transaction_contacts,
-                &transaction_map,
             )
         })
         .last()
@@ -250,9 +234,6 @@ pub async fn get_sync_events(
             )
         })?;
 
-    // Build transaction contact map from events (all transactions must have contact_id in event_data)
-    let transaction_map = build_transaction_contact_map(&events);
-
     // Convert to response, filtering by permission
     let sync_events: Vec<SyncEvent> = events
         .into_iter()
@@ -261,7 +242,6 @@ pub async fn get_sync_events(
                 e,
                 &readable_contacts,
                 &readable_transaction_contacts,
-                &transaction_map,
             )
         })
         .map(|row| SyncEvent {
