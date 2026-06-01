@@ -8,6 +8,20 @@ use super::queries;
 use super::resource::Resource;
 use crate::database::error::DbError;
 
+/// Check if user is a wallet owner (stored in wallet_owners table)
+async fn is_wallet_owner(pool: &PgPool, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {
+    let is_owner: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM wallet_owners WHERE wallet_id = $1 AND user_id = $2)",
+    )
+    .bind(wallet_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    Ok(is_owner)
+}
+
 /// Resolve allowed actions for a user on a resource
 /// Uses single JOIN query for efficiency
 pub async fn resolve_actions(
@@ -15,8 +29,8 @@ pub async fn resolve_actions(
     ctx: &PermissionContext,
     resource: &Resource,
 ) -> Result<HashSet<Action>, DbError> {
-    // Owner and admin bypass - they can do everything
-    if ctx.bypasses_permissions() {
+    // Owners have all permissions
+    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
         return Ok(Action::all().iter().copied().collect());
     }
 
@@ -80,8 +94,8 @@ pub async fn can_perform(
     action: Action,
     resource: &Resource,
 ) -> Result<bool, DbError> {
-    // Owner and admin bypass
-    if ctx.bypasses_permissions() {
+    // Owners can perform any action
+    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
         return Ok(true);
     }
 
@@ -97,8 +111,8 @@ pub async fn get_readable_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<Option<HashSet<Uuid>>, DbError> {
-    // Owner and admin can read all
-    if ctx.bypasses_permissions() {
+    // Owners can read all contacts
+    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
         return Ok(None); // None = can read all
     }
 
@@ -135,8 +149,8 @@ pub async fn get_readable_transaction_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<Option<HashSet<Uuid>>, DbError> {
-    // Owner and admin can read all
-    if ctx.bypasses_permissions() {
+    // Owners can read all transaction contacts
+    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
         return Ok(None); // None = can read all
     }
 

@@ -4,10 +4,8 @@ use uuid::Uuid;
 /// Wallet role - determines permission inheritance
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WalletRole {
-    /// Owner - immovable, has all permissions always
+    /// Owner - tracked in wallet_owners table, can transfer ownership
     Owner,
-    /// Admin - manages permissions but cannot edit own
-    Admin,
     /// Member - group-based permissions only
     Member,
 }
@@ -16,7 +14,6 @@ impl WalletRole {
     pub fn as_str(&self) -> &'static str {
         match self {
             WalletRole::Owner => "owner",
-            WalletRole::Admin => "admin",
             WalletRole::Member => "member",
         }
     }
@@ -24,15 +21,9 @@ impl WalletRole {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "owner" => Some(WalletRole::Owner),
-            "admin" => Some(WalletRole::Admin),
             "member" => Some(WalletRole::Member),
             _ => None,
         }
-    }
-
-    /// Owner and admin bypass normal permission checks
-    pub fn bypasses_permissions(&self) -> bool {
-        matches!(self, WalletRole::Owner | WalletRole::Admin)
     }
 
     /// Check if this role is Owner
@@ -40,27 +31,21 @@ impl WalletRole {
         matches!(self, WalletRole::Owner)
     }
 
-    /// Check if this role is Admin
-    pub fn is_admin(&self) -> bool {
-        matches!(self, WalletRole::Admin)
-    }
-
-    /// Check if this role is at least Admin (Owner or Admin)
+    /// Check if this role is at least Owner (Owner only, since Admin was removed)
+    /// Note: This will be removed once database-backed admin permissions are implemented
     pub fn is_admin_or_higher(&self) -> bool {
-        matches!(self, WalletRole::Owner | WalletRole::Admin)
+        matches!(self, WalletRole::Owner)
     }
 
-    /// Check if this role meets or exceeds required level (0=member, 1=admin, 2=owner)
+    /// Check if this role meets or exceeds required level (0=member, 1=owner)
     pub fn can_perform(&self, required: WalletRole) -> bool {
         let self_level = match self {
             WalletRole::Member => 0,
-            WalletRole::Admin => 1,
-            WalletRole::Owner => 2,
+            WalletRole::Owner => 1,
         };
         let required_level = match required {
             WalletRole::Member => 0,
-            WalletRole::Admin => 1,
-            WalletRole::Owner => 2,
+            WalletRole::Owner => 1,
         };
         self_level >= required_level
     }
@@ -92,20 +77,9 @@ impl PermissionContext {
         }
     }
 
-    /// Check if context bypasses normal permission checks
-    /// Owner and admin do not go through permission matrix
-    pub fn bypasses_permissions(&self) -> bool {
-        self.user_role.bypasses_permissions()
-    }
-
-    /// Create context for owner (always has permissions)
+    /// Create context for owner
     pub fn owner(wallet_id: Uuid, user_id: Uuid) -> Self {
         Self::new(wallet_id, user_id, WalletRole::Owner)
-    }
-
-    /// Create context for admin
-    pub fn admin(wallet_id: Uuid, user_id: Uuid) -> Self {
-        Self::new(wallet_id, user_id, WalletRole::Admin)
     }
 
     /// Create context for member (group-based permissions)

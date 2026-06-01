@@ -221,6 +221,14 @@ pub trait DatabaseRepository: Send + Sync {
 
     async fn wallet_user_exists(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError>;
 
+    async fn get_wallet_owners(&self, wallet_id: Uuid) -> Result<Vec<WalletOwner>, DbError>;
+
+    async fn is_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError>;
+
+    async fn add_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<(), DbError>;
+
+    async fn remove_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError>;
+
     // ============ PERMISSIONS ============
     async fn get_user_groups(&self, wallet_id: Uuid) -> Result<Vec<UserGroup>, DbError>;
 
@@ -1143,6 +1151,22 @@ impl DatabaseRepository for Database {
 
     async fn wallet_user_exists(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {
         self.wallet_user_exists_impl(wallet_id, user_id).await
+    }
+
+    async fn get_wallet_owners(&self, wallet_id: Uuid) -> Result<Vec<WalletOwner>, DbError> {
+        self.get_wallet_owners_impl(wallet_id).await
+    }
+
+    async fn is_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {
+        self.is_wallet_owner_impl(wallet_id, user_id).await
+    }
+
+    async fn add_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<(), DbError> {
+        self.add_wallet_owner_impl(wallet_id, user_id).await
+    }
+
+    async fn remove_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {
+        self.remove_wallet_owner_impl(wallet_id, user_id).await
     }
 
     async fn create_projection_snapshot(

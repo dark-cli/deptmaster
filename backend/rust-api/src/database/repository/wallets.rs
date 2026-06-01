@@ -396,4 +396,75 @@ impl Database {
 
         Ok(exists)
     }
+
+    pub async fn get_wallet_owners_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Vec<crate::database::models::WalletOwner>, DbError> {
+        let owners = sqlx::query_as::<_, crate::database::models::WalletOwner>(
+            r#"
+            SELECT id, wallet_id, user_id, created_at
+            FROM wallet_owners
+            WHERE wallet_id = $1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(wallet_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(owners)
+    }
+
+    pub async fn is_wallet_owner_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<bool, DbError> {
+        let is_owner: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM wallet_owners WHERE wallet_id = $1 AND user_id = $2)",
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(is_owner)
+    }
+
+    pub async fn add_wallet_owner_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO wallet_owners (wallet_id, user_id)
+            VALUES ($1, $2)
+            ON CONFLICT (wallet_id, user_id) DO NOTHING
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn remove_wallet_owner_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<bool, DbError> {
+        let result = sqlx::query(
+            "DELETE FROM wallet_owners WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
 }
