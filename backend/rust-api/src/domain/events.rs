@@ -234,7 +234,7 @@ pub struct DomainEvent {
     #[serde(deserialize_with = "deserialize_datetime_utc")]
     pub created_at: DateTime<Utc>,
     pub version: i32,
-    pub idempotency_key: Option<String>,
+    pub idempotency_key: String,
     pub event_data: EventData,
 }
 
@@ -245,9 +245,7 @@ impl DomainEvent {
     }
 
     /// Get the aggregate type as a string (for database storage)
-    pub fn aggregate_type(&self) -> &'static str {
-        self.aggregate_type_enum().as_str()
-    }
+    pub fn aggregate_type(&self) -> &'static str { self.aggregate_type_enum().as_str() }
 
     /// Get the event type string
     pub fn event_type(&self) -> &'static str {
@@ -280,7 +278,7 @@ impl DomainEvent {
             user_id: event.user_id,
             created_at: event.created_at,
             version: event.version,
-            idempotency_key: event.idempotency_key.clone(),
+            idempotency_key: event.idempotency_key.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
             event_data,
         })
     }

@@ -2114,7 +2114,7 @@ pub async fn add_contact_group_member(
             user_id: auth_user.user_id,
             created_at: chrono::Utc::now(),
             version: 1,
-            idempotency_key: None,
+            idempotency_key: Uuid::new_v4().to_string(),
             event_data: crate::domain::EventData::ContactGroupMemberAdded {
                 data: serde_json::json!({
                     "contact_id": contact_uuid.to_string(),
@@ -2221,7 +2221,7 @@ pub async fn remove_contact_group_member(
             user_id: auth_user.user_id,
             created_at: chrono::Utc::now(),
             version: 1,
-            idempotency_key: None,
+            idempotency_key: Uuid::new_v4().to_string(),
             event_data: crate::domain::EventData::ContactGroupMemberRemoved {
                 data: serde_json::json!({
                     "contact_id": contact_uuid.to_string(),

@@ -65,7 +65,7 @@ fn can_read_event(
     match &event.event_data {
         // Contact events
         EventData::ContactCreated { .. }
-        | EventData::ContactUpdated { .. }
+     | EventData::ContactUpdated { .. }
         | EventData::ContactDeleted { .. }
         | EventData::ContactUndone { .. } => match contact_ids {
             None => true,
@@ -471,12 +471,33 @@ pub async fn insert_permission_event_and_apply(
             wallet_id,
             user_id,
             1,
-            None,
+            Some(Uuid::new_v4().to_string()),
         )
         .await
         .map_err(|_| sqlx::Error::RowNotFound)?;
 
-    // Event stored, broadcast permission change
+    // Apply event to projections
+    let rows: Vec<_> = sqlx::query(
+        "SELECT id, event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, created_at, event_version FROM events WHERE event_id = $1 AND wallet_id = $2"
+    )
+    .bind(event_id)
+    .bind(wallet_id)
+    .fetch_all(&*state.db_pool)
+    .await
+    .unwrap_or_default();
+
+    if !rows.is_empty() {
+        let row_refs: Vec<_> = rows.iter().collect();
+        let mut undone_set = std::collections::HashSet::new();
+        if let Err(e) = db
+            .apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set)
+            .await
+        {
+            tracing::error!("Error applying event: {:?}", e);
+        }
+    }
+
+    // Broadcast permission change
     websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "permission");
 
     Ok(())
