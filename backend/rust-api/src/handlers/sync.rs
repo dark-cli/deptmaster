@@ -7,9 +7,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::database::models::EventRow;
 use crate::database::repository::Database;
-use crate::domain::events::{AggregateType, DomainEvent, EventData};
+use crate::domain::events::{DomainEvent, EventData};
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
@@ -56,45 +55,46 @@ pub struct SyncEventsQuery {
 
 // ============ INTERNAL HELPERS ============
 
-/// Extract contact_id from transaction event data (required field)
-fn extract_contact_id(data: &serde_json::Value) -> Result<Uuid, String> {
-    let contact_id_str = data
-        .get("contact_id")
-        .ok_or_else(|| "missing required contact_id".to_string())?
-        .as_str()
-        .ok_or_else(|| "contact_id must be a string".to_string())?;
-    contact_id_str
-        .parse::<Uuid>()
-        .map_err(|e| format!("invalid contact_id uuid: {}", e))
-}
 
 /// Check if user can read an event based on permission boundaries
 fn can_read_event(
-    event: &EventRow,
+    event: &DomainEvent,
     contact_ids: &Option<HashSet<Uuid>>,
     transaction_contact_ids: &Option<HashSet<Uuid>>,
 ) -> bool {
-    let aggregate_type = match AggregateType::from_str(&event.aggregate_type) {
-        Some(at) => at,
-        None => return false,
-    };
-
-    match aggregate_type {
-        AggregateType::Permission => true,
-        AggregateType::Contact => match contact_ids {
+    match &event.event_data {
+        // Contact events
+        EventData::ContactCreated { .. }
+        | EventData::ContactUpdated { .. }
+        | EventData::ContactDeleted { .. }
+        | EventData::ContactUndone { .. } => match contact_ids {
             None => true,
             Some(set) => set.contains(&event.aggregate_id),
         },
-        AggregateType::Transaction => {
-            let contact_id = match extract_contact_id(&event.data) {
-                Ok(id) => id,
-                Err(_) => return false,
-            };
+        // Transaction events
+        EventData::TransactionCreated { contact_id, .. }
+        | EventData::TransactionUpdated { contact_id, .. } => {
             match transaction_contact_ids {
                 None => true,
-                Some(set) => set.contains(&contact_id),
+                Some(set) => set.contains(contact_id),
             }
         }
+        EventData::TransactionDeleted { .. } | EventData::TransactionUndone { .. } => false,
+        // Permission events always allowed (all users see permission changes)
+        EventData::WalletUserAdded { .. }
+        | EventData::WalletUserRoleChanged { .. }
+        | EventData::WalletUserRemoved { .. }
+        | EventData::UserGroupCreated { .. }
+        | EventData::UserGroupUpdated { .. }
+        | EventData::UserGroupDeleted { .. }
+        | EventData::UserGroupMemberAdded { .. }
+        | EventData::UserGroupMemberRemoved { .. }
+        | EventData::ContactGroupCreated { .. }
+        | EventData::ContactGroupUpdated { .. }
+        | EventData::ContactGroupDeleted { .. }
+        | EventData::ContactGroupMemberAdded { .. }
+        | EventData::ContactGroupMemberRemoved { .. }
+        | EventData::PermissionMatrixSet { .. } => true,
     }
 }
 
@@ -150,7 +150,7 @@ pub async fn get_sync_hash(
             &readable_contacts,
             &readable_transaction_contacts,
         ) {
-            hasher.update(event.event_id.to_string().as_bytes());
+            hasher.update(event.id.to_string().as_bytes());
             hasher.update(event.created_at.to_string().as_bytes());
         }
     }
@@ -177,7 +177,7 @@ pub async fn get_sync_hash(
             )
         })
         .last()
-        .map(|e| e.created_at);
+        .map(|e| e.created_at.naive_utc());
 
     Ok(Json(SyncHashResponse {
         hash,
@@ -253,14 +253,14 @@ pub async fn get_sync_events(
                 &readable_transaction_contacts,
             )
         })
-        .map(|row| SyncEvent {
-            id: row.event_id.to_string(),
-            aggregate_type: row.aggregate_type,
-            aggregate_id: row.aggregate_id.to_string(),
-            event_type: row.event_type,
-            event_data: row.data,
-            timestamp: DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc).to_rfc3339(),
-            version: row.version,
+        .map(|event| SyncEvent {
+            id: event.id.to_string(),
+            aggregate_type: event.aggregate_type().to_string(),
+            aggregate_id: event.aggregate_id.to_string(),
+            event_type: event.event_type().to_string(),
+            event_data: serde_json::to_value(&event.event_data).unwrap_or_default(),
+            timestamp: event.created_at.to_rfc3339(),
+            version: event.version,
         })
         .collect();
 

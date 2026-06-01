@@ -309,8 +309,33 @@ impl DomainEvent {
 
     /// Convert a generic Event to DomainEvent
     pub fn from_event(event: &crate::database::models::Event) -> Result<Self, String> {
-        serde_json::from_value(event.data.clone())
-            .map_err(|e| format!("Failed to deserialize event: {}", e))
+        // Reconstruct EventData by adding the "type" field back (it was removed during storage)
+        let mut event_data_with_type = event.data.clone();
+        if let Some(obj) = event_data_with_type.as_object_mut() {
+            // Map event_type to the serde tag discriminator
+            let discriminator = match event.event_type.as_str() {
+                "CREATED" => if event.aggregate_type == "contact" { "contact_created".to_string() } else { "transaction_created".to_string() },
+                "UPDATED" => if event.aggregate_type == "contact" { "contact_updated".to_string() } else { "transaction_updated".to_string() },
+                "DELETED" => if event.aggregate_type == "contact" { "contact_deleted".to_string() } else { "transaction_deleted".to_string() },
+                "UNDO" => if event.aggregate_type == "contact" { "contact_undone".to_string() } else { "transaction_undone".to_string() },
+                t => t.to_lowercase(),
+            };
+            obj.insert("type".to_string(), serde_json::Value::String(discriminator));
+        }
+
+        let event_data = serde_json::from_value::<EventData>(event_data_with_type)
+            .map_err(|e| format!("Failed to deserialize event data: {}", e))?;
+
+        Ok(Self {
+            id: event.id,
+            aggregate_id: event.aggregate_id,
+            wallet_id: event.wallet_id,
+            user_id: event.user_id,
+            created_at: event.created_at,
+            version: event.version,
+            idempotency_key: event.idempotency_key.clone(),
+            event_data,
+        })
     }
 
     /// Get permission metadata for this event

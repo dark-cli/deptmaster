@@ -1,6 +1,7 @@
 use crate::database::error::DbError;
 use crate::database::models::*;
 use crate::database::repository::Database;
+use crate::domain::events::DomainEvent;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -47,7 +48,7 @@ impl Database {
     pub async fn get_all_events_for_wallet(
         &self,
         wallet_id: Uuid,
-    ) -> Result<Vec<EventRow>, DbError> {
+    ) -> Result<Vec<DomainEvent>, DbError> {
         let rows = sqlx::query_as::<_, EventRowDb>(
             r#"
             SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
@@ -61,14 +62,22 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(|db| db.into()).collect())
+        let mut events = Vec::new();
+        for db in rows {
+            let event_row: EventRow = db.into();
+            let event: Event = event_row.into();
+            let domain_event = DomainEvent::from_event(&event)
+                .map_err(|e| DbError::SerializationError(e))?;
+            events.push(domain_event);
+        }
+        Ok(events)
     }
 
     pub async fn get_events_since_impl(
         &self,
         wallet_id: Uuid,
         since_timestamp: DateTime<Utc>,
-    ) -> Result<Vec<EventRow>, DbError> {
+    ) -> Result<Vec<DomainEvent>, DbError> {
         let rows = sqlx::query_as::<_, EventRowDb>(
             r#"
             SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
@@ -83,10 +92,18 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(|db| db.into()).collect())
+        let mut events = Vec::new();
+        for db in rows {
+            let event_row: EventRow = db.into();
+            let event: Event = event_row.into();
+            let domain_event = DomainEvent::from_event(&event)
+                .map_err(|e| DbError::SerializationError(e))?;
+            events.push(domain_event);
+        }
+        Ok(events)
     }
 
-    pub async fn get_event_by_id_impl(&self, event_id: Uuid) -> Result<Option<EventRow>, DbError> {
+    pub async fn get_event_by_id_impl(&self, event_id: Uuid) -> Result<Option<DomainEvent>, DbError> {
         let row = sqlx::query_as::<_, EventRowDb>(
             r#"
             SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
@@ -99,7 +116,16 @@ impl Database {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|db| db.into()))
+        match row {
+            None => Ok(None),
+            Some(db) => {
+                let event_row: EventRow = db.into();
+                let event: Event = event_row.into();
+                let domain_event = DomainEvent::from_event(&event)
+                    .map_err(|e| DbError::SerializationError(e))?;
+                Ok(Some(domain_event))
+            }
+        }
     }
 
     pub async fn insert_event_impl(
