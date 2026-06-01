@@ -59,20 +59,17 @@ pub struct SyncEventsQuery {
 /// Build transaction_id -> contact_id map for permission filtering
 fn build_transaction_contact_map(
     events: &[EventRow],
-    _db_map: &HashMap<Uuid, Uuid>,
 ) -> HashMap<Uuid, Uuid> {
-    let mut result = HashMap::new();
-    for event in events {
-        if event.aggregate_type == "transaction" {
-            // All transaction events (CREATED, UPDATED, etc.) must have contact_id in data
-            if let Some(contact_id_str) = event.data.get("contact_id").and_then(|v| v.as_str()) {
-                if let Ok(contact_id) = Uuid::parse_str(contact_id_str) {
-                    result.insert(event.aggregate_id, contact_id);
-                }
-            }
-        }
-    }
-    result
+    events
+        .iter()
+        .filter(|e| e.aggregate_type == "transaction")
+        .filter_map(|event| {
+            let contact_id_str = event.data.get("contact_id")?.as_str()?;
+            let contact_id = Uuid::parse_str(contact_id_str)
+                .expect("transaction event contact_id must be valid UUID");
+            Some((event.aggregate_id, contact_id))
+        })
+        .collect()
 }
 
 /// Check if user can read an event based on permission boundaries
@@ -146,8 +143,8 @@ pub async fn get_sync_hash(
             )
         })?;
 
-    // Build transaction contact map from events (all transactions now have contact_id in event_data)
-    let transaction_map = build_transaction_contact_map(&events, &HashMap::new());
+    // Build transaction contact map from events (all transactions must have contact_id in event_data)
+    let transaction_map = build_transaction_contact_map(&events);
 
     // Filter events by permission and compute hash
     let mut hasher = Sha256::new();
@@ -253,8 +250,8 @@ pub async fn get_sync_events(
             )
         })?;
 
-    // Build transaction contact map from events (all transactions now have contact_id in event_data)
-    let transaction_map = build_transaction_contact_map(&events, &HashMap::new());
+    // Build transaction contact map from events (all transactions must have contact_id in event_data)
+    let transaction_map = build_transaction_contact_map(&events);
 
     // Convert to response, filtering by permission
     let sync_events: Vec<SyncEvent> = events
