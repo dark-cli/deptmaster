@@ -2,102 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
-// ============ EVENT DISCRIMINATOR ENUM ============
-
-/// Strongly typed enum of all valid event discriminators.
-/// Compiler enforces that all variants are handled when pattern matching.
-/// If you add a new EventData variant, you MUST add it here AND update EventData.aggregate_type()
-/// to include it in the permission arm (lines ~272-285).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EventDiscriminator {
-    // Contact events
-    ContactCreated,
-    ContactUpdated,
-    ContactDeleted,
-    ContactUndone,
-    // Transaction events
-    TransactionCreated,
-    TransactionUpdated,
-    TransactionDeleted,
-    TransactionUndone,
-    // Permission events (must match EventData.aggregate_type() permission arm)
-    WalletUserAdded,
-    WalletUserRoleChanged,
-    WalletUserRemoved,
-    UserGroupCreated,
-    UserGroupUpdated,
-    UserGroupDeleted,
-    UserGroupMemberAdded,
-    UserGroupMemberRemoved,
-    ContactGroupCreated,
-    ContactGroupUpdated,
-    ContactGroupDeleted,
-    ContactGroupMemberAdded,
-    ContactGroupMemberRemoved,
-    PermissionMatrixSet,
-}
-
-impl EventDiscriminator {
-    /// Convert from database strings to strongly typed discriminator.
-    /// If you add a new EventData variant, this will fail to compile until you handle it.
-    pub fn from_database(aggregate_type: &str, event_type: &str) -> Result<Self, String> {
-        match (aggregate_type, event_type) {
-            ("contact", "CREATED") => Ok(Self::ContactCreated),
-            ("contact", "UPDATED") => Ok(Self::ContactUpdated),
-            ("contact", "DELETED") => Ok(Self::ContactDeleted),
-            ("contact", "UNDO") => Ok(Self::ContactUndone),
-            ("transaction", "CREATED") => Ok(Self::TransactionCreated),
-            ("transaction", "UPDATED") => Ok(Self::TransactionUpdated),
-            ("transaction", "DELETED") => Ok(Self::TransactionDeleted),
-            ("transaction", "UNDO") => Ok(Self::TransactionUndone),
-            ("permission", "WALLET_USER_ADDED") => Ok(Self::WalletUserAdded),
-            ("permission", "WALLET_USER_ROLE_CHANGED") => Ok(Self::WalletUserRoleChanged),
-            ("permission", "WALLET_USER_REMOVED") => Ok(Self::WalletUserRemoved),
-            ("permission", "USER_GROUP_CREATED") => Ok(Self::UserGroupCreated),
-            ("permission", "USER_GROUP_UPDATED") => Ok(Self::UserGroupUpdated),
-            ("permission", "USER_GROUP_DELETED") => Ok(Self::UserGroupDeleted),
-            ("permission", "USER_GROUP_MEMBER_ADDED") => Ok(Self::UserGroupMemberAdded),
-            ("permission", "USER_GROUP_MEMBER_REMOVED") => Ok(Self::UserGroupMemberRemoved),
-            ("permission", "CONTACT_GROUP_CREATED") => Ok(Self::ContactGroupCreated),
-            ("permission", "CONTACT_GROUP_UPDATED") => Ok(Self::ContactGroupUpdated),
-            ("permission", "CONTACT_GROUP_DELETED") => Ok(Self::ContactGroupDeleted),
-            ("permission", "CONTACT_GROUP_MEMBER_ADDED") => Ok(Self::ContactGroupMemberAdded),
-            ("permission", "CONTACT_GROUP_MEMBER_REMOVED") => Ok(Self::ContactGroupMemberRemoved),
-            ("permission", "PERMISSION_MATRIX_SET") => Ok(Self::PermissionMatrixSet),
-            (agg, evt) => Err(format!("Unknown event type: {} / {}", agg, evt)),
-        }
-    }
-
-    /// Convert to serde tag discriminator string (e.g., "contact_created").
-    /// Pattern matching here is exhaustive - compiler forces handling all variants.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::ContactCreated => "contact_created",
-            Self::ContactUpdated => "contact_updated",
-            Self::ContactDeleted => "contact_deleted",
-            Self::ContactUndone => "contact_undone",
-            Self::TransactionCreated => "transaction_created",
-            Self::TransactionUpdated => "transaction_updated",
-            Self::TransactionDeleted => "transaction_deleted",
-            Self::TransactionUndone => "transaction_undone",
-            Self::WalletUserAdded => "wallet_user_added",
-            Self::WalletUserRoleChanged => "wallet_user_role_changed",
-            Self::WalletUserRemoved => "wallet_user_removed",
-            Self::UserGroupCreated => "user_group_created",
-            Self::UserGroupUpdated => "user_group_updated",
-            Self::UserGroupDeleted => "user_group_deleted",
-            Self::UserGroupMemberAdded => "user_group_member_added",
-            Self::UserGroupMemberRemoved => "user_group_member_removed",
-            Self::ContactGroupCreated => "contact_group_created",
-            Self::ContactGroupUpdated => "contact_group_updated",
-            Self::ContactGroupDeleted => "contact_group_deleted",
-            Self::ContactGroupMemberAdded => "contact_group_member_added",
-            Self::ContactGroupMemberRemoved => "contact_group_member_removed",
-            Self::PermissionMatrixSet => "permission_matrix_set",
-        }
-    }
-}
-
 // ============ AGGREGATE TYPE ENUM ============
 
 /// Strongly typed aggregate types. Use instead of string matching.
@@ -259,8 +163,7 @@ pub enum EventData {
 }
 
 impl EventData {
-    /// Get the aggregate type for this event data.
-    /// Contact and transaction variants return their types; all others are permissions.
+    /// Get the aggregate type for this event data
     pub fn aggregate_type(&self) -> AggregateType {
         match self {
             EventData::ContactCreated { .. }
@@ -271,7 +174,20 @@ impl EventData {
             | EventData::TransactionUpdated { .. }
             | EventData::TransactionDeleted { .. }
             | EventData::TransactionUndone { .. } => AggregateType::Transaction,
-            _ => AggregateType::Permission, // All other variants are permission events
+            EventData::WalletUserAdded { .. }
+            | EventData::WalletUserRoleChanged { .. }
+            | EventData::WalletUserRemoved { .. }
+            | EventData::UserGroupCreated { .. }
+            | EventData::UserGroupUpdated { .. }
+            | EventData::UserGroupDeleted { .. }
+            | EventData::UserGroupMemberAdded { .. }
+            | EventData::UserGroupMemberRemoved { .. }
+            | EventData::ContactGroupCreated { .. }
+            | EventData::ContactGroupUpdated { .. }
+            | EventData::ContactGroupDeleted { .. }
+            | EventData::ContactGroupMemberAdded { .. }
+            | EventData::ContactGroupMemberRemoved { .. }
+            | EventData::PermissionMatrixSet { .. } => AggregateType::Permission,
         }
     }
 
