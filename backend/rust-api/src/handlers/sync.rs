@@ -74,31 +74,10 @@ pub async fn get_sync_hash(
         )
     })?;
 
-    // Get permission boundaries once
+    // Get permission context and compute readable events
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    let readable_contacts = perm_model
-        .get_readable_contacts(&perm_ctx)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
-
-    let readable_transaction_contacts = perm_model
-        .get_readable_transaction_contacts(&perm_ctx)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
-
-    // Filter events by permission using permission model
     let readable_event_ids = perm_model
         .get_readable_event_ids(&perm_ctx, &events)
         .await
@@ -169,31 +148,10 @@ pub async fn get_sync_events(
         )
     })?;
 
-    // Get permission boundaries once
+    // Get permission context and compute readable events
     let perm_ctx = PermissionContext::new(wallet_id, auth_user.user_id, wallet_context.user_role);
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
-    let readable_contacts = perm_model
-        .get_readable_contacts(&perm_ctx)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
-
-    let readable_transaction_contacts = perm_model
-        .get_readable_transaction_contacts(&perm_ctx)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to check permissions"})),
-            )
-        })?;
-
-    // Filter events by permission using permission model
     let readable_event_ids = perm_model
         .get_readable_event_ids(&perm_ctx, &events)
         .await

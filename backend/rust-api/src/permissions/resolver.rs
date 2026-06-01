@@ -188,6 +188,7 @@ pub async fn get_readable_transaction_contacts(
 }
 
 /// Filter events to return only those readable by user
+/// Uses proven permission computation functions with single SQL filter query
 pub async fn filter_readable_events(
     pool: &PgPool,
     ctx: &PermissionContext,
@@ -197,12 +198,15 @@ pub async fn filter_readable_events(
         return Ok(Vec::new());
     }
 
-    // Get readable contacts and transactions using proven permission functions
+    // Use proven permission functions to compute readable sets
     let readable_contacts = get_readable_contacts(pool, ctx).await?;
     let readable_transaction_contacts = get_readable_transaction_contacts(pool, ctx).await?;
 
-    // Single query to fetch readable event IDs based on already-computed permission sets
+    // Single SQL query to filter events using computed permission sets
     let event_ids: Vec<Uuid> = events.iter().map(|e| e.id).collect();
+    let readable_contact_uuids: Vec<Uuid> = readable_contacts.iter().copied().collect();
+    let readable_transaction_contact_uuids: Vec<Uuid> =
+        readable_transaction_contacts.iter().copied().collect();
 
     let readable_ids: Vec<Uuid> = sqlx::query_scalar(
         r#"
@@ -211,23 +215,23 @@ pub async fn filter_readable_events(
         WHERE e.wallet_id = $1
           AND e.event_id = ANY($2::uuid[])
           AND (
-            -- Contact events: check if contact is readable
+            -- Contact events
             (e.aggregate_type = 'contact' AND e.aggregate_id = ANY($3::uuid[]))
-            -- Transaction events: check if transaction contact is readable
+            -- Transaction events
             OR (e.aggregate_type = 'transaction' AND e.event_type IN ('CREATED', 'UPDATED')
                 AND (e.event_data->>'contact_id')::uuid = ANY($4::uuid[]))
-            -- Delete/Undo events: allow if user can read any transactions
+            -- Delete/Undo events
             OR (e.aggregate_type = 'transaction' AND e.event_type IN ('DELETED', 'UNDO')
                 AND ARRAY_LENGTH($4::uuid[], 1) > 0)
-            -- Permission and wallet events: always readable
+            -- Permission and wallet events
             OR (e.aggregate_type = 'permission' OR e.aggregate_type = 'wallet')
           )
         "#,
     )
     .bind(ctx.wallet_id)
     .bind(&event_ids)
-    .bind(readable_contacts.iter().copied().collect::<Vec<_>>())
-    .bind(readable_transaction_contacts.iter().copied().collect::<Vec<_>>())
+    .bind(&readable_contact_uuids)
+    .bind(&readable_transaction_contact_uuids)
     .fetch_all(pool)
     .await
     .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
