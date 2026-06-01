@@ -110,12 +110,7 @@ pub async fn can_perform(
 pub async fn get_readable_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
-) -> Result<Option<HashSet<Uuid>>, DbError> {
-    // Owners can read all contacts
-    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
-        return Ok(None); // None = can read all
-    }
-
+) -> Result<HashSet<Uuid>, DbError> {
     // Try explicit contact groups first
     let explicit: Vec<Uuid> = sqlx::query_scalar(queries::GET_READABLE_CONTACTS_QUERY)
         .bind(ctx.wallet_id)
@@ -137,9 +132,17 @@ pub async fn get_readable_contacts(
         .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
 
     if can_read_all {
-        Ok(None) // Can read all contacts
+        // Get all contacts for this wallet
+        let all_contacts: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM contacts_projection WHERE wallet_id = $1 AND is_deleted = false",
+        )
+        .bind(ctx.wallet_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+        Ok(all_contacts.into_iter().collect())
     } else {
-        Ok(Some(explicit.into_iter().collect())) // Specific contacts only
+        Ok(explicit.into_iter().collect()) // Specific contacts only
     }
 }
 
@@ -148,12 +151,7 @@ pub async fn get_readable_contacts(
 pub async fn get_readable_transaction_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
-) -> Result<Option<HashSet<Uuid>>, DbError> {
-    // Owners can read all transaction contacts
-    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
-        return Ok(None); // None = can read all
-    }
-
+) -> Result<HashSet<Uuid>, DbError> {
     // Try explicit contact groups first
     let explicit: Vec<Uuid> = sqlx::query_scalar(queries::GET_READABLE_TRANSACTION_CONTACTS_QUERY)
         .bind(ctx.wallet_id)
@@ -175,8 +173,16 @@ pub async fn get_readable_transaction_contacts(
         .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
 
     if can_read_all {
-        Ok(None) // Can read all transactions
+        // Get all contacts for this wallet
+        let all_contacts: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM contacts_projection WHERE wallet_id = $1 AND is_deleted = false",
+        )
+        .bind(ctx.wallet_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+        Ok(all_contacts.into_iter().collect())
     } else {
-        Ok(Some(explicit.into_iter().collect())) // Specific contacts only
+        Ok(explicit.into_iter().collect()) // Specific contacts only
     }
 }

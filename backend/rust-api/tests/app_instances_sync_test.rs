@@ -68,6 +68,35 @@ async fn test_sync_read_permission_filter_and_full_pull() {
 
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
+    // Create __owners__ group with full permissions on all contacts
+    sqlx::query(
+        "INSERT INTO user_groups (wallet_id, name, is_system) VALUES ($1, '__owners__', true)
+         ON CONFLICT (wallet_id, name) DO UPDATE SET is_system = true",
+    )
+    .bind(wallet_id)
+    .execute(&pool)
+    .await
+    .expect("create __owners__");
+
+    let owners_group_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = '__owners__'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get __owners__ id");
+
+    // Add owner to __owners__ group
+    sqlx::query(
+        "INSERT INTO user_group_members (user_group_id, user_id) VALUES ($1, $2)
+         ON CONFLICT (user_group_id, user_id) DO NOTHING",
+    )
+    .bind(owners_group_id)
+    .bind(owner_id)
+    .execute(&pool)
+    .await
+    .expect("add owner to __owners__");
+
     // Contact group "Limited": only contact A will be in it. Member gets contact:read only for this group.
     sqlx::query(
         "INSERT INTO contact_groups (wallet_id, name, type, is_system) VALUES ($1, 'Limited', 'static', false)",
@@ -124,6 +153,20 @@ async fn test_sync_read_permission_filter_and_full_pull() {
     .execute(&pool)
     .await
     .expect("grant contact:read on Limited");
+
+    // Grant __owners__ group full permissions on all_contacts
+    for act_id in 1..=10_i16 {
+        sqlx::query(
+            "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id) VALUES ($1, $2, $3)
+             ON CONFLICT (user_group_id, contact_group_id, permission_action_id) DO NOTHING",
+        )
+        .bind(owners_group_id)
+        .bind(all_contacts_id)
+        .bind(act_id)
+        .execute(&pool)
+        .await
+        .ok();
+    }
 
     // Create two contacts in projection (so contact_group_members can reference them)
     let contact_a_id = Uuid::new_v4();

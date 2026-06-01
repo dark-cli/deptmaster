@@ -58,24 +58,18 @@ pub struct SyncEventsQuery {
 /// Check if user can read an event based on permission boundaries
 fn can_read_event(
     event: &DomainEvent,
-    contact_ids: &Option<HashSet<Uuid>>,
-    transaction_contact_ids: &Option<HashSet<Uuid>>,
+    contact_ids: &HashSet<Uuid>,
+    transaction_contact_ids: &HashSet<Uuid>,
 ) -> bool {
     match &event.event_data {
         // Contact events
         EventData::ContactCreated { .. }
         | EventData::ContactUpdated { .. }
         | EventData::ContactDeleted { .. }
-        | EventData::ContactUndone { .. } => match contact_ids {
-            None => true,
-            Some(set) => set.contains(&event.aggregate_id),
-        },
+        | EventData::ContactUndone { .. } => contact_ids.contains(&event.aggregate_id),
         // Transaction events
         EventData::TransactionCreated { contact_id, .. }
-        | EventData::TransactionUpdated { contact_id, .. } => match transaction_contact_ids {
-            None => true,
-            Some(set) => set.contains(contact_id),
-        },
+        | EventData::TransactionUpdated { contact_id, .. } => transaction_contact_ids.contains(contact_id),
         EventData::TransactionDeleted { .. } | EventData::TransactionUndone { .. } => false,
         // Permission and wallet management events always allowed (all users see these changes)
         EventData::WalletUserAdded { .. }

@@ -146,6 +146,28 @@ pub async fn add_user_to_wallet(pool: &PgPool, user_id: Uuid, wallet_id: Uuid, r
         .await
         .expect("Failed to add owner to wallet_owners");
     }
+
+    // Add user to all_users group (all users should be in this group for permission matrix)
+    let all_users_group: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(group_id) = all_users_group {
+        sqlx::query(
+            "INSERT INTO user_group_members (user_group_id, user_id) VALUES ($1, $2)
+             ON CONFLICT (user_group_id, user_id) DO NOTHING",
+        )
+        .bind(group_id)
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .ok();
+    }
 }
 
 pub async fn create_test_contact(
