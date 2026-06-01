@@ -4,9 +4,10 @@ use uuid::Uuid;
 
 // ============ EVENT DISCRIMINATOR ENUM ============
 
-/// Strongly-typed enum of all valid event discriminators.
+/// Strongly typed enum of all valid event discriminators.
 /// Compiler enforces that all variants are handled when pattern matching.
-/// If you add a new EventData variant, you MUST add it here.
+/// If you add a new EventData variant, you MUST add it here AND update EventData.aggregate_type()
+/// to include it in the permission arm (lines ~272-285).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventDiscriminator {
     // Contact events
@@ -19,7 +20,7 @@ pub enum EventDiscriminator {
     TransactionUpdated,
     TransactionDeleted,
     TransactionUndone,
-    // Permission events
+    // Permission events (must match EventData.aggregate_type() permission arm)
     WalletUserAdded,
     WalletUserRoleChanged,
     WalletUserRemoved,
@@ -37,7 +38,7 @@ pub enum EventDiscriminator {
 }
 
 impl EventDiscriminator {
-    /// Convert from database strings to strongly-typed discriminator.
+    /// Convert from database strings to strongly typed discriminator.
     /// If you add a new EventData variant, this will fail to compile until you handle it.
     pub fn from_database(aggregate_type: &str, event_type: &str) -> Result<Self, String> {
         match (aggregate_type, event_type) {
@@ -258,7 +259,8 @@ pub enum EventData {
 }
 
 impl EventData {
-    /// Get the aggregate type for this event data
+    /// Get the aggregate type for this event data.
+    /// Contact and transaction variants return their types; all others are permissions.
     pub fn aggregate_type(&self) -> AggregateType {
         match self {
             EventData::ContactCreated { .. }
@@ -269,20 +271,7 @@ impl EventData {
             | EventData::TransactionUpdated { .. }
             | EventData::TransactionDeleted { .. }
             | EventData::TransactionUndone { .. } => AggregateType::Transaction,
-            EventData::WalletUserAdded { .. }
-            | EventData::WalletUserRoleChanged { .. }
-            | EventData::WalletUserRemoved { .. }
-            | EventData::UserGroupCreated { .. }
-            | EventData::UserGroupUpdated { .. }
-            | EventData::UserGroupDeleted { .. }
-            | EventData::UserGroupMemberAdded { .. }
-            | EventData::UserGroupMemberRemoved { .. }
-            | EventData::ContactGroupCreated { .. }
-            | EventData::ContactGroupUpdated { .. }
-            | EventData::ContactGroupDeleted { .. }
-            | EventData::ContactGroupMemberAdded { .. }
-            | EventData::ContactGroupMemberRemoved { .. }
-            | EventData::PermissionMatrixSet { .. } => AggregateType::Permission,
+            _ => AggregateType::Permission, // All other variants are permission events
         }
     }
 
