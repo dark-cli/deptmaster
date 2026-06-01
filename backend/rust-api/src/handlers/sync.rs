@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::database::models::EventRow;
 use crate::database::repository::Database;
-use crate::domain::{DomainEvent, EventData};
+use crate::domain::events::{AggregateType, DomainEvent, EventData};
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
@@ -62,13 +62,18 @@ fn can_read_event(
     contact_ids: &Option<HashSet<Uuid>>,
     transaction_contact_ids: &Option<HashSet<Uuid>>,
 ) -> bool {
-    match event.aggregate_type.as_str() {
-        "permission" => true,
-        "contact" => match contact_ids {
+    let aggregate_type = match AggregateType::from_str(&event.aggregate_type) {
+        Some(at) => at,
+        None => return false,
+    };
+
+    match aggregate_type {
+        AggregateType::Permission => true,
+        AggregateType::Contact => match contact_ids {
             None => true,
             Some(set) => set.contains(&event.aggregate_id),
         },
-        "transaction" => {
+        AggregateType::Transaction => {
             let contact_id_str = match event.data.get("contact_id") {
                 Some(val) => match val.as_str() {
                     Some(s) => s,
@@ -85,7 +90,6 @@ fn can_read_event(
                 Some(set) => set.contains(&contact_id),
             }
         }
-        _ => false,
     }
 }
 
