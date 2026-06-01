@@ -132,6 +132,20 @@ pub async fn add_user_to_wallet(pool: &PgPool, user_id: Uuid, wallet_id: Uuid, r
     .execute(pool)
     .await
     .expect("Failed to add user to wallet");
+
+    // If adding as owner, also add to wallet_owners table
+    if role == "owner" {
+        sqlx::query(
+            "INSERT INTO wallet_owners (wallet_id, user_id, created_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (wallet_id, user_id) DO NOTHING",
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .expect("Failed to add owner to wallet_owners");
+    }
 }
 
 pub async fn create_test_contact(

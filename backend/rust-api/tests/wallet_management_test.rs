@@ -113,7 +113,7 @@ async fn test_update_wallet() {
     let pool = setup_test_db().await;
     let acting_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Original Name").await;
-    add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "owner").await;
 
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
@@ -239,7 +239,7 @@ async fn test_update_wallet_user_role() {
     let acting_user_id = create_test_user(&pool).await;
     let target_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
-    add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "owner").await;
     add_user_to_wallet(&pool, target_user_id, wallet_id, "member").await;
 
     let config = Arc::new(Config::from_env().unwrap());
@@ -275,7 +275,7 @@ async fn test_update_wallet_user_role() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(user_role, "admin");
+    assert_eq!(user_role, "owner");
 }
 
 #[tokio::test]
@@ -284,7 +284,7 @@ async fn test_remove_user_from_wallet() {
     let acting_user_id = create_test_user(&pool).await;
     let target_user_id = create_test_user(&pool).await;
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
-    add_user_to_wallet(&pool, acting_user_id, wallet_id, "admin").await;
+    add_user_to_wallet(&pool, acting_user_id, wallet_id, "owner").await;
     add_user_to_wallet(&pool, target_user_id, wallet_id, "member").await;
 
     let config = Arc::new(Config::from_env().unwrap());

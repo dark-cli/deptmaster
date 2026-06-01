@@ -17,7 +17,7 @@ COMMENT ON TABLE wallet_owners IS 'Explicit ownership tracking for wallets. Owne
 
 -- Migrate existing owners from wallet_users.role = 'owner' to wallet_owners table
 INSERT INTO wallet_owners (wallet_id, user_id, created_at)
-SELECT wu.wallet_id, wu.user_id, wu.created_at
+SELECT wu.wallet_id, wu.user_id, NOW()
 FROM wallet_users wu
 WHERE wu.role = 'owner'
 ON CONFLICT DO NOTHING;
