@@ -57,11 +57,15 @@ pub struct SyncEventsQuery {
 // ============ INTERNAL HELPERS ============
 
 /// Extract contact_id from transaction event data (required field)
-fn extract_contact_id(data: &serde_json::Value) -> Option<Uuid> {
-    data.get("contact_id")?
-        .as_str()?
+fn extract_contact_id(data: &serde_json::Value) -> Result<Uuid, String> {
+    let contact_id_str = data
+        .get("contact_id")
+        .ok_or_else(|| "missing required contact_id".to_string())?
+        .as_str()
+        .ok_or_else(|| "contact_id must be a string".to_string())?;
+    contact_id_str
         .parse::<Uuid>()
-        .ok()
+        .map_err(|e| format!("invalid contact_id uuid: {}", e))
 }
 
 /// Check if user can read an event based on permission boundaries
@@ -83,8 +87,8 @@ fn can_read_event(
         },
         AggregateType::Transaction => {
             let contact_id = match extract_contact_id(&event.data) {
-                Some(id) => id,
-                None => return false,
+                Ok(id) => id,
+                Err(_) => return false,
             };
             match transaction_contact_ids {
                 None => true,
