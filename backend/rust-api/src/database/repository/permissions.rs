@@ -499,4 +499,118 @@ impl Database {
 
         Ok(result)
     }
+
+    // User readable events - denormalized cache for efficient sync hash/events queries
+    pub async fn add_readable_event_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        event_id: Uuid,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_readable_events (wallet_id, user_id, event_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (wallet_id, user_id, event_id) DO NOTHING
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .bind(event_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_readable_events_for_user_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_readable_event_ids_for_user_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Vec<Uuid>, DbError> {
+        let ids = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT event_id
+            FROM user_readable_events
+            WHERE wallet_id = $1 AND user_id = $2
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(ids)
+    }
+
+    pub async fn get_readable_events_hash_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(String, i64, Option<chrono::NaiveDateTime>), DbError> {
+        // Note: This assumes user_readable_events cache is populated.
+        // For backward compatibility with direct event insertion (tests),
+        // the sync handlers should populate the cache when events are inserted.
+        let row = sqlx::query_as::<_, (Option<String>, i64, Option<chrono::NaiveDateTime>)>(
+            r#"
+            SELECT
+                CASE
+                    WHEN COUNT(*) = 0 THEN ''
+                    ELSE md5(string_agg(event_id::text ORDER BY created_at)::text)
+                END,
+                COUNT(*),
+                MAX(created_at)
+            FROM user_readable_events
+            WHERE wallet_id = $1 AND user_id = $2
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let hash = row.0.unwrap_or_default();
+        Ok((hash, row.1, row.2))
+    }
+
+    pub async fn get_wallet_users_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<Vec<(Uuid, String)>, DbError> {
+        let users = sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT user_id, role FROM wallet_users WHERE wallet_id = $1",
+        )
+        .bind(wallet_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(users)
+    }
+
+    pub async fn rebuild_readable_events_for_user_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), DbError> {
+        // Delete all existing readable events for this user
+        self.delete_readable_events_for_user_impl(wallet_id, user_id)
+            .await?;
+
+        // For now, return - rebuilding requires permission model which creates a circular dependency
+        // In practice, this will be called from handlers after permission changes
+        Ok(())
+    }
 }

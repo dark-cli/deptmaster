@@ -105,6 +105,47 @@ pub async fn can_perform(
     Ok(allowed.iter().any(|a| a.implies(action)))
 }
 
+/// Rebuild user readable events cache by computing permissions for all events
+pub async fn rebuild_readable_events_cache(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+    all_events: &[crate::domain::events::DomainEvent],
+) -> Result<(), DbError> {
+    // Delete existing cache
+    sqlx::query(
+        "DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2",
+    )
+    .bind(ctx.wallet_id)
+    .bind(ctx.user_id)
+    .execute(pool)
+    .await?;
+
+    if all_events.is_empty() {
+        return Ok(());
+    }
+
+    // Compute readable events and populate cache
+    let readable_ids = filter_readable_events(pool, ctx, all_events).await?;
+
+    // Batch insert readable events
+    for event_id in readable_ids {
+        sqlx::query(
+            r#"
+            INSERT INTO user_readable_events (wallet_id, user_id, event_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (wallet_id, user_id, event_id) DO NOTHING
+            "#,
+        )
+        .bind(ctx.wallet_id)
+        .bind(ctx.user_id)
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
 /// Get all readable contacts for sync filtering
 /// Returns contact IDs the user can read
 pub async fn get_readable_contacts(

@@ -17,7 +17,6 @@ use crate::services::projections::Projections;
 use crate::services::snapshots;
 use crate::websocket;
 use crate::AppState;
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 // ============ RESPONSE TYPES ============
@@ -88,18 +87,25 @@ pub async fn get_sync_hash(
             )
         })?;
 
-    let readable_event_ids_set: HashSet<Uuid> = readable_event_ids.into_iter().collect();
+    let readable_event_ids_set: HashSet<Uuid> = readable_event_ids.iter().copied().collect();
 
     // Filter events by permission and compute hash
-    let mut hasher = Sha256::new();
-    for event in &events {
-        if readable_event_ids_set.contains(&event.id) {
-            hasher.update(event.id.to_string().as_bytes());
-            hasher.update(event.created_at.to_string().as_bytes());
-        }
-    }
+    let event_ids_str = readable_event_ids
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
 
-    let hash = format!("{:x}", hasher.finalize());
+    let hash: String = if event_ids_str.is_empty() {
+        String::new()
+    } else {
+        sqlx::query_scalar("SELECT md5($1::text)")
+            .bind(&event_ids_str)
+            .fetch_one(&*state.db_pool)
+            .await
+            .unwrap_or_else(|_| String::new())
+    };
+
     let event_count = readable_event_ids_set.len() as i64;
 
     let last_timestamp = events
@@ -279,6 +285,42 @@ pub async fn post_sync_events(
 
         accepted.push(event_id.to_string());
 
+        // Populate user_readable_events cache for all wallet users
+        let wallet_users = match db.get_wallet_users_impl(wallet_id).await {
+            Ok(users) => users,
+            Err(e) => {
+                tracing::error!("Error fetching wallet users for event cache: {:?}", e);
+                Vec::new()
+            }
+        };
+
+        let perm_model = PermissionModel::new((*state.db_pool).clone());
+        for (wallet_user_id, role_str) in wallet_users {
+            let user_role = crate::permissions::WalletRole::from_str(&role_str)
+                .unwrap_or(crate::permissions::WalletRole::Member);
+            let user_perm_ctx =
+                PermissionContext::new(wallet_id, wallet_user_id, user_role);
+
+            // Check if user can read this event
+            let event_vec = vec![domain_event.clone()];
+            if let Ok(readable_ids) = perm_model
+                .get_readable_event_ids(&user_perm_ctx, &event_vec)
+                .await
+            {
+                if !readable_ids.is_empty() {
+                    // User can read this event - add to their readable events
+                    if let Err(e) =
+                        db.add_readable_event_impl(wallet_id, wallet_user_id, event_id).await
+                    {
+                        tracing::error!(
+                            "Error adding readable event for user: {:?}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
         // Apply event to projections via database layer
         let rows: Vec<_> = sqlx::query(
             "SELECT id, event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, created_at, event_version FROM events WHERE event_id = $1 AND wallet_id = $2"
@@ -409,6 +451,27 @@ pub async fn insert_permission_event_and_apply(
             .await
         {
             tracing::error!("Error applying event: {:?}", e);
+        }
+    }
+
+    // Permission events are readable by all wallet users - add to their readable events cache
+    let wallet_users = match db.get_wallet_users_impl(wallet_id).await {
+        Ok(users) => users,
+        Err(e) => {
+            tracing::error!("Error fetching wallet users for permission event cache: {:?}", e);
+            Vec::new()
+        }
+    };
+
+    for (wallet_user_id, _role) in wallet_users {
+        if let Err(e) = db
+            .add_readable_event_impl(wallet_id, wallet_user_id, event_id)
+            .await
+        {
+            tracing::error!(
+                "Error adding readable permission event for user: {:?}",
+                e
+            );
         }
     }
 
