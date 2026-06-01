@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
@@ -20,15 +19,6 @@ impl AggregateType {
             AggregateType::Contact => "contact",
             AggregateType::Transaction => "transaction",
             AggregateType::Permission => "permission",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "contact" => Some(AggregateType::Contact),
-            "transaction" => Some(AggregateType::Transaction),
-            "permission" => Some(AggregateType::Permission),
-            _ => None,
         }
     }
 }
@@ -230,33 +220,6 @@ impl EventData {
     }
 }
 
-// ============ EVENT APPLIER TRAIT ============
-
-/// Trait for events that know how to apply themselves during projection rebuilds.
-/// Each aggregate type implements this to handle its own application logic.
-#[async_trait]
-pub trait EventApplier: Send + Sync {
-    /// Apply this event to the database during sync or rebuild
-    async fn apply(
-        &self,
-        pool: &sqlx::PgPool,
-        wallet_id: Uuid,
-        user_id: Uuid,
-        event_db_id: i64,
-        created_at: chrono::NaiveDateTime,
-    ) -> Result<(), sqlx::Error>;
-
-    /// Clear all projections/data for this aggregate type in a wallet during rebuild with UNDO events
-    async fn clear_for_rebuild(
-        &self,
-        pool: &sqlx::PgPool,
-        wallet_id: Uuid,
-    ) -> Result<(), sqlx::Error>;
-
-    /// Get the aggregate type for this event (contact, transaction, permission, etc.)
-    fn aggregate_type(&self) -> &'static str;
-}
-
 // ============ DOMAIN EVENT ============
 
 /// Strongly-typed domain event with metadata in the struct and payload in EventData enum.
@@ -289,22 +252,6 @@ impl DomainEvent {
     /// Get the event type string
     pub fn event_type(&self) -> &'static str {
         self.event_data.event_type()
-    }
-
-    /// Convert DomainEvent to a generic Event for database storage
-    pub fn to_event(&self) -> crate::database::models::Event {
-        crate::database::models::Event {
-            id: self.id,
-            aggregate_id: self.aggregate_id,
-            aggregate_type: self.aggregate_type().to_string(),
-            event_type: self.event_type().to_string(),
-            data: serde_json::to_value(self).unwrap_or(serde_json::json!({})),
-            wallet_id: self.wallet_id,
-            user_id: self.user_id,
-            created_at: self.created_at,
-            version: self.version,
-            idempotency_key: self.idempotency_key.clone(),
-        }
     }
 
     /// Convert a generic Event to DomainEvent
