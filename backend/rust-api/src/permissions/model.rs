@@ -106,6 +106,16 @@ impl PermissionModel {
         resolver::get_readable_transaction_contacts(&self.pool, ctx).await
     }
 
+    /// Filter events to return only those readable by the user
+    /// Returns a Vec of event IDs the user can read based on permission matrix
+    pub async fn get_readable_event_ids(
+        &self,
+        ctx: &PermissionContext,
+        events: &[crate::domain::events::DomainEvent],
+    ) -> Result<Vec<Uuid>, DbError> {
+        resolver::filter_readable_events(&self.pool, ctx, events).await
+    }
+
     async fn check_permissions(
         &self,
         ctx: &PermissionContext,

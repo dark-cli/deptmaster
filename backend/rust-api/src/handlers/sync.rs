@@ -53,43 +53,6 @@ pub struct SyncEventsQuery {
     pub since: Option<String>,
 }
 
-// ============ INTERNAL HELPERS ============
-
-/// Check if user can read an event based on permission boundaries
-fn can_read_event(
-    event: &DomainEvent,
-    contact_ids: &HashSet<Uuid>,
-    transaction_contact_ids: &HashSet<Uuid>,
-) -> bool {
-    match &event.event_data {
-        // Contact events
-        EventData::ContactCreated { .. }
-        | EventData::ContactUpdated { .. }
-        | EventData::ContactDeleted { .. }
-        | EventData::ContactUndone { .. } => contact_ids.contains(&event.aggregate_id),
-        // Transaction events
-        EventData::TransactionCreated { contact_id, .. }
-        | EventData::TransactionUpdated { contact_id, .. } => transaction_contact_ids.contains(contact_id),
-        EventData::TransactionDeleted { .. } | EventData::TransactionUndone { .. } => false,
-        // Permission and wallet management events always allowed (all users see these changes)
-        EventData::WalletUserAdded { .. }
-        | EventData::WalletUserRoleChanged { .. }
-        | EventData::WalletUserRemoved { .. }
-        | EventData::UserGroupCreated { .. }
-        | EventData::UserGroupUpdated { .. }
-        | EventData::UserGroupDeleted { .. }
-        | EventData::UserGroupMemberAdded { .. }
-        | EventData::UserGroupMemberRemoved { .. }
-        | EventData::ContactGroupCreated { .. }
-        | EventData::ContactGroupUpdated { .. }
-        | EventData::ContactGroupDeleted { .. }
-        | EventData::ContactGroupMemberAdded { .. }
-        | EventData::ContactGroupMemberRemoved { .. }
-        | EventData::PermissionMatrixSet { .. }
-        | EventData::WalletDeleted { .. }
-        | EventData::OwnershipTransferred { .. } => true,
-    }
-}
 
 // ============ PUBLIC ENDPOINTS ============
 
@@ -135,24 +98,34 @@ pub async fn get_sync_hash(
             )
         })?;
 
+    // Filter events by permission using permission model
+    let readable_event_ids = perm_model
+        .get_readable_event_ids(&perm_ctx, &events)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to filter events"})),
+            )
+        })?;
+
+    let readable_event_ids_set: HashSet<Uuid> = readable_event_ids.into_iter().collect();
+
     // Filter events by permission and compute hash
     let mut hasher = Sha256::new();
     for event in &events {
-        if can_read_event(event, &readable_contacts, &readable_transaction_contacts) {
+        if readable_event_ids_set.contains(&event.id) {
             hasher.update(event.id.to_string().as_bytes());
             hasher.update(event.created_at.to_string().as_bytes());
         }
     }
 
     let hash = format!("{:x}", hasher.finalize());
-    let event_count = events
-        .iter()
-        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts))
-        .count() as i64;
+    let event_count = readable_event_ids_set.len() as i64;
 
     let last_timestamp = events
         .iter()
-        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts))
+        .filter(|e| readable_event_ids_set.contains(&e.id))
         .last()
         .map(|e| e.created_at.naive_utc());
 
@@ -220,10 +193,23 @@ pub async fn get_sync_events(
             )
         })?;
 
+    // Filter events by permission using permission model
+    let readable_event_ids = perm_model
+        .get_readable_event_ids(&perm_ctx, &events)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to filter events"})),
+            )
+        })?;
+
+    let readable_event_ids_set: HashSet<Uuid> = readable_event_ids.into_iter().collect();
+
     // Convert to response, filtering by permission
     let sync_events: Vec<SyncEvent> = events
         .into_iter()
-        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts))
+        .filter(|e| readable_event_ids_set.contains(&e.id))
         .map(|event| SyncEvent {
             id: event.id.to_string(),
             aggregate_type: event.aggregate_type_enum().as_str().to_string(),
