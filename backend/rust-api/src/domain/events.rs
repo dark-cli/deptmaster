@@ -244,7 +244,6 @@ impl DomainEvent {
         self.event_data.aggregate_type()
     }
 
-    /// Get the event type string
     pub fn event_type(&self) -> &'static str {
         self.event_data.event_type()
     }
@@ -254,14 +253,7 @@ impl DomainEvent {
         // Reconstruct EventData by adding the "type" field back (it was removed during storage)
         let mut event_data_with_type = event.data.clone();
         if let Some(obj) = event_data_with_type.as_object_mut() {
-            // Map event_type to the serde tag discriminator
-            let discriminator = match event.event_type.as_str() {
-                "CREATED" => if event.aggregate_type == "contact" { "contact_created".to_string() } else { "transaction_created".to_string() },
-                "UPDATED" => if event.aggregate_type == "contact" { "contact_updated".to_string() } else { "transaction_updated".to_string() },
-                "DELETED" => if event.aggregate_type == "contact" { "contact_deleted".to_string() } else { "transaction_deleted".to_string() },
-                "UNDO" => if event.aggregate_type == "contact" { "contact_undone".to_string() } else { "transaction_undone".to_string() },
-                t => t.to_lowercase(),
-            };
+            let discriminator = Self::event_type_to_discriminator(&event.aggregate_type, &event.event_type);
             obj.insert("type".to_string(), serde_json::Value::String(discriminator));
         }
 
@@ -278,6 +270,16 @@ impl DomainEvent {
             idempotency_key: event.idempotency_key.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
             event_data,
         })
+    }
+
+    /// Map database stored event_type and aggregate_type to the serde(tag) discriminator
+    /// For contact/transaction: "{aggregate}_{event_type}" (e.g., "contact_created")
+    /// For permission events: just the event_type in lowercase (e.g., "wallet_user_added")
+    fn event_type_to_discriminator(aggregate_type: &str, event_type: &str) -> String {
+        match aggregate_type {
+            "contact" | "transaction" => format!("{}_{}", aggregate_type, event_type.to_lowercase()),
+            _ => event_type.to_lowercase(),
+        }
     }
 
     /// Get permission metadata for this event
