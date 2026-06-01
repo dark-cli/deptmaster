@@ -45,6 +45,36 @@ impl From<EventRowDb> for EventRow {
 }
 
 impl Database {
+    /// Convert database Event to domain DomainEvent.
+    /// This is internal conversion logic - domain layer should not depend on storage types.
+    fn event_to_domain(event: &Event) -> Result<DomainEvent, DbError> {
+        use crate::domain::events::EventDiscriminator;
+
+        // Use strongly-typed discriminator to ensure we handle all event types
+        let discriminator = EventDiscriminator::from_database(&event.aggregate_type, &event.event_type)
+            .map_err(|e| DbError::SerializationError(e))?;
+
+        // Reconstruct EventData by adding the "type" field back (it was removed during storage)
+        let mut event_data_with_type = event.data.clone();
+        if let Some(obj) = event_data_with_type.as_object_mut() {
+            obj.insert("type".to_string(), serde_json::Value::String(discriminator.as_str().to_string()));
+        }
+
+        let event_data = serde_json::from_value::<crate::domain::events::EventData>(event_data_with_type)
+            .map_err(|e| DbError::SerializationError(format!("Failed to deserialize event data: {}", e)))?;
+
+        Ok(DomainEvent {
+            id: event.id,
+            aggregate_id: event.aggregate_id,
+            wallet_id: event.wallet_id,
+            user_id: event.user_id,
+            created_at: event.created_at,
+            version: event.version,
+            idempotency_key: event.idempotency_key.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
+            event_data,
+        })
+    }
+
     pub async fn get_all_events_for_wallet(
         &self,
         wallet_id: Uuid,
@@ -66,8 +96,7 @@ impl Database {
         for db in rows {
             let event_row: EventRow = db.into();
             let event: Event = event_row.into();
-            let domain_event = DomainEvent::from_event(&event)
-                .map_err(|e| DbError::SerializationError(e))?;
+            let domain_event = Self::event_to_domain(&event)?;
             events.push(domain_event);
         }
         Ok(events)
@@ -96,8 +125,7 @@ impl Database {
         for db in rows {
             let event_row: EventRow = db.into();
             let event: Event = event_row.into();
-            let domain_event = DomainEvent::from_event(&event)
-                .map_err(|e| DbError::SerializationError(e))?;
+            let domain_event = Self::event_to_domain(&event)?;
             events.push(domain_event);
         }
         Ok(events)
@@ -121,8 +149,7 @@ impl Database {
             Some(db) => {
                 let event_row: EventRow = db.into();
                 let event: Event = event_row.into();
-                let domain_event = DomainEvent::from_event(&event)
-                    .map_err(|e| DbError::SerializationError(e))?;
+                let domain_event = Self::event_to_domain(&event)?;
                 Ok(Some(domain_event))
             }
         }

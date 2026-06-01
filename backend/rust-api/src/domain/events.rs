@@ -343,31 +343,6 @@ impl DomainEvent {
         self.event_data.event_type()
     }
 
-    /// Convert a generic Event to DomainEvent
-    pub fn from_event(event: &crate::database::models::event::Event) -> Result<Self, String> {
-        // Use strongly-typed discriminator to ensure we handle all event types
-        let discriminator = EventDiscriminator::from_database(&event.aggregate_type, &event.event_type)?;
-
-        // Reconstruct EventData by adding the "type" field back (it was removed during storage)
-        let mut event_data_with_type = event.data.clone();
-        if let Some(obj) = event_data_with_type.as_object_mut() {
-            obj.insert("type".to_string(), serde_json::Value::String(discriminator.as_str().to_string()));
-        }
-
-        let event_data = serde_json::from_value::<EventData>(event_data_with_type)
-            .map_err(|e| format!("Failed to deserialize event data: {}", e))?;
-
-        Ok(Self {
-            id: event.id,
-            aggregate_id: event.aggregate_id,
-            wallet_id: event.wallet_id,
-            user_id: event.user_id,
-            created_at: event.created_at,
-            version: event.version,
-            idempotency_key: event.idempotency_key.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
-            event_data,
-        })
-    }
 
     /// Get permission metadata for this event
     pub fn permission_metadata(
