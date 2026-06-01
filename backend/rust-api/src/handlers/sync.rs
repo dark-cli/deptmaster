@@ -255,7 +255,7 @@ pub async fn get_sync_events(
         })
         .map(|event| SyncEvent {
             id: event.id.to_string(),
-            aggregate_type: event.aggregate_type().to_string(),
+            aggregate_type: event.aggregate_type_enum().as_str().to_string(),
             aggregate_id: event.aggregate_id.to_string(),
             event_type: event.event_type().to_string(),
             event_data: serde_json::to_value(&event.event_data).unwrap_or_default(),
@@ -340,8 +340,8 @@ pub async fn post_sync_events(
         }
 
         // Insert event
-        let aggregate_type = domain_event.aggregate_type();
         let event_type = domain_event.event_type();
+        let aggregate_type = domain_event.aggregate_type_enum().as_str();
 
         if db
             .insert_event_impl(

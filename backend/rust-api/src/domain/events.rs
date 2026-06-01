@@ -244,9 +244,6 @@ impl DomainEvent {
         self.event_data.aggregate_type()
     }
 
-    /// Get the aggregate type as a string (for database storage)
-    pub fn aggregate_type(&self) -> &'static str { self.aggregate_type_enum().as_str() }
-
     /// Get the event type string
     pub fn event_type(&self) -> &'static str {
         self.event_data.event_type()
