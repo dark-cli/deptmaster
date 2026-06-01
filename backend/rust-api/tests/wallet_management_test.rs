@@ -248,7 +248,7 @@ async fn test_update_wallet_user_role() {
         test_helpers::create_test_app_state(pool.clone(), config.clone(), broadcast_tx.clone());
 
     let update_request = wallets::UpdateWalletUserRequest {
-        role: WalletRole::Admin,
+        role: WalletRole::Owner,
     };
 
     let result = wallets::update_wallet_user(

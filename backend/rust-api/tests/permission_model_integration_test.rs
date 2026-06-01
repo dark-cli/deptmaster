@@ -61,17 +61,10 @@ fn test_permission_context_creation() {
     assert_eq!(owner_ctx.wallet_id, wallet_id);
     assert_eq!(owner_ctx.user_id, user_id);
     assert_eq!(owner_ctx.user_role, WalletRole::Owner);
-    assert!(owner_ctx.bypasses_permissions());
-
-    // Test admin context
-    let admin_ctx = PermissionContext::admin(wallet_id, user_id);
-    assert_eq!(admin_ctx.user_role, WalletRole::Admin);
-    assert!(admin_ctx.bypasses_permissions());
 
     // Test member context
     let member_ctx = PermissionContext::member(wallet_id, user_id);
     assert_eq!(member_ctx.user_role, WalletRole::Member);
-    assert!(!member_ctx.bypasses_permissions());
 
     // Test new() constructor with explicit role
     let wallet_id2 = Uuid::new_v4();
