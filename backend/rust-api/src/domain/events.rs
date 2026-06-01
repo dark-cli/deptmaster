@@ -248,7 +248,6 @@ impl DomainEvent {
         self.event_data.event_type()
     }
 
-
     /// Get permission metadata for this event
     pub fn permission_metadata(
         &self,
@@ -337,7 +336,6 @@ impl DomainEvent {
         }
     }
 }
-
 
 /// Custom deserializer for DateTime<Utc> from RFC3339 string
 fn deserialize_datetime_utc<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>

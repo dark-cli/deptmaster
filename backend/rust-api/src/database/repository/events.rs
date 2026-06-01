@@ -141,17 +141,24 @@ impl Database {
     /// This is internal conversion logic - domain layer should not depend on storage types.
     fn event_to_domain(event: &Event) -> Result<DomainEvent, DbError> {
         // Use strongly-typed discriminator to ensure we handle all event types
-        let discriminator = EventDiscriminator::from_database(&event.aggregate_type, &event.event_type)
-            .map_err(|e| DbError::SerializationError(e))?;
+        let discriminator =
+            EventDiscriminator::from_database(&event.aggregate_type, &event.event_type)
+                .map_err(|e| DbError::SerializationError(e))?;
 
         // Reconstruct EventData by adding the "type" field back (it was removed during storage)
         let mut event_data_with_type = event.data.clone();
         if let Some(obj) = event_data_with_type.as_object_mut() {
-            obj.insert("type".to_string(), serde_json::Value::String(discriminator.as_str().to_string()));
+            obj.insert(
+                "type".to_string(),
+                serde_json::Value::String(discriminator.as_str().to_string()),
+            );
         }
 
-        let event_data = serde_json::from_value::<crate::domain::events::EventData>(event_data_with_type)
-            .map_err(|e| DbError::SerializationError(format!("Failed to deserialize event data: {}", e)))?;
+        let event_data =
+            serde_json::from_value::<crate::domain::events::EventData>(event_data_with_type)
+                .map_err(|e| {
+                    DbError::SerializationError(format!("Failed to deserialize event data: {}", e))
+                })?;
 
         Ok(DomainEvent {
             id: event.id,
@@ -160,7 +167,10 @@ impl Database {
             user_id: event.user_id,
             created_at: event.created_at,
             version: event.version,
-            idempotency_key: event.idempotency_key.clone().unwrap_or_else(|| Uuid::new_v4().to_string()),
+            idempotency_key: event
+                .idempotency_key
+                .clone()
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
             event_data,
         })
     }
@@ -221,7 +231,10 @@ impl Database {
         Ok(events)
     }
 
-    pub async fn get_event_by_id_impl(&self, event_id: Uuid) -> Result<Option<DomainEvent>, DbError> {
+    pub async fn get_event_by_id_impl(
+        &self,
+        event_id: Uuid,
+    ) -> Result<Option<DomainEvent>, DbError> {
         let row = sqlx::query_as::<_, EventRowDb>(
             r#"
             SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,

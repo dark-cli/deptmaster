@@ -190,4 +190,3 @@ pub fn create_test_app_state(
         rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
     }
 }
-

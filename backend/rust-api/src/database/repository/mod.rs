@@ -24,7 +24,10 @@ pub trait DatabaseRepository: Send + Sync {
         since_timestamp: DateTime<Utc>,
     ) -> Result<Vec<crate::domain::events::DomainEvent>, DbError>;
 
-    async fn get_event_by_id(&self, event_id: Uuid) -> Result<Option<crate::domain::events::DomainEvent>, DbError>;
+    async fn get_event_by_id(
+        &self,
+        event_id: Uuid,
+    ) -> Result<Option<crate::domain::events::DomainEvent>, DbError>;
 
     async fn get_latest_event_id(&self) -> Result<Option<i64>, DbError>;
 
@@ -507,7 +510,10 @@ impl DatabaseRepository for Database {
         self.get_events_since_impl(wallet_id, since_timestamp).await
     }
 
-    async fn get_event_by_id(&self, event_id: Uuid) -> Result<Option<crate::domain::events::DomainEvent>, DbError> {
+    async fn get_event_by_id(
+        &self,
+        event_id: Uuid,
+    ) -> Result<Option<crate::domain::events::DomainEvent>, DbError> {
         self.get_event_by_id_impl(event_id).await
     }
 

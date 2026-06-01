@@ -55,7 +55,6 @@ pub struct SyncEventsQuery {
 
 // ============ INTERNAL HELPERS ============
 
-
 /// Check if user can read an event based on permission boundaries
 fn can_read_event(
     event: &DomainEvent,
@@ -65,7 +64,7 @@ fn can_read_event(
     match &event.event_data {
         // Contact events
         EventData::ContactCreated { .. }
-     | EventData::ContactUpdated { .. }
+        | EventData::ContactUpdated { .. }
         | EventData::ContactDeleted { .. }
         | EventData::ContactUndone { .. } => match contact_ids {
             None => true,
@@ -73,12 +72,10 @@ fn can_read_event(
         },
         // Transaction events
         EventData::TransactionCreated { contact_id, .. }
-        | EventData::TransactionUpdated { contact_id, .. } => {
-            match transaction_contact_ids {
-                None => true,
-                Some(set) => set.contains(contact_id),
-            }
-        }
+        | EventData::TransactionUpdated { contact_id, .. } => match transaction_contact_ids {
+            None => true,
+            Some(set) => set.contains(contact_id),
+        },
         EventData::TransactionDeleted { .. } | EventData::TransactionUndone { .. } => false,
         // Permission events always allowed (all users see permission changes)
         EventData::WalletUserAdded { .. }
@@ -145,11 +142,7 @@ pub async fn get_sync_hash(
     // Filter events by permission and compute hash
     let mut hasher = Sha256::new();
     for event in &events {
-        if can_read_event(
-            event,
-            &readable_contacts,
-            &readable_transaction_contacts,
-        ) {
+        if can_read_event(event, &readable_contacts, &readable_transaction_contacts) {
             hasher.update(event.id.to_string().as_bytes());
             hasher.update(event.created_at.to_string().as_bytes());
         }
@@ -158,24 +151,12 @@ pub async fn get_sync_hash(
     let hash = format!("{:x}", hasher.finalize());
     let event_count = events
         .iter()
-        .filter(|e| {
-            can_read_event(
-                e,
-                &readable_contacts,
-                &readable_transaction_contacts,
-            )
-        })
+        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts))
         .count() as i64;
 
     let last_timestamp = events
         .iter()
-        .filter(|e| {
-            can_read_event(
-                e,
-                &readable_contacts,
-                &readable_transaction_contacts,
-            )
-        })
+        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts))
         .last()
         .map(|e| e.created_at.naive_utc());
 
@@ -246,13 +227,7 @@ pub async fn get_sync_events(
     // Convert to response, filtering by permission
     let sync_events: Vec<SyncEvent> = events
         .into_iter()
-        .filter(|e| {
-            can_read_event(
-                e,
-                &readable_contacts,
-                &readable_transaction_contacts,
-            )
-        })
+        .filter(|e| can_read_event(e, &readable_contacts, &readable_transaction_contacts))
         .map(|event| SyncEvent {
             id: event.id.to_string(),
             aggregate_type: event.aggregate_type_enum().as_str().to_string(),
