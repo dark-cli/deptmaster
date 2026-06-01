@@ -261,8 +261,12 @@ pub async fn create_my_wallet(
         &serde_json::to_string(&response).unwrap_or_default(),
     );
 
-    // Initialize default permissions (system groups and matrix)
-    if let Err(e) = initialize_wallet_permissions(&db, wallet_id).await {
+    // Initialize owner in wallet_owners table and default permissions
+    if let Err(e) = db.add_wallet_owner(wallet_id, user_id).await {
+        tracing::error!("Failed to add wallet owner: {:?}", e);
+    }
+
+    if let Err(e) = initialize_wallet_permissions(&db, wallet_id, user_id).await {
         tracing::error!(
             "Failed to initialize wallet permissions for {}: {:?}",
             wallet_id,
@@ -273,25 +277,65 @@ pub async fn create_my_wallet(
     Ok((StatusCode::CREATED, Json(response)))
 }
 
-/// Helper to initialize default permissions for a new wallet (all_users, all_contacts, matrix)
-async fn initialize_wallet_permissions(db: &Database, wallet_id: Uuid) -> Result<(), DbError> {
+/// Helper to initialize default permissions for a new wallet
+/// - Creates all_users group for members (default: contact:read, transaction:read)
+/// - Creates __owners__ system group for owners (all permissions)
+/// - Adds creator as owner to both wallet_owners table and __owners__ group
+async fn initialize_wallet_permissions(
+    db: &Database,
+    wallet_id: Uuid,
+    owner_user_id: Uuid,
+) -> Result<(), DbError> {
     use crate::database::repository::DatabaseRepository;
 
-    // 1. Create all_users system user group
-    let ug_id = db.create_user_group(wallet_id, "all_users", true).await?;
+    // 1. Create all_users system user group (for members)
+    let all_users_group = db.create_user_group(wallet_id, "all_users", true).await?;
 
-    // 2. Create all_contacts system contact group
-    let cg_id = db
+    // 2. Create __owners__ system user group (cannot be modified by admins)
+    let owners_group = db
+        .create_user_group(wallet_id, "__owners__", true)
+        .await?;
+
+    // 3. Add owner to owners group
+    db.add_user_group_member(owners_group, owner_user_id).await?;
+
+    // 4. Create all_contacts system contact group
+    let all_contacts = db
         .create_contact_group(wallet_id, "all_contacts", "static", true)
         .await?;
 
-    // 3. Grant default permissions: all_users can only READ contacts/transactions by default.
-    // Events are always viewable (no permission). Explicitly exclude create/update/delete/close to force admins to grant them.
-    let actions = ["contact:read", "transaction:read"];
-
-    for action in actions {
+    // 5. Grant default permissions: all_users (members) get READ only
+    let member_actions = ["contact:read", "transaction:read"];
+    for action in member_actions {
         if let Some(aid) = db.get_permission_action_id(action).await? {
-            db.grant_permission(ug_id, cg_id, aid).await?;
+            db.grant_permission(all_users_group, all_contacts, aid).await?;
+        }
+    }
+
+    // 6. Grant full permissions to owners group (all actions on all_contacts)
+    let owner_actions = [
+        "contact:create",
+        "contact:read",
+        "contact:update",
+        "contact:delete",
+        "contact:edit",
+        "transaction:create",
+        "transaction:read",
+        "transaction:update",
+        "transaction:delete",
+        "user_group:create",
+        "user_group:read",
+        "user_group:update",
+        "user_group:delete",
+        "contact_group:create",
+        "contact_group:read",
+        "contact_group:update",
+        "contact_group:delete",
+    ];
+
+    for action in owner_actions {
+        if let Some(aid) = db.get_permission_action_id(action).await? {
+            db.grant_permission(owners_group, all_contacts, aid).await?;
         }
     }
 
@@ -348,8 +392,12 @@ pub async fn create_wallet(
         &serde_json::to_string(&response).unwrap_or_default(),
     );
 
-    // Initialize default permissions (system groups and matrix)
-    if let Err(e) = initialize_wallet_permissions(&db, wallet_id).await {
+    // Initialize owner and default permissions (system groups and matrix)
+    if let Err(e) = db.add_wallet_owner(wallet_id, user_id).await {
+        tracing::error!("Failed to add wallet owner: {:?}", e);
+    }
+
+    if let Err(e) = initialize_wallet_permissions(&db, wallet_id, user_id).await {
         tracing::error!(
             "Failed to initialize wallet permissions for {}: {:?}",
             wallet_id,
@@ -2447,5 +2495,114 @@ pub async fn put_permission_matrix(
 
     Ok(Json(
         serde_json::json!({"message": "Permission matrix updated"}),
+    ))
+}
+
+/// Transfer wallet ownership to another user
+pub async fn transfer_ownership(
+    Path((wallet_id, new_owner_username)): Path<(String, String)>,
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
+
+    let db = Database::new((*state.db_pool).clone());
+
+    // Check if requester is an owner
+    let is_owner = db
+        .is_wallet_owner(wallet_uuid, auth_user.user_id)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+    if !is_owner {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Only owners can transfer ownership"})),
+        ));
+    }
+
+    // Find user by username
+    let new_owner = db
+        .get_user_by_username(new_owner_username.trim())
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User not found"})),
+            )
+        })?;
+
+    let new_owner_id = new_owner.id;
+
+    // Check if new owner is already a wallet member
+    let is_member = db
+        .wallet_user_exists(wallet_uuid, new_owner_id)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+    if !is_member {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "User is not a member of this wallet"})),
+        ));
+    }
+
+    // Add new owner to wallet_owners
+    db.add_wallet_owner(wallet_uuid, new_owner_id)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to transfer ownership"})),
+            )
+        })?;
+
+    // Create ownership transferred event
+    let event_data = serde_json::json!({
+        "from": auth_user.user_id.to_string(),
+        "to": new_owner_id.to_string(),
+    });
+
+    sync::insert_permission_event_and_apply(
+        &state,
+        auth_user.user_id,
+        wallet_uuid,
+        wallet_uuid,
+        "OWNERSHIP_TRANSFERRED",
+        event_data,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("transfer_ownership: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to transfer ownership"})),
+        )
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({"message": "Ownership transferred"})),
     ))
 }

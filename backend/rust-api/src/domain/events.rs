@@ -160,6 +160,16 @@ pub enum EventData {
         #[serde(default)]
         data: serde_json::Value,
     },
+
+    // Wallet management events
+    WalletDeleted {
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    OwnershipTransferred {
+        from: Uuid,
+        to: Uuid,
+    },
 }
 
 impl EventData {
@@ -187,7 +197,9 @@ impl EventData {
             | EventData::ContactGroupDeleted { .. }
             | EventData::ContactGroupMemberAdded { .. }
             | EventData::ContactGroupMemberRemoved { .. }
-            | EventData::PermissionMatrixSet { .. } => AggregateType::Permission,
+            | EventData::PermissionMatrixSet { .. }
+            | EventData::WalletDeleted { .. }
+            | EventData::OwnershipTransferred { .. } => AggregateType::Permission,
         }
     }
 
@@ -216,6 +228,8 @@ impl EventData {
             EventData::ContactGroupMemberAdded { .. } => "CONTACT_GROUP_MEMBER_ADDED",
             EventData::ContactGroupMemberRemoved { .. } => "CONTACT_GROUP_MEMBER_REMOVED",
             EventData::PermissionMatrixSet { .. } => "PERMISSION_MATRIX_SET",
+            EventData::WalletDeleted { .. } => "WALLET_DELETED",
+            EventData::OwnershipTransferred { .. } => "OWNERSHIP_TRANSFERRED",
         }
     }
 }
@@ -332,6 +346,12 @@ impl DomainEvent {
             }
             EventData::PermissionMatrixSet { .. } => {
                 vec![(Action::UserGroupUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::WalletDeleted { .. } => {
+                vec![(Action::WalletDelete, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::OwnershipTransferred { .. } => {
+                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
             }
         }
     }

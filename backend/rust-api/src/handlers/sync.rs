@@ -77,7 +77,7 @@ fn can_read_event(
             Some(set) => set.contains(contact_id),
         },
         EventData::TransactionDeleted { .. } | EventData::TransactionUndone { .. } => false,
-        // Permission events always allowed (all users see permission changes)
+        // Permission and wallet management events always allowed (all users see these changes)
         EventData::WalletUserAdded { .. }
         | EventData::WalletUserRoleChanged { .. }
         | EventData::WalletUserRemoved { .. }
@@ -91,7 +91,9 @@ fn can_read_event(
         | EventData::ContactGroupDeleted { .. }
         | EventData::ContactGroupMemberAdded { .. }
         | EventData::ContactGroupMemberRemoved { .. }
-        | EventData::PermissionMatrixSet { .. } => true,
+        | EventData::PermissionMatrixSet { .. }
+        | EventData::WalletDeleted { .. }
+        | EventData::OwnershipTransferred { .. } => true,
     }
 }
 
