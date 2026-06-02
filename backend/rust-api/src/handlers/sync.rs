@@ -200,12 +200,15 @@ pub async fn post_sync_events(
     for domain_event in unique_events {
         match insert_event(&db, wallet_id, user_id, &domain_event).await {
             Ok(inserted) => {
-                accepted.push(domain_event.id.to_string());
                 if inserted {
-                    // Only process newly inserted events (cache, projections, broadcasts)
+                    // Newly inserted by this request - process it
+                    accepted.push(domain_event.id.to_string());
                     new_events.push(domain_event);
+                } else {
+                    // Event was inserted by concurrent request - skip it
+                    skipped.push(domain_event.id.to_string());
+                    tracing::debug!("Event {} already in database from concurrent request", domain_event.id);
                 }
-                // Already-existing events are accepted but not re-processed
             }
             Err(e) => {
                 tracing::error!("Failed to insert event {}: {:?}", domain_event.id, e);
