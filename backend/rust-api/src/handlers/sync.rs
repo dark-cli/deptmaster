@@ -193,9 +193,8 @@ pub async fn post_sync_events(
     let (unique_events, duplicate_ids) = deduplicate_events(events);
 
     // Check which events already exist in database
-    let unique_event_ids: Vec<Uuid> = unique_events.iter().map(|e| e.id).collect();
     let existing_ids = db
-        .get_existing_event_ids_impl(&unique_event_ids)
+        .get_existing_event_ids_impl(&unique_events.iter().map(|e| e.id).collect::<Vec<_>>())
         .await
         .map_err(|_| {
             (
@@ -203,7 +202,6 @@ pub async fn post_sync_events(
                 Json(serde_json::json!({"error": "Database error"})),
             )
         })?;
-    let existing_set: HashSet<Uuid> = existing_ids.into_iter().collect();
 
     // Process events and collect accepted/skipped
     let mut accepted = Vec::new();
@@ -211,7 +209,7 @@ pub async fn post_sync_events(
     let mut accepted_events = Vec::new();
 
     for domain_event in unique_events {
-        if existing_set.contains(&domain_event.id) {
+        if existing_ids.contains(&domain_event.id) {
             skipped.push(domain_event.id.to_string());
             continue;
         }
