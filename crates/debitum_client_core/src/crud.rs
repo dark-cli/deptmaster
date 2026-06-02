@@ -35,6 +35,13 @@ fn append_event(
         "[debitum_rs] crud::append_event wallet_id={} aggregate={}/{} event_type={}",
         wallet_id, aggregate_type, aggregate_id, event_type
     );
+    // TODO: ARCHITECTURE FIX NEEDED
+    // This should NOT generate event_id. The server generates event_id at insert time.
+    // Instead, generate an idempotency_key per UI action to prevent duplicate form submissions.
+    // Client should:
+    // 1. Generate idempotency_key (per form submit, dialog action, etc)
+    // 2. Send: event_data + idempotency_key (NOT event_id)
+    // 3. Store returned event_id from server for future operations (delete, undo, etc)
     let id = Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
     let event_data_str = serde_json::to_string(&event_data).map_err(|e| e.to_string())?;

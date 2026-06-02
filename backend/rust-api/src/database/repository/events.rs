@@ -320,7 +320,7 @@ impl Database {
             r#"
             INSERT INTO events (event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, event_version, idempotency_key, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-            ON CONFLICT (event_id) DO NOTHING
+            ON CONFLICT (idempotency_key) DO NOTHING
             RETURNING id
             "#
         )
