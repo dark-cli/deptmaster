@@ -212,6 +212,51 @@ pub fn auth_user_extension(
     })
 }
 
+/// Create a contact in projections and add it to the all_contacts group
+/// This is needed for permission checks to work during event sync
+pub async fn setup_contact_for_wallet(
+    pool: &PgPool,
+    wallet_id: Uuid,
+    user_id: Uuid,
+    contact_id: Uuid,
+    name: &str,
+) {
+    // Create contact in projection
+    sqlx::query(
+        "INSERT INTO contacts_projection (id, user_id, wallet_id, name, is_deleted, created_at, updated_at, last_event_id)
+         VALUES ($1, $2, $3, $4, false, NOW(), NOW(), 0)"
+    )
+    .bind(contact_id)
+    .bind(user_id)
+    .bind(wallet_id)
+    .bind(name)
+    .execute(pool)
+    .await
+    .ok();
+
+    // Add to all_contacts group
+    let all_contacts_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
+    )
+    .bind(wallet_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(cg_id) = all_contacts_id {
+        sqlx::query(
+            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(contact_id)
+        .bind(cg_id)
+        .execute(pool)
+        .await
+        .ok();
+    }
+}
+
 /// Create AppState for tests
 pub fn create_test_app_state(
     pool: PgPool,

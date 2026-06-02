@@ -175,51 +175,42 @@ impl Database {
         })
     }
 
-    pub async fn get_all_events_for_wallet(
+    pub async fn get_wallet_events_impl(
         &self,
         wallet_id: Uuid,
+        since: Option<DateTime<Utc>>,
     ) -> Result<Vec<DomainEvent>, DbError> {
-        let rows = sqlx::query_as::<_, EventRowDb>(
-            r#"
-            SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
-                   wallet_id, user_id, created_at, event_version, idempotency_key
-            FROM events
-            WHERE wallet_id = $1
-            ORDER BY created_at ASC
-            "#,
-        )
-        .bind(wallet_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut events = Vec::new();
-        for db in rows {
-            let event_row: EventRow = db.into();
-            let event: Event = event_row.into();
-            let domain_event = Self::event_to_domain(&event)?;
-            events.push(domain_event);
-        }
-        Ok(events)
-    }
-
-    pub async fn get_events_since_impl(
-        &self,
-        wallet_id: Uuid,
-        since_timestamp: DateTime<Utc>,
-    ) -> Result<Vec<DomainEvent>, DbError> {
-        let rows = sqlx::query_as::<_, EventRowDb>(
-            r#"
-            SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
-                   wallet_id, user_id, created_at, event_version, idempotency_key
-            FROM events
-            WHERE wallet_id = $1 AND created_at > $2
-            ORDER BY created_at ASC
-            "#,
-        )
-        .bind(wallet_id)
-        .bind(since_timestamp)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = match since {
+            Some(since_timestamp) => {
+                sqlx::query_as::<_, EventRowDb>(
+                    r#"
+                    SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
+                           wallet_id, user_id, created_at, event_version, idempotency_key
+                    FROM events
+                    WHERE wallet_id = $1 AND created_at > $2
+                    ORDER BY created_at ASC
+                    "#,
+                )
+                .bind(wallet_id)
+                .bind(since_timestamp)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_as::<_, EventRowDb>(
+                    r#"
+                    SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
+                           wallet_id, user_id, created_at, event_version, idempotency_key
+                    FROM events
+                    WHERE wallet_id = $1
+                    ORDER BY created_at ASC
+                    "#,
+                )
+                .bind(wallet_id)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
 
         let mut events = Vec::new();
         for db in rows {
@@ -256,6 +247,77 @@ impl Database {
                 Ok(Some(domain_event))
             }
         }
+    }
+
+    pub async fn get_existing_event_ids_impl(
+        &self,
+        event_ids: &[Uuid],
+    ) -> Result<Vec<Uuid>, DbError> {
+        if event_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let existing: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT event_id FROM events WHERE event_id = ANY($1)",
+        )
+        .bind(event_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(existing)
+    }
+
+    pub async fn get_readable_events_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<DomainEvent>, DbError> {
+        let rows = match since {
+            Some(since_timestamp) => {
+                sqlx::query_as::<_, EventRowDb>(
+                    r#"
+                    SELECT e.id, e.event_id, e.aggregate_type, e.aggregate_id, e.event_type,
+                           e.event_data, e.wallet_id, e.user_id, e.created_at, e.event_version, e.idempotency_key
+                    FROM events e
+                    INNER JOIN user_readable_events ure ON e.event_id = ure.event_id
+                    WHERE e.wallet_id = $1 AND ure.user_id = $2 AND e.created_at > $3
+                    ORDER BY e.created_at ASC
+                    "#,
+                )
+                .bind(wallet_id)
+                .bind(user_id)
+                .bind(since_timestamp)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_as::<_, EventRowDb>(
+                    r#"
+                    SELECT e.id, e.event_id, e.aggregate_type, e.aggregate_id, e.event_type,
+                           e.event_data, e.wallet_id, e.user_id, e.created_at, e.event_version, e.idempotency_key
+                    FROM events e
+                    INNER JOIN user_readable_events ure ON e.event_id = ure.event_id
+                    WHERE e.wallet_id = $1 AND ure.user_id = $2
+                    ORDER BY e.created_at ASC
+                    "#,
+                )
+                .bind(wallet_id)
+                .bind(user_id)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+
+        let mut events = Vec::new();
+        for db in rows {
+            let event_row: EventRow = db.into();
+            let event: Event = event_row.into();
+            let domain_event = Self::event_to_domain(&event)?;
+            events.push(domain_event);
+        }
+
+        Ok(events)
     }
 
     pub async fn insert_event_impl(

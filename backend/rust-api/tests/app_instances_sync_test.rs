@@ -5,8 +5,10 @@
 //! Run with: cargo test --test app_instances_sync_test -- --ignored
 
 use axum::extract::Query;
+use chrono::Utc;
+use debt_tracker_api::domain::events::{DomainEvent, EventData};
 use debt_tracker_api::handlers::sync::{
-    get_sync_events, get_sync_hash, SyncEvent, SyncEventsQuery,
+    get_sync_events, get_sync_hash, post_sync_events, SyncEvent, SyncEventsQuery,
 };
 use debt_tracker_api::middleware::auth::AuthUser;
 use debt_tracker_api::middleware::wallet_context::WalletContext;
@@ -197,39 +199,48 @@ async fn test_sync_read_permission_filter_and_full_pull() {
         .await
         .expect("add contact A to Limited");
 
-    // Insert two contact events (CREATED) so owner sees both, member should see only A's
+    // Create domain events for contacts A and B
     let event_a_id = Uuid::new_v4();
     let event_b_id = Uuid::new_v4();
-    sqlx::query(
-        r#"INSERT INTO events (event_id, user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-           VALUES ($1, $2, $3, 'contact', $4, 'CREATED', 1, $5, NOW())"#,
-    )
-    .bind(event_a_id)
-    .bind(owner_id)
-    .bind(wallet_id)
-    .bind(contact_a_id)
-    .bind(serde_json::json!({"name": "Contact A"}))
-    .execute(&pool)
-    .await
-    .expect("insert event A");
-    sqlx::query(
-        r#"INSERT INTO events (event_id, user_id, wallet_id, aggregate_type, aggregate_id, event_type, event_version, event_data, created_at)
-           VALUES ($1, $2, $3, 'contact', $4, 'CREATED', 1, $5, NOW())"#,
-    )
-    .bind(event_b_id)
-    .bind(owner_id)
-    .bind(wallet_id)
-    .bind(contact_b_id)
-    .bind(serde_json::json!({"name": "Contact B"}))
-    .execute(&pool)
-    .await
-    .expect("insert event B");
+    let event_a = DomainEvent {
+        id: event_a_id,
+        aggregate_id: contact_a_id,
+        wallet_id,
+        user_id: owner_id,
+        created_at: Utc::now(),
+        version: 1,
+        idempotency_key: Uuid::new_v4().to_string(),
+        event_data: EventData::ContactCreated {
+            name: "Contact A".to_string(),
+            username: None,
+            phone: None,
+            email: None,
+            notes: None,
+        },
+    };
+    let event_b = DomainEvent {
+        id: event_b_id,
+        aggregate_id: contact_b_id,
+        wallet_id,
+        user_id: owner_id,
+        created_at: Utc::now(),
+        version: 1,
+        idempotency_key: Uuid::new_v4().to_string(),
+        event_data: EventData::ContactCreated {
+            name: "Contact B".to_string(),
+            username: None,
+            phone: None,
+            email: None,
+            notes: None,
+        },
+    };
 
     let config =
         Arc::new(Config::from_env().expect("Config::from_env (set TEST_DATABASE_URL etc.)"));
     let broadcast_tx = debt_tracker_api::websocket::create_broadcast_channel();
     let app_state = create_test_app_state(pool, config, broadcast_tx);
 
+    // Insert events using post_sync_events from owner (which populates user_readable_events)
     let instance_owner = AppInstance {
         auth_user: AuthUser {
             user_id: owner_id,
@@ -246,6 +257,23 @@ async fn test_sync_read_permission_filter_and_full_pull() {
         },
         wallet_context: WalletContext::new(wallet_id, WalletRole::Member),
     };
+
+    // Post the events through the sync API (which populates user_readable_events)
+    let sync_result = post_sync_events(
+        axum::extract::State(app_state.clone()),
+        axum::extract::Extension(instance_owner.wallet_context.clone()),
+        axum::extract::Extension(instance_owner.auth_user.clone()),
+        axum::Json(vec![event_a, event_b]),
+    )
+    .await;
+    assert!(sync_result.is_ok(), "post_sync_events should succeed");
+    let response = sync_result.unwrap().0;
+    assert_eq!(
+        response.accepted.len(),
+        2,
+        "both events should be accepted, got {}",
+        response.accepted.len()
+    );
 
     // Owner: full pull sees both events
     let owner_events = instance_owner.get_sync_events(&app_state, None).await;

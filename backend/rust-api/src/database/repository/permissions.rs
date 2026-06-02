@@ -1,6 +1,6 @@
 use crate::database::error::DbError;
 use crate::database::models::*;
-use crate::database::repository::Database;
+use crate::database::repository::{Database, hash::UserEventHash};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -501,6 +501,7 @@ impl Database {
     }
 
     // User readable events - denormalized cache for efficient sync hash/events queries
+    // Also updates incremental hash via UserEventHash private API
     pub async fn add_readable_event_impl(
         &self,
         wallet_id: Uuid,
@@ -519,6 +520,10 @@ impl Database {
         .bind(event_id)
         .execute(&self.pool)
         .await?;
+
+        // Update incremental hash (private API called on readable events change)
+        let _ = UserEventHash::calculate_and_store(&self.pool, wallet_id, user_id, event_id).await;
+
         Ok(())
     }
 
@@ -534,6 +539,10 @@ impl Database {
         .bind(user_id)
         .execute(&self.pool)
         .await?;
+
+        // Reset hash when cache is cleared (private API)
+        UserEventHash::reset(&self.pool, wallet_id, user_id).await?;
+
         Ok(())
     }
 
@@ -557,36 +566,6 @@ impl Database {
         Ok(ids)
     }
 
-    pub async fn get_readable_events_hash_impl(
-        &self,
-        wallet_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<(String, i64, Option<chrono::NaiveDateTime>), DbError> {
-        // Note: This assumes user_readable_events cache is populated.
-        // For backward compatibility with direct event insertion (tests),
-        // the sync handlers should populate the cache when events are inserted.
-        let row = sqlx::query_as::<_, (Option<String>, i64, Option<chrono::NaiveDateTime>)>(
-            r#"
-            SELECT
-                CASE
-                    WHEN COUNT(*) = 0 THEN ''
-                    ELSE md5(string_agg(event_id::text ORDER BY created_at)::text)
-                END,
-                COUNT(*),
-                MAX(created_at)
-            FROM user_readable_events
-            WHERE wallet_id = $1 AND user_id = $2
-            "#,
-        )
-        .bind(wallet_id)
-        .bind(user_id)
-        .fetch_one(&self.pool)
-        .await?;
-
-        let hash = row.0.unwrap_or_default();
-        Ok((hash, row.1, row.2))
-    }
-
     pub async fn get_wallet_users_impl(
         &self,
         wallet_id: Uuid,
@@ -598,6 +577,33 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
         Ok(users)
+    }
+
+    pub async fn get_sync_hash_data_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(String, i64, Option<chrono::NaiveDateTime>), DbError> {
+        let row: (String, i64, Option<chrono::NaiveDateTime>) = sqlx::query_as(
+            r#"
+            SELECT
+              COALESCE(ueh.hash, '') as hash,
+              COUNT(ure.event_id) as event_count,
+              MAX(e.created_at) as last_timestamp
+            FROM user_event_hashes ueh
+            LEFT JOIN user_readable_events ure ON ueh.wallet_id = ure.wallet_id AND ueh.user_id = ure.user_id
+            LEFT JOIN events e ON ure.event_id = e.event_id
+            WHERE ueh.wallet_id = $1 AND ueh.user_id = $2
+            GROUP BY ueh.hash
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or((String::new(), 0, None));
+
+        Ok(row)
     }
 
     pub async fn rebuild_readable_events_for_user_impl(
