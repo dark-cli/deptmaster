@@ -192,35 +192,29 @@ pub async fn post_sync_events(
     // Deduplicate within batch
     let (unique_events, duplicate_ids) = deduplicate_events(events);
 
-    // Check which events already exist in database
-    let existing_ids = db
-        .get_existing_event_ids_impl(&unique_events.iter().map(|e| e.id).collect::<Vec<_>>())
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?;
-
-    // Process events and collect accepted/skipped
+    // Try to insert all unique events, let database handle conflicts
     let mut accepted = Vec::new();
     let mut skipped = duplicate_ids;
     let mut accepted_events = Vec::new();
 
     for domain_event in unique_events {
-        if existing_ids.contains(&domain_event.id) {
-            skipped.push(domain_event.id.to_string());
-            continue;
+        match insert_event(&db, wallet_id, user_id, &domain_event).await {
+            Ok(inserted) => {
+                if inserted {
+                    // Event was actually inserted (new to database)
+                    accepted.push(domain_event.id.to_string());
+                    accepted_events.push(domain_event);
+                } else {
+                    // Event already existed in database (ON CONFLICT skipped it)
+                    skipped.push(domain_event.id.to_string());
+                }
+            }
+            Err(e) => {
+                // Insert failed for other reasons
+                tracing::error!("Failed to insert event {}: {:?}", domain_event.id, e);
+                skipped.push(domain_event.id.to_string());
+            }
         }
-
-        if insert_event(&db, wallet_id, user_id, &domain_event).await.is_err() {
-            skipped.push(domain_event.id.to_string());
-            continue;
-        }
-
-        accepted.push(domain_event.id.to_string());
-        accepted_events.push(domain_event);
     }
 
     // Batch populate cache for all accepted events (automatically done by database)
@@ -284,7 +278,7 @@ async fn insert_event(
     wallet_id: Uuid,
     user_id: Uuid,
     domain_event: &DomainEvent,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     let mut event_data = serde_json::to_value(&domain_event.event_data)
         .unwrap_or_else(|_| serde_json::json!({}));
 
@@ -292,7 +286,7 @@ async fn insert_event(
         obj.remove("type");
     }
 
-    db.insert_event_impl(
+    let inserted_id = db.insert_event_impl(
         domain_event.id,
         domain_event.aggregate_id,
         domain_event.aggregate_type_enum().as_str().to_string(),
@@ -305,7 +299,8 @@ async fn insert_event(
     )
     .await?;
 
-    Ok(())
+    // If id is 0, event already existed (ON CONFLICT DO NOTHING returned nothing)
+    Ok(inserted_id > 0)
 }
 
 async fn apply_events_batch(

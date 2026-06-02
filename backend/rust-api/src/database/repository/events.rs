@@ -251,24 +251,6 @@ impl Database {
         }
     }
 
-    pub async fn get_existing_event_ids_impl(
-        &self,
-        event_ids: &[Uuid],
-    ) -> Result<Vec<Uuid>, DbError> {
-        if event_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let existing: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT event_id FROM events WHERE event_id = ANY($1)",
-        )
-        .bind(event_ids)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(existing)
-    }
-
     pub async fn get_readable_events_impl(
         &self,
         wallet_id: Uuid,
