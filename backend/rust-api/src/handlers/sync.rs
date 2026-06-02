@@ -195,22 +195,19 @@ pub async fn post_sync_events(
     // Try to insert all unique events, let database handle conflicts
     let mut accepted = Vec::new();
     let mut skipped = duplicate_ids;
-    let mut accepted_events = Vec::new();
+    let mut new_events = Vec::new();  // Only newly inserted, for processing
 
     for domain_event in unique_events {
         match insert_event(&db, wallet_id, user_id, &domain_event).await {
             Ok(inserted) => {
+                accepted.push(domain_event.id.to_string());
                 if inserted {
-                    // Event was actually inserted (new to database)
-                    accepted.push(domain_event.id.to_string());
-                    accepted_events.push(domain_event);
-                } else {
-                    // Event already existed in database (ON CONFLICT skipped it)
-                    skipped.push(domain_event.id.to_string());
+                    // Only process newly inserted events (cache, projections, broadcasts)
+                    new_events.push(domain_event);
                 }
+                // Already-existing events are accepted but not re-processed
             }
             Err(e) => {
-                // Insert failed for other reasons
                 tracing::error!("Failed to insert event {}: {:?}", domain_event.id, e);
                 skipped.push(domain_event.id.to_string());
             }
@@ -218,17 +215,17 @@ pub async fn post_sync_events(
     }
 
     // Batch populate cache for all accepted events (automatically done by database)
-    if !accepted_events.is_empty() {
-        if let Err(e) = db.populate_event_cache(wallet_id, &accepted_events).await {
+    if !new_events.is_empty() {
+        if let Err(e) = db.populate_event_cache(wallet_id, &new_events).await {
             tracing::error!("Error populating event cache: {:?}", e);
         }
 
         // Batch apply all events to projections
-        let event_ids: Vec<Uuid> = accepted_events.iter().map(|e| e.id).collect();
+        let event_ids: Vec<Uuid> = new_events.iter().map(|e| e.id).collect();
         apply_events_batch(&db, wallet_id, user_id, &event_ids).await;
 
         // Track undo events for rebuild
-        let has_undo = accepted_events.iter().any(|e| is_undo_event(&e.event_data));
+        let has_undo = new_events.iter().any(|e| is_undo_event(&e.event_data));
         if has_undo {
             tracing::info!("UNDO event processed, rebuilding wallet projections");
             if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
@@ -238,7 +235,7 @@ pub async fn post_sync_events(
 
         // Batch broadcast: group by type and notify once per type
         let mut broadcast_types = HashSet::new();
-        for event in &accepted_events {
+        for event in &new_events {
             broadcast_types.insert(get_broadcast_type(&event.event_data));
         }
         for broadcast_type in broadcast_types {
@@ -246,7 +243,7 @@ pub async fn post_sync_events(
         }
 
         // Handle snapshots for each event that triggers one
-        for domain_event in accepted_events {
+        for domain_event in new_events {
             create_snapshot_if_needed(&db, &state, wallet_id, &domain_event).await;
         }
     }
