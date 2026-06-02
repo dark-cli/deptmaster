@@ -2,10 +2,12 @@ use crate::database::error::DbError;
 use crate::database::models::event::{Event, EventRow};
 use crate::database::repository::Database;
 use crate::domain::events::DomainEvent;
+use crate::permissions::{PermissionContext, PermissionModel};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
+use std::str::FromStr;
 use uuid::Uuid;
 
 // ============ EVENT DISCRIMINATOR (REPOSITORY INTERNAL) ============
@@ -353,6 +355,44 @@ impl Database {
         .await?;
 
         Ok(result.unwrap_or(0))
+    }
+
+    /// Populate readable_events cache for inserted events.
+    /// Automatically called after events are inserted to make them visible to users based on permissions.
+    pub async fn populate_event_cache(
+        &self,
+        wallet_id: Uuid,
+        events: &[DomainEvent],
+    ) -> Result<(), DbError> {
+        if events.is_empty() {
+            return Ok(());
+        }
+
+        // Get all wallet users
+        let wallet_users = self.get_wallet_users_impl(wallet_id).await?;
+        let perm_model = PermissionModel::new(self.pool.clone());
+
+        // For each event, check which users can read it and populate cache
+        for event in events {
+            for (wallet_user_id, role_str) in &wallet_users {
+                let user_role = crate::permissions::WalletRole::from_str(role_str)
+                    .unwrap_or(crate::permissions::WalletRole::Member);
+                let user_perm_ctx = PermissionContext::new(wallet_id, *wallet_user_id, user_role);
+
+                // Check if user can read this event
+                if let Ok(readable_ids) = perm_model
+                    .get_readable_event_ids(&user_perm_ctx, &[event.clone()])
+                    .await
+                {
+                    if !readable_ids.is_empty() {
+                        // Add to user's readable events
+                        let _ = self.add_readable_event_impl(wallet_id, *wallet_user_id, event.id).await;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn delete_event_impl(&self, event_id: Uuid) -> Result<bool, DbError> {

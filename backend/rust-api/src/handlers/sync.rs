@@ -223,9 +223,11 @@ pub async fn post_sync_events(
         accepted_events.push(domain_event);
     }
 
-    // Batch populate cache for all accepted events
+    // Batch populate cache for all accepted events (automatically done by database)
     if !accepted_events.is_empty() {
-        populate_cache_for_events(&db, &state.db_pool, wallet_id, &accepted_events).await;
+        if let Err(e) = db.populate_event_cache(wallet_id, &accepted_events).await {
+            tracing::error!("Error populating event cache: {:?}", e);
+        }
 
         // Batch apply all events to projections
         let event_ids: Vec<Uuid> = accepted_events.iter().map(|e| e.id).collect();
@@ -304,42 +306,6 @@ async fn insert_event(
     .await?;
 
     Ok(())
-}
-
-async fn populate_cache_for_events(
-    db: &Database,
-    pool: &sqlx::PgPool,
-    wallet_id: Uuid,
-    events: &[DomainEvent],
-) {
-    let wallet_users = match db.get_wallet_users_impl(wallet_id).await {
-        Ok(users) => users,
-        Err(e) => {
-            tracing::error!("Error fetching wallet users: {:?}", e);
-            return;
-        }
-    };
-
-    let perm_model = PermissionModel::new(pool.clone());
-
-    for event in events {
-        for (wallet_user_id, role_str) in &wallet_users {
-            let user_role = crate::permissions::WalletRole::from_str(role_str)
-                .unwrap_or(crate::permissions::WalletRole::Member);
-            let user_perm_ctx = PermissionContext::new(wallet_id, *wallet_user_id, user_role);
-
-            if let Ok(readable_ids) = perm_model
-                .get_readable_event_ids(&user_perm_ctx, &[event.clone()])
-                .await
-            {
-                if !readable_ids.is_empty() {
-                    if let Err(e) = db.add_readable_event_impl(wallet_id, *wallet_user_id, event.id).await {
-                        tracing::error!("Error adding readable event: {:?}", e);
-                    }
-                }
-            }
-        }
-    }
 }
 
 async fn apply_events_batch(
