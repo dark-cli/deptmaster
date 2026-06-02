@@ -200,13 +200,13 @@ pub async fn post_sync_events(
     for domain_event in unique_events {
         match insert_event(&db, wallet_id, user_id, &domain_event).await {
             Ok(inserted) => {
+                accepted.push(domain_event.id.to_string());
                 if inserted {
                     // Newly inserted by this request - process it
-                    accepted.push(domain_event.id.to_string());
                     new_events.push(domain_event);
                 } else {
-                    // Event was inserted by concurrent request - skip it
-                    skipped.push(domain_event.id.to_string());
+                    // Event was inserted by concurrent request - already in DB and processed
+                    // Accept it but don't re-process (race condition handling)
                     tracing::debug!("Event {} already in database from concurrent request", domain_event.id);
                 }
             }
@@ -295,7 +295,7 @@ async fn insert_event(
         wallet_id,
         user_id,
         domain_event.version,
-        None,
+        Some(domain_event.idempotency_key.clone()),
     )
     .await?;
 
