@@ -226,23 +226,33 @@ pub async fn post_sync_events(
     // Batch populate cache for all accepted events
     if !accepted_events.is_empty() {
         populate_cache_for_events(&db, &state.db_pool, wallet_id, &accepted_events).await;
-    }
 
-    // Apply events, broadcast, handle undo, snapshot
-    for domain_event in accepted_events {
-        let event_id = domain_event.id;
+        // Batch apply all events to projections
+        let event_ids: Vec<Uuid> = accepted_events.iter().map(|e| e.id).collect();
+        apply_events_batch(&db, wallet_id, user_id, &event_ids).await;
 
-        apply_event_to_projections(&db, event_id, wallet_id, user_id).await;
-        websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, get_broadcast_type(&domain_event.event_data));
-
-        if is_undo_event(&domain_event.event_data) {
+        // Track undo events for rebuild
+        let has_undo = accepted_events.iter().any(|e| is_undo_event(&e.event_data));
+        if has_undo {
             tracing::info!("UNDO event processed, rebuilding wallet projections");
             if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
                 tracing::error!("Error rebuilding projections: {:?}", e);
             }
         }
 
-        create_snapshot_if_needed(&db, &state, wallet_id, &domain_event).await;
+        // Batch broadcast: group by type and notify once per type
+        let mut broadcast_types = HashSet::new();
+        for event in &accepted_events {
+            broadcast_types.insert(get_broadcast_type(&event.event_data));
+        }
+        for broadcast_type in broadcast_types {
+            websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, broadcast_type);
+        }
+
+        // Handle snapshots for each event that triggers one
+        for domain_event in accepted_events {
+            create_snapshot_if_needed(&db, &state, wallet_id, &domain_event).await;
+        }
     }
 
     Ok(Json(SyncEventsResponse {
@@ -332,16 +342,20 @@ async fn populate_cache_for_events(
     }
 }
 
-async fn apply_event_to_projections(
+async fn apply_events_batch(
     db: &Database,
-    event_id: Uuid,
     wallet_id: Uuid,
     user_id: Uuid,
+    event_ids: &[Uuid],
 ) {
+    if event_ids.is_empty() {
+        return;
+    }
+
     let rows: Vec<_> = sqlx::query(
-        "SELECT id, event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, created_at, event_version FROM events WHERE event_id = $1 AND wallet_id = $2"
+        "SELECT id, event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, created_at, event_version FROM events WHERE event_id = ANY($1) AND wallet_id = $2"
     )
-    .bind(event_id)
+    .bind(event_ids)
     .bind(wallet_id)
     .fetch_all(db.pool())
     .await
@@ -351,7 +365,7 @@ async fn apply_event_to_projections(
         let row_refs: Vec<_> = rows.iter().collect();
         let mut undone_set = HashSet::new();
         if let Err(e) = db.apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set).await {
-            tracing::error!("Error applying event: {:?}", e);
+            tracing::error!("Error applying event batch: {:?}", e);
         }
     }
 }
