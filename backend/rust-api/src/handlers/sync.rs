@@ -5,7 +5,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::database::repository::Database;
@@ -189,30 +189,20 @@ pub async fn post_sync_events(
         return Err(responses::insufficient_permission_response());
     }
 
-    // Deduplicate within batch
-    let (unique_events, duplicate_ids) = deduplicate_events(events);
-
-    // Try to insert all unique events, let database handle conflicts
+    // Try to insert all events. Database enforces uniqueness on event_id and idempotency_key.
     let mut accepted = Vec::new();
-    let mut skipped = duplicate_ids;
-    let mut new_events = Vec::new();  // Only newly inserted, for processing
+    let mut conflicts = Vec::new();
+    let mut new_events = Vec::new();
 
-    for domain_event in unique_events {
+    for domain_event in events {
         match insert_event(&db, wallet_id, user_id, &domain_event).await {
-            Ok(inserted) => {
+            Ok(_inserted_id) => {
                 accepted.push(domain_event.id.to_string());
-                if inserted {
-                    // Newly inserted by this request - process it
-                    new_events.push(domain_event);
-                } else {
-                    // Event was inserted by concurrent request - already in DB and processed
-                    // Accept it but don't re-process (race condition handling)
-                    tracing::debug!("Event {} already in database from concurrent request", domain_event.id);
-                }
+                new_events.push(domain_event);
             }
             Err(e) => {
-                tracing::error!("Failed to insert event {}: {:?}", domain_event.id, e);
-                skipped.push(domain_event.id.to_string());
+                tracing::debug!("Failed to insert event {} (duplicate key): {:?}", domain_event.id, e);
+                conflicts.push(domain_event.id.to_string());
             }
         }
     }
@@ -253,27 +243,10 @@ pub async fn post_sync_events(
 
     Ok(Json(SyncEventsResponse {
         accepted,
-        conflicts: skipped,
+        conflicts,
     }))
 }
 
-fn deduplicate_events(events: Vec<DomainEvent>) -> (Vec<DomainEvent>, Vec<String>) {
-    let mut seen_keys: HashMap<String, Uuid> = HashMap::new();
-    let mut unique = Vec::new();
-    let mut duplicates = Vec::new();
-
-    for event in events {
-        let key = event.idempotency_key.clone();
-        if let Some(first_event_id) = seen_keys.insert(key, event.id) {
-            // Duplicate idempotency_key - report the first event_id that had it
-            duplicates.push(first_event_id.to_string());
-        } else {
-            unique.push(event);
-        }
-    }
-
-    (unique, duplicates)
-}
 
 async fn insert_event(
     db: &Database,
