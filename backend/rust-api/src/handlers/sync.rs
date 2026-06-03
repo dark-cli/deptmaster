@@ -5,7 +5,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::database::repository::Database;
@@ -258,13 +258,15 @@ pub async fn post_sync_events(
 }
 
 fn deduplicate_events(events: Vec<DomainEvent>) -> (Vec<DomainEvent>, Vec<String>) {
-    let mut seen_ids = HashSet::new();
+    let mut seen_keys: HashMap<String, Uuid> = HashMap::new();
     let mut unique = Vec::new();
     let mut duplicates = Vec::new();
 
     for event in events {
-        if !seen_ids.insert(event.id) {
-            duplicates.push(event.id.to_string());
+        let key = event.idempotency_key.clone();
+        if let Some(first_event_id) = seen_keys.insert(key, event.id) {
+            // Duplicate idempotency_key - report the first event_id that had it
+            duplicates.push(first_event_id.to_string());
         } else {
             unique.push(event);
         }

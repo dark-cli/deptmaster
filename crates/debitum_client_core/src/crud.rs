@@ -36,13 +36,18 @@ fn append_event(
         wallet_id, aggregate_type, aggregate_id, event_type
     );
     // TODO: ARCHITECTURE FIX NEEDED
-    // This should NOT generate event_id. The server generates event_id at insert time.
-    // Instead, generate an idempotency_key per UI action to prevent duplicate form submissions.
+    // REMOVE: Client should NOT generate event_id (the `id` variable below)
+    // INSTEAD: Generate idempotency_key per UI action to prevent duplicate form submissions
+    //
+    // Current (WRONG): Generates event_id locally
+    // Correct: Generate idempotency_key, send to server, store returned event_id
+    //
     // Client should:
-    // 1. Generate idempotency_key (per form submit, dialog action, etc)
-    // 2. Send: event_data + idempotency_key (NOT event_id)
-    // 3. Store returned event_id from server for future operations (delete, undo, etc)
-    let id = Uuid::new_v4().to_string();
+    // 1. Generate idempotency_key per UI action (form submit, dialog, button click, etc)
+    // 2. Send: { event_data, idempotency_key, aggregate_id, etc } - NO event_id
+    // 3. Server will generate event_id and return it in sync response
+    // 4. Store returned event_id locally for future operations (delete, undo, etc)
+    let id = Uuid::new_v4().to_string(); // TODO: Remove this, generate idempotency_key instead
     let timestamp = chrono::Utc::now().to_rfc3339();
     let event_data_str = serde_json::to_string(&event_data).map_err(|e| e.to_string())?;
     let e = storage::StoredEvent {
