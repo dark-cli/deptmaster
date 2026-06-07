@@ -232,9 +232,9 @@ pub async fn post_sync_events(
         }
     }
 
-    // Batch populate cache for all accepted events (automatically done by database)
+    // Populate readable events cache for all accepted events
     if !new_events.is_empty() {
-        if let Err(e) = db.populate_event_cache(wallet_id, &new_events).await {
+        if let Err(e) = db.populate_events_cache_after_sync(wallet_id, &new_events).await {
             tracing::error!("Error populating event cache: {:?}", e);
         }
 

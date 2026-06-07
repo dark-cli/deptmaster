@@ -375,9 +375,22 @@ impl Database {
         Ok(inserted_id)
     }
 
+    /// Populate readable events cache after synced events are inserted.
+    /// This is called by the sync handler after inserting a batch of client events.
+    /// Database responsibility: make events visible to users based on their permissions.
+    pub async fn populate_events_cache_after_sync(
+        &self,
+        wallet_id: Uuid,
+        events: &[DomainEvent],
+    ) -> Result<(), DbError> {
+        self.populate_event_cache(wallet_id, events).await
+    }
+
     /// Populate readable_events cache for inserted events.
     /// Automatically called after events are inserted to make them visible to users based on permissions.
-    pub async fn populate_event_cache(
+    /// TODO: Optimize by calling this automatically from insert_event_impl batch processing
+    /// instead of requiring explicit calls from handlers.
+    async fn populate_event_cache(
         &self,
         wallet_id: Uuid,
         events: &[DomainEvent],
