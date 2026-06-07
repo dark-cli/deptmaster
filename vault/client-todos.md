@@ -32,13 +32,20 @@ tags:
 
 ### Idempotency Keys (CRITICAL - Prevents Duplicates)
 - [ ] **Implement proper idempotency keys on client**
-  - Generate UUID when form/page loads (not on submit)
-  - Store UUID in form state (or use transaction ID)
-  - Send same UUID for all submit attempts
-  - Currently: Not sending Idempotency-Key header
+  - BACKEND CHANGE: Client should generate `idempotency_key` (not `event_id`)
+  - Server generates `event_id` at insertion, uses `idempotency_key` for deduplication
+  - Current (WRONG): Client sends `event_id` as `"id"` field
+  - Required (CORRECT): Client sends `idempotency_key` in sync payload, NO event_id
+  - Generate UUID when event is created (use as idempotency_key)
+  - Store idempotency_key in local StoredEvent structure
+  - Send same idempotency_key for all retry attempts
+  - Currently: Sending event_id instead of idempotency_key
   - Impact: Prevents duplicates from network retries, UI glitches, or button re-enabling
-  - Effort: 2-3 hours
-  - Files: frontend/src/screens/*.dart
+  - Effort: 2-3 hours (update payload structure, local storage schema)
+  - Files: 
+    - crates/debitum_client_core/src/crud.rs (remove event_id generation)
+    - crates/debitum_client_core/src/sync.rs (add idempotency_key to payload)
+    - mobile/lib/ (update StoredEvent schema if using local SQLite)
 
 ### Sync Hash Optimization (PERFORMANCE)
 - [ ] Implement client-side hash caching with get_sync_hash endpoint
