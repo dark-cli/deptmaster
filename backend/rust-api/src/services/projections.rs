@@ -573,8 +573,6 @@ impl Projections {
 
                 if !filtered.is_empty() {
                     let db = Database::new((*state.db_pool).clone());
-                    // Keep using the old apply_event_batch while we complete the type-driven migration
-                    // TODO: Migrate to apply_event_batch_type_driven once all event handlers are complete
                     db.apply_event_batch(&filtered, user_id, wallet_id, &mut undone_event_ids)
                         .await?;
                     total_processed += filtered.len();

@@ -59,11 +59,13 @@ impl EventDiscriminator {
             ("permission", "WALLET_USER_REMOVED") => Ok(Self::WalletUserRemoved),
             ("permission", "USER_GROUP_CREATED") => Ok(Self::UserGroupCreated),
             ("permission", "USER_GROUP_UPDATED") => Ok(Self::UserGroupUpdated),
+            ("permission", "USER_GROUP_RENAMED") => Ok(Self::UserGroupUpdated),
             ("permission", "USER_GROUP_DELETED") => Ok(Self::UserGroupDeleted),
             ("permission", "USER_GROUP_MEMBER_ADDED") => Ok(Self::UserGroupMemberAdded),
             ("permission", "USER_GROUP_MEMBER_REMOVED") => Ok(Self::UserGroupMemberRemoved),
             ("permission", "CONTACT_GROUP_CREATED") => Ok(Self::ContactGroupCreated),
             ("permission", "CONTACT_GROUP_UPDATED") => Ok(Self::ContactGroupUpdated),
+            ("permission", "CONTACT_GROUP_RENAMED") => Ok(Self::ContactGroupUpdated),
             ("permission", "CONTACT_GROUP_DELETED") => Ok(Self::ContactGroupDeleted),
             ("permission", "CONTACT_GROUP_MEMBER_ADDED") => Ok(Self::ContactGroupMemberAdded),
             ("permission", "CONTACT_GROUP_MEMBER_REMOVED") => Ok(Self::ContactGroupMemberRemoved),
@@ -484,6 +486,22 @@ impl Database {
         let Some(arr) = event_data.get("group_ids").and_then(|v| v.as_array()) else {
             return Ok(());
         };
+        let group_ids: Vec<Uuid> = arr
+            .iter()
+            .filter_map(|g| g.as_str().and_then(|s| Uuid::parse_str(s).ok()))
+            .collect();
+        self.apply_contact_group_ids_typed(wallet_id, contact_id, &group_ids)
+            .await
+    }
+
+    /// Type-driven version: assigns contact to all_contacts + given group_ids (full sync).
+    /// Replaces any existing group memberships for this contact within this wallet.
+    async fn apply_contact_group_ids_typed(
+        &self,
+        wallet_id: Uuid,
+        contact_id: Uuid,
+        group_ids: &[Uuid],
+    ) -> Result<(), sqlx::Error> {
         let mut desired: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
         if let Some(all_contacts_id) = sqlx::query_scalar::<_, Uuid>(
             "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
@@ -494,19 +512,17 @@ impl Database {
         {
             desired.insert(all_contacts_id);
         }
-        for g in arr {
-            if let Some(s) = g.as_str().and_then(|s| Uuid::parse_str(s).ok()) {
-                let in_wallet = sqlx::query_scalar::<_, bool>(
-                    "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
-                )
-                .bind(s)
-                .bind(wallet_id)
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or(false);
-                if in_wallet {
-                    desired.insert(s);
-                }
+        for &group_id in group_ids {
+            let in_wallet = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
+            )
+            .bind(group_id)
+            .bind(wallet_id)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(false);
+            if in_wallet {
+                desired.insert(group_id);
             }
         }
         sqlx::query(
@@ -528,6 +544,12 @@ impl Database {
         Ok(())
     }
 
+    /// Type-driven event batch processor.
+    ///
+    /// Parses each row's raw event_data into the strongly-typed [`EventData`] enum,
+    /// then dispatches to type-specific handlers based on the aggregate. The compiler
+    /// enforces exhaustive matching, so adding a new event variant fails to compile
+    /// until a handler is added.
     pub async fn apply_event_batch(
         &self,
         events: &[&sqlx::postgres::PgRow],
@@ -537,6 +559,7 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         tracing::info!("apply_event_batch: processing {} events", events.len());
 
+        // First pass: collect IDs of events undone by UNDO events in this batch
         if undone_event_ids.is_empty() {
             for row in events.iter() {
                 let event_type: String = row.get("event_type");
@@ -553,12 +576,13 @@ impl Database {
             }
         }
 
+        // Second pass: parse and dispatch each event via typed handlers
         for row in events {
             let event_id: Uuid = row.get("event_id");
             let aggregate_type: String = row.get("aggregate_type");
             let aggregate_id: Uuid = row.get("aggregate_id");
             let event_type: String = row.get("event_type");
-            let event_data: Value = row.get("event_data");
+            let raw_data: Value = row.get("event_data");
             let created_at: NaiveDateTime = row.get("created_at");
             let event_db_id: i64 = row.get("id");
 
@@ -568,550 +592,693 @@ impl Database {
                 event_type
             );
 
+            // Skip raw UNDO records - their effect is already captured in undone_event_ids
             if event_type == "UNDO" {
                 continue;
             }
 
+            // Skip events that were undone by an UNDO event
             if undone_event_ids.contains(&event_id) {
                 continue;
             }
 
-            if aggregate_type == "contact" {
-                match event_type.as_str() {
-                    "CREATED" => {
-                        let name = event_data
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let username = event_data.get("username").and_then(|v| v.as_str());
-                        let phone = event_data.get("phone").and_then(|v| v.as_str());
-                        let email = event_data.get("email").and_then(|v| v.as_str());
-                        let notes = event_data.get("notes").and_then(|v| v.as_str());
-
-                        sqlx::query(
-                            r#"
-                            INSERT INTO contacts_projection
-                            (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $9, $10)
-                            ON CONFLICT (id) DO UPDATE SET
-                                name = EXCLUDED.name,
-                                username = EXCLUDED.username,
-                                phone = EXCLUDED.phone,
-                                email = EXCLUDED.email,
-                                notes = EXCLUDED.notes,
-                                updated_at = EXCLUDED.updated_at,
-                                last_event_id = EXCLUDED.last_event_id
-                            "#
-                        )
-                        .bind(aggregate_id)
-                        .bind(user_id)
-                        .bind(wallet_id)
-                        .bind(name)
-                        .bind(username)
-                        .bind(phone)
-                        .bind(email)
-                        .bind(notes)
-                        .bind(created_at)
-                        .bind(event_db_id)
-                        .execute(&self.pool)
-                        .await?;
-
-                        if let Some(all_contacts_id) = sqlx::query_scalar::<_, Uuid>(
-                            "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
-                        )
-                        .bind(wallet_id)
-                        .fetch_optional(&self.pool)
-                        .await?
-                        {
-                            let _ = sqlx::query(
-                                "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                            )
-                            .bind(aggregate_id)
-                            .bind(all_contacts_id)
-                            .execute(&self.pool)
-                            .await;
-                        }
-                        if let Some(arr) = event_data.get("group_ids").and_then(|v| v.as_array()) {
-                            for g in arr {
-                                if let Some(s) = g.as_str().and_then(|s| Uuid::parse_str(s).ok()) {
-                                    let in_wallet = sqlx::query_scalar::<_, bool>(
-                                        "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
-                                    )
-                                    .bind(s)
-                                    .bind(wallet_id)
-                                    .fetch_one(&self.pool)
-                                    .await
-                                    .unwrap_or(false);
-                                    if in_wallet {
-                                        let _ = sqlx::query(
-                                            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                                        )
-                                        .bind(aggregate_id)
-                                        .bind(s)
-                                        .execute(&self.pool)
-                                        .await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "UPDATED" => {
-                        let current = sqlx::query(
-                            "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
-                        )
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .fetch_optional(&self.pool)
-                        .await?;
-
-                        if let Some(current_row) = current {
-                            let current_name: String = current_row.get("name");
-                            let current_username: Option<String> = current_row.get("username");
-                            let current_phone: Option<String> = current_row.get("phone");
-                            let current_email: Option<String> = current_row.get("email");
-                            let current_notes: Option<String> = current_row.get("notes");
-
-                            let name = event_data
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(&current_name);
-                            let username = event_data
-                                .get("username")
-                                .and_then(|v| v.as_str())
-                                .or(current_username.as_deref());
-                            let phone = event_data
-                                .get("phone")
-                                .and_then(|v| v.as_str())
-                                .or(current_phone.as_deref());
-                            let email = event_data
-                                .get("email")
-                                .and_then(|v| v.as_str())
-                                .or(current_email.as_deref());
-                            let notes = event_data
-                                .get("notes")
-                                .and_then(|v| v.as_str())
-                                .or(current_notes.as_deref());
-
-                            sqlx::query(
-                                r#"
-                                UPDATE contacts_projection SET
-                                    name = $2,
-                                    username = $3,
-                                    phone = $4,
-                                    email = $5,
-                                    notes = $6,
-                                    updated_at = $7,
-                                    last_event_id = $9
-                                WHERE id = $1 AND wallet_id = $8
-                                "#,
-                            )
-                            .bind(aggregate_id)
-                            .bind(name)
-                            .bind(username)
-                            .bind(phone)
-                            .bind(email)
-                            .bind(notes)
-                            .bind(created_at)
-                            .bind(wallet_id)
-                            .bind(event_db_id)
-                            .execute(&self.pool)
-                            .await?;
-                        }
-                        self.apply_contact_group_ids_from_event_data_impl(
-                            wallet_id,
-                            aggregate_id,
-                            &event_data,
-                        )
-                        .await?;
-                    }
-                    "DELETED" => {
-                        sqlx::query(
-                            "UPDATE contacts_projection SET is_deleted = true, updated_at = $2, last_event_id = $4 WHERE id = $1 AND wallet_id = $3"
-                        )
-                        .bind(aggregate_id)
-                        .bind(created_at)
-                        .bind(wallet_id)
-                        .bind(event_db_id)
-                        .execute(&self.pool)
-                        .await?;
-
-                        let deleted_transactions = sqlx::query(
-                            "UPDATE transactions_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE contact_id = $2 AND wallet_id = $3 AND is_deleted = false"
-                        )
-                        .bind(created_at)
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .bind(event_db_id)
-                        .execute(&self.pool)
-                        .await?;
-
-                        if deleted_transactions.rows_affected() > 0 {
-                            tracing::info!(
-                                "Deleted {} transaction(s) for deleted contact {}",
-                                deleted_transactions.rows_affected(),
-                                aggregate_id
-                            );
-                        }
-                    }
-                    _ => {}
+            // Parse raw event_data into typed EventData enum
+            let event_data = match Self::parse_event_data_typed(
+                &aggregate_type,
+                &event_type,
+                raw_data.clone(),
+            ) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        "Skipping event {}/{} - failed type-driven parse: {}",
+                        aggregate_type,
+                        event_type,
+                        e
+                    );
+                    continue;
                 }
-            } else if aggregate_type == "transaction" {
-                match event_type.as_str() {
-                    "CREATED" => {
-                        let contact_id_str = event_data
-                            .get("contact_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let contact_id = Uuid::parse_str(contact_id_str).ok();
+            };
 
-                        if let Some(cid) = contact_id {
-                            let contact_exists = sqlx::query_scalar::<_, bool>(
-                                "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
-                            )
-                            .bind(cid)
-                            .bind(wallet_id)
-                            .fetch_one(&self.pool)
-                            .await?;
-
-                            if !contact_exists {
-                                tracing::warn!(
-                                    "Skipping transaction creation for deleted contact {}",
-                                    cid
-                                );
-                                continue;
-                            }
-                            let tx_type = event_data
-                                .get("type")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("money");
-                            let direction = event_data
-                                .get("direction")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("lent");
-                            let amount = event_data
-                                .get("amount")
-                                .and_then(|v| v.as_i64())
-                                .unwrap_or(0);
-                            let currency = event_data
-                                .get("currency")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("USD");
-                            let description =
-                                event_data.get("description").and_then(|v| v.as_str());
-                            let transaction_date_str = event_data
-                                .get("transaction_date")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let due_date_str = event_data.get("due_date").and_then(|v| v.as_str());
-
-                            let transaction_date = if !transaction_date_str.is_empty() {
-                                chrono::NaiveDate::parse_from_str(transaction_date_str, "%Y-%m-%d")
-                                    .ok()
-                            } else {
-                                Some(created_at.date())
-                            };
-
-                            let due_date = due_date_str.and_then(|d| {
-                                chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
-                            });
-
-                            if let Some(txn_date) = transaction_date {
-                                sqlx::query(
-                                    r#"
-                                    INSERT INTO transactions_projection
-                                    (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
-                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $12, $13)
-                                    ON CONFLICT (id) DO UPDATE SET
-                                        contact_id = EXCLUDED.contact_id,
-                                        type = EXCLUDED.type,
-                                        direction = EXCLUDED.direction,
-                                        amount = EXCLUDED.amount,
-                                        currency = EXCLUDED.currency,
-                                        description = EXCLUDED.description,
-                                        transaction_date = EXCLUDED.transaction_date,
-                                        due_date = EXCLUDED.due_date,
-                                        updated_at = EXCLUDED.updated_at,
-                                        last_event_id = EXCLUDED.last_event_id
-                                    "#
-                                )
-                                .bind(aggregate_id)
-                                .bind(user_id)
-                                .bind(wallet_id)
-                                .bind(cid)
-                                .bind(tx_type)
-                                .bind(direction)
-                                .bind(amount)
-                                .bind(currency)
-                                .bind(description)
-                                .bind(txn_date)
-                                .bind(due_date)
-                                .bind(created_at)
-                                .bind(event_db_id)
-                                .execute(&self.pool)
-                                .await?;
-                            }
-                        }
-                    }
-                    "UPDATED" => {
-                        let current = sqlx::query(
-                            "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
-                        )
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .fetch_optional(&self.pool)
-                        .await?;
-
-                        if let Some(current_row) = current {
-                            let current_contact_id: Uuid = current_row.get("contact_id");
-                            let current_type: String = current_row.get("type");
-                            let current_direction: String = current_row.get("direction");
-                            let current_amount: i64 = current_row.get("amount");
-                            let current_currency: String = current_row.get("currency");
-                            let current_description: Option<String> =
-                                current_row.get("description");
-                            let current_transaction_date: chrono::NaiveDate =
-                                current_row.get("transaction_date");
-                            let current_due_date: Option<chrono::NaiveDate> =
-                                current_row.get("due_date");
-
-                            let contact_id_str =
-                                event_data.get("contact_id").and_then(|v| v.as_str());
-                            let contact_id = contact_id_str
-                                .and_then(|s| Uuid::parse_str(s).ok())
-                                .unwrap_or(current_contact_id);
-
-                            let tx_type = event_data
-                                .get("type")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(&current_type);
-                            let direction = event_data
-                                .get("direction")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(&current_direction);
-                            let amount = event_data
-                                .get("amount")
-                                .and_then(|v| v.as_i64())
-                                .unwrap_or(current_amount);
-                            let currency = event_data
-                                .get("currency")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(&current_currency);
-                            let description = event_data
-                                .get("description")
-                                .and_then(|v| v.as_str())
-                                .or(current_description.as_deref());
-
-                            let transaction_date_str =
-                                event_data.get("transaction_date").and_then(|v| v.as_str());
-                            let transaction_date = transaction_date_str
-                                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-                                .unwrap_or(current_transaction_date);
-
-                            let due_date_str = event_data.get("due_date").and_then(|v| v.as_str());
-                            let due_date = due_date_str
-                                .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-                                .or(current_due_date);
-
-                            sqlx::query(
-                                r#"
-                                UPDATE transactions_projection SET
-                                    contact_id = $2,
-                                    type = $3,
-                                    direction = $4,
-                                    amount = $5,
-                                    currency = $6,
-                                    description = $7,
-                                    transaction_date = $8,
-                                    due_date = $9,
-                                    updated_at = $10,
-                                    last_event_id = $12
-                                WHERE id = $1 AND wallet_id = $11
-                                "#,
-                            )
-                            .bind(aggregate_id)
-                            .bind(contact_id)
-                            .bind(tx_type)
-                            .bind(direction)
-                            .bind(amount)
-                            .bind(currency)
-                            .bind(description)
-                            .bind(transaction_date)
-                            .bind(due_date)
-                            .bind(created_at)
-                            .bind(wallet_id)
-                            .bind(event_db_id)
-                            .execute(&self.pool)
-                            .await?;
-                        }
-                    }
-                    "DELETED" => {
-                        sqlx::query(
-                            "UPDATE transactions_projection SET is_deleted = true, updated_at = $2, last_event_id = $4 WHERE id = $1 AND wallet_id = $3"
-                        )
-                        .bind(aggregate_id)
-                        .bind(created_at)
-                        .bind(wallet_id)
-                        .bind(event_db_id)
-                        .execute(&self.pool)
-                        .await?;
-                    }
-                    _ => {}
+            // Type-driven dispatch by aggregate kind
+            match event_data.aggregate_type() {
+                crate::domain::events::AggregateType::Contact => {
+                    self.apply_contact_event_typed(
+                        &event_data,
+                        aggregate_id,
+                        user_id,
+                        wallet_id,
+                        event_db_id,
+                        created_at,
+                    )
+                    .await?;
                 }
-            } else if aggregate_type == "permission" {
-                // Permission events are applied to operational tables (wallet_users, user_groups, etc.)
-                // They don't have a separate projection table since they're normalized and frequently queried
-                // Permission event data is nested in a "data" field because EventData variants use generic Value
-                tracing::info!("Processing permission event: {}", event_type);
-                let data = event_data.get("data").unwrap_or(&event_data);
-                match event_type.as_str() {
-                    "WALLET_USER_ADDED" => {
-                        let user_id_str =
-                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
-                        tracing::info!("WALLET_USER_ADDED: inserting user {}", user_id_str);
-                        if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            let role = data
-                                .get("role")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("member");
-                            let result = sqlx::query(
-                                r#"
-                                INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
-                                VALUES ($1, $2, $3, $4)
-                                ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3, subscribed_at = $4
-                                "#
-                            )
-                            .bind(wallet_id)
-                            .bind(perm_user_id)
-                            .bind(role)
-                            .bind(created_at)
-                            .execute(&self.pool)
-                            .await;
-
-                            if let Err(e) = result {
-                                tracing::error!("Error inserting wallet user: {:?}", e);
-                            } else {
-                                tracing::info!("Successfully inserted wallet user");
-                            }
-                        }
-                    }
-                    "WALLET_USER_ROLE_CHANGED" => {
-                        let user_id_str =
-                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
-                        if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            if let Some(role) = data.get("role").and_then(|v| v.as_str()) {
-                                let _ = sqlx::query(
-                                    "UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3"
-                                )
-                                .bind(role)
-                                .bind(wallet_id)
-                                .bind(perm_user_id)
-                                .execute(&self.pool)
-                                .await;
-                            }
-                        }
-                    }
-                    "WALLET_USER_REMOVED" => {
-                        let user_id_str =
-                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
-                        if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            let _ = sqlx::query(
-                                "DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
-                            )
-                            .bind(wallet_id)
-                            .bind(perm_user_id)
-                            .execute(&self.pool)
-                            .await;
-                        }
-                    }
-                    "USER_GROUP_CREATED" => {
-                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let _ = sqlx::query(
-                            "INSERT INTO user_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
-                        )
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .bind(name)
-                        .execute(&self.pool)
-                        .await;
-                    }
-                    "USER_GROUP_RENAMED" => {
-                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let _ = sqlx::query(
-                            "UPDATE user_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
-                        )
-                        .bind(name)
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .execute(&self.pool)
-                        .await;
-                    }
-                    "USER_GROUP_DELETED" => {
-                        let _ = sqlx::query("DELETE FROM user_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false")
-                            .bind(aggregate_id)
-                            .bind(wallet_id)
-                            .execute(&self.pool)
-                            .await;
-                    }
-                    "USER_GROUP_MEMBER_ADDED" => {
-                        let user_id_str =
-                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
-                        if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            let _ = sqlx::query(
-                                "INSERT INTO user_group_members (user_id, user_group_id) VALUES ($1, $2) ON CONFLICT (user_id, user_group_id) DO NOTHING"
-                            )
-                            .bind(perm_user_id)
-                            .bind(aggregate_id)
-                            .execute(&self.pool)
-                            .await;
-                        }
-                    }
-                    "USER_GROUP_MEMBER_REMOVED" => {
-                        let user_id_str =
-                            data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
-                        if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
-                            let _ = sqlx::query("DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2")
-                                .bind(perm_user_id)
-                                .bind(aggregate_id)
-                                .execute(&self.pool)
-                                .await;
-                        }
-                    }
-                    "CONTACT_GROUP_CREATED" => {
-                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let _ = sqlx::query(
-                            "INSERT INTO contact_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
-                        )
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .bind(name)
-                        .execute(&self.pool)
-                        .await;
-                    }
-                    "CONTACT_GROUP_RENAMED" => {
-                        let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let _ = sqlx::query(
-                            "UPDATE contact_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
-                        )
-                        .bind(name)
-                        .bind(aggregate_id)
-                        .bind(wallet_id)
-                        .execute(&self.pool)
-                        .await;
-                    }
-                    "CONTACT_GROUP_DELETED" => {
-                        let _ = sqlx::query("DELETE FROM contact_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false")
-                            .bind(aggregate_id)
-                            .bind(wallet_id)
-                            .execute(&self.pool)
-                            .await;
-                    }
-                    _ => {}
+                crate::domain::events::AggregateType::Transaction => {
+                    self.apply_transaction_event_typed(
+                        &event_data,
+                        aggregate_id,
+                        user_id,
+                        wallet_id,
+                        event_db_id,
+                        created_at,
+                    )
+                    .await?;
+                }
+                crate::domain::events::AggregateType::Permission => {
+                    self.apply_permission_event_typed(
+                        &event_data,
+                        aggregate_id,
+                        wallet_id,
+                        created_at,
+                    )
+                    .await?;
                 }
             }
         }
 
         Ok(())
     }
+
+    /// Parse raw database event_data into typed EventData enum.
+    /// Rebuilds the `type` tag from (aggregate_type, event_type) since storage strips it.
+    ///
+    /// Permission events have inconsistent storage: events written via the sync handler
+    /// path are wrapped as `{"data": {...}}`, while those written via
+    /// insert_permission_event_and_apply store the payload directly. Normalize both
+    /// shapes into the typed variant's `data` field.
+    fn parse_event_data_typed(
+        aggregate_type: &str,
+        event_type: &str,
+        raw_data: Value,
+    ) -> Result<crate::domain::events::EventData, String> {
+        let discriminator = EventDiscriminator::from_database(aggregate_type, event_type)?;
+
+        let mut data_with_type =
+            if aggregate_type == "permission" && raw_data.get("data").is_none() {
+                serde_json::json!({ "data": raw_data })
+            } else {
+                raw_data
+            };
+
+        if let Some(obj) = data_with_type.as_object_mut() {
+            obj.insert(
+                "type".to_string(),
+                Value::String(discriminator.as_str().to_string()),
+            );
+        }
+
+        serde_json::from_value::<crate::domain::events::EventData>(data_with_type)
+            .map_err(|e| format!("deserialization failed: {}", e))
+    }
+
+    /// Apply a contact-aggregate event to the contacts_projection table.
+    /// Exhaustive on contact EventData variants; non-contact variants are ignored.
+    async fn apply_contact_event_typed(
+        &self,
+        event_data: &crate::domain::events::EventData,
+        aggregate_id: Uuid,
+        user_id: Uuid,
+        wallet_id: Uuid,
+        event_db_id: i64,
+        created_at: NaiveDateTime,
+    ) -> Result<(), sqlx::Error> {
+        use crate::domain::events::EventData as ED;
+
+        match event_data {
+            ED::ContactCreated {
+                name,
+                username,
+                phone,
+                email,
+                notes,
+                group_ids,
+            } => {
+                sqlx::query(
+                    r#"
+                    INSERT INTO contacts_projection
+                    (id, user_id, wallet_id, name, username, phone, email, notes, is_deleted, created_at, updated_at, last_event_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, $9, $9, $10)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        username = EXCLUDED.username,
+                        phone = EXCLUDED.phone,
+                        email = EXCLUDED.email,
+                        notes = EXCLUDED.notes,
+                        updated_at = EXCLUDED.updated_at,
+                        last_event_id = EXCLUDED.last_event_id
+                    "#
+                )
+                .bind(aggregate_id)
+                .bind(user_id)
+                .bind(wallet_id)
+                .bind(name.as_str())
+                .bind(username.as_deref())
+                .bind(phone.as_deref())
+                .bind(email.as_deref())
+                .bind(notes.as_deref())
+                .bind(created_at)
+                .bind(event_db_id)
+                .execute(&self.pool)
+                .await?;
+
+                // Auto-add to all_contacts system group
+                if let Some(all_contacts_id) = sqlx::query_scalar::<_, Uuid>(
+                    "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts' LIMIT 1",
+                )
+                .bind(wallet_id)
+                .fetch_optional(&self.pool)
+                .await?
+                {
+                    let _ = sqlx::query(
+                        "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                    )
+                    .bind(aggregate_id)
+                    .bind(all_contacts_id)
+                    .execute(&self.pool)
+                    .await;
+                }
+
+                // Add to specified groups (validated against wallet)
+                for &group_id in group_ids {
+                    let in_wallet = sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS(SELECT 1 FROM contact_groups WHERE id = $1 AND wallet_id = $2)",
+                    )
+                    .bind(group_id)
+                    .bind(wallet_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .unwrap_or(false);
+                    if in_wallet {
+                        let _ = sqlx::query(
+                            "INSERT INTO contact_group_members (contact_id, contact_group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                        )
+                        .bind(aggregate_id)
+                        .bind(group_id)
+                        .execute(&self.pool)
+                        .await;
+                    }
+                }
+            }
+
+            ED::ContactUpdated {
+                name,
+                username,
+                phone,
+                email,
+                notes,
+                group_ids,
+            } => {
+                let current = sqlx::query(
+                    "SELECT name, username, phone, email, notes FROM contacts_projection WHERE id = $1 AND wallet_id = $2"
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .fetch_optional(&self.pool)
+                .await?;
+
+                if let Some(current_row) = current {
+                    let current_name: String = current_row.get("name");
+                    let current_username: Option<String> = current_row.get("username");
+                    let current_phone: Option<String> = current_row.get("phone");
+                    let current_email: Option<String> = current_row.get("email");
+                    let current_notes: Option<String> = current_row.get("notes");
+
+                    // Merge: use event value if provided, else keep existing
+                    let new_name = name.as_deref().unwrap_or(&current_name);
+                    let new_username = username.as_deref().or(current_username.as_deref());
+                    let new_phone = phone.as_deref().or(current_phone.as_deref());
+                    let new_email = email.as_deref().or(current_email.as_deref());
+                    let new_notes = notes.as_deref().or(current_notes.as_deref());
+
+                    sqlx::query(
+                        r#"
+                        UPDATE contacts_projection SET
+                            name = $2,
+                            username = $3,
+                            phone = $4,
+                            email = $5,
+                            notes = $6,
+                            updated_at = $7,
+                            last_event_id = $9
+                        WHERE id = $1 AND wallet_id = $8
+                        "#,
+                    )
+                    .bind(aggregate_id)
+                    .bind(new_name)
+                    .bind(new_username)
+                    .bind(new_phone)
+                    .bind(new_email)
+                    .bind(new_notes)
+                    .bind(created_at)
+                    .bind(wallet_id)
+                    .bind(event_db_id)
+                    .execute(&self.pool)
+                    .await?;
+                }
+
+                // Full sync of group memberships if group_ids provided
+                if let Some(ids) = group_ids {
+                    self.apply_contact_group_ids_typed(wallet_id, aggregate_id, ids)
+                        .await?;
+                }
+            }
+
+            ED::ContactDeleted { .. } => {
+                sqlx::query(
+                    "UPDATE contacts_projection SET is_deleted = true, updated_at = $2, last_event_id = $4 WHERE id = $1 AND wallet_id = $3"
+                )
+                .bind(aggregate_id)
+                .bind(created_at)
+                .bind(wallet_id)
+                .bind(event_db_id)
+                .execute(&self.pool)
+                .await?;
+
+                // Cascade: soft-delete all transactions for this contact
+                let deleted_transactions = sqlx::query(
+                    "UPDATE transactions_projection SET is_deleted = true, updated_at = $1, last_event_id = $4 WHERE contact_id = $2 AND wallet_id = $3 AND is_deleted = false"
+                )
+                .bind(created_at)
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .bind(event_db_id)
+                .execute(&self.pool)
+                .await?;
+
+                if deleted_transactions.rows_affected() > 0 {
+                    tracing::info!(
+                        "Deleted {} transaction(s) for deleted contact {}",
+                        deleted_transactions.rows_affected(),
+                        aggregate_id
+                    );
+                }
+            }
+
+            ED::ContactUndone { .. } => {
+                // UNDO records are filtered out before dispatch; their effect is captured
+                // in undone_event_ids and skipped events. Nothing to do here.
+            }
+
+            _ => {
+                // Non-contact event arrived in the contact handler; dispatcher routes by aggregate_type
+                // so this branch is unreachable in practice. Log for debugging.
+                tracing::warn!("apply_contact_event_typed received non-contact event variant");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Apply a transaction-aggregate event to the transactions_projection table.
+    /// Exhaustive on transaction EventData variants.
+    async fn apply_transaction_event_typed(
+        &self,
+        event_data: &crate::domain::events::EventData,
+        aggregate_id: Uuid,
+        user_id: Uuid,
+        wallet_id: Uuid,
+        event_db_id: i64,
+        created_at: NaiveDateTime,
+    ) -> Result<(), sqlx::Error> {
+        use crate::domain::events::EventData as ED;
+
+        match event_data {
+            ED::TransactionCreated {
+                contact_id,
+                amount,
+                direction,
+                transaction_type,
+                currency,
+                description,
+                transaction_date,
+                due_date,
+            } => {
+                let contact_exists = sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS(SELECT 1 FROM contacts_projection WHERE id = $1 AND wallet_id = $2 AND is_deleted = false)"
+                )
+                .bind(contact_id)
+                .bind(wallet_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+                if !contact_exists {
+                    tracing::warn!(
+                        "Skipping transaction creation for deleted contact {}",
+                        contact_id
+                    );
+                    return Ok(());
+                }
+
+                let tx_type = transaction_type.as_deref().unwrap_or("money");
+                let currency_str = currency.as_deref().unwrap_or("USD");
+
+                let txn_date = if let Some(date_str) = transaction_date.as_deref() {
+                    chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok()
+                } else {
+                    Some(created_at.date())
+                };
+
+                let parsed_due_date = due_date.as_deref().and_then(|d| {
+                    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+                });
+
+                if let Some(txn_date) = txn_date {
+                    sqlx::query(
+                        r#"
+                        INSERT INTO transactions_projection
+                        (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description, transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $12, $13)
+                        ON CONFLICT (id) DO UPDATE SET
+                            contact_id = EXCLUDED.contact_id,
+                            type = EXCLUDED.type,
+                            direction = EXCLUDED.direction,
+                            amount = EXCLUDED.amount,
+                            currency = EXCLUDED.currency,
+                            description = EXCLUDED.description,
+                            transaction_date = EXCLUDED.transaction_date,
+                            due_date = EXCLUDED.due_date,
+                            updated_at = EXCLUDED.updated_at,
+                            last_event_id = EXCLUDED.last_event_id
+                        "#
+                    )
+                    .bind(aggregate_id)
+                    .bind(user_id)
+                    .bind(wallet_id)
+                    .bind(contact_id)
+                    .bind(tx_type)
+                    .bind(direction.as_str())
+                    .bind(amount)
+                    .bind(currency_str)
+                    .bind(description.as_deref())
+                    .bind(txn_date)
+                    .bind(parsed_due_date)
+                    .bind(created_at)
+                    .bind(event_db_id)
+                    .execute(&self.pool)
+                    .await?;
+                }
+            }
+
+            ED::TransactionUpdated {
+                contact_id,
+                amount,
+                direction,
+                transaction_type,
+                currency,
+                description,
+                transaction_date,
+                due_date,
+            } => {
+                let current = sqlx::query(
+                    "SELECT contact_id, type, direction, amount, currency, description, transaction_date, due_date FROM transactions_projection WHERE id = $1 AND wallet_id = $2"
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .fetch_optional(&self.pool)
+                .await?;
+
+                if let Some(current_row) = current {
+                    let current_contact_id: Uuid = current_row.get("contact_id");
+                    let current_type: String = current_row.get("type");
+                    let current_direction: String = current_row.get("direction");
+                    let current_amount: i64 = current_row.get("amount");
+                    let current_currency: String = current_row.get("currency");
+                    let current_description: Option<String> = current_row.get("description");
+                    let current_transaction_date: chrono::NaiveDate =
+                        current_row.get("transaction_date");
+                    let current_due_date: Option<chrono::NaiveDate> = current_row.get("due_date");
+
+                    // For TransactionUpdated, contact_id is non-optional (required field)
+                    // but we tolerate it being unchanged. If the typed value differs, use it.
+                    let new_contact_id = *contact_id;
+                    // contact_id of nil might indicate "no change"; preserve current
+                    let new_contact_id = if new_contact_id == Uuid::nil() {
+                        current_contact_id
+                    } else {
+                        new_contact_id
+                    };
+
+                    let new_type = transaction_type.as_deref().unwrap_or(&current_type);
+                    let new_direction = direction.as_deref().unwrap_or(&current_direction);
+                    let new_amount = amount.unwrap_or(current_amount);
+                    let new_currency = currency.as_deref().unwrap_or(&current_currency);
+                    let new_description = description.as_deref().or(current_description.as_deref());
+
+                    let new_transaction_date = transaction_date
+                        .as_deref()
+                        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+                        .unwrap_or(current_transaction_date);
+
+                    let new_due_date = due_date
+                        .as_deref()
+                        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+                        .or(current_due_date);
+
+                    sqlx::query(
+                        r#"
+                        UPDATE transactions_projection SET
+                            contact_id = $2,
+                            type = $3,
+                            direction = $4,
+                            amount = $5,
+                            currency = $6,
+                            description = $7,
+                            transaction_date = $8,
+                            due_date = $9,
+                            updated_at = $10,
+                            last_event_id = $12
+                        WHERE id = $1 AND wallet_id = $11
+                        "#,
+                    )
+                    .bind(aggregate_id)
+                    .bind(new_contact_id)
+                    .bind(new_type)
+                    .bind(new_direction)
+                    .bind(new_amount)
+                    .bind(new_currency)
+                    .bind(new_description)
+                    .bind(new_transaction_date)
+                    .bind(new_due_date)
+                    .bind(created_at)
+                    .bind(wallet_id)
+                    .bind(event_db_id)
+                    .execute(&self.pool)
+                    .await?;
+                }
+            }
+
+            ED::TransactionDeleted { .. } => {
+                sqlx::query(
+                    "UPDATE transactions_projection SET is_deleted = true, updated_at = $2, last_event_id = $4 WHERE id = $1 AND wallet_id = $3"
+                )
+                .bind(aggregate_id)
+                .bind(created_at)
+                .bind(wallet_id)
+                .bind(event_db_id)
+                .execute(&self.pool)
+                .await?;
+            }
+
+            ED::TransactionUndone { .. } => {
+                // UNDO records are filtered out before dispatch
+            }
+
+            _ => {
+                tracing::warn!("apply_transaction_event_typed received non-transaction event variant");
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Apply a permission-aggregate event to operational permission tables.
+    /// Compiler enforces exhaustive matching across all 14+ permission variants.
+    async fn apply_permission_event_typed(
+        &self,
+        event_data: &crate::domain::events::EventData,
+        aggregate_id: Uuid,
+        wallet_id: Uuid,
+        created_at: NaiveDateTime,
+    ) -> Result<(), sqlx::Error> {
+        use crate::domain::events::EventData as ED;
+
+        // Permission EventData variants carry raw JSON payloads (generic across many shapes).
+        // The type-safe match still guarantees we handle every variant.
+        match event_data {
+            ED::WalletUserAdded { data } => {
+                let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                tracing::info!("WALLET_USER_ADDED: inserting user {}", user_id_str);
+                if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
+                    let role = data
+                        .get("role")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("member");
+                    let result = sqlx::query(
+                        r#"
+                        INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3, subscribed_at = $4
+                        "#
+                    )
+                    .bind(wallet_id)
+                    .bind(perm_user_id)
+                    .bind(role)
+                    .bind(created_at)
+                    .execute(&self.pool)
+                    .await;
+
+                    if let Err(e) = result {
+                        tracing::error!("Error inserting wallet user: {:?}", e);
+                    } else {
+                        tracing::info!("Successfully inserted wallet user");
+                    }
+                }
+            }
+
+            ED::WalletUserRoleChanged { data } => {
+                let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
+                    if let Some(role) = data.get("role").and_then(|v| v.as_str()) {
+                        let _ = sqlx::query(
+                            "UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3"
+                        )
+                        .bind(role)
+                        .bind(wallet_id)
+                        .bind(perm_user_id)
+                        .execute(&self.pool)
+                        .await;
+                    }
+                }
+            }
+
+            ED::WalletUserRemoved { data } => {
+                let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
+                    let _ = sqlx::query(
+                        "DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
+                    )
+                    .bind(wallet_id)
+                    .bind(perm_user_id)
+                    .execute(&self.pool)
+                    .await;
+                }
+            }
+
+            ED::UserGroupCreated { data } => {
+                let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let _ = sqlx::query(
+                    "INSERT INTO user_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .bind(name)
+                .execute(&self.pool)
+                .await;
+            }
+
+            ED::UserGroupUpdated { data } => {
+                // Covers both USER_GROUP_UPDATED and USER_GROUP_RENAMED (same effect: rename)
+                let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let _ = sqlx::query(
+                    "UPDATE user_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
+                )
+                .bind(name)
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .execute(&self.pool)
+                .await;
+            }
+
+            ED::UserGroupDeleted { .. } => {
+                let _ = sqlx::query(
+                    "DELETE FROM user_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false"
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .execute(&self.pool)
+                .await;
+            }
+
+            ED::UserGroupMemberAdded { data } => {
+                let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
+                    let _ = sqlx::query(
+                        "INSERT INTO user_group_members (user_id, user_group_id) VALUES ($1, $2) ON CONFLICT (user_id, user_group_id) DO NOTHING"
+                    )
+                    .bind(perm_user_id)
+                    .bind(aggregate_id)
+                    .execute(&self.pool)
+                    .await;
+                }
+            }
+
+            ED::UserGroupMemberRemoved { data } => {
+                let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
+                    let _ = sqlx::query(
+                        "DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2"
+                    )
+                    .bind(perm_user_id)
+                    .bind(aggregate_id)
+                    .execute(&self.pool)
+                    .await;
+                }
+            }
+
+            ED::ContactGroupCreated { data } => {
+                let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let _ = sqlx::query(
+                    "INSERT INTO contact_groups (id, wallet_id, name, is_system) VALUES ($1, $2, $3, false) ON CONFLICT (id) DO UPDATE SET name = $3"
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .bind(name)
+                .execute(&self.pool)
+                .await;
+            }
+
+            ED::ContactGroupUpdated { data } => {
+                // Covers both CONTACT_GROUP_UPDATED and CONTACT_GROUP_RENAMED
+                let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let _ = sqlx::query(
+                    "UPDATE contact_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false"
+                )
+                .bind(name)
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .execute(&self.pool)
+                .await;
+            }
+
+            ED::ContactGroupDeleted { .. } => {
+                let _ = sqlx::query(
+                    "DELETE FROM contact_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false"
+                )
+                .bind(aggregate_id)
+                .bind(wallet_id)
+                .execute(&self.pool)
+                .await;
+            }
+
+            // The following permission variants don't update operational projection tables here.
+            // (Group memberships, matrix changes, ownership are handled by repository-level
+            // operations triggered separately; the cache layer reacts via handle_cache_invalidation_for_event.)
+            ED::ContactGroupMemberAdded { .. }
+            | ED::ContactGroupMemberRemoved { .. }
+            | ED::PermissionMatrixSet { .. }
+            | ED::WalletDeleted { .. }
+            | ED::OwnershipTransferred { .. } => {
+                // No-op for projection application; these are handled elsewhere.
+            }
+
+            _ => {
+                tracing::warn!("apply_permission_event_typed received non-permission event variant");
+            }
+        }
+
+        Ok(())
+    }
+
 
     /// Apply a single event by fetching it from DB and using the batch processor
     /// This consolidates event application logic into one place
@@ -1136,7 +1303,6 @@ impl Database {
 
         if let Some(row) = event_row {
             let row_ref: &sqlx::postgres::PgRow = &row;
-            // TODO: Use type-driven approach (apply_event_batch_type_driven) once all handlers are complete
             self.apply_event_batch(
                 &[row_ref],
                 user_id,

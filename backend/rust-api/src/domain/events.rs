@@ -41,6 +41,8 @@ pub enum EventData {
         email: Option<String>,
         #[serde(default)]
         notes: Option<String>,
+        #[serde(default)]
+        group_ids: Vec<Uuid>,
     },
     ContactUpdated {
         #[serde(default)]
@@ -53,6 +55,8 @@ pub enum EventData {
         email: Option<String>,
         #[serde(default)]
         notes: Option<String>,
+        #[serde(default)]
+        group_ids: Option<Vec<Uuid>>,
     },
     ContactDeleted {
         #[serde(default)]

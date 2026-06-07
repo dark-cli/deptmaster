@@ -73,7 +73,13 @@
 - [x] Handler follows same pattern as contact events (merge-on-conflict for CREATED)
 - [x] All 13 snapshot_optimization_test.rs tests passing
 - [x] Includes transactions in snapshot optimization (Phase 1 & 2)
-- [ ] Migrate apply_event_batch to apply_event_batch_type_driven (future, not blocking)
+- [x] Migrated apply_event_batch to type-driven dispatch (June 2026)
+  - Extracted apply_contact_event_typed, apply_transaction_event_typed, apply_permission_event_typed
+  - parse_event_data_typed normalizes permission event storage format inconsistencies
+  - Added group_ids to ContactCreated/ContactUpdated EventData variants
+  - Added USER_GROUP_RENAMED/CONTACT_GROUP_RENAMED → Updated mapping in discriminator
+  - Compiler enforces exhaustive matching across all event variants
+  - All 59 tests passing
 
 ## Phase 6: Extend System to New Aggregates 📋 TODO
 - [ ] User aggregate (UserProfileUpdated, UserPreferencesUpdated)
@@ -85,12 +91,12 @@
 
 ## Phase 7: sync.rs Refactoring 📋 TODO
 Thin orchestration layer (150-200 lines):
-- [ ] Move business logic to repository/domain layers
-- [ ] Use PermissionModel API directly (no duplication)
-- [ ] Use projection_snapshot_service (no duplication)
-- [ ] Type-driven validation (Serde deserializers)
-- [ ] Handler becomes HTTP glue only
-- [ ] Update documentation with refactoring details
+- [x] Move business logic to repository/domain layers
+- [x] Use PermissionModel API directly (no duplication)
+- [x] Use projection_snapshot_service (no duplication)
+- [x] Type-driven validation (Serde deserializers)
+- [x] Handler becomes HTTP glue only
+- [x] Update documentation with refactoring details
 
 ## Phase 8: Advanced Topics 📋 TODO
 - [ ] Complete performance benchmarks with real data
@@ -98,7 +104,7 @@ Thin orchestration layer (150-200 lines):
 - [ ] Add snapshot history tracking (audit trail)
 - [ ] EventApplier trait for optional trait-based dispatch
 - [ ] Real-time event streaming architecture
-- [ ] Documentation: 07-advanced-topics deep dives
+- [x] Documentation: 07-advanced-topics deep dives
 
 ## Recent Work
 - Completed type-driven event handler architecture

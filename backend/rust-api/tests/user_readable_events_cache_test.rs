@@ -103,6 +103,7 @@ async fn test_cache_populated_via_sync_api() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
 
@@ -177,6 +178,7 @@ async fn test_cache_per_user_via_sync() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
 
@@ -194,6 +196,7 @@ async fn test_cache_per_user_via_sync() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
 
@@ -283,6 +286,7 @@ async fn test_cache_deletion_on_permission_change() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
 
@@ -300,6 +304,7 @@ async fn test_cache_deletion_on_permission_change() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
 
@@ -376,6 +381,7 @@ async fn test_cache_uniqueness_per_user() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
 
@@ -521,6 +527,7 @@ async fn test_cache_accumulates_multiple_events() {
                 phone: None,
                 email: None,
                 notes: None,
+                group_ids: vec![],
             },
         })
         .collect();
@@ -564,6 +571,7 @@ async fn test_cache_accumulates_multiple_events() {
                 phone: None,
                 email: None,
                 notes: None,
+                group_ids: vec![],
             },
         })
         .collect();

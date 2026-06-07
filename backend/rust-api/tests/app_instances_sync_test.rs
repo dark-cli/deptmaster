@@ -216,6 +216,7 @@ async fn test_sync_read_permission_filter_and_full_pull() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
     let event_b = DomainEvent {
@@ -232,6 +233,7 @@ async fn test_sync_read_permission_filter_and_full_pull() {
             phone: None,
             email: None,
             notes: None,
+            group_ids: vec![],
         },
     };
 
