@@ -170,20 +170,6 @@ pub async fn get_sync_events(
     Ok(Json(sync_events))
 }
 
-fn get_broadcast_type(event_data: &EventData) -> &'static str {
-    match event_data {
-        EventData::ContactCreated { .. }
-        | EventData::ContactUpdated { .. }
-        | EventData::ContactDeleted { .. }
-        | EventData::ContactUndone { .. } => "contact",
-        EventData::TransactionCreated { .. }
-        | EventData::TransactionUpdated { .. }
-        | EventData::TransactionDeleted { .. }
-        | EventData::TransactionUndone { .. } => "transaction",
-        _ => "permission",
-    }
-}
-
 fn is_undo_event(event_data: &EventData) -> bool {
     matches!(
         event_data,
@@ -269,14 +255,8 @@ pub async fn post_sync_events(
             }
         }
 
-        // Batch broadcast: group by type and notify once per type
-        let mut broadcast_types = HashSet::new();
-        for event in &new_events {
-            broadcast_types.insert(get_broadcast_type(&event.event_data));
-        }
-        for broadcast_type in broadcast_types {
-            websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, broadcast_type);
-        }
+        // Notify all clients that sync completed
+        websocket::broadcast_events_synced(&state.broadcast_tx, wallet_id, "sync");
 
         // Handle snapshots for each event that triggers one
         for domain_event in new_events {
