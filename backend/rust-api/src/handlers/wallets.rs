@@ -127,7 +127,7 @@ async fn check_event_permissions(
     let perm_model = PermissionModel::new((*state.db_pool).clone());
 
     let denied = perm_model
-        .get_denied_event_ids(&perm_ctx, &[event.clone()])
+        .get_denied_event_ids(&perm_ctx, std::slice::from_ref(&event))
         .await
         .map_err(|e| {
             tracing::error!("Permission check error: {:?}", e);

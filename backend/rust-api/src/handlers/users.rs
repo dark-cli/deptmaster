@@ -399,7 +399,7 @@ pub async fn backup_user_data(
          FROM contacts_projection
          WHERE user_id = $1 AND is_deleted = false",
     )
-    .bind(&user_uuid)
+    .bind(user_uuid)
     .fetch_all(&*state.db_pool)
     .await
     .map_err(|e| {
@@ -417,7 +417,7 @@ pub async fn backup_user_data(
          FROM transactions_projection
          WHERE user_id = $1 AND is_deleted = false",
     )
-    .bind(&user_uuid)
+    .bind(user_uuid)
     .fetch_all(&*state.db_pool)
     .await
     .map_err(|e| {

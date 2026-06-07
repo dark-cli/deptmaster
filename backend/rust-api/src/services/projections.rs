@@ -197,7 +197,7 @@ impl Projections {
             // Step 4: Search for suitable snapshot using metadata (lightweight, ordered by newest first)
             // Load snapshot metadata (without JSON data) ordered by most recent first
             let snapshot_metadata =
-                snapshots::get_snapshot_metadata_for_wallet(&*state.db_pool, wallet_id)
+                snapshots::get_snapshot_metadata_for_wallet(&state.db_pool, wallet_id)
                     .await
                     .ok()
                     .unwrap_or_default();
@@ -240,7 +240,7 @@ impl Projections {
 
             // Load full snapshot only if we found a suitable one
             let snapshot = if let Some(snapshot_id) = suitable_snapshot_id {
-                snapshots::get_snapshot_by_id(&*state.db_pool, snapshot_id)
+                snapshots::get_snapshot_by_id(&state.db_pool, snapshot_id)
                     .await
                     .ok()
                     .flatten()
@@ -290,7 +290,7 @@ impl Projections {
                         .iter()
                         .filter(|row| {
                             let event_db_id: Option<i64> = row.get("id");
-                            event_db_id.map_or(false, |id| id > snapshot_last_db_id)
+                            event_db_id.is_some_and(|id| id > snapshot_last_db_id)
                         })
                         .copied()
                         .collect();
@@ -349,7 +349,7 @@ impl Projections {
                     last_id
                 );
                 if let Ok(Some(snapshot)) =
-                    snapshots::get_snapshot_before_event(&*state.db_pool, last_id, wallet_id).await
+                    snapshots::get_snapshot_before_event(&state.db_pool, last_id, wallet_id).await
                 {
                     tracing::info!(
                         "Found snapshot: last_event_id={}, event_count={}",
@@ -362,7 +362,7 @@ impl Projections {
                         .iter()
                         .filter(|row| {
                             let event_db_id: Option<i64> = row.get("id");
-                            event_db_id.map_or(false, |id| id > snapshot_last_db_id)
+                            event_db_id.is_some_and(|id| id > snapshot_last_db_id)
                         })
                         .map(|row| row as &sqlx::postgres::PgRow)
                         .collect();

@@ -654,7 +654,7 @@ pub async fn dev_clear_database(
         ON CONFLICT (username) DO UPDATE SET password_hash = $2, is_active = true
         "#,
     )
-    .bind(&admin_id)
+    .bind(admin_id)
     .bind(&admin_password_hash)
     .bind(Utc::now())
     .execute(&mut *tx)

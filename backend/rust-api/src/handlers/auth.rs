@@ -258,7 +258,7 @@ pub async fn register(
 
     let token = generate_jwt_token(
         &user_id,
-        &username,
+        username,
         &state.config.jwt_secret,
         state.config.jwt_expiration,
     )
