@@ -7,7 +7,6 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
-use std::str::FromStr;
 use uuid::Uuid;
 
 // ============ EVENT DISCRIMINATOR (REPOSITORY INTERNAL) ============
@@ -145,7 +144,7 @@ impl Database {
         // Use strongly-typed discriminator to ensure we handle all event types
         let discriminator =
             EventDiscriminator::from_database(&event.aggregate_type, &event.event_type)
-                .map_err(|e| DbError::SerializationError(e))?;
+                .map_err(DbError::SerializationError)?;
 
         // Reconstruct EventData by adding the "type" field back (it was removed during storage)
         let mut event_data_with_type = event.data.clone();
