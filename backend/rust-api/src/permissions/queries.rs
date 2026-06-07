@@ -1,4 +1,5 @@
 /// SQL queries for permission resolution
+///
 /// These are constants to centralize all permission-related SQL
 
 /// Get allowed actions for a user on a resource (single JOIN query)

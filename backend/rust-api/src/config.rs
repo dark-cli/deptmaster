@@ -97,12 +97,10 @@ impl Config {
         }
 
         // Validate TLS config if enabled
-        if self.enable_tls {
-            if self.tls_cert_path.is_none() || self.tls_key_path.is_none() {
-                return Err(anyhow::anyhow!(
-                    "TLS enabled but TLS_CERT_PATH or TLS_KEY_PATH not set"
-                ));
-            }
+        if self.enable_tls && (self.tls_cert_path.is_none() || self.tls_key_path.is_none()) {
+            return Err(anyhow::anyhow!(
+                "TLS enabled but TLS_CERT_PATH or TLS_KEY_PATH not set"
+            ));
         }
 
         // Validate database URL and check for TLS

@@ -35,21 +35,17 @@ fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
     for action in actions {
         if let Some((resource, verb)) = action.split_once(':') {
             // For wallet resource, 'manage_members' is a special verb
-            if resource == "wallet" {
-                if verb == "update" || verb == "delete" || verb == "manage_members" {
-                    if !has_action("wallet:read") {
-                        return Err(format!("Permission '{}' requires 'wallet:read'", action));
-                    }
+            if resource == "wallet" && (verb == "update" || verb == "delete" || verb == "manage_members") {
+                if !has_action("wallet:read") {
+                    return Err(format!("Permission '{}' requires 'wallet:read'", action));
                 }
-            } else {
-                if ["create", "update", "delete", "close"].contains(&verb) {
-                    let read_action = format!("{}:read", resource);
-                    if !has_action(&read_action) {
-                        return Err(format!(
-                            "Permission '{}' requires '{}'",
-                            action, read_action
-                        ));
-                    }
+            } else if ["create", "update", "delete", "close"].contains(&verb) {
+                let read_action = format!("{}:read", resource);
+                if !has_action(&read_action) {
+                    return Err(format!(
+                        "Permission '{}' requires '{}'",
+                        action, read_action
+                    ));
                 }
             }
         }
@@ -57,10 +53,8 @@ fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
 
     // Rule 2: Transaction permissions imply Contact Read
     // (Because you need to see the contact to see its transactions)
-    if actions.iter().any(|a| a.starts_with("transaction:")) {
-        if !has_action("contact:read") {
-            return Err("Transaction permissions require 'contact:read'".to_string());
-        }
+    if actions.iter().any(|a| a.starts_with("transaction:")) && !has_action("contact:read") {
+        return Err("Transaction permissions require 'contact:read'".to_string());
     }
 
     Ok(())

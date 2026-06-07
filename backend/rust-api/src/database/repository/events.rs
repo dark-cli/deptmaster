@@ -361,7 +361,7 @@ impl Database {
 
                 // Check if user can read this event
                 if let Ok(readable_ids) = perm_model
-                    .get_readable_event_ids(&user_perm_ctx, &[event.clone()])
+                    .get_readable_event_ids(&user_perm_ctx, std::slice::from_ref(&event))
                     .await
                 {
                     if !readable_ids.is_empty() {
