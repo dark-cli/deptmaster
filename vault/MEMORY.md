@@ -27,8 +27,8 @@ Quick links to project documentation and references.
 
 ## Status & Tracking
 
-- [Todos (Backend)](todos.md) — Backend development tasks and known issues
-- [Todos (Client)](client-todos.md) — Flutter/Dart mobile development tasks
+- [Backend TODO](backend-todo.md) — Backend development roadmap (phases 1-8, architecture work)
+- [Client TODO](client-todos.md) — Frontend/Mobile development tasks (Flutter, Rust bridge, UI)
 - [Current State](current-state.md) — Latest codebase snapshot
 - [Merged Features](merged-features.md) — Feature branches integrated into main
 
