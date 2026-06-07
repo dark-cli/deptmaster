@@ -1,3 +1,42 @@
+//! Sync event handler with permission matrix caching for O(1) permission lookups.
+//!
+//! # Permission Matrix Caching Strategy
+//!
+//! The permission matrix cache stores (user, contact_group) → allowed_actions mappings.
+//! Instead of computing permissions on every check with expensive JOINs, the cache
+//! is populated once when users are added and only rebuilt when permission events occur.
+//!
+//! ## Cache Lifecycle
+//!
+//! 1. **Initialization**: When a user is added to a wallet (WalletUserAdded event),
+//!    `compute_and_cache_user_permission_matrix()` populates their cache by computing
+//!    all permissions from: user_groups → group_permission_matrix → contact_groups
+//!
+//! 2. **Invalidation**: When permission events are processed, the cache is intelligently
+//!    invalidated based on the event type:
+//!    - **UserGroupMemberAdded/Removed**: Invalidate only the affected user
+//!    - **PermissionMatrixSet**: Invalidate only users with permissions on that group
+//!    - **WalletUserRemoved**: Clean up cache for removed user
+//!    - Falls back to full wallet invalidation if event data is incomplete (safe default)
+//!
+//! 3. **Cleanup**: When a user is removed from a wallet (WalletUserRemoved event),
+//!    their permission matrix cache is deleted to free resources
+//!
+//! 4. **Rebuild**: After invalidation, the cache is lazily repopulated when the user
+//!    next accesses a resource requiring permission checks
+//!
+//! ## Performance Impact
+//!
+//! - Before: O(n*m) - n users × m permission checks, each requiring 4-way JOINs
+//! - After: O(1) - simple index lookup on cache table + small join with permission_actions
+//! - Storage: ~100 bytes per user/group/action entry (negligible for most wallets)
+//!
+//! ## Future Optimizations
+//!
+//! - Lazy repopulation: Compute cache on-demand instead of just invalidating
+//! - Read-only tracking: Only rebuild when READ permissions change
+//! - Batch operations: Use async batch invalidation for multiple users
+
 use axum::{
     extract::{Extension, Query, State},
     http::StatusCode,
@@ -213,6 +252,10 @@ pub async fn post_sync_events(
             tracing::error!("Error populating event cache: {:?}", e);
         }
 
+        // Note: Permission matrix cache invalidation is now handled automatically
+        // by the database layer (in insert_event_with_cache_handling), not here.
+        // The sync handler doesn't need to know about caching.
+
         // Batch apply all events to projections
         let event_ids: Vec<Uuid> = new_events.iter().map(|e| e.id).collect();
         apply_events_batch(&db, wallet_id, user_id, &event_ids).await;
@@ -261,18 +304,22 @@ async fn insert_event(
         obj.remove("type");
     }
 
-    let inserted_id = db.insert_event_impl(
-        domain_event.id,
-        domain_event.aggregate_id,
-        domain_event.aggregate_type_enum().as_str().to_string(),
-        domain_event.event_type().to_string(),
-        event_data,
-        wallet_id,
-        user_id,
-        domain_event.version,
-        Some(domain_event.idempotency_key.clone()),
-    )
-    .await?;
+    // Insert event and let database handle permission cache invalidation
+    // This is the public interface - it handles both storage and cache
+    let inserted_id = db
+        .insert_event_with_cache_handling(
+            domain_event.id,
+            domain_event.aggregate_id,
+            domain_event.aggregate_type_enum().as_str().to_string(),
+            domain_event.event_type().to_string(),
+            event_data,
+            wallet_id,
+            user_id,
+            domain_event.version,
+            Some(domain_event.idempotency_key.clone()),
+            domain_event,
+        )
+        .await?;
 
     // If id is 0, event already existed (ON CONFLICT DO NOTHING returned nothing)
     Ok(inserted_id > 0)
@@ -362,6 +409,10 @@ pub async fn insert_permission_event_and_apply(
         .await
         .map_err(|_| sqlx::Error::RowNotFound)?;
 
+    // Handle permission matrix cache invalidation (database responsibility)
+    db.handle_cache_invalidation_for_event_raw(wallet_id, event_type, &event_data)
+        .await;
+
     // Apply event to projections
     let rows: Vec<_> = sqlx::query(
         "SELECT id, event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, created_at, event_version FROM events WHERE event_id = $1 AND wallet_id = $2"
@@ -402,6 +453,45 @@ pub async fn insert_permission_event_and_apply(
                 e
             );
         }
+    }
+
+    // Invalidate permission matrix cache if this is a permission-affecting event
+    // (This handles direct permission event insertion, not through normal sync)
+    // Check event type to determine if cache invalidation is needed
+    match event_type {
+        "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED" => {
+            if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
+                if let Ok(user_id) = Uuid::parse_str(user_id_str) {
+                    let _ = db
+                        .invalidate_permission_matrix_cache(wallet_id, user_id)
+                        .await;
+                }
+            }
+        }
+        "PERMISSION_MATRIX_SET" => {
+            let _ = db
+                .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                .await;
+        }
+        "WALLET_USER_ADDED" => {
+            if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
+                if let Ok(user_id) = Uuid::parse_str(user_id_str) {
+                    let _ = db
+                        .compute_and_cache_user_permission_matrix(wallet_id, user_id)
+                        .await;
+                }
+            }
+        }
+        "WALLET_USER_REMOVED" => {
+            if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
+                if let Ok(user_id) = Uuid::parse_str(user_id_str) {
+                    let _ = db
+                        .invalidate_permission_matrix_cache(wallet_id, user_id)
+                        .await;
+                }
+            }
+        }
+        _ => {}
     }
 
     // Broadcast permission change

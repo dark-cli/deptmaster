@@ -34,18 +34,18 @@ pub async fn resolve_actions(
         return Ok(Action::all().iter().copied().collect());
     }
 
-    // Handle ContactGroup resources specially
+    // Handle ContactGroup resources specially using cached permission matrix
     if let Resource::ContactGroup(group_id) = resource {
-        let action_names: Vec<String> = sqlx::query_scalar(
+        // Query cached matrix: O(1) index lookup instead of expensive JOINs
+        // The cache is computed when users are added/permissions change
+        let cached_perms: Vec<(String, bool)> = sqlx::query_as(
             r#"
-            SELECT DISTINCT pa.name
-            FROM user_groups ug
-              JOIN user_group_members ugm ON ugm.user_group_id = ug.id
-              JOIN group_permission_matrix m ON m.user_group_id = ug.id
-              JOIN permission_actions pa ON pa.id = m.permission_action_id
-            WHERE ug.wallet_id = $1
-              AND ugm.user_id = $2
-              AND m.contact_group_id = $3
+            SELECT pa.name, ucpm.is_deny
+            FROM user_permission_matrix_cache ucpm
+            JOIN permission_actions pa ON pa.id = ucpm.permission_action_id
+            WHERE ucpm.wallet_id = $1
+              AND ucpm.user_id = $2
+              AND ucpm.contact_group_id = $3
             "#,
         )
         .bind(ctx.wallet_id)
@@ -55,10 +55,13 @@ pub async fn resolve_actions(
         .await
         .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
 
+        // Build allowed actions, respecting deny overrides
         let mut actions = HashSet::new();
-        for name in action_names {
-            if let Some(action) = Action::from_str(&name) {
-                actions.insert(action);
+        for (name, is_deny) in cached_perms {
+            if !is_deny {
+                if let Some(action) = Action::from_str(&name) {
+                    actions.insert(action);
+                }
             }
         }
         return Ok(actions);

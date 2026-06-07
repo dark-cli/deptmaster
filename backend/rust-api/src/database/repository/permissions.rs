@@ -619,4 +619,360 @@ impl Database {
         // In practice, this will be called from handlers after permission changes
         Ok(())
     }
+
+    // ============ PERMISSION MATRIX CACHE ============
+
+    /// Compute and cache the permission matrix for a user.
+    ///
+    /// This is called when:
+    /// 1. User is added to wallet (WalletUserAdded event)
+    /// 2. Permission events are processed (PermissionMatrixSet, UserGroupMemberAdded/Removed, etc.)
+    ///
+    /// The matrix maps: user → { contact_group → { allowed_actions } }
+    /// This replaces expensive JOIN calculations with O(1) cache lookups.
+    pub async fn compute_and_cache_user_permission_matrix(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), DbError> {
+        // Step 1: Delete old cache for this user
+        sqlx::query(
+            "DELETE FROM user_permission_matrix_cache WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        // Step 2: Compute new matrix from user_groups → group_permission_matrix → contact_groups
+        // This query:
+        // - Gets all user groups the user belongs to
+        // - Gets all permissions those groups have on contact groups
+        // - Inserts into cache table
+        sqlx::query(
+            r#"
+            INSERT INTO user_permission_matrix_cache
+            (wallet_id, user_id, contact_group_id, permission_action_id, is_deny)
+            SELECT $1, $2, m.contact_group_id, m.permission_action_id, m.is_deny
+            FROM user_group_members ugm
+            JOIN user_groups ug ON ug.id = ugm.user_group_id
+            JOIN group_permission_matrix m ON m.user_group_id = ug.id
+            WHERE ug.wallet_id = $1 AND ugm.user_id = $2
+            ON CONFLICT (wallet_id, user_id, contact_group_id, permission_action_id)
+            DO UPDATE SET is_deny = EXCLUDED.is_deny
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Fetch cached permission matrix for a user.
+    ///
+    /// Returns: HashMap<contact_group_id, HashMap<action_id, is_deny>>
+    /// Used by: PermissionModel to make allow/deny decisions
+    pub async fn get_user_permission_matrix_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<std::collections::HashMap<Uuid, Vec<(i16, bool)>>, DbError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT contact_group_id, permission_action_id, is_deny
+            FROM user_permission_matrix_cache
+            WHERE wallet_id = $1 AND user_id = $2
+            ORDER BY contact_group_id, permission_action_id
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut result: std::collections::HashMap<Uuid, Vec<(i16, bool)>> =
+            std::collections::HashMap::new();
+
+        for row in rows {
+            let contact_group_id: Uuid = row.get("contact_group_id");
+            let action_id: i16 = row.get("permission_action_id");
+            let is_deny: bool = row.get("is_deny");
+
+            result
+                .entry(contact_group_id)
+                .or_insert_with(Vec::new)
+                .push((action_id, is_deny));
+        }
+
+        Ok(result)
+    }
+
+    /// Invalidate permission matrix cache for a user.
+    /// Called when permission events occur that might affect this user.
+    pub async fn invalidate_permission_matrix_cache(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "DELETE FROM user_permission_matrix_cache WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Invalidate permission matrix cache for all users in a wallet.
+    /// Called when global permission changes occur (e.g., contact_group changes).
+    pub async fn invalidate_permission_matrix_cache_for_wallet(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM user_permission_matrix_cache WHERE wallet_id = $1")
+            .bind(wallet_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Get affected users when permission matrix changes for a contact group.
+    /// Optimizes cache invalidation by only invalidating users with permissions on the changed group.
+    pub async fn get_users_with_group_permissions(
+        &self,
+        wallet_id: Uuid,
+        contact_group_id: Uuid,
+    ) -> Result<Vec<Uuid>, DbError> {
+        let user_ids = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT DISTINCT user_id
+            FROM user_permission_matrix_cache
+            WHERE wallet_id = $1 AND contact_group_id = $2
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(contact_group_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(user_ids)
+    }
+
+    /// Handle permission matrix cache invalidation when permission events are inserted.
+    /// Called automatically after events are inserted to keep cache in sync.
+    /// This is the database's responsibility - sync handlers just insert events.
+    pub async fn handle_cache_invalidation_for_event(
+        &self,
+        wallet_id: Uuid,
+        domain_event: &crate::domain::events::DomainEvent,
+    ) {
+        use crate::domain::events::EventData;
+
+        // Check if this event affects permissions
+        let event_data = &domain_event.event_data;
+
+        match event_data {
+            // User added/removed from group - invalidate that user's cache
+            EventData::UserGroupMemberAdded { data } | EventData::UserGroupMemberRemoved { data } => {
+                if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
+                    if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
+                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                            tracing::warn!(
+                                "Failed to invalidate permission cache for user {}: {:?}",
+                                user_id, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Permission matrix changed - smart invalidation: only affected users
+            EventData::PermissionMatrixSet { data } => {
+                if let Some(contact_group_id_str) =
+                    data.get("contact_group_id").and_then(|v| v.as_str())
+                {
+                    if let Ok(contact_group_id) = uuid::Uuid::parse_str(contact_group_id_str) {
+                        // Find users with permissions on this group
+                        match self.get_users_with_group_permissions(wallet_id, contact_group_id).await {
+                            Ok(affected_users) => {
+                                // Invalidate only affected users
+                                for user_id in affected_users {
+                                    if let Err(e) =
+                                        self.invalidate_permission_matrix_cache(wallet_id, user_id).await
+                                    {
+                                        tracing::warn!(
+                                            "Failed to invalidate permission cache for user {}: {:?}",
+                                            user_id, e
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                // Fall back to full wallet invalidation if query fails
+                                tracing::warn!(
+                                    "Failed to query affected users for permission matrix change, \
+                                     falling back to full wallet invalidation: {:?}",
+                                    e
+                                );
+                                let _ = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await;
+                            }
+                        }
+                        return;
+                    }
+                }
+
+                // Fall back: Invalidate entire wallet cache if we can't extract contact_group_id
+                tracing::warn!(
+                    "PermissionMatrixSet event missing contact_group_id, invalidating entire wallet cache"
+                );
+                if let Err(e) = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await {
+                    tracing::warn!(
+                        "Failed to invalidate permission cache for wallet {}: {:?}",
+                        wallet_id, e
+                    );
+                }
+            }
+
+            // New user added to wallet - populate cache
+            EventData::WalletUserAdded { data } => {
+                if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
+                    if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
+                        if let Err(e) = self.compute_and_cache_user_permission_matrix(wallet_id, user_id).await {
+                            tracing::warn!(
+                                "Failed to compute permission matrix for new user {}: {:?}",
+                                user_id, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            // User removed from wallet - clean up cache
+            EventData::WalletUserRemoved { data } => {
+                if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
+                    if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
+                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                            tracing::warn!(
+                                "Failed to invalidate permission cache for removed user {}: {:?}",
+                                user_id, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            _ => {
+                // Not a permission event - no cache invalidation needed
+            }
+        }
+    }
+
+    /// Internal helper: Handle cache invalidation for events using just event_type and raw JSON data.
+    /// Used by insert_permission_event_and_apply() which doesn't construct a full DomainEvent.
+    pub async fn handle_cache_invalidation_for_event_raw(
+        &self,
+        wallet_id: Uuid,
+        event_type: &str,
+        event_data: &serde_json::Value,
+    ) {
+        match event_type {
+            // User added/removed from group - invalidate that user's cache
+            "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED" => {
+                if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
+                    if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
+                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                            tracing::warn!(
+                                "Failed to invalidate permission cache for user {}: {:?}",
+                                user_id, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Permission matrix changed - smart invalidation: only affected users
+            "PERMISSION_MATRIX_SET" => {
+                if let Some(contact_group_id_str) =
+                    event_data.get("contact_group_id").and_then(|v| v.as_str())
+                {
+                    if let Ok(contact_group_id) = uuid::Uuid::parse_str(contact_group_id_str) {
+                        // Find users with permissions on this group
+                        match self.get_users_with_group_permissions(wallet_id, contact_group_id).await {
+                            Ok(affected_users) => {
+                                // Invalidate only affected users
+                                for user_id in affected_users {
+                                    if let Err(e) =
+                                        self.invalidate_permission_matrix_cache(wallet_id, user_id).await
+                                    {
+                                        tracing::warn!(
+                                            "Failed to invalidate permission cache for user {}: {:?}",
+                                            user_id, e
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                // Fall back to full wallet invalidation if query fails
+                                tracing::warn!(
+                                    "Failed to query affected users for permission matrix change, \
+                                     falling back to full wallet invalidation: {:?}",
+                                    e
+                                );
+                                let _ = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await;
+                            }
+                        }
+                        return;
+                    }
+                }
+
+                // Fall back: Invalidate entire wallet cache if we can't extract contact_group_id
+                tracing::warn!(
+                    "PERMISSION_MATRIX_SET event missing contact_group_id, invalidating entire wallet cache"
+                );
+                if let Err(e) = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await {
+                    tracing::warn!(
+                        "Failed to invalidate permission cache for wallet {}: {:?}",
+                        wallet_id, e
+                    );
+                }
+            }
+
+            // New user added to wallet - populate cache
+            "WALLET_USER_ADDED" => {
+                if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
+                    if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
+                        if let Err(e) = self.compute_and_cache_user_permission_matrix(wallet_id, user_id).await {
+                            tracing::warn!(
+                                "Failed to compute permission matrix for new user {}: {:?}",
+                                user_id, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            // User removed from wallet - clean up cache
+            "WALLET_USER_REMOVED" => {
+                if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
+                    if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
+                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                            tracing::warn!(
+                                "Failed to invalidate permission cache for removed user {}: {:?}",
+                                user_id, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            _ => {
+                // Not a permission event - no cache invalidation needed
+            }
+        }
+    }
 }
