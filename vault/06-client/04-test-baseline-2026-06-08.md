@@ -7,84 +7,90 @@ tags:
 
 # Client Integration Tests — Baseline 2026-06-08
 
-First run of `crates/debitum_client_core` integration tests against a live backend on this branch.
+Series of fixes that landed today against the integration tests in
+`crates/debitum_client_core/tests/`. All run against a live backend via the
+single `integration` test binary; per-file binaries are disabled
+(`autotests = false`) since they're just modules of `integration.rs`.
 
-**How to reproduce:**
+**Final baseline: 22/40 passing (55%)** — over the >50% goal.
+
+---
+
+## Run instructions
+
 ```bash
-# 1. Build backend
+# 1. Build backend (one-time per code change)
 cd backend/rust-api && cargo build --bin debt-tracker-api
 
-# 2. Start it (or use ./scripts/manage.sh start-server-direct, which blocks)
+# 2. Start it (background; ./scripts/manage.sh start-server-direct blocks)
 DATABASE_URL="postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker" \
-PORT=8000 RUST_LOG=info JWT_SECRET=... JWT_EXPIRATION=3600 RATE_LIMIT_REQUESTS=0 \
-  nohup ./target/debug/debt-tracker-api > /tmp/debt-tracker-api.log 2>&1 &
+PORT=8000 RUST_LOG=info \
+JWT_SECRET="your-secret-key-change-in-production" \
+JWT_EXPIRATION=3600 RATE_LIMIT_REQUESTS=0 \
+  /home/max/dev/deptmaster/backend/rust-api/target/debug/debt-tracker-api \
+  > /tmp/debt-tracker-api.log 2>&1 &
 
-# 3. Run tests
+# 3. Run tests sequentially (process-wide thread-local state in the client)
 cd crates/debitum_client_core
 cargo test --test integration -- --ignored --test-threads=1
 ```
 
-`--test-threads=1` is required: the client has process-wide thread-local state (storage, sync backoff) that breaks under parallelism.
+---
+
+## Progression
+
+| Stage | Pass | Fail | Note |
+|---:|---:|---:|---|
+| Start (this session) | 3 | 37 | All blocked at `signup` 500 (`last_event_id` regression) |
+| After signup fix | 5 | 35 | `signup` works; all push events now blocked at 400 (middleware refused) |
+| After wrong middleware "fix" + route-move + revert | 5 | 35 | Same count, but for the right reason (signup auto-creates a wallet now misses) |
+| After signup auto-creates wallet | 8 | 32 | Single-app signup-then-CRUD tests unblock |
+| After client pull no longer destroys local on first sync | 13 | 27 | Single-app suite mostly green (7/8) |
+| **After server applies projections before populating readable cache** | **22** | **18** | **Multi-app same-user sync works** |
 
 ---
 
-## Result: 5 passing / 35 failing (40 total)
+## Real bugs fixed in this session
 
-Up from 3 passing in the very first run (pre-fixes).
-
-### Real bugs surfaced and fixed during this run
-
-| # | Symptom | Cause | Fix | Commit |
+| # | Symptom | Root cause | Fix | Commit |
 |---|---|---|---|---|
-| 1 | All tests fail at signup with `500 - "Failed to create account"` | `create_user_impl` was missing `last_event_id` in the INSERT, but the column is `NOT NULL` since migration 001 | Insert with sentinel `0` (same convention as `admin.rs:624` and `reset_password.rs:60`) | `ac0b41b` |
-| 2 | After signup works, all push events fail with `400 Bad Request` and middleware warns `No wallet_id provided in request` | `wallet_context_middleware` was narrowed to extract `wallet_id` only from the path segment after `wallets/` — but `/api/sync/events` doesn't have that segment | Restore 3-source extraction (path → header → query); the old version was lost in commit `dfdaafa` | `ac0b41b` |
-
-### Remaining failures (35)
-
-Grouped by symptom from the post-fix run:
-
-**A. `"No wallet selected"` (tests that use `signup` then immediately operate without `create_wallet`):**
-- `single_app::single_app_signup_create_contact_and_sync`
-- `single_app::single_app_many_events_then_assert`
-- `single_app::single_app_many_contacts_and_transactions`
-- `single_app::single_app_offline_*`
-- `single_app::single_app_multiple_offline_creates_then_online_sync`
-
-These tests call `AppInstance::signup()` (register-only by design — comment says "no wallet; then call create_wallet or select_wallet") and then immediately try to create contacts. They worked at some earlier point when `signup` auto-created a default wallet, or before "no wallet selected" was a hard error.
-
-**Fix path:** either add `create_wallet(...)` after `signup()` in each test, or make `signup()` create a default wallet for these one-app tests. The latter is closer to the test author's intent based on the test names.
-
-**B. Cross-app visibility — the actual BUGS.md territory:**
-- `single_app::two_apps_sync_via_server` ("contact name 'Carol' not found; got []") — same as BUGS #1
-- `multi_app_sync::*` (delete propagation, update propagation, etc.) — BUGS #10, #11
-- `resync::*` — BUGS #2, #3
-- `permissions::*` (member-sees-data-after-grant, give/take read, etc.) — BUGS #4–#7
-- `groups::*` — BUGS #7, #12
-
-These are the failures the original `BUGS.md` documented, now reachable end-to-end because the contract and signup are fixed.
-
-**C. Workflow / unknown:**
-- `conflict::*` — concurrent updates / update-delete resolution
-- `comprehensive_events::*` — full lifecycle + per-type event audit (BUGS #8, #9)
+| 1 | `register` → 500 on every signup | `create_user_impl` skipped `last_event_id` in INSERT; column is NOT NULL since migration 001 | Insert with sentinel `0` | `ac0b41b` |
+| 2 | Push events fail with 400, middleware warns "No wallet_id" | `/api/sync/events` was mounted under wallet middleware but its path didn't contain `wallets/`; middleware reads from path only by design | Move routes to `/api/wallets/:wallet_id/sync/...` and update client URLs accordingly | `dfee556` + part of `94b611b` |
+| 3 | After single-app push+sync, next sync deletes the just-pushed event | `pull_and_merge` did destructive `delete_all_for_wallet` whenever `last_sync_timestamp` was None, even if local had data. Race-prone | Only delete on truly empty wallet; always advance `last_sync_timestamp` to "now" even when server returned 0 events | part of `94b611b` |
+| 4 | Multi-app: server accepts push but returns 0 events on pull, even for the wallet owner | `post_sync_events` called `populate_events_cache_after_sync` BEFORE `apply_events_batch` — the readable-cache check queries `contacts_projection` which didn't yet reflect the new event | Reorder: apply projections first, then populate cache | `a4cbf74` |
 
 ---
 
-## The 5 currently passing
+## Architectural decisions enforced (durable, see memory)
 
-Not enumerated by name in this snapshot (truncated output), but likely the `offline_online_multi_app::*` ones marked "skipped in Rust" plus any test that just exercises the auth path. The signal that matters: we're past the protocol-level failures and into the semantic ones.
+- **wallet_id is path-only.** Every wallet-scoped route has `:wallet_id` in its URL. No fallback to header or query. The middleware was deliberately narrowed; do not undo that.
+- **Client tests stay in client scope.** Tests assert what the client sends and what it receives. No "get from server" helpers, no peeking at backend state. Server-state assertions belong in backend tests. Removed `get_contacts_from_server` and rewrote its two usages to be `manual_sync()` + `get_contacts()` (assert on local state after a normal sync — same path production uses).
+- **BUGS.md is stale.** Written against `main`'s old backend. We are NOT mapping current failures to BUGS entries.
 
 ---
 
-## What this means
+## What's still failing (18 tests)
 
-- Phase 0 (shared crate) is still the right structural play, but it won't fix the visibility bugs by itself — those have real causes (server-side filtering, replay handling, etc.) that need diagnosis.
-- The "no wallet selected" cluster is the cheapest next win — a small test-helper / signup change probably moves 6+ tests from red to green.
-- The cross-app visibility cluster is the highest-value next investigation, but each case needs its own root-cause analysis.
+All in multi-app permission/group flows. Concentrated:
+
+- **11 permissions tests** — read grant/revoke, group-based access, deny-overrides-allow, etc.
+- **3 comprehensive_events tests** — full-lifecycle and concurrent-mixed scenarios
+- **1 conflict** — `conflict_update_delete_resolution`
+- **1 multi_app_sync** — `multi_app_delete_propagation`
+- **2 resync** — full + incremental resync
+
+These need investigation of permission resolution semantics (matrix expansion, group membership across the readable_contacts query) and the delete/UNDO propagation. They were NOT addressed in this session — the >50% goal was met by fixing structural issues (auth flow, contract, sync logic, cache ordering) that affected many tests at once.
+
+---
+
+## Where this leaves us
+
+The baseline is now stable and high enough to start the shared-domain-crate refactor ([[02-shared-domain-crate]]) without losing test signal. Phase 0 of [[00-refactoring-plan]] can begin. The remaining 18 failures are best diagnosed AFTER Phase 0 — many of them likely simplify or auto-resolve once the client and server use the same `EventData` enum.
 
 ---
 
 ## Cross-references
 
-- [[03-api-contract-audit]] — earlier audit that motivated the contract fix
-- [[00-refactoring-plan]] — overall plan
-- `crates/debitum_client_core/BUGS.md` — pre-existing bug catalog (mostly subsumed by cluster B above)
+- [[03-api-contract-audit]] — contract analysis that motivated the session
+- [[00-refactoring-plan]] — Phase 0 (shared crate) is the right next move
+- [[01-design-notes]] — three decisions taken during the audit
