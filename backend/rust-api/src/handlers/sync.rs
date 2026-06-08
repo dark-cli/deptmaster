@@ -213,7 +213,9 @@ pub async fn post_sync_events(
         return Err(responses::insufficient_permission_response());
     }
 
-    // Try to insert all events. Database enforces uniqueness on event_id and idempotency_key.
+    // Try to insert all events. Database enforces uniqueness via idempotency_key.
+    // Response echoes back the client-provided idempotency_keys so the client can
+    // mark its local events as synced (it never sees the server-generated event_id here).
     let mut accepted = Vec::new();
     let mut conflicts = Vec::new();
     let mut new_events = Vec::new();
@@ -221,16 +223,16 @@ pub async fn post_sync_events(
     for domain_event in events {
         match insert_event(&db, wallet_id, user_id, &domain_event).await {
             Ok(_inserted_id) => {
-                accepted.push(domain_event.id.to_string());
+                accepted.push(domain_event.idempotency_key.clone());
                 new_events.push(domain_event);
             }
             Err(e) => {
                 tracing::debug!(
-                    "Failed to insert event {} (duplicate key): {:?}",
-                    domain_event.id,
+                    "Failed to insert event with idempotency_key {} (duplicate?): {:?}",
+                    domain_event.idempotency_key,
                     e
                 );
-                conflicts.push(domain_event.id.to_string());
+                conflicts.push(domain_event.idempotency_key.clone());
             }
         }
     }

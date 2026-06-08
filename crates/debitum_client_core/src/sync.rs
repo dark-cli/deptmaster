@@ -69,7 +69,81 @@ fn check_read_revoked_and_resync(wallet_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Build the snake_case discriminator the server's `EventData` (serde `#[tag = "type"]`)
+/// expects for a given (aggregate_type, event_type) pair. Returns `None` for unknown
+/// combinations so the caller can skip the event rather than send something the server
+/// will reject.
+fn event_data_discriminator(aggregate_type: &str, event_type: &str) -> Option<&'static str> {
+    match (aggregate_type, event_type) {
+        ("contact", "CREATED") => Some("contact_created"),
+        ("contact", "UPDATED") => Some("contact_updated"),
+        ("contact", "DELETED") => Some("contact_deleted"),
+        ("contact", "UNDO") => Some("contact_undone"),
+        ("transaction", "CREATED") => Some("transaction_created"),
+        ("transaction", "UPDATED") => Some("transaction_updated"),
+        ("transaction", "DELETED") => Some("transaction_deleted"),
+        ("transaction", "UNDO") => Some("transaction_undone"),
+        _ => None,
+    }
+}
+
+/// Reshape a stored event into the JSON the server's `DomainEvent` deserializer accepts.
+///
+/// Returns `None` if the event can't be reshaped (unknown discriminator, malformed
+/// event_data, missing user_id). The caller skips those — better than sending a
+/// payload the server will reject for the whole batch.
+fn build_server_event_payload(
+    e: &storage::StoredEvent,
+    user_id: &str,
+) -> Option<serde_json::Value> {
+    let discriminator = event_data_discriminator(&e.aggregate_type, &e.event_type)?;
+
+    let mut event_data: serde_json::Value =
+        serde_json::from_str(&e.event_data).unwrap_or(serde_json::Value::Null);
+
+    if let Some(obj) = event_data.as_object_mut() {
+        // The client writes the inner-type field as "type" for transactions, but the
+        // server's EventData::Transaction* variants name it `transaction_type` (the
+        // outer "type" key is consumed by serde as the variant discriminator).
+        if e.aggregate_type == "transaction" {
+            if let Some(inner_type) = obj.remove("type") {
+                obj.insert("transaction_type".to_string(), inner_type);
+            }
+        }
+        // Insert the variant discriminator so EventData's `#[serde(tag = "type")]`
+        // can pick the right variant.
+        obj.insert(
+            "type".to_string(),
+            serde_json::Value::String(discriminator.to_string()),
+        );
+    } else {
+        // event_data was not an object — wrap it so we at least have a discriminator.
+        let mut wrapped = serde_json::Map::new();
+        wrapped.insert(
+            "type".to_string(),
+            serde_json::Value::String(discriminator.to_string()),
+        );
+        event_data = serde_json::Value::Object(wrapped);
+    }
+
+    Some(serde_json::json!({
+        "aggregate_id":    e.aggregate_id,
+        "wallet_id":       e.wallet_id,
+        "user_id":         user_id,
+        "created_at":      e.timestamp,
+        "version":         e.version,
+        "idempotency_key": e.id,
+        "event_data":      event_data,
+    }))
+}
+
 /// Push unsynced events to server, mark accepted as synced.
+///
+/// Wire contract (matches backend `DomainEvent` deserializer in
+/// `backend/rust-api/src/domain/events.rs`):
+/// - Client provides `idempotency_key` (our local event id, a UUID) — server uses it for dedup.
+/// - Server generates and owns `event_id`.
+/// - Server returns `accepted: [<idempotency_key>]` so we can mark local rows synced.
 pub fn push_unsynced() -> Result<(), String> {
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
@@ -84,34 +158,28 @@ pub fn push_unsynced() -> Result<(), String> {
     if unsynced.is_empty() {
         return Ok(());
     }
-    // TODO: ARCHITECTURE FIX NEEDED - CLIENT SIDE SYNC PAYLOAD
-    // CURRENT (WRONG): Sending "id" field as event_id (server-side identifier)
-    // CORRECT: Send "idempotency_key" field (client-side deduplication key)
-    //
-    // Payload changes needed:
-    // - REMOVE: "id" field (server generates this)
-    // - ADD: "idempotency_key" field (client should provide this per action)
-    // - Server will return new event_id in response - STORE IT locally for future ops
-    //
-    // This ensures:
-    // 1. Client idempotency_key prevents duplicate form submissions (glitches, retries)
-    // 2. Server generates unique event_id for each event
-    // 3. Client stores returned event_id for delete/undo operations
+
+    let user_id = storage::config_get("user_id")?
+        .ok_or_else(|| "Not logged in (no user_id in storage)".to_string())?;
+
     let payload: Vec<String> = unsynced
         .iter()
-        .map(|e| {
-            let v = serde_json::json!({
-                "id": e.id,  // TODO: REMOVE - don't send event_id, send idempotency_key
-                "aggregate_type": e.aggregate_type,
-                "aggregate_id": e.aggregate_id,
-                "event_type": e.event_type,
-                "event_data": serde_json::from_str::<serde_json::Value>(&e.event_data).unwrap_or(serde_json::Value::Null),
-                "timestamp": e.timestamp,
-                "version": e.version
-            });
-            serde_json::to_string(&v).unwrap_or_else(|_| "{}".to_string())
+        .filter_map(|e| {
+            let v = build_server_event_payload(e, &user_id)?;
+            serde_json::to_string(&v).ok()
         })
         .collect();
+
+    if payload.len() != unsynced.len() {
+        rust_log!(
+            "[debitum_rs] push_unsynced: skipped {} unsendable event(s) of {} pending (unknown discriminator or serialization failure)",
+            unsynced.len() - payload.len(),
+            unsynced.len()
+        );
+    }
+    if payload.is_empty() {
+        return Ok(());
+    }
     match api::post_sync_events(payload) {
         Ok(accepted) => {
             rust_log!(
