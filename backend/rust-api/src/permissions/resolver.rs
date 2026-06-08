@@ -174,9 +174,14 @@ pub async fn get_readable_contacts(
         .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
 
     if can_read_all {
-        // Get all contacts for this wallet
+        // Include soft-deleted contacts too — this function is used by
+        // filter_readable_events to decide which contact/transaction events the user is
+        // allowed to receive. A user with read access to a contact must still see the
+        // contact's own DELETE event (and the DELETEs of its transactions) after it has
+        // been soft-deleted; if we filtered is_deleted=false here, those events would
+        // become invisible at the exact moment they fire.
         let all_contacts: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM contacts_projection WHERE wallet_id = $1 AND is_deleted = false",
+            "SELECT id FROM contacts_projection WHERE wallet_id = $1",
         )
         .bind(ctx.wallet_id)
         .fetch_all(pool)
@@ -215,9 +220,11 @@ pub async fn get_readable_transaction_contacts(
         .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
 
     if can_read_all {
-        // Get all contacts for this wallet
+        // Include soft-deleted contacts too (same reasoning as get_readable_contacts):
+        // a transaction DELETE event for a contact that has just been soft-deleted must
+        // still be visible to users who had read access to that contact.
         let all_contacts: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM contacts_projection WHERE wallet_id = $1 AND is_deleted = false",
+            "SELECT id FROM contacts_projection WHERE wallet_id = $1",
         )
         .bind(ctx.wallet_id)
         .fetch_all(pool)
@@ -257,12 +264,20 @@ pub async fn filter_readable_events(
         WHERE e.wallet_id = $1
           AND e.event_id = ANY($2::uuid[])
           AND (
-            -- Contact events
-            (e.aggregate_type = 'contact' AND e.aggregate_id = ANY($3::uuid[]))
-            -- Transaction events
+            -- Contact CREATED / UPDATED: visible iff the contact is currently in the user's readable set
+            (e.aggregate_type = 'contact' AND e.event_type IN ('CREATED', 'UPDATED')
+                AND e.aggregate_id = ANY($3::uuid[]))
+            -- Contact DELETED / UNDO: by the time we query, the contact may no longer be in
+            -- readable_contacts (DELETE removes it from the projection used by get_readable_contacts).
+            -- Allow if the user can read any contacts at all — they should learn that a contact
+            -- they could see has been removed/undone.
+            OR (e.aggregate_type = 'contact' AND e.event_type IN ('DELETED', 'UNDO')
+                AND ARRAY_LENGTH($3::uuid[], 1) > 0)
+            -- Transaction CREATED / UPDATED: visible iff the linked contact is readable
             OR (e.aggregate_type = 'transaction' AND e.event_type IN ('CREATED', 'UPDATED')
                 AND (e.event_data->>'contact_id')::uuid = ANY($4::uuid[]))
-            -- Delete/Undo events
+            -- Transaction DELETED / UNDO: same "may already be gone" issue; allow if the user
+            -- can read any transaction contacts.
             OR (e.aggregate_type = 'transaction' AND e.event_type IN ('DELETED', 'UNDO')
                 AND ARRAY_LENGTH($4::uuid[], 1) > 0)
             -- Permission and wallet events

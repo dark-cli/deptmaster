@@ -41,7 +41,11 @@ pub const GET_READABLE_CONTACTS_QUERY: &str = r#"
     AND ug.name = 'all_users'
     AND pa.name = 'contact:read'
     AND c.wallet_id = $1
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 UNION
 (
@@ -57,7 +61,11 @@ UNION
     AND ug.wallet_id = $1
     AND pa.name = 'contact:read'
     AND c.wallet_id = $1
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 "#;
 
@@ -74,7 +82,11 @@ pub const GET_READABLE_CONTACTS_VIA_ALL_QUERY: &str = r#"
   WHERE ug.wallet_id = $1
     AND ug.name = 'all_users'
     AND pa.name = 'contact:read'
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 UNION
 (
@@ -88,7 +100,11 @@ UNION
   WHERE ugm.user_id = $2
     AND ug.wallet_id = $1
     AND pa.name = 'contact:read'
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 "#;
 
@@ -107,7 +123,11 @@ pub const GET_READABLE_TRANSACTION_CONTACTS_QUERY: &str = r#"
     AND ug.name = 'all_users'
     AND pa.name = 'transaction:read'
     AND c.wallet_id = $1
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 UNION
 (
@@ -123,7 +143,11 @@ UNION
     AND ug.wallet_id = $1
     AND pa.name = 'transaction:read'
     AND c.wallet_id = $1
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 "#;
 
@@ -140,7 +164,11 @@ pub const GET_READABLE_TRANSACTION_CONTACTS_VIA_ALL_QUERY: &str = r#"
   WHERE ug.wallet_id = $1
     AND ug.name = 'all_users'
     AND pa.name = 'transaction:read'
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 UNION
 (
@@ -154,7 +182,11 @@ UNION
   WHERE ugm.user_id = $2
     AND ug.wallet_id = $1
     AND pa.name = 'transaction:read'
-    AND c.is_deleted = false
+    -- NOTE: is_deleted filter intentionally omitted. These queries decide "what is
+    -- the user allowed to read events about" (used by filter_readable_events for
+    -- sync). A user must still receive the DELETE/UNDO events for a contact they
+    -- had access to — filtering them out here makes the contact's own deletion
+    -- invisible to other apps.
 )
 "#;
 
