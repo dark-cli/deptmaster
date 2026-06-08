@@ -16,6 +16,24 @@ This mirrors the backend process: **read → document → divide & conquer → f
 ---
 
 ## Phase 1: Discovery (✅ in progress)
+## Phase 0: Shared domain crate (NEW — added 2026-06-08)
+
+After the discovery review surfaced how much the client and server duplicate (events, permissions, projections, replay logic), the decision was made to extract shared types **first**, before applying any bug fixes. See [[02-shared-domain-crate]] for the full proposal and [[01-design-notes]] Decision 4 for the summary.
+
+**Order:**
+1. Create `crates/debitum_domain` (pure types) with backend's `EventData`, `Action`, `Resource`, `WalletRole`, projection structs copied in. No callers touched yet.
+2. Create `crates/debitum_event_replay` (`apply(state, &event) -> state`) factored from the server's type-driven handlers.
+3. Migrate backend to use the shared crates. All 59 backend tests must still pass.
+4. Migrate client to use the shared crates. This alone should kill some of the BUGS (#8, #9 likely).
+5. Then continue with Phase 2 / Phase 3 below.
+
+**Open questions blocking start** (need user input):
+1. Workspace `Cargo.toml` at the root, or keep crates independent with path deps?
+2. Should `frontend/` (Dioxus web) also depend on `debitum_domain`?
+3. OK with a thin DTO shell in `debitum_client_core` for FRB ↔ Dart?
+
+---
+
 
 - [x] Branch created off `fix/test-compilation`
 - [x] Inventoried Rust core modules (`06-client/00-overview.md`)

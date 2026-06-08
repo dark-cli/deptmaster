@@ -86,6 +86,55 @@ This already partially exists (`pull_and_merge` does a full pull when `local_cou
 ---
 
 ## Cross-references
+## Decision 4: Share `DomainEvent`, permission model, and projection types between client and server
+
+**Short answer: yes — and we should do it before any more bug fixes, because most of the bugs in `BUGS.md` exist precisely because client and server can't compile against the same shape.**
+
+Full proposal with crate layout, constraint analysis, FRB compatibility, migration steps, and risk table: [[02-shared-domain-crate]].
+
+### What can be shared
+- `EventData` enum (28 variants), `DomainEvent`, `AggregateType`, `EventDiscriminator`
+- `Action`, `Resource`, `WalletRole`, `PermissionContext` (pure data, no DB)
+- Projection types: `Contact`, `Transaction`, `Wallet`, `Currency`, `TransactionType`, `TransactionDirection`
+- Typed IDs (`WalletId`, `ContactId`, …)
+- Event-replay *logic* (`apply(state, event) -> state`) — server-side `apply_event_batch_typed` and client-side `state_builder` are doing the same job twice
+
+### What can't (and shouldn't try to)
+- `sqlx::PgRow` parsing / `rusqlite` storage — different DBs, but the conversion target (the projection struct) is shared
+- `axum` handlers / `reqwest` client / `flutter_rust_bridge` exports — platform glue
+- DB connection pools, tokio runtime choice
+
+### Proposed structure
+
+```
+crates/
+  debitum_domain/         ← NEW: pure types (serde, uuid, chrono only)
+  debitum_event_replay/   ← NEW: apply(state, event) — used by both sides
+  debitum_client_core/    ← uses the two above
+backend/rust-api/         ← uses the two above
+```
+
+### Why do it NOW (before more bug fixes)
+
+- We just refactored the server to use type-driven dispatch (`apply_event_batch_typed`). That logic is *exactly* what the client needs. If we share it, the client and server can't disagree.
+- BUGS #8 and #9 (UPDATED events not visible) would likely disappear — currently the client emits an event the server doesn't recognise as UPDATED. Shared `EventData` enum makes that impossible.
+- Every fix we apply now risks drifting from the other side. Sharing first means fixes apply once.
+
+### Order of execution
+
+1. Create the two shared crates with backend types copied in (no callers touched yet)
+2. Migrate backend to use them — tests must still pass
+3. Migrate client to use them — this alone should kill some bugs
+4. Then proceed with the rest of [[00-refactoring-plan]] Phase 3 (multi-app sync, permission visibility)
+
+### Open questions for the user
+
+1. **Workspace `Cargo.toml`** at the root, or keep crates independent with path deps?
+2. Should `frontend/` (the Dioxus web crate) also depend on `debitum_domain`?
+3. Are you OK with a thin DTO shell in `debitum_client_core` for FRB ↔ Dart (to avoid FRB issues with serde-tagged enums)?
+
+---
+
 
 - [[00-overview]] — client architecture map
 - [[00-refactoring-plan]] — what we're doing about all of this
