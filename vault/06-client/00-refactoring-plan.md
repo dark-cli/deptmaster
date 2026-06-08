@@ -17,6 +17,8 @@ This mirrors the backend process: **read → document → divide & conquer → f
 
 ## Phase 1: Discovery (✅ in progress)
 ## Phase 0: Shared domain crate (NEW — added 2026-06-08)
+> 🔴 **Read [[03-api-contract-audit]] first.** The client's `POST /api/sync/events` payload doesn't match what the server's `DomainEvent` deserializer accepts (`id` instead of generated, missing `idempotency_key`/`wallet_id`/`user_id`/`created_at`, wrong `event_data` shape). Every event the client pushes silently fails to deserialize on the server and the client treats it as a network error, keeping events local forever. This is almost certainly the root cause of BUGS #1–#11 in `BUGS.md`. Phase 0 (shared crate) makes this class of bug structurally impossible.
+
 
 After the discovery review surfaced how much the client and server duplicate (events, permissions, projections, replay logic), the decision was made to extract shared types **first**, before applying any bug fixes. See [[02-shared-domain-crate]] for the full proposal and [[01-design-notes]] Decision 4 for the summary.
 

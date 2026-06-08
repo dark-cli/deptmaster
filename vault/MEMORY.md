@@ -19,6 +19,9 @@ Quick links to project documentation and references.
 
 - [Client Overview](06-client/00-overview.md) — Module map for Rust core + Flutter layer
 - [Client Refactoring Plan](06-client/00-refactoring-plan.md) — Active plan: discovery → divide → fix
+- [Client Design Notes](06-client/01-design-notes.md) — Decisions on permissions, notifications, cache conflict, shared types
+- [Shared Domain Crate Proposal](06-client/02-shared-domain-crate.md) — Extract event/permission/projection types
+- [🔴 API Contract Audit](06-client/03-api-contract-audit.md) — Client push payload doesn't match server; root cause of most BUGS
 
 ## Database
 
