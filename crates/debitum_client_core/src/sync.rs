@@ -223,23 +223,37 @@ pub fn push_unsynced() -> Result<(), String> {
     }
 }
 
-/// Pull server events (since last sync for this wallet), merge into local, rebuild state.
-/// When we have zero local events for this wallet, do a full pull (no since) so server data loads.
-/// On full pull (since=None), we replace local events with the server response so that permission
-/// filtering takes effect: the client ends up with exactly the events the server allows.
+/// Pull server events for this wallet, merge into local, rebuild state.
+///
+/// Sync semantics:
+/// - `since = last_sync_timestamp` (per-wallet) when present → incremental pull (only newer events).
+/// - `since = None` → server returns the full visible-to-this-user event set.
+///
+/// We only DESTRUCTIVELY replace local events when one of two things is true:
+///   1. Local has zero events (nothing to lose), AND it's a full pull (first sync).
+///   2. An incremental pull returned permission events — the user's visible set may
+///      have shrunk, so we full-reset to match the server's filter.
+///
+/// Otherwise we just upsert (`INSERT OR IGNORE`); the server-issued ids don't collide
+/// with our client-issued ones, and dedup happens on (id) plus replay tolerates duplicates.
+/// `last_sync_timestamp` is updated at the end of every successful pull (even when the
+/// server returned 0 events) so the next sync is incremental — without this, every sync
+/// would re-trigger the full-pull path and destroy local-only state.
 pub fn pull_and_merge() -> Result<(), String> {
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
     let local_count = storage::events_count(&wallet_id).unwrap_or(0);
-    let since = if local_count == 0 {
-        rust_log!("[debitum_rs] pull_and_merge: 0 local events for wallet {}, full pull (no since)", wallet_id);
-        None
-    } else {
-        storage::config_get(&last_sync_key(&wallet_id))?
-    };
+    let since = storage::config_get(&last_sync_key(&wallet_id))?;
     let is_full_pull = since.is_none();
-    if since.as_ref().is_some() {
-        rust_log!("[debitum_rs] pull_and_merge: incremental pull since={:?}", since);
+    if let Some(ref s) = since {
+        rust_log!("[debitum_rs] pull_and_merge: incremental pull since={}", s);
+    } else if local_count == 0 {
+        rust_log!("[debitum_rs] pull_and_merge: 0 local events for wallet {}, full pull (no since)", wallet_id);
+    } else {
+        rust_log!(
+            "[debitum_rs] pull_and_merge: no last_sync_timestamp but {} local events for wallet {} — full pull WITHOUT clearing local",
+            local_count, wallet_id
+        );
     }
     rust_log!("[debitum_rs] pull_and_merge: requesting server events");
     let mut server_events = api::get_sync_events(since.clone())?;
@@ -254,9 +268,9 @@ pub fn pull_and_merge() -> Result<(), String> {
         let _ = storage::config_remove(&perms_cache_key(&wallet_id));
         storage::events_delete_all_for_wallet(&wallet_id)?;
         server_events = api::get_sync_events(None)?;
-    } else if is_full_pull {
-        storage::events_delete_all_for_wallet(&wallet_id)?;
-        rust_log!("[debitum_rs] pull_and_merge: full pull — cleared local events for wallet {}", wallet_id);
+    } else if is_full_pull && local_count == 0 {
+        // First sync, nothing local to lose. (No-op — there's nothing to delete.)
+        rust_log!("[debitum_rs] pull_and_merge: full pull on empty wallet — just absorbing server events");
     }
 
     for ev in &server_events {
@@ -286,9 +300,15 @@ pub fn pull_and_merge() -> Result<(), String> {
     let events = storage::events_get_all(&wallet_id)?;
     let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
     storage::state_save(&wallet_id, &contacts, &transactions)?;
-    if let Some(ts) = server_events.last().and_then(|e| e.get("timestamp").and_then(|v| v.as_str())) {
-        storage::config_set(&last_sync_key(&wallet_id), ts)?;
-    }
+    // Always advance last_sync_timestamp — using the newest server event's timestamp if any,
+    // else "now". Without the fallback, repeated empty-response syncs would all re-trigger the
+    // full-pull path, which is destructive when local has data.
+    let ts_to_save = server_events
+        .last()
+        .and_then(|e| e.get("timestamp").and_then(|v| v.as_str()))
+        .map(String::from)
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    storage::config_set(&last_sync_key(&wallet_id), &ts_to_save)?;
     Ok(())
 }
 

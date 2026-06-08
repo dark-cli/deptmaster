@@ -96,10 +96,18 @@ impl AppInstance {
         self.activate()
     }
 
-    /// Register this app's user only (no wallet). Use after new(). Then login() then create_wallet() or select_wallet().
+    /// Register and create a default wallet (named after the test app id). Used by
+    /// single-app tests that want one fresh user with one fresh wallet in one call.
+    /// Multi-app tests that need to share a wallet should use
+    /// `create_unique_test_user_and_wallet` + `with_credentials` + `select_wallet`
+    /// instead.
     pub fn signup(&self) -> Result<(), String> {
         self.activate()?;
         register(self.username.clone(), self.password.clone())?;
+        // Most tests that call signup() immediately do CRUD on a wallet; auto-create one
+        // so they don't all have to repeat the create_wallet boilerplate.
+        let wallet_name = format!("itest-wallet-{}", self._id);
+        self.create_wallet(wallet_name, String::new())?;
         Ok(())
     }
 

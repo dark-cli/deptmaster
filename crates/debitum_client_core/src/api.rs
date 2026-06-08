@@ -94,24 +94,25 @@ pub fn register(username: String, password: String) -> Result<(), String> {
     })
 }
 
-/// GET /api/sync/events?since=... (internal; not exposed to FFI)
+/// GET /api/wallets/<wallet_id>/sync/events?since=... (internal; not exposed to FFI).
+/// wallet_id is path-only — backend's wallet_context middleware doesn't read header/query.
 pub(crate) fn get_sync_events(since: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     let base = base_url()?;
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
-    let mut headers = auth_headers()?;
-    headers.insert(
-        reqwest::header::HeaderName::from_static("x-wallet-id"),
-        wallet_id.parse().map_err(|e: reqwest::header::InvalidHeaderValue| e.to_string())?,
+    let headers = auth_headers()?;
+    let url = format!(
+        "{}/api/wallets/{}/sync/events",
+        base.trim_end_matches('/'),
+        wallet_id
     );
-    let url = format!("{}/api/sync/events", base);
     let since_ref = since.as_deref();
     RUNTIME.block_on(async {
-        let mut q = vec![("wallet_id", wallet_id.as_str())];
+        let mut req = CLIENT.get(&url).headers(headers);
         if let Some(s) = since_ref {
-            q.push(("since", s));
+            req = req.query(&[("since", s)]);
         }
-        let resp = CLIENT.get(&url).query(&q).headers(headers).send().await.map_err(|e| e.to_string())?;
+        let resp = req.send().await.map_err(|e| e.to_string())?;
         let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
         if status.as_u16() == 401 && text.contains("DEBITUM_AUTH_DECLINED") {
@@ -125,7 +126,8 @@ pub(crate) fn get_sync_events(since: Option<String>) -> Result<Vec<serde_json::V
     })
 }
 
-/// POST /api/sync/events (internal; not exposed to FFI)
+/// POST /api/wallets/<wallet_id>/sync/events (internal; not exposed to FFI).
+/// wallet_id is path-only — backend's wallet_context middleware doesn't read header/query.
 pub(crate) fn post_sync_events(events_json: Vec<String>) -> Result<Vec<String>, String> {
     let events: Vec<serde_json::Value> = events_json
         .iter()
@@ -134,14 +136,14 @@ pub(crate) fn post_sync_events(events_json: Vec<String>) -> Result<Vec<String>, 
     let base = base_url()?;
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
-    let mut headers = auth_headers()?;
-    headers.insert(
-        reqwest::header::HeaderName::from_static("x-wallet-id"),
-        wallet_id.parse().map_err(|e: reqwest::header::InvalidHeaderValue| e.to_string())?,
+    let headers = auth_headers()?;
+    let url = format!(
+        "{}/api/wallets/{}/sync/events",
+        base.trim_end_matches('/'),
+        wallet_id
     );
-    let url = format!("{}/api/sync/events", base);
     let accepted: Vec<String> = RUNTIME.block_on(async {
-        let resp = CLIENT.post(&url).query(&[("wallet_id", wallet_id.as_str())]).headers(headers).json(&events).send().await.map_err(|e| e.to_string())?;
+        let resp = CLIENT.post(&url).headers(headers).json(&events).send().await.map_err(|e| e.to_string())?;
         let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
         // Only treat as "permission denied" when the server body contains our unique code (never in network errors).

@@ -16,8 +16,8 @@ use debitum_client_core::{
     create_wallet_user_group,
     delete_contact,
     get_contacts,
-    get_contacts_from_server,
     get_wallet_permission_matrix,
+    manual_sync,
     join_wallet_by_code,
     list_wallet_contact_group_members,
     list_wallet_contact_groups,
@@ -404,7 +404,11 @@ fn permission_limits_union_of_groups() {
     member.activate().expect("activate");
     set_current_wallet_id(wallet_id.clone()).expect("member must use shared wallet");
 
-    let contacts_json = get_contacts_from_server().expect("get contacts from server");
+    // Sync member's local state with the server, then read from local projection.
+    // (Asserting on local state after a sync is the right pattern — the client never
+    // probes the server directly; backend tests cover server-state assertions.)
+    manual_sync().expect("member sync");
+    let contacts_json = get_contacts().expect("get contacts");
     let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
     let contact = contacts.iter().find(|c| c["name"] == "Test Contact").expect("should see contact");
     let contact_id = contact["id"].as_str().unwrap().to_string();
@@ -418,7 +422,8 @@ fn permission_limits_union_of_groups() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     owner.activate().expect("activate");
     set_current_wallet_id(wallet_id.clone()).expect("owner use shared wallet");
-    let contacts_json = get_contacts_from_server().expect("get contacts from server");
+    manual_sync().expect("owner sync");
+    let contacts_json = get_contacts().expect("get contacts");
     let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
     let contact = contacts.iter().find(|c| c["id"] == contact_id).unwrap();
     assert_eq!(contact["name"], "Updated Name");
@@ -473,7 +478,8 @@ fn permission_limits_scoped_denial() {
     member.activate().expect("activate");
     set_current_wallet_id(wallet_id.clone()).expect("member must use shared wallet");
 
-    let contacts_json = get_contacts_from_server().expect("get contacts from server");
+    manual_sync().expect("member sync");
+    let contacts_json = get_contacts().expect("get contacts");
     let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
     assert!(contacts.iter().any(|c| c["name"] == "Work Contact"), "Should see Work Contact");
     assert!(!contacts.iter().any(|c| c["name"] == "Personal Contact"), "Should NOT see Personal Contact (Probation deny overrides Friends allow)");
@@ -1093,7 +1099,8 @@ fn permission_flow_default_read_then_none_then_group_read_write_three_apps() {
         .expect("app2 can read contacts in VIP group");
     // App2 can edit: update a contact via API (app2's command runner has no labels from app1's creates)
     app2_instance.activate().expect("app2");
-    let contacts_json = get_contacts_from_server().expect("get contacts");
+    manual_sync().expect("app2 sync");
+    let contacts_json = get_contacts().expect("get contacts");
     let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
     let alice = contacts.iter().find(|c| c["name"].as_str() == Some("Alice")).expect("Alice in VIP");
     let alice_id = alice["id"].as_str().unwrap().to_string();

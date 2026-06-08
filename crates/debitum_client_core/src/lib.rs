@@ -264,14 +264,6 @@ pub fn get_contacts() -> Result<String, String> {
     crud::get_contacts()
 }
 
-/// Force a server pull for the current wallet and return the resulting contacts.
-/// Used by integration tests to bypass the local projection cache when asserting
-/// that data created on one app/server is visible from another app.
-pub fn get_contacts_from_server() -> Result<String, String> {
-    sync::pull_and_merge()?;
-    crud::get_contacts()
-}
-
 pub fn get_transactions() -> Result<String, String> {
     crud::get_transactions()
 }
