@@ -91,7 +91,6 @@ pub struct SyncEventsQuery {
     pub since: Option<String>,
 }
 
-
 // ============ PUBLIC ENDPOINTS ============
 
 /// Get hash of all events for sync comparison (permission-filtered)
@@ -226,7 +225,11 @@ pub async fn post_sync_events(
                 new_events.push(domain_event);
             }
             Err(e) => {
-                tracing::debug!("Failed to insert event {} (duplicate key): {:?}", domain_event.id, e);
+                tracing::debug!(
+                    "Failed to insert event {} (duplicate key): {:?}",
+                    domain_event.id,
+                    e
+                );
                 conflicts.push(domain_event.id.to_string());
             }
         }
@@ -234,7 +237,10 @@ pub async fn post_sync_events(
 
     // Populate readable events cache for all accepted events
     if !new_events.is_empty() {
-        if let Err(e) = db.populate_events_cache_after_sync(wallet_id, &new_events).await {
+        if let Err(e) = db
+            .populate_events_cache_after_sync(wallet_id, &new_events)
+            .await
+        {
             tracing::error!("Error populating event cache: {:?}", e);
         }
 
@@ -270,15 +276,14 @@ pub async fn post_sync_events(
     }))
 }
 
-
 async fn insert_event(
     db: &Database,
     wallet_id: Uuid,
     user_id: Uuid,
     domain_event: &DomainEvent,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    let mut event_data = serde_json::to_value(&domain_event.event_data)
-        .unwrap_or_else(|_| serde_json::json!({}));
+    let mut event_data =
+        serde_json::to_value(&domain_event.event_data).unwrap_or_else(|_| serde_json::json!({}));
 
     if let Some(obj) = event_data.as_object_mut() {
         obj.remove("type");
@@ -305,12 +310,7 @@ async fn insert_event(
     Ok(inserted_id > 0)
 }
 
-async fn apply_events_batch(
-    db: &Database,
-    wallet_id: Uuid,
-    user_id: Uuid,
-    event_ids: &[Uuid],
-) {
+async fn apply_events_batch(db: &Database, wallet_id: Uuid, user_id: Uuid, event_ids: &[Uuid]) {
     if event_ids.is_empty() {
         return;
     }
@@ -327,7 +327,10 @@ async fn apply_events_batch(
     if !rows.is_empty() {
         let row_refs: Vec<_> = rows.iter().collect();
         let mut undone_set = HashSet::new();
-        if let Err(e) = db.apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set).await {
+        if let Err(e) = db
+            .apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set)
+            .await
+        {
             tracing::error!("Error applying event batch: {:?}", e);
         }
     }
@@ -418,7 +421,10 @@ pub async fn insert_permission_event_and_apply(
     let wallet_users = match db.get_wallet_users_impl(wallet_id).await {
         Ok(users) => users,
         Err(e) => {
-            tracing::error!("Error fetching wallet users for permission event cache: {:?}", e);
+            tracing::error!(
+                "Error fetching wallet users for permission event cache: {:?}",
+                e
+            );
             Vec::new()
         }
     };
@@ -428,10 +434,7 @@ pub async fn insert_permission_event_and_apply(
             .add_readable_event_impl(wallet_id, wallet_user_id, event_id)
             .await
         {
-            tracing::error!(
-                "Error adding readable permission event for user: {:?}",
-                e
-            );
+            tracing::error!("Error adding readable permission event for user: {:?}", e);
         }
     }
 

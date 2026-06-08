@@ -43,12 +43,13 @@ async fn test_cache_populated_on_user_added() {
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
     // Get all_users group and all_contacts group
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -87,7 +88,7 @@ async fn test_cache_populated_on_user_added() {
     // Verify cache has entries for all_contacts (which has permissions from all_users)
     let cache_for_group: Vec<(Uuid, i16)> = sqlx::query_as(
         "SELECT contact_group_id, permission_action_id FROM user_permission_matrix_cache
-         WHERE wallet_id = $1 AND user_id = $2 AND contact_group_id = $3"
+         WHERE wallet_id = $1 AND user_id = $2 AND contact_group_id = $3",
     )
     .bind(wallet_id)
     .bind(user_id)
@@ -115,12 +116,13 @@ async fn test_cache_cleaned_on_user_removed() {
 
     // Add user and populate cache
     add_user_to_wallet(&pool, user_id, wallet_id, "member").await;
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     sqlx::query(
         "INSERT INTO user_group_members (user_group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
@@ -165,12 +167,13 @@ async fn test_smart_cache_invalidation_for_permission_matrix_change() {
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
     // Get system groups
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -243,12 +246,13 @@ async fn test_full_wallet_cache_invalidation() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     // Add users and populate cache
     for user_id in [user1_id, user2_id] {
@@ -295,12 +299,13 @@ async fn test_cache_respects_deny_overrides() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -331,7 +336,7 @@ async fn test_cache_respects_deny_overrides() {
          (wallet_id, user_id, contact_group_id, permission_action_id, is_deny)
          VALUES ($1, $2, $3, 1, true)
          ON CONFLICT (wallet_id, user_id, contact_group_id, permission_action_id)
-         DO UPDATE SET is_deny = true"
+         DO UPDATE SET is_deny = true",
     )
     .bind(wallet_id)
     .bind(user_id)
@@ -369,12 +374,13 @@ async fn test_cascade_delete_cleans_cache_on_wallet_delete() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     add_user_to_wallet(&pool, user_id, wallet_id, "member").await;
     sqlx::query(
@@ -420,12 +426,13 @@ async fn test_cache_handles_multiple_contact_groups() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -438,7 +445,7 @@ async fn test_cache_handles_multiple_contact_groups() {
     // Create additional contact group
     let custom_group_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO contact_groups (id, wallet_id, name, type) VALUES ($1, $2, $3, 'static')"
+        "INSERT INTO contact_groups (id, wallet_id, name, type) VALUES ($1, $2, $3, 'static')",
     )
     .bind(custom_group_id)
     .bind(wallet_id)
@@ -476,7 +483,7 @@ async fn test_cache_handles_multiple_contact_groups() {
     // Verify cache has entries for both groups
     let all_contacts_entries: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_permission_matrix_cache
-         WHERE wallet_id = $1 AND user_id = $2 AND contact_group_id = $3"
+         WHERE wallet_id = $1 AND user_id = $2 AND contact_group_id = $3",
     )
     .bind(wallet_id)
     .bind(user_id)
@@ -487,7 +494,7 @@ async fn test_cache_handles_multiple_contact_groups() {
 
     let custom_entries: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_permission_matrix_cache
-         WHERE wallet_id = $1 AND user_id = $2 AND contact_group_id = $3"
+         WHERE wallet_id = $1 AND user_id = $2 AND contact_group_id = $3",
     )
     .bind(wallet_id)
     .bind(user_id)

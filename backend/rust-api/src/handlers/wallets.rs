@@ -35,7 +35,9 @@ fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
     for action in actions {
         if let Some((resource, verb)) = action.split_once(':') {
             // For wallet resource, 'manage_members' is a special verb
-            if resource == "wallet" && (verb == "update" || verb == "delete" || verb == "manage_members") {
+            if resource == "wallet"
+                && (verb == "update" || verb == "delete" || verb == "manage_members")
+            {
                 if !has_action("wallet:read") {
                     return Err(format!("Permission '{}' requires 'wallet:read'", action));
                 }
@@ -286,12 +288,11 @@ async fn initialize_wallet_permissions(
     let all_users_group = db.create_user_group(wallet_id, "all_users", true).await?;
 
     // 2. Create __owners__ system user group (cannot be modified by admins)
-    let owners_group = db
-        .create_user_group(wallet_id, "__owners__", true)
-        .await?;
+    let owners_group = db.create_user_group(wallet_id, "__owners__", true).await?;
 
     // 3. Add owner to owners group
-    db.add_user_group_member(owners_group, owner_user_id).await?;
+    db.add_user_group_member(owners_group, owner_user_id)
+        .await?;
 
     // 4. Create all_contacts system contact group
     let all_contacts = db
@@ -302,7 +303,8 @@ async fn initialize_wallet_permissions(
     let member_actions = ["contact:read", "transaction:read"];
     for action in member_actions {
         if let Some(aid) = db.get_permission_action_id(action).await? {
-            db.grant_permission(all_users_group, all_contacts, aid).await?;
+            db.grant_permission(all_users_group, all_contacts, aid)
+                .await?;
         }
     }
 

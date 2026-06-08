@@ -419,7 +419,9 @@ impl Database {
                 {
                     if !readable_ids.is_empty() {
                         // Add to user's readable events
-                        let _ = self.add_readable_event_impl(wallet_id, *wallet_user_id, event.id).await;
+                        let _ = self
+                            .add_readable_event_impl(wallet_id, *wallet_user_id, event.id)
+                            .await;
                     }
                 }
             }
@@ -673,12 +675,12 @@ impl Database {
     ) -> Result<crate::domain::events::EventData, String> {
         let discriminator = EventDiscriminator::from_database(aggregate_type, event_type)?;
 
-        let mut data_with_type =
-            if aggregate_type == "permission" && raw_data.get("data").is_none() {
-                serde_json::json!({ "data": raw_data })
-            } else {
-                raw_data
-            };
+        let mut data_with_type = if aggregate_type == "permission" && raw_data.get("data").is_none()
+        {
+            serde_json::json!({ "data": raw_data })
+        } else {
+            raw_data
+        };
 
         if let Some(obj) = data_with_type.as_object_mut() {
             obj.insert(
@@ -938,9 +940,9 @@ impl Database {
                     Some(created_at.date())
                 };
 
-                let parsed_due_date = due_date.as_deref().and_then(|d| {
-                    chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
-                });
+                let parsed_due_date = due_date
+                    .as_deref()
+                    .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
                 if let Some(txn_date) = txn_date {
                     sqlx::query(
@@ -1084,7 +1086,9 @@ impl Database {
             }
 
             _ => {
-                tracing::warn!("apply_transaction_event_typed received non-transaction event variant");
+                tracing::warn!(
+                    "apply_transaction_event_typed received non-transaction event variant"
+                );
             }
         }
 
@@ -1118,7 +1122,7 @@ impl Database {
                         INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
                         VALUES ($1, $2, $3, $4)
                         ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3, subscribed_at = $4
-                        "#
+                        "#,
                     )
                     .bind(wallet_id)
                     .bind(perm_user_id)
@@ -1216,7 +1220,7 @@ impl Database {
                 let user_id_str = data.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
                 if let Ok(perm_user_id) = Uuid::parse_str(user_id_str) {
                     let _ = sqlx::query(
-                        "DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2"
+                        "DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2",
                     )
                     .bind(perm_user_id)
                     .bind(aggregate_id)
@@ -1272,13 +1276,14 @@ impl Database {
             }
 
             _ => {
-                tracing::warn!("apply_permission_event_typed received non-permission event variant");
+                tracing::warn!(
+                    "apply_permission_event_typed received non-permission event variant"
+                );
             }
         }
 
         Ok(())
     }
-
 
     /// Apply a single event by fetching it from DB and using the batch processor
     /// This consolidates event application logic into one place

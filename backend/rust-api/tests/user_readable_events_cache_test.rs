@@ -3,6 +3,7 @@
 //! Uses the sync API (post_sync_events) to populate cache realistically
 
 use axum::extract::{Extension, Json, State};
+use chrono::Utc;
 use debt_tracker_api::database::repository::Database;
 use debt_tracker_api::domain::events::{DomainEvent, EventData};
 use debt_tracker_api::handlers::sync::post_sync_events;
@@ -11,7 +12,6 @@ use debt_tracker_api::middleware::wallet_context::WalletContext;
 use debt_tracker_api::permissions::WalletRole;
 use debt_tracker_api::websocket;
 use debt_tracker_api::Config;
-use chrono::Utc;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -226,14 +226,8 @@ async fn test_cache_per_user_via_sync() {
         .await
         .expect("get user1 readable events");
 
-    assert!(
-        user1_cached.contains(&event1_id),
-        "User1 should see event1"
-    );
-    assert!(
-        user1_cached.contains(&event2_id),
-        "User1 should see event2"
-    );
+    assert!(user1_cached.contains(&event1_id), "User1 should see event1");
+    assert!(user1_cached.contains(&event2_id), "User1 should see event2");
 
     // User2 should also see both events (they can read them since they're a member with default permissions)
     // The cache is populated for all users who can read the event when it's synced
@@ -426,21 +420,13 @@ async fn test_cache_uniqueness_per_user() {
         .get_readable_event_ids_for_user_impl(wallet_id, user1_id)
         .await
         .expect("get user1 cached");
-    assert_eq!(
-        user1_cached.len(),
-        1,
-        "User1 should have exactly 1 event"
-    );
+    assert_eq!(user1_cached.len(), 1, "User1 should have exactly 1 event");
 
     let user2_cached = db
         .get_readable_event_ids_for_user_impl(wallet_id, user2_id)
         .await
         .expect("get user2 cached");
-    assert_eq!(
-        user2_cached.len(),
-        1,
-        "User2 should have exactly 1 event"
-    );
+    assert_eq!(user2_cached.len(), 1, "User2 should have exactly 1 event");
 }
 
 /// Test that get_wallet_users returns correct users
@@ -465,14 +451,8 @@ async fn test_get_wallet_users() {
     assert_eq!(users.len(), 2, "Should have 2 users in wallet");
 
     let user_ids: Vec<Uuid> = users.iter().map(|(id, _)| *id).collect();
-    assert!(
-        user_ids.contains(&owner_id),
-        "Should contain owner"
-    );
-    assert!(
-        user_ids.contains(&member_id),
-        "Should contain member"
-    );
+    assert!(user_ids.contains(&owner_id), "Should contain owner");
+    assert!(user_ids.contains(&member_id), "Should contain member");
 
     // Check roles
     for (id, role) in &users {
@@ -508,7 +488,14 @@ async fn test_cache_accumulates_multiple_events() {
     // Create contacts for batch 1 and set them up in projections
     let batch1_contact_ids: Vec<Uuid> = (0..3).map(|_| Uuid::new_v4()).collect();
     for (i, &contact_id) in batch1_contact_ids.iter().enumerate() {
-        setup_contact_for_wallet(&pool, wallet_id, user_id, contact_id, &format!("Contact {}", i)).await;
+        setup_contact_for_wallet(
+            &pool,
+            wallet_id,
+            user_id,
+            contact_id,
+            &format!("Contact {}", i),
+        )
+        .await;
     }
 
     // Sync first batch of events
@@ -547,12 +534,23 @@ async fn test_cache_accumulates_multiple_events() {
         .get_readable_event_ids_for_user_impl(wallet_id, user_id)
         .await
         .expect("get after batch 1");
-    assert_eq!(cached_after_batch1.len(), 3, "Should have 3 events after batch 1");
+    assert_eq!(
+        cached_after_batch1.len(),
+        3,
+        "Should have 3 events after batch 1"
+    );
 
     // Create contacts for batch 2 and set them up in projections
     let batch2_contact_ids: Vec<Uuid> = (0..2).map(|_| Uuid::new_v4()).collect();
     for (i, &contact_id) in batch2_contact_ids.iter().enumerate() {
-        setup_contact_for_wallet(&pool, wallet_id, user_id, contact_id, &format!("Contact {}", i + 3)).await;
+        setup_contact_for_wallet(
+            &pool,
+            wallet_id,
+            user_id,
+            contact_id,
+            &format!("Contact {}", i + 3),
+        )
+        .await;
     }
 
     // Sync second batch

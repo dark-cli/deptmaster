@@ -50,8 +50,10 @@ impl UserEventHash {
         // Calculate new hash: MD5(current_hash + event_id)
         let current = current_hash.unwrap_or_default();
         let hash_input = format!("{}{}", current, event_id);
-        let new_hash: String =
-            sqlx::query_scalar("SELECT md5($1::text)").bind(&hash_input).fetch_one(pool).await?;
+        let new_hash: String = sqlx::query_scalar("SELECT md5($1::text)")
+            .bind(&hash_input)
+            .fetch_one(pool)
+            .await?;
 
         // Update or insert hash record
         sqlx::query(

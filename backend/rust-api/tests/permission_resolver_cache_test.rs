@@ -2,7 +2,9 @@
 //! Verifies that the resolver correctly uses the cached permissions for ContactGroup lookups
 
 use debt_tracker_api::database::repository::Database;
-use debt_tracker_api::permissions::{Action, PermissionContext, PermissionModel, Resource, WalletRole};
+use debt_tracker_api::permissions::{
+    Action, PermissionContext, PermissionModel, Resource, WalletRole,
+};
 use uuid::Uuid;
 
 mod test_helpers;
@@ -25,12 +27,13 @@ async fn test_resolver_uses_cache_for_contact_group_permissions() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -87,12 +90,13 @@ async fn test_resolver_respects_cache_deny_entries() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -123,7 +127,7 @@ async fn test_resolver_respects_cache_deny_entries() {
          (wallet_id, user_id, contact_group_id, permission_action_id, is_deny)
          VALUES ($1, $2, $3, 2, true)
          ON CONFLICT (wallet_id, user_id, contact_group_id, permission_action_id)
-         DO UPDATE SET is_deny = true"
+         DO UPDATE SET is_deny = true",
     )
     .bind(wallet_id)
     .bind(user_id)
@@ -160,12 +164,13 @@ async fn test_resolver_cache_performance_multiple_queries() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -230,12 +235,13 @@ async fn test_resolver_cache_invalidation_and_repopulation() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -275,7 +281,7 @@ async fn test_resolver_cache_invalidation_and_repopulation() {
 
     // After invalidation, cache is empty
     let cache_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM user_permission_matrix_cache WHERE wallet_id = $1 AND user_id = $2"
+        "SELECT COUNT(*) FROM user_permission_matrix_cache WHERE wallet_id = $1 AND user_id = $2",
     )
     .bind(wallet_id)
     .bind(user_id)
@@ -315,12 +321,13 @@ async fn test_resolver_cache_independent_per_user() {
     let wallet_id = create_test_wallet(&pool, "Test Wallet").await;
     ensure_wallet_has_system_groups(&pool, wallet_id).await;
 
-    let all_users_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'")
-            .bind(wallet_id)
-            .fetch_one(&pool)
-            .await
-            .expect("get all_users");
+    let all_users_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND name = 'all_users'",
+    )
+    .bind(wallet_id)
+    .fetch_one(&pool)
+    .await
+    .expect("get all_users");
 
     let all_contacts_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = 'all_contacts'",
@@ -353,7 +360,7 @@ async fn test_resolver_cache_independent_per_user() {
          (wallet_id, user_id, contact_group_id, permission_action_id, is_deny)
          VALUES ($1, $2, $3, 2, true)
          ON CONFLICT (wallet_id, user_id, contact_group_id, permission_action_id)
-         DO UPDATE SET is_deny = true"
+         DO UPDATE SET is_deny = true",
     )
     .bind(wallet_id)
     .bind(user1_id)

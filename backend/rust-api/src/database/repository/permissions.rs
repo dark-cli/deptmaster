@@ -1,6 +1,6 @@
 use crate::database::error::DbError;
 use crate::database::models::*;
-use crate::database::repository::{Database, hash::UserEventHash};
+use crate::database::repository::{hash::UserEventHash, Database};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -532,13 +532,11 @@ impl Database {
         wallet_id: Uuid,
         user_id: Uuid,
     ) -> Result<(), DbError> {
-        sqlx::query(
-            "DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2",
-        )
-        .bind(wallet_id)
-        .bind(user_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2")
+            .bind(wallet_id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
 
         // Reset hash when cache is cleared (private API)
         UserEventHash::reset(&self.pool, wallet_id, user_id).await?;
@@ -778,13 +776,18 @@ impl Database {
 
         match event_data {
             // User added/removed from group - invalidate that user's cache
-            EventData::UserGroupMemberAdded { data } | EventData::UserGroupMemberRemoved { data } => {
+            EventData::UserGroupMemberAdded { data }
+            | EventData::UserGroupMemberRemoved { data } => {
                 if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
-                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                        if let Err(e) = self
+                            .invalidate_permission_matrix_cache(wallet_id, user_id)
+                            .await
+                        {
                             tracing::warn!(
                                 "Failed to invalidate permission cache for user {}: {:?}",
-                                user_id, e
+                                user_id,
+                                e
                             );
                         }
                     }
@@ -798,12 +801,16 @@ impl Database {
                 {
                     if let Ok(contact_group_id) = uuid::Uuid::parse_str(contact_group_id_str) {
                         // Find users with permissions on this group
-                        match self.get_users_with_group_permissions(wallet_id, contact_group_id).await {
+                        match self
+                            .get_users_with_group_permissions(wallet_id, contact_group_id)
+                            .await
+                        {
                             Ok(affected_users) => {
                                 // Invalidate only affected users
                                 for user_id in affected_users {
-                                    if let Err(e) =
-                                        self.invalidate_permission_matrix_cache(wallet_id, user_id).await
+                                    if let Err(e) = self
+                                        .invalidate_permission_matrix_cache(wallet_id, user_id)
+                                        .await
                                     {
                                         tracing::warn!(
                                             "Failed to invalidate permission cache for user {}: {:?}",
@@ -819,7 +826,9 @@ impl Database {
                                      falling back to full wallet invalidation: {:?}",
                                     e
                                 );
-                                let _ = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await;
+                                let _ = self
+                                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                                    .await;
                             }
                         }
                         return;
@@ -830,10 +839,14 @@ impl Database {
                 tracing::warn!(
                     "PermissionMatrixSet event missing contact_group_id, invalidating entire wallet cache"
                 );
-                if let Err(e) = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await {
+                if let Err(e) = self
+                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                    .await
+                {
                     tracing::warn!(
                         "Failed to invalidate permission cache for wallet {}: {:?}",
-                        wallet_id, e
+                        wallet_id,
+                        e
                     );
                 }
             }
@@ -842,10 +855,14 @@ impl Database {
             EventData::WalletUserAdded { data } => {
                 if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
-                        if let Err(e) = self.compute_and_cache_user_permission_matrix(wallet_id, user_id).await {
+                        if let Err(e) = self
+                            .compute_and_cache_user_permission_matrix(wallet_id, user_id)
+                            .await
+                        {
                             tracing::warn!(
                                 "Failed to compute permission matrix for new user {}: {:?}",
-                                user_id, e
+                                user_id,
+                                e
                             );
                         }
                     }
@@ -856,10 +873,14 @@ impl Database {
             EventData::WalletUserRemoved { data } => {
                 if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
-                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                        if let Err(e) = self
+                            .invalidate_permission_matrix_cache(wallet_id, user_id)
+                            .await
+                        {
                             tracing::warn!(
                                 "Failed to invalidate permission cache for removed user {}: {:?}",
-                                user_id, e
+                                user_id,
+                                e
                             );
                         }
                     }
@@ -885,10 +906,14 @@ impl Database {
             "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED" => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
-                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                        if let Err(e) = self
+                            .invalidate_permission_matrix_cache(wallet_id, user_id)
+                            .await
+                        {
                             tracing::warn!(
                                 "Failed to invalidate permission cache for user {}: {:?}",
-                                user_id, e
+                                user_id,
+                                e
                             );
                         }
                     }
@@ -902,12 +927,16 @@ impl Database {
                 {
                     if let Ok(contact_group_id) = uuid::Uuid::parse_str(contact_group_id_str) {
                         // Find users with permissions on this group
-                        match self.get_users_with_group_permissions(wallet_id, contact_group_id).await {
+                        match self
+                            .get_users_with_group_permissions(wallet_id, contact_group_id)
+                            .await
+                        {
                             Ok(affected_users) => {
                                 // Invalidate only affected users
                                 for user_id in affected_users {
-                                    if let Err(e) =
-                                        self.invalidate_permission_matrix_cache(wallet_id, user_id).await
+                                    if let Err(e) = self
+                                        .invalidate_permission_matrix_cache(wallet_id, user_id)
+                                        .await
                                     {
                                         tracing::warn!(
                                             "Failed to invalidate permission cache for user {}: {:?}",
@@ -923,7 +952,9 @@ impl Database {
                                      falling back to full wallet invalidation: {:?}",
                                     e
                                 );
-                                let _ = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await;
+                                let _ = self
+                                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                                    .await;
                             }
                         }
                         return;
@@ -934,10 +965,14 @@ impl Database {
                 tracing::warn!(
                     "PERMISSION_MATRIX_SET event missing contact_group_id, invalidating entire wallet cache"
                 );
-                if let Err(e) = self.invalidate_permission_matrix_cache_for_wallet(wallet_id).await {
+                if let Err(e) = self
+                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                    .await
+                {
                     tracing::warn!(
                         "Failed to invalidate permission cache for wallet {}: {:?}",
-                        wallet_id, e
+                        wallet_id,
+                        e
                     );
                 }
             }
@@ -946,10 +981,14 @@ impl Database {
             "WALLET_USER_ADDED" => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
-                        if let Err(e) = self.compute_and_cache_user_permission_matrix(wallet_id, user_id).await {
+                        if let Err(e) = self
+                            .compute_and_cache_user_permission_matrix(wallet_id, user_id)
+                            .await
+                        {
                             tracing::warn!(
                                 "Failed to compute permission matrix for new user {}: {:?}",
-                                user_id, e
+                                user_id,
+                                e
                             );
                         }
                     }
@@ -960,10 +999,14 @@ impl Database {
             "WALLET_USER_REMOVED" => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
-                        if let Err(e) = self.invalidate_permission_matrix_cache(wallet_id, user_id).await {
+                        if let Err(e) = self
+                            .invalidate_permission_matrix_cache(wallet_id, user_id)
+                            .await
+                        {
                             tracing::warn!(
                                 "Failed to invalidate permission cache for removed user {}: {:?}",
-                                user_id, e
+                                user_id,
+                                e
                             );
                         }
                     }

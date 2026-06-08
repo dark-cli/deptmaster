@@ -115,13 +115,11 @@ pub async fn rebuild_readable_events_cache(
     all_events: &[crate::domain::events::DomainEvent],
 ) -> Result<(), DbError> {
     // Delete existing cache
-    sqlx::query(
-        "DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2",
-    )
-    .bind(ctx.wallet_id)
-    .bind(ctx.user_id)
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2")
+        .bind(ctx.wallet_id)
+        .bind(ctx.user_id)
+        .execute(pool)
+        .await?;
 
     if all_events.is_empty() {
         return Ok(());

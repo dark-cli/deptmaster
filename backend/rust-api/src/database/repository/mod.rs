@@ -516,7 +516,8 @@ impl DatabaseRepository for Database {
         wallet_id: Uuid,
         since_timestamp: DateTime<Utc>,
     ) -> Result<Vec<crate::domain::events::DomainEvent>, DbError> {
-        self.get_wallet_events_impl(wallet_id, Some(since_timestamp)).await
+        self.get_wallet_events_impl(wallet_id, Some(since_timestamp))
+            .await
     }
 
     async fn get_event_by_id(

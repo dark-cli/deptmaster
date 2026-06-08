@@ -457,13 +457,11 @@ impl Database {
         wallet_id: Uuid,
         user_id: Uuid,
     ) -> Result<bool, DbError> {
-        let result = sqlx::query(
-            "DELETE FROM wallet_owners WHERE wallet_id = $1 AND user_id = $2",
-        )
-        .bind(wallet_id)
-        .bind(user_id)
-        .execute(&self.pool)
-        .await?;
+        let result = sqlx::query("DELETE FROM wallet_owners WHERE wallet_id = $1 AND user_id = $2")
+            .bind(wallet_id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(result.rows_affected() > 0)
     }
