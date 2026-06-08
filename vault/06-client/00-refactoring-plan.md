@@ -17,6 +17,12 @@ This mirrors the backend process: **read → document → divide & conquer → f
 
 ## Phase 1: Discovery (✅ in progress)
 ## Phase 0: Shared domain crate (NEW — added 2026-06-08)
+> 🔴 **Read [[03-api-contract-audit]] first.** The current `client/refactor-and-stabilize` backend hardened `DomainEvent` to require `idempotency_key` and reject client-provided `id`. The client was never updated. Right now the client's push events fail to deserialize on the server, and the client treats the failure as "offline" — so events stay local forever.
+>
+> **Important correction:** `BUGS.md` was written against `main`, where the contract was different and the client's payload worked. The contract gap **blocks running the tests** but does not by itself explain the 12 catalogued bugs. After the payload fix, we have to actually run the tests against the current backend to see which bugs are still real and which were silently fixed by other backend work (user_readable_events cache, type-driven dispatch, etc.).
+>
+> Phase 0 (shared crate) is still the right structural move — it makes this class of contract drift impossible.
+
 > 🔴 **Read [[03-api-contract-audit]] first.** The client's `POST /api/sync/events` payload doesn't match what the server's `DomainEvent` deserializer accepts (`id` instead of generated, missing `idempotency_key`/`wallet_id`/`user_id`/`created_at`, wrong `event_data` shape). Every event the client pushes silently fails to deserialize on the server and the client treats it as a network error, keeping events local forever. This is almost certainly the root cause of BUGS #1–#11 in `BUGS.md`. Phase 0 (shared crate) makes this class of bug structurally impossible.
 
 

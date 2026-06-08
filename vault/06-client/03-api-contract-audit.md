@@ -15,6 +15,9 @@ tags:
 
 ## TL;DR
 
+> ⚠️ **Correction added after comparing with `main` branch.** The findings below describe the current state of `client/refactor-and-stabilize`, which has had heavy backend refactoring (DomainEvent struct + idempotency_key, type-driven dispatch, etc.). **`BUGS.md` was catalogued against `main`, where the contract was different.** See the new section *Comparison with `main`* below before treating the audit as an explanation of any specific bug.
+
+
 - **Auth endpoints** (`/api/auth/login`, `/api/auth/register`) — ✅ match.
 - **Wallet management** (users, groups, members, permissions, invite, join) — ✅ paths and bodies match.
 - **Pull events** (`GET /api/sync/events`) — ✅ matches.
@@ -211,6 +214,52 @@ All `/api/wallets/:wallet_id/...` paths in the client's `wallet_management_url()
 
 ## Action items
 
+## Comparison with `main` (the baseline `BUGS.md` was written against)
+
+On `main`, the server's POST handler accepted the *exact* payload the client sends today. The relevant struct (`backend/rust-api/src/handlers/sync.rs` on `main`):
+
+```rust
+#[derive(Deserialize, Clone)]
+pub struct SyncEventRequest {
+    pub id: String,                        // ← client-provided event_id, used as dedup key
+    pub aggregate_type: String,
+    pub aggregate_id: String,
+    pub event_type: String,
+    pub event_data: serde_json::Value,     // ← raw JSON, no tagged enum
+    pub timestamp: String,                 // ← named "timestamp", not "created_at"
+    pub version: i32,
+}
+```
+
+This matches the client's payload exactly. On `main`:
+- Dedup key was `event_id` (`ON CONFLICT (event_id) DO NOTHING`).
+- Server's response `accepted: [String]` echoed back the *client-provided* IDs, so `events_mark_synced(&accepted)` worked.
+- `wallet_id` and `user_id` came from headers / a single-user DB lookup, not from the request body.
+
+So **on `main`, the contract was fine**. The 12 entries in `BUGS.md` describe *semantic* failures (App2 doesn't see App1's data, permission grants don't reveal existing data, UPDATED events don't appear) — not contract failures.
+
+### What changed in `client/refactor-and-stabilize` (and earlier branches before our work)
+
+Looking at `git log main..HEAD -- backend/rust-api/`:
+
+- `c065add` "Change event deduplication from event_id to idempotency_key"
+- `3a16f89` "Implement proper event deduplication using idempotency_key"
+- `eab2419` "Pass idempotency_key from DomainEvent to database"
+- `72fd0e2` "Make database the single source of truth for event uniqueness"
+- + the `DomainEvent` custom Deserialize that *rejects* client-provided `id`
+- + every subsequent backend refactor on top of those
+
+The backend hardened the contract; the client was never updated to match. That's the gap.
+
+### Honest implications
+
+1. **The contract mismatch I described is real on this branch**, but it doesn't explain `BUGS.md`. Those bugs existed under `main`'s working contract — they have other causes (most likely server-side filtering / permission visibility in `get_sync_events`, and client-side replay handling of UPDATED events).
+2. **We still must fix the client payload** — otherwise we literally can't run the integration tests against the current backend to know which of the 12 bugs are still real.
+3. **After the payload fix, re-run the tests against the current backend.** Some of the 12 bugs may already be fixed by other backend work (the user_readable_events cache, the type-driven dispatch). Some are likely still real. We won't know until we run them.
+
+---
+
+
 1. **🔴 BLOCKER: fix the push payload shape.** Cannot run end-to-end client tests until this is fixed. See task #15 (idempotency_key) — same root cause; merge them.
 2. **🔴 BLOCKER: fix the response handling.** Server should return `accepted: [{idempotency_key, event_id}]` (not just event_ids); client needs `idempotency_key` to look up local events. This is a backend change too.
 3. **🟡 Wire up `/api/sync/hash`.** Needed for Decision 3 (push-then-flush-then-rebuild on cache divergence).
@@ -221,21 +270,22 @@ All `/api/wallets/:wallet_id/...` paths in the client's `wallet_management_url()
 
 ## How to verify the fix works (once applied)
 
-A single integration test should be enough:
+**Adjusted from the earlier draft.** The single-test claim was overconfident — the contract fix unblocks *running* the tests, but the BUGS in `BUGS.md` will need separate diagnosis.
+
+Step 1 (binary "does the push reach the server at all"):
 
 ```rust
 // pseudo
 let app1 = App::login_or_create(...);
 app1.create_contact("Carol")?;
 app1.sync()?;
-// Right now: client returns Ok but the events.count on the server is 0.
-// After fix: events.count on the server is 1, the event has the expected idempotency_key,
-// and a second app loading the wallet sees "Carol".
+let count = server_admin_query("SELECT count(*) FROM events WHERE wallet_id = ?")?;
+assert!(count >= 1, "client push reached the server");
 ```
 
-If this passes, `BUGS.md` #1, #2, #3, #4, #5, #6, #7, #10, #11 should *all* pass without further work. That's how confident we should be that this is the root cause.
+If this passes, the protocol contract is restored and we can move on to actually running the 10 integration test files.
 
----
+Step 2: run all client integration tests, regenerate `BUGS.md` against the current backend. Each remaining failure gets diagnosed on its own merits — not blamed on the contract gap.
 
 ## Cross-references
 
