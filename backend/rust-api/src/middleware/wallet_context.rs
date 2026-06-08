@@ -29,8 +29,12 @@ impl WalletContext {
     }
 }
 
-/// Middleware to extract and validate wallet context
-/// Extracts wallet_id from path parameter (/:wallet_id or /:id)
+/// Middleware to extract and validate wallet context.
+///
+/// Extracts wallet_id from any of (checked in order):
+///   1. Path segment after `wallets/` (e.g. `/api/wallets/<id>/users`)
+///   2. `X-Wallet-Id` header (used by `/api/sync/events` and similar non-path-scoped routes)
+///   3. `wallet_id` query parameter (legacy fallback used by older clients)
 pub async fn wallet_context_middleware(
     State(state): State<AppState>,
     mut req: Request,
@@ -43,8 +47,8 @@ pub async fn wallet_context_middleware(
         .cloned()
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    // Extract wallet_id from path parameter
-    let wallet_id_str = {
+    // 1. Path: /api/wallets/<id>/...
+    let from_path = {
         let segments: Vec<&str> = req.uri().path().split('/').collect();
         segments
             .iter()
@@ -52,8 +56,26 @@ pub async fn wallet_context_middleware(
             .and_then(|pos| segments.get(pos + 1).map(|s| s.to_string()))
     };
 
-    let wallet_id_str = wallet_id_str.ok_or_else(|| {
-        tracing::warn!("No wallet_id provided in request");
+    // 2. Header: X-Wallet-Id (case-insensitive in axum)
+    let from_header = req
+        .headers()
+        .get("x-wallet-id")
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+
+    // 3. Query: ?wallet_id=...
+    let from_query = req.uri().query().and_then(|q| {
+        q.split('&').find_map(|kv| {
+            let mut it = kv.splitn(2, '=');
+            match (it.next(), it.next()) {
+                (Some("wallet_id"), Some(v)) if !v.is_empty() => Some(v.to_string()),
+                _ => None,
+            }
+        })
+    });
+
+    let wallet_id_str = from_path.or(from_header).or(from_query).ok_or_else(|| {
+        tracing::warn!("No wallet_id provided in request (path/header/query all empty)");
         StatusCode::BAD_REQUEST
     })?;
 

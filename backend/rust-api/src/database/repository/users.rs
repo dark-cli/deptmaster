@@ -42,10 +42,13 @@ impl Database {
         username: String,
         password_hash: String,
     ) -> Result<(), DbError> {
+        // last_event_id is NOT NULL on users_projection (see migrations/001).
+        // A freshly-created user has no events yet, so we use the sentinel 0 — same
+        // convention as admin.rs:624 and reset_password.rs:60.
         sqlx::query(
             r#"
-            INSERT INTO users_projection (id, username, email, password_hash, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO users_projection (id, username, email, password_hash, created_at, last_event_id)
+            VALUES ($1, $2, $3, $4, NOW(), 0)
             ON CONFLICT (id) DO NOTHING
             "#,
         )
