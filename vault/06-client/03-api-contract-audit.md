@@ -15,6 +15,9 @@ tags:
 
 ## TL;DR
 
+> ✅ **Update 2026-06-08:** the contract fix has landed in commit `0dc8f93`. Backend now returns `accepted: [idempotency_key]`; client now sends payloads that match the `DomainEvent` deserializer (idempotency_key, wallet_id, user_id, created_at, tagged event_data). Backend 59/59 tests still green; client lib builds clean. **Client integration tests still don't run** — they have pre-existing compile errors (missing imports, signature mismatches) that aren't caused by our work; rehabilitating them is tracked separately as task #29.
+
+
 > ⚠️ **Correction added after comparing with `main` branch.** The findings below describe the current state of `client/refactor-and-stabilize`, which has had heavy backend refactoring (DomainEvent struct + idempotency_key, type-driven dispatch, etc.). **`BUGS.md` was catalogued against `main`, where the contract was different.** See the new section *Comparison with `main`* below before treating the audit as an explanation of any specific bug.
 
 
