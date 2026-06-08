@@ -409,7 +409,7 @@ fn permission_limits_union_of_groups() {
     let contact = contacts.iter().find(|c| c["name"] == "Test Contact").expect("should see contact");
     let contact_id = contact["id"].as_str().unwrap().to_string();
 
-    let res = update_contact(contact_id.clone(), "Updated Name".to_string(), None, None, None, None);
+    let res = update_contact(contact_id.clone(), "Updated Name".to_string(), None, None, None, None, None);
     assert!(res.is_ok(), "Should be able to update due to Updaters group");
 
     let res = delete_contact(contact_id.clone());
@@ -1097,7 +1097,7 @@ fn permission_flow_default_read_then_none_then_group_read_write_three_apps() {
     let contacts: Vec<serde_json::Value> = serde_json::from_str(&contacts_json).expect("parse");
     let alice = contacts.iter().find(|c| c["name"].as_str() == Some("Alice")).expect("Alice in VIP");
     let alice_id = alice["id"].as_str().unwrap().to_string();
-    update_contact(alice_id.clone(), "Alice Updated".to_string(), None, None, None, None)
+    update_contact(alice_id.clone(), "Alice Updated".to_string(), None, None, None, None, None)
         .expect("app2 can edit contact in VIP");
     std::thread::sleep(std::time::Duration::from_millis(200));
     app2_instance.sync().expect("app2 sync after edit");

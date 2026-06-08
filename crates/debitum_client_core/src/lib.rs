@@ -183,6 +183,26 @@ pub fn is_network_offline() -> bool {
     NETWORK_OFFLINE.with(|cell| *cell.borrow())
 }
 
+// --- Log context (per-thread tag for multi-app integration tests) ---
+thread_local! {
+    static LOG_CONTEXT: RefCell<Option<String>> = RefCell::new(None);
+}
+
+/// Set or clear a per-thread log tag. When set, the multi-app log viewer can
+/// distinguish which simulated app produced each log line. Stub today — the
+/// log_bridge doesn't yet prepend it — but exposing the API unblocks the
+/// integration test setup (`AppInstance::activate`) that calls it on every
+/// app switch. If/when we want per-app prefixes, log_bridge::push can read
+/// LOG_CONTEXT and prepend it.
+pub fn set_log_context(ctx: Option<String>) {
+    LOG_CONTEXT.with(|cell| *cell.borrow_mut() = ctx);
+}
+
+/// Read the current per-thread log tag (None if not set).
+pub fn log_context() -> Option<String> {
+    LOG_CONTEXT.with(|cell| cell.borrow().clone())
+}
+
 // --- Auth ---
 pub fn login(username: String, password: String) -> Result<(), String> {
     api::login(username, password)
@@ -241,6 +261,14 @@ pub fn ensure_current_wallet() -> Result<(), String> {
 
 // --- Data (JSON strings for Dart) ---
 pub fn get_contacts() -> Result<String, String> {
+    crud::get_contacts()
+}
+
+/// Force a server pull for the current wallet and return the resulting contacts.
+/// Used by integration tests to bypass the local projection cache when asserting
+/// that data created on one app/server is visible from another app.
+pub fn get_contacts_from_server() -> Result<String, String> {
+    sync::pull_and_merge()?;
     crud::get_contacts()
 }
 

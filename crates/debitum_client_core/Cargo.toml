@@ -2,9 +2,18 @@
 name = "debitum_client_core"
 version = "0.1.0"
 edition = "2021"
+# Disable autodiscovery of integration tests: tests/single_app.rs etc. are NOT
+# standalone test binaries — they are submodules pulled in by tests/integration.rs.
+# Without this, Cargo would compile them twice (once standalone, where
+# `crate::common::...` fails because they don't declare `mod common;`).
+autotests = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [dependencies]
 anyhow = "1.0"

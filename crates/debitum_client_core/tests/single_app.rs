@@ -42,10 +42,10 @@ fn single_app_login_and_sync() {
         &server_url,
         username,
         password,
-        Some(wallet_id),
     );
     app1.initialize().expect("initialize");
     app1.login().expect("login");
+    app1.select_wallet(&wallet_id).expect("select_wallet");
 
     app1
         .run_commands(&["contact create \"Bob\" bob", "wait 300"])
@@ -67,14 +67,15 @@ fn two_apps_sync_via_server() {
         &server_url,
         username.clone(),
         password.clone(),
-        Some(wallet_id.clone()),
     );
-    let app2 = AppInstance::with_credentials("app2", &server_url, username, password, Some(wallet_id));
+    let app2 = AppInstance::with_credentials("app2", &server_url, username, password);
 
     app1.initialize().expect("initialize");
     app2.initialize().expect("initialize");
     app1.login().expect("login");
     app2.login().expect("login");
+    app1.select_wallet(&wallet_id).expect("select_wallet app1");
+    app2.select_wallet(&wallet_id).expect("select_wallet app2");
 
     let mut apps = HashMap::new();
     apps.insert("app1".to_string(), app1);

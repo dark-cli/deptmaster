@@ -136,6 +136,7 @@ impl CommandRunner {
                     phone,
                     email,
                     notes,
+                    None, // group_ids: command runner doesn't drive group membership
                 )?;
             }
             "delete" => {
