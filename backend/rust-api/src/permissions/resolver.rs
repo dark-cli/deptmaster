@@ -147,9 +147,17 @@ pub async fn rebuild_readable_events_cache(
     Ok(())
 }
 
-/// Get all readable contacts for sync filtering
-/// Returns contact IDs the user can read
-pub async fn get_readable_contacts(
+/// Return the set of contact IDs the user has **permission** to read in this wallet.
+///
+/// This is a *permission* query, not a *current-visibility* query: it intentionally
+/// includes soft-deleted contacts so that DELETE / UNDO events for a contact the user
+/// had access to are still classified as readable. (`is_deleted` is a projection-side
+/// optimization, not a permission boundary.)
+///
+/// Used only by [`filter_readable_events`] to populate the `user_readable_events` cache.
+/// Do NOT call this from UI / display code — for that, query `contacts_projection`
+/// directly and filter `is_deleted = false` at the API boundary.
+pub async fn get_permitted_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<HashSet<Uuid>, DbError> {
@@ -193,9 +201,9 @@ pub async fn get_readable_contacts(
     }
 }
 
-/// Get all contacts whose transactions a user can read (for sync filtering)
-/// Returns contact IDs whose transactions the user can read
-pub async fn get_readable_transaction_contacts(
+/// Return the set of contact IDs whose transactions the user has **permission** to read.
+/// Same permission-not-display contract as [`get_permitted_contacts`].
+pub async fn get_permitted_transaction_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<HashSet<Uuid>, DbError> {
@@ -220,7 +228,7 @@ pub async fn get_readable_transaction_contacts(
         .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
 
     if can_read_all {
-        // Include soft-deleted contacts too (same reasoning as get_readable_contacts):
+        // Include soft-deleted contacts too (same reasoning as get_permitted_contacts):
         // a transaction DELETE event for a contact that has just been soft-deleted must
         // still be visible to users who had read access to that contact.
         let all_contacts: Vec<Uuid> = sqlx::query_scalar(
@@ -247,15 +255,15 @@ pub async fn filter_readable_events(
         return Ok(Vec::new());
     }
 
-    // Use proven permission functions to compute readable sets
-    let readable_contacts = get_readable_contacts(pool, ctx).await?;
-    let readable_transaction_contacts = get_readable_transaction_contacts(pool, ctx).await?;
+    // Compute permission sets ONCE for this user. These answer "what does the user have
+    // permission to read", regardless of current is_deleted state.
+    let permitted_contacts = get_permitted_contacts(pool, ctx).await?;
+    let permitted_transaction_contacts = get_permitted_transaction_contacts(pool, ctx).await?;
 
-    // Single SQL query to filter events using computed permission sets
     let event_ids: Vec<Uuid> = events.iter().map(|e| e.id).collect();
-    let readable_contact_uuids: Vec<Uuid> = readable_contacts.iter().copied().collect();
-    let readable_transaction_contact_uuids: Vec<Uuid> =
-        readable_transaction_contacts.iter().copied().collect();
+    let permitted_contact_uuids: Vec<Uuid> = permitted_contacts.iter().copied().collect();
+    let permitted_transaction_contact_uuids: Vec<Uuid> =
+        permitted_transaction_contacts.iter().copied().collect();
 
     let readable_ids: Vec<Uuid> = sqlx::query_scalar(
         r#"
@@ -264,31 +272,39 @@ pub async fn filter_readable_events(
         WHERE e.wallet_id = $1
           AND e.event_id = ANY($2::uuid[])
           AND (
-            -- Contact CREATED / UPDATED: visible iff the contact is currently in the user's readable set
-            (e.aggregate_type = 'contact' AND e.event_type IN ('CREATED', 'UPDATED')
-                AND e.aggregate_id = ANY($3::uuid[]))
-            -- Contact DELETED / UNDO: by the time we query, the contact may no longer be in
-            -- readable_contacts (DELETE removes it from the projection used by get_readable_contacts).
-            -- Allow if the user can read any contacts at all — they should learn that a contact
-            -- they could see has been removed/undone.
-            OR (e.aggregate_type = 'contact' AND e.event_type IN ('DELETED', 'UNDO')
-                AND ARRAY_LENGTH($3::uuid[], 1) > 0)
-            -- Transaction CREATED / UPDATED: visible iff the linked contact is readable
+            -- Contact events (CREATED / UPDATED / DELETED / UNDO).
+            -- aggregate_id is the contact id for all four. Visible iff the user has
+            -- permission to read this contact; soft-delete is intentionally ignored by
+            -- get_permitted_contacts (it's a permission query, not a display query).
+            (e.aggregate_type = 'contact' AND e.aggregate_id = ANY($3::uuid[]))
+
+            -- Transaction CREATED / UPDATED: event_data carries contact_id, check directly.
             OR (e.aggregate_type = 'transaction' AND e.event_type IN ('CREATED', 'UPDATED')
                 AND (e.event_data->>'contact_id')::uuid = ANY($4::uuid[]))
-            -- Transaction DELETED / UNDO: same "may already be gone" issue; allow if the user
-            -- can read any transaction contacts.
+
+            -- Transaction DELETED / UNDO: event_data does NOT carry contact_id (only
+            -- `comment` or `undone_event_id`). Resolve the contact link by looking up the
+            -- CREATED event for the same transaction (same aggregate_id) and checking
+            -- THAT contact_id against the user's permitted set.
             OR (e.aggregate_type = 'transaction' AND e.event_type IN ('DELETED', 'UNDO')
-                AND ARRAY_LENGTH($4::uuid[], 1) > 0)
-            -- Permission and wallet events
+                AND EXISTS (
+                    SELECT 1 FROM events orig
+                    WHERE orig.wallet_id = e.wallet_id
+                      AND orig.aggregate_type = 'transaction'
+                      AND orig.aggregate_id = e.aggregate_id
+                      AND orig.event_type = 'CREATED'
+                      AND (orig.event_data->>'contact_id')::uuid = ANY($4::uuid[])
+                ))
+
+            -- Permission and wallet events: broadcast to all wallet users.
             OR (e.aggregate_type = 'permission' OR e.aggregate_type = 'wallet')
           )
         "#,
     )
     .bind(ctx.wallet_id)
     .bind(&event_ids)
-    .bind(&readable_contact_uuids)
-    .bind(&readable_transaction_contact_uuids)
+    .bind(&permitted_contact_uuids)
+    .bind(&permitted_transaction_contact_uuids)
     .fetch_all(pool)
     .await
     .map_err(|e| DbError::PermissionResolution(e.to_string()))?;

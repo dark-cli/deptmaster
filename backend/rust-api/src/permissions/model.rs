@@ -82,11 +82,11 @@ impl PermissionModel {
     ///
     /// # Returns
     /// None = can read all contacts, Some(HashSet<Uuid>) = specific contact IDs
-    pub async fn get_readable_contacts(
+    pub async fn get_permitted_contacts(
         &self,
         ctx: &PermissionContext,
     ) -> Result<HashSet<Uuid>, DbError> {
-        resolver::get_readable_contacts(&self.pool, ctx).await
+        resolver::get_permitted_contacts(&self.pool, ctx).await
     }
 
     /// Get contacts whose transactions a user can read (for sync filtering)
@@ -99,11 +99,11 @@ impl PermissionModel {
     ///
     /// # Returns
     /// HashSet<Uuid> of contact IDs the user can read transactions for
-    pub async fn get_readable_transaction_contacts(
+    pub async fn get_permitted_transaction_contacts(
         &self,
         ctx: &PermissionContext,
     ) -> Result<HashSet<Uuid>, DbError> {
-        resolver::get_readable_transaction_contacts(&self.pool, ctx).await
+        resolver::get_permitted_transaction_contacts(&self.pool, ctx).await
     }
 
     /// Filter events to return only those readable by the user
