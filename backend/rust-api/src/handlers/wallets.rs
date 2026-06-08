@@ -1367,11 +1367,49 @@ pub struct MatrixEntry {
     pub action_names: Vec<String>,
 }
 
+/// Request body for one (user_group, contact_group) entry on PUT /permission-matrix.
+///
+/// Accepts two shapes for backwards compatibility:
+/// - New shape: `allowed_actions` and/or `denied_actions` (either may be omitted/empty).
+///   This is the only way to set deny rows.
+/// - Legacy shape: `action_names` — treated as allowed-only. No denies set or cleared.
+///
+/// When BOTH shapes are present, the new fields take precedence. When BOTH new fields
+/// are absent and `action_names` is also absent, the entry is treated as empty (all
+/// existing permissions for the pair are removed).
 #[derive(Deserialize)]
 pub struct PutPermissionMatrixRequest {
     pub user_group_id: String,
     pub contact_group_id: String,
-    pub action_names: Vec<String>,
+    #[serde(default)]
+    pub allowed_actions: Option<Vec<String>>,
+    #[serde(default)]
+    pub denied_actions: Option<Vec<String>>,
+    #[serde(default)]
+    pub action_names: Option<Vec<String>>,
+}
+
+impl PutPermissionMatrixRequest {
+    /// Normalize the request into (allowed, denied) action-name lists.
+    /// Strips the deprecated `events:read` value (no-op on backend).
+    fn allowed_denied(&self) -> (Vec<String>, Vec<String>) {
+        let allowed = self
+            .allowed_actions
+            .clone()
+            .or_else(|| self.action_names.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| a != "events:read")
+            .collect();
+        let denied = self
+            .denied_actions
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| a != "events:read")
+            .collect();
+        (allowed, denied)
+    }
 }
 
 async fn require_wallet_admin(
@@ -2394,6 +2432,35 @@ pub struct PutPermissionMatrixBulkRequest {
 
 /// PUT /api/wallets/:wallet_id/permission-matrix
 /// Body: { "entries": [ { "user_group_id", "contact_group_id", "action_names": [] } ] }
+/// Look up action ids for a list of action name strings.
+/// Returns 400 if any name is unknown.
+async fn action_ids_for(
+    db: &Database,
+    names: &[String],
+) -> Result<Vec<i16>, (StatusCode, Json<serde_json::Value>)> {
+    use crate::database::repository::DatabaseRepository;
+    let mut ids = Vec::with_capacity(names.len());
+    for name in names {
+        match db.get_permission_action_id(name).await {
+            Ok(Some(id)) => ids.push(id),
+            Ok(None) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": format!("Unknown permission action: {}", name)})),
+                ));
+            }
+            Err(e) => {
+                tracing::error!("action_ids_for: {:?}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to resolve action ids"})),
+                ));
+            }
+        }
+    }
+    Ok(ids)
+}
+
 pub async fn put_permission_matrix(
     Path(wallet_id): Path<String>,
     State(state): State<AppState>,
@@ -2408,14 +2475,13 @@ pub async fn put_permission_matrix(
     })?;
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
+    let db = Database::new((*state.db_pool).clone());
     for entry in &payload.entries {
-        let action_names: Vec<String> = entry
-            .action_names
-            .iter()
-            .filter(|a| *a != "events:read")
-            .cloned()
-            .collect();
-        if let Err(e) = validate_permission_dependencies(&action_names) {
+        let (allowed_names, denied_names) = entry.allowed_denied();
+
+        // Dependency validation applies to allowed actions only (deny rows are gates,
+        // not capabilities, so they don't induce read-prerequisites).
+        if let Err(e) = validate_permission_dependencies(&allowed_names) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": e})),
@@ -2435,7 +2501,6 @@ pub async fn put_permission_matrix(
             )
         })?;
 
-        let db = Database::new((*state.db_pool).clone());
         let ug_ok = db
             .user_group_in_wallet(ug_id, wallet_uuid)
             .await
@@ -2466,10 +2531,27 @@ pub async fn put_permission_matrix(
             ));
         }
 
+        // Resolve action names to action ids. Unknown names are an error (caller is wrong).
+        let allowed_ids = action_ids_for(&db, &allowed_names).await?;
+        let denied_ids = action_ids_for(&db, &denied_names).await?;
+
+        // Replace the entire (ug, cg) entry in one transaction. This is the actual
+        // mutation; the event below exists for sync notification and cache invalidation.
+        db.set_permission_matrix_entries_impl(ug_id, cg_id, &allowed_ids, &denied_ids)
+            .await
+            .map_err(|e| {
+                tracing::error!("put_permission_matrix: set entries: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to update matrix"})),
+                )
+            })?;
+
         let event_data = serde_json::json!({
             "user_group_id": entry.user_group_id,
             "contact_group_id": entry.contact_group_id,
-            "action_names": action_names,
+            "allowed_actions": allowed_names,
+            "denied_actions": denied_names,
         });
         sync::insert_permission_event_and_apply(
             &state,

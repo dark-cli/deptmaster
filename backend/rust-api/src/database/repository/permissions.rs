@@ -437,6 +437,50 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Replace the entire (user_group, contact_group) permission set in one transaction.
+    /// Removes any existing rows for the pair, then inserts new rows for `allowed_action_ids`
+    /// (is_deny=false) and `denied_action_ids` (is_deny=true). This is the semantics the
+    /// PUT /permission-matrix endpoint exposes: each call is the complete desired state
+    /// for that (ug, cg) pair.
+    pub async fn set_permission_matrix_entries_impl(
+        &self,
+        user_group_id: Uuid,
+        contact_group_id: Uuid,
+        allowed_action_ids: &[i16],
+        denied_action_ids: &[i16],
+    ) -> Result<(), DbError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "DELETE FROM group_permission_matrix WHERE user_group_id = $1 AND contact_group_id = $2"
+        )
+        .bind(user_group_id)
+        .bind(contact_group_id)
+        .execute(&mut *tx)
+        .await?;
+        for &aid in allowed_action_ids {
+            sqlx::query(
+                "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id, is_deny) VALUES ($1, $2, $3, false)"
+            )
+            .bind(user_group_id)
+            .bind(contact_group_id)
+            .bind(aid)
+            .execute(&mut *tx)
+            .await?;
+        }
+        for &aid in denied_action_ids {
+            sqlx::query(
+                "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id, is_deny) VALUES ($1, $2, $3, true)"
+            )
+            .bind(user_group_id)
+            .bind(contact_group_id)
+            .bind(aid)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     // Utility checks
     pub async fn user_group_in_wallet_impl(
         &self,
