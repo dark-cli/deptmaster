@@ -15,6 +15,11 @@ Quick links to project documentation and references.
 - [Permission System](permission-system-deep-dive.md) — User groups, contact groups, permission matrix
 - [Middleware Architecture](middleware-architecture.md) — Auth, wallet context, rate limiting
 
+## Client (Flutter UI + Rust core)
+
+- [Client Overview](06-client/00-overview.md) — Module map for Rust core + Flutter layer
+- [Client Refactoring Plan](06-client/00-refactoring-plan.md) — Active plan: discovery → divide → fix
+
 ## Database
 
 - [Migration Guide](migration-guide.md) — All 21 migrations organized by phase
