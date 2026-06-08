@@ -237,20 +237,11 @@ pub async fn post_sync_events(
         }
     }
 
-    // Populate readable events cache for all accepted events
     if !new_events.is_empty() {
-        if let Err(e) = db
-            .populate_events_cache_after_sync(wallet_id, &new_events)
-            .await
-        {
-            tracing::error!("Error populating event cache: {:?}", e);
-        }
-
-        // Note: Permission matrix cache invalidation is now handled automatically
-        // by the database layer (in insert_event_with_cache_handling), not here.
-        // The sync handler doesn't need to know about caching.
-
-        // Batch apply all events to projections
+        // Apply events to projections FIRST. populate_events_cache_after_sync (below) computes
+        // permissions by querying contacts_projection / transactions_projection — if those don't
+        // reflect the just-inserted events yet, the cache will think nothing is readable and
+        // pulls will return 0 events. Order matters.
         let event_ids: Vec<Uuid> = new_events.iter().map(|e| e.id).collect();
         apply_events_batch(&db, wallet_id, user_id, &event_ids).await;
 
@@ -261,6 +252,16 @@ pub async fn post_sync_events(
             if let Err(e) = Projections::rebuild_projections_from_events(&state, wallet_id).await {
                 tracing::error!("Error rebuilding projections: {:?}", e);
             }
+        }
+
+        // Now populate the readable-events cache against the up-to-date projection state.
+        // (Permission matrix cache invalidation is handled inside insert_event_with_cache_handling
+        // at the database layer; the sync handler doesn't manage that one.)
+        if let Err(e) = db
+            .populate_events_cache_after_sync(wallet_id, &new_events)
+            .await
+        {
+            tracing::error!("Error populating event cache: {:?}", e);
         }
 
         // Notify all clients that sync completed
