@@ -21,7 +21,8 @@ Quick links to project documentation and references.
 - [Client Refactoring Plan](06-client/00-refactoring-plan.md) — Active plan: discovery → divide → fix
 - [Client Design Notes](06-client/01-design-notes.md) — Decisions on permissions, notifications, cache conflict, shared types
 - [Shared Domain Crate Proposal](06-client/02-shared-domain-crate.md) — Extract event/permission/projection types
-- [🔴 API Contract Audit](06-client/03-api-contract-audit.md) — Client push payload doesn't match server; root cause of most BUGS
+- [API Contract Audit](06-client/03-api-contract-audit.md) — Push payload mismatch (now fixed)
+- [Test Baseline 2026-06-08](06-client/04-test-baseline-2026-06-08.md) — 5/40 pass after contract+signup+middleware fixes; failure clusters
 
 ## Database
 
