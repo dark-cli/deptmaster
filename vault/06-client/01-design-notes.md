@@ -77,11 +77,22 @@ A per-user queue of typed notifications that:
 
 ## Decision 3: Cache-conflict full-flush
 
-If the client and server ever disagree about what data exists in a wallet (e.g. client has events the server has never seen, or vice versa beyond what an incremental pull explains), the right resolution is **full flush + full re-pull**, not a partial merge. Server is the source of truth.
+If the client and server disagree about what data exists in a wallet (e.g. hash mismatch on `/api/sync/hash`, or after-push counts don't reconcile), the right resolution is **push-then-flush-then-rebuild**:
 
-This already partially exists (`pull_and_merge` does a full pull when `local_count == 0` or when a permission event arrives). We should make it more general:
-- After push, if the server's `event_count` for the wallet doesn't match what we expect (we sent N, server says it has M ≠ local M + N accepted), assume divergence → flush + re-pull
-- Use the existing `/api/sync/hash` endpoint to detect divergence cheaply
+1. **Push first.** The client may have unsynced events from when it was offline; those must reach the server before we throw away local state. (`storage::events_get_unsynced` → `push_unsynced`.)
+2. **Flush local data.** Drop the projection and events for this wallet (`storage::events_delete_all_for_wallet`, projection clear).
+3. **Full re-pull and rebuild.** `pull_and_merge` with `since=None` so the server returns the full visible-to-this-user event set; replay them locally to rebuild the projection.
+
+This preserves offline work (step 1) while still treating the server as source of truth (steps 2–3).
+
+**Why not just merge?** Partial merges have to reason about ordering, idempotency, and what to do with events the client has but the server doesn't. After a push, the server is definitively up to date with the user's intent; a full pull then gives exactly the right state. Cheaper to throw away local state and rebuild than to write merge logic that handles every divergence case.
+
+**What already exists:**
+- `pull_and_merge` does a full pull when `local_count == 0` or when a permission event arrives in the batch — these paths skip step 1 because there's nothing to push or because permission changes warrant a clean slate.
+
+**What to add:**
+- After push completes, compare server's wallet hash to local hash via `/api/sync/hash`. On mismatch → run the flush + re-pull path.
+- Same trigger on app startup if last sync was long ago or the device was offline.
 
 ---
 
