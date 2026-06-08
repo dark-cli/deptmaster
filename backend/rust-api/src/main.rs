@@ -139,11 +139,19 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::post(handlers::dev_clear_database),
         ); // Dev-only: clears database (checks ENVIRONMENT internally)
 
-    // Protected API routes that require wallet context
+    // Protected API routes that require wallet context.
+    // Every route here MUST have `:wallet_id` in its path — the wallet_context
+    // middleware extracts it from the path segment after `wallets/` and does NOT
+    // fall back to headers or query strings (see middleware/wallet_context.rs).
     let wallet_protected_routes = Router::new()
-        .route("/api/sync/hash", get(handlers::get_sync_hash))
-        .route("/api/sync/events", get(handlers::get_sync_events))
-        .route("/api/sync/events", post(handlers::post_sync_events))
+        .route(
+            "/api/wallets/:wallet_id/sync/hash",
+            get(handlers::get_sync_hash),
+        )
+        .route(
+            "/api/wallets/:wallet_id/sync/events",
+            get(handlers::get_sync_events).post(handlers::post_sync_events),
+        )
         .route(
             "/api/wallets/:wallet_id/me/permissions",
             get(handlers::get_my_permissions),
