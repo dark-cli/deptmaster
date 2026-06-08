@@ -35,19 +35,12 @@ fn append_event(
         "[debitum_rs] crud::append_event wallet_id={} aggregate={}/{} event_type={}",
         wallet_id, aggregate_type, aggregate_id, event_type
     );
-    // TODO: ARCHITECTURE FIX NEEDED
-    // REMOVE: Client should NOT generate event_id (the `id` variable below)
-    // INSTEAD: Generate idempotency_key per UI action to prevent duplicate form submissions
-    //
-    // Current (WRONG): Generates event_id locally
-    // Correct: Generate idempotency_key, send to server, store returned event_id
-    //
-    // Client should:
-    // 1. Generate idempotency_key per UI action (form submit, dialog, button click, etc)
-    // 2. Send: { event_data, idempotency_key, aggregate_id, etc } - NO event_id
-    // 3. Server will generate event_id and return it in sync response
-    // 4. Store returned event_id locally for future operations (delete, undo, etc)
-    let id = Uuid::new_v4().to_string(); // TODO: Remove this, generate idempotency_key instead
+    // Client generates event_id locally (UUID v4). Uniqueness is enforced per-wallet
+    // on the server (UNIQUE (wallet_id, event_id)); collision odds at our scale are
+    // ~10^-18 — see vault/06-client/01-design-notes.md. Generating client-side lets
+    // offline events reference each other (e.g. UNDO -> original) without waiting
+    // for sync.
+    let id = Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
     let event_data_str = serde_json::to_string(&event_data).map_err(|e| e.to_string())?;
     let e = storage::StoredEvent {

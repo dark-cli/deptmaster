@@ -305,6 +305,9 @@ impl Database {
         Ok(events)
     }
 
+    /// Insert an event. Dedup on `(wallet_id, event_id)` — a duplicate is silently
+    /// dropped and returns 0; a new insert returns the BIGSERIAL row id.
+    /// Callers use `result > 0` to distinguish new vs duplicate without exception flow.
     pub async fn insert_event_impl(
         &self,
         event_id: Uuid,
@@ -321,6 +324,7 @@ impl Database {
             r#"
             INSERT INTO events (event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, event_version, idempotency_key, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            ON CONFLICT (wallet_id, event_id) DO NOTHING
             RETURNING id
             "#
         )
@@ -333,10 +337,10 @@ impl Database {
         .bind(user_id)
         .bind(version)
         .bind(&idempotency_key)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
 
-        Ok(result)
+        Ok(result.unwrap_or(0))
     }
 
     /// Insert event and handle permission matrix cache invalidation.

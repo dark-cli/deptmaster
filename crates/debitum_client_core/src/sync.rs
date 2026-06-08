@@ -127,13 +127,13 @@ fn build_server_event_payload(
     }
 
     Some(serde_json::json!({
-        "aggregate_id":    e.aggregate_id,
-        "wallet_id":       e.wallet_id,
-        "user_id":         user_id,
-        "created_at":      e.timestamp,
-        "version":         e.version,
-        "idempotency_key": e.id,
-        "event_data":      event_data,
+        "id":           e.id,
+        "aggregate_id": e.aggregate_id,
+        "wallet_id":    e.wallet_id,
+        "user_id":      user_id,
+        "created_at":   e.timestamp,
+        "version":      e.version,
+        "event_data":   event_data,
     }))
 }
 
@@ -141,9 +141,10 @@ fn build_server_event_payload(
 ///
 /// Wire contract (matches backend `DomainEvent` deserializer in
 /// `backend/rust-api/src/domain/events.rs`):
-/// - Client provides `idempotency_key` (our local event id, a UUID) — server uses it for dedup.
-/// - Server generates and owns `event_id`.
-/// - Server returns `accepted: [<idempotency_key>]` so we can mark local rows synced.
+/// - Client owns `id` (event_id, a UUID v4). Uniqueness is scoped per-wallet on the
+///   server, so collisions are essentially impossible.
+/// - Server echoes back `accepted: [<event_id>]` so we can mark local rows synced
+///   (the client's local event id == the wire id == the server's event_id).
 pub fn push_unsynced() -> Result<(), String> {
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
