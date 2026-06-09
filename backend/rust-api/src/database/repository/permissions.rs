@@ -661,17 +661,67 @@ impl Database {
         Ok(row)
     }
 
+    /// Rebuild the per-user readable-events cache against current permissions.
+    ///
+    /// `user_readable_events` is point-in-time — entries reflect whatever the user's
+    /// permissions were when each event was inserted. When the permission matrix or
+    /// group memberships change, stale entries linger: a contact the user can no
+    /// longer read still appears in their readable set, and vice versa. Call this
+    /// to bring one user's cache back into sync.
+    ///
+    /// Use [`rebuild_readable_events_for_wallet_impl`] when a change affects every
+    /// user in the wallet (matrix change, contact-group membership change).
     pub async fn rebuild_readable_events_for_user_impl(
         &self,
         wallet_id: Uuid,
         user_id: Uuid,
     ) -> Result<(), DbError> {
-        // Delete all existing readable events for this user
-        self.delete_readable_events_for_user_impl(wallet_id, user_id)
-            .await?;
+        use crate::permissions::resolver;
+        use crate::permissions::{PermissionContext, WalletRole};
 
-        // For now, return - rebuilding requires permission model which creates a circular dependency
-        // In practice, this will be called from handlers after permission changes
+        let role_str = sqlx::query_scalar::<_, String>(
+            "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_else(|| WalletRole::Member.as_str().to_string());
+        let role = WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member);
+        let ctx = PermissionContext::new(wallet_id, user_id, role);
+
+        let all_events = self.get_wallet_events_impl(wallet_id, None).await?;
+        resolver::rebuild_readable_events_cache(&self.pool, &ctx, &all_events).await?;
+        Ok(())
+    }
+
+    /// Rebuild [`user_readable_events`] for every member of a wallet.
+    /// Use after any change that may have flipped visibility for multiple users
+    /// (permission matrix changes, contact-group / user-group membership changes,
+    /// group deletions). Heavier than per-user rebuild — N users × M events —
+    /// but the simple "fully recompute" path is the easiest way to stay correct.
+    pub async fn rebuild_readable_events_for_wallet_impl(
+        &self,
+        wallet_id: Uuid,
+    ) -> Result<(), DbError> {
+        use crate::permissions::resolver;
+        use crate::permissions::{PermissionContext, WalletRole};
+
+        let users = self.get_wallet_users_impl(wallet_id).await?;
+        if users.is_empty() {
+            return Ok(());
+        }
+        let all_events = self.get_wallet_events_impl(wallet_id, None).await?;
+        for (user_id, role_str) in users {
+            let role = WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member);
+            let ctx = PermissionContext::new(wallet_id, user_id, role);
+            if let Err(e) = resolver::rebuild_readable_events_cache(&self.pool, &ctx, &all_events).await {
+                tracing::warn!(
+                    "Failed to rebuild readable events for user {} in wallet {}: {:?}",
+                    user_id, wallet_id, e
+                );
+            }
+        }
         Ok(())
     }
 
@@ -853,7 +903,7 @@ impl Database {
 
             // Permission matrix changed - smart invalidation: only affected users
             EventData::PermissionMatrixSet { data } => {
-                if let Some(contact_group_id_str) =
+                let handled = if let Some(contact_group_id_str) =
                     data.get("contact_group_id").and_then(|v| v.as_str())
                 {
                     if let Ok(contact_group_id) = uuid::Uuid::parse_str(contact_group_id_str) {
@@ -863,7 +913,6 @@ impl Database {
                             .await
                         {
                             Ok(affected_users) => {
-                                // Invalidate only affected users
                                 for user_id in affected_users {
                                     if let Err(e) = self
                                         .invalidate_permission_matrix_cache(wallet_id, user_id)
@@ -877,7 +926,6 @@ impl Database {
                                 }
                             }
                             Err(e) => {
-                                // Fall back to full wallet invalidation if query fails
                                 tracing::warn!(
                                     "Failed to query affected users for permission matrix change, \
                                      falling back to full wallet invalidation: {:?}",
@@ -888,23 +936,29 @@ impl Database {
                                     .await;
                             }
                         }
-                        return;
+                        true
+                    } else {
+                        false
                     }
-                }
+                } else {
+                    false
+                };
 
-                // Fall back: Invalidate entire wallet cache if we can't extract contact_group_id
-                tracing::warn!(
-                    "PermissionMatrixSet event missing contact_group_id, invalidating entire wallet cache"
-                );
-                if let Err(e) = self
-                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
-                    .await
-                {
+                if !handled {
+                    // No / unparseable contact_group_id — invalidate the whole wallet
+                    // matrix cache as a safe fallback.
                     tracing::warn!(
-                        "Failed to invalidate permission cache for wallet {}: {:?}",
-                        wallet_id,
-                        e
+                        "PermissionMatrixSet event missing contact_group_id, invalidating entire wallet cache"
                     );
+                    if let Err(e) = self
+                        .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                        .await
+                    {
+                        tracing::warn!(
+                            "Failed to invalidate permission cache for wallet {}: {:?}",
+                            wallet_id, e
+                        );
+                    }
                 }
             }
 
@@ -944,8 +998,42 @@ impl Database {
                 }
             }
 
+            // Group membership / contact-group changes affect which contacts users
+            // can see — rebuild the wallet's readable-events cache so existing events
+            // get re-filtered against the new state.
+            EventData::ContactGroupMemberAdded { .. }
+            | EventData::ContactGroupMemberRemoved { .. }
+            | EventData::UserGroupDeleted { .. }
+            | EventData::ContactGroupDeleted { .. } => {
+                if let Err(e) = self.rebuild_readable_events_for_wallet_impl(wallet_id).await {
+                    tracing::warn!(
+                        "Failed to rebuild readable events for wallet {}: {:?}",
+                        wallet_id, e
+                    );
+                }
+            }
+
             _ => {
                 // Not a permission event - no cache invalidation needed
+            }
+        }
+
+        // Permission events (matrix changes, group memberships) can change every
+        // user's visible event set. The per-user matrix cache invalidation above
+        // handles future permission CHECKS, but the readable-events cache holds
+        // a frozen snapshot from when events were inserted. Rebuild it for the
+        // whole wallet so existing events get re-filtered against current state.
+        if matches!(
+            &domain_event.event_data,
+            EventData::PermissionMatrixSet { .. }
+                | EventData::UserGroupMemberAdded { .. }
+                | EventData::UserGroupMemberRemoved { .. }
+        ) {
+            if let Err(e) = self.rebuild_readable_events_for_wallet_impl(wallet_id).await {
+                tracing::warn!(
+                    "Failed to rebuild readable events for wallet {}: {:?}",
+                    wallet_id, e
+                );
             }
         }
     }
@@ -1014,23 +1102,29 @@ impl Database {
                                     .await;
                             }
                         }
-                        return;
+                        // Fall through so the readable-events rebuild at the end of the
+                        // function also runs. (There used to be a `return;` here that
+                        // skipped it — gone.)
+                    } else {
+                        // contact_group_id present but didn't parse: fall through to
+                        // wallet-wide invalidation below.
                     }
-                }
-
-                // Fall back: Invalidate entire wallet cache if we can't extract contact_group_id
-                tracing::warn!(
-                    "PERMISSION_MATRIX_SET event missing contact_group_id, invalidating entire wallet cache"
-                );
-                if let Err(e) = self
-                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
-                    .await
-                {
+                } else {
+                    // No contact_group_id in event data — invalidate the whole wallet
+                    // matrix cache as a safe fallback.
                     tracing::warn!(
-                        "Failed to invalidate permission cache for wallet {}: {:?}",
-                        wallet_id,
-                        e
+                        "PERMISSION_MATRIX_SET event missing contact_group_id, invalidating entire wallet cache"
                     );
+                    if let Err(e) = self
+                        .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                        .await
+                    {
+                        tracing::warn!(
+                            "Failed to invalidate permission cache for wallet {}: {:?}",
+                            wallet_id,
+                            e
+                        );
+                    }
                 }
             }
 
@@ -1072,6 +1166,26 @@ impl Database {
 
             _ => {
                 // Not a permission event - no cache invalidation needed
+            }
+        }
+
+        // Mirror the readable-events rebuild from handle_cache_invalidation_for_event:
+        // events that change who-can-see-what need the per-user readable cache redone.
+        if matches!(
+            event_type,
+            "PERMISSION_MATRIX_SET"
+                | "USER_GROUP_MEMBER_ADDED"
+                | "USER_GROUP_MEMBER_REMOVED"
+                | "CONTACT_GROUP_MEMBER_ADDED"
+                | "CONTACT_GROUP_MEMBER_REMOVED"
+                | "USER_GROUP_DELETED"
+                | "CONTACT_GROUP_DELETED"
+        ) {
+            if let Err(e) = self.rebuild_readable_events_for_wallet_impl(wallet_id).await {
+                tracing::warn!(
+                    "Failed to rebuild readable events for wallet {}: {:?}",
+                    wallet_id, e
+                );
             }
         }
     }

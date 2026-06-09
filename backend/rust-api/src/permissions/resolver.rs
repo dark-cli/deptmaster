@@ -149,99 +149,46 @@ pub async fn rebuild_readable_events_cache(
 
 /// Return the set of contact IDs the user has **permission** to read in this wallet.
 ///
-/// This is a *permission* query, not a *current-visibility* query: it intentionally
-/// includes soft-deleted contacts so that DELETE / UNDO events for a contact the user
-/// had access to are still classified as readable. (`is_deleted` is a projection-side
-/// optimization, not a permission boundary.)
+/// This is a *permission* query (used by [`filter_readable_events`] to populate the
+/// readable-events cache), not a *current-visibility* query: soft-deleted contacts
+/// remain in the result so DELETE / UNDO events for a contact the user had access
+/// to are still classified as readable. UI/display code should query
+/// `contacts_projection` directly and filter `is_deleted = false`.
 ///
-/// Used only by [`filter_readable_events`] to populate the `user_readable_events` cache.
-/// Do NOT call this from UI / display code — for that, query `contacts_projection`
-/// directly and filter `is_deleted = false` at the API boundary.
+/// Implements the three-state (allowed / denied / unset) resolution: a contact is
+/// returned iff at least one of the user's groups allows `contact:read` for it AND
+/// no group denies it. Deny wins.
 pub async fn get_permitted_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<HashSet<Uuid>, DbError> {
-    // Try explicit contact groups first
-    let explicit: Vec<Uuid> = sqlx::query_scalar(queries::GET_READABLE_CONTACTS_QUERY)
-        .bind(ctx.wallet_id)
-        .bind(ctx.user_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-
-    // Check if user can read via all_contacts group
-    let query = format!(
-        "SELECT EXISTS(SELECT 1 FROM ({}) AS t LIMIT 1)",
-        queries::GET_READABLE_CONTACTS_VIA_ALL_QUERY
-    );
-    let can_read_all: bool = sqlx::query_scalar(&query)
-        .bind(ctx.wallet_id)
-        .bind(ctx.user_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-
-    if can_read_all {
-        // Include soft-deleted contacts too — this function is used by
-        // filter_readable_events to decide which contact/transaction events the user is
-        // allowed to receive. A user with read access to a contact must still see the
-        // contact's own DELETE event (and the DELETEs of its transactions) after it has
-        // been soft-deleted; if we filtered is_deleted=false here, those events would
-        // become invisible at the exact moment they fire.
-        let all_contacts: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM contacts_projection WHERE wallet_id = $1",
-        )
-        .bind(ctx.wallet_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-        Ok(all_contacts.into_iter().collect())
-    } else {
-        Ok(explicit.into_iter().collect()) // Specific contacts only
-    }
+    permitted_contacts_for_action(pool, ctx, "contact:read").await
 }
 
 /// Return the set of contact IDs whose transactions the user has **permission** to read.
-/// Same permission-not-display contract as [`get_permitted_contacts`].
+/// Same contract as [`get_permitted_contacts`], for the `transaction:read` action.
 pub async fn get_permitted_transaction_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<HashSet<Uuid>, DbError> {
-    // Try explicit contact groups first
-    let explicit: Vec<Uuid> = sqlx::query_scalar(queries::GET_READABLE_TRANSACTION_CONTACTS_QUERY)
+    permitted_contacts_for_action(pool, ctx, "transaction:read").await
+}
+
+/// Shared implementation: resolves the user's allow-minus-deny contact set for one action.
+/// See [`queries::PERMITTED_CONTACTS_FOR_ACTION`] for the SQL.
+async fn permitted_contacts_for_action(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+    action: &str,
+) -> Result<HashSet<Uuid>, DbError> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(queries::PERMITTED_CONTACTS_FOR_ACTION)
         .bind(ctx.wallet_id)
         .bind(ctx.user_id)
+        .bind(action)
         .fetch_all(pool)
         .await
         .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-
-    // Check if user can read via all_contacts group
-    let query = format!(
-        "SELECT EXISTS(SELECT 1 FROM ({}) AS t LIMIT 1)",
-        queries::GET_READABLE_TRANSACTION_CONTACTS_VIA_ALL_QUERY
-    );
-    let can_read_all: bool = sqlx::query_scalar(&query)
-        .bind(ctx.wallet_id)
-        .bind(ctx.user_id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-
-    if can_read_all {
-        // Include soft-deleted contacts too (same reasoning as get_permitted_contacts):
-        // a transaction DELETE event for a contact that has just been soft-deleted must
-        // still be visible to users who had read access to that contact.
-        let all_contacts: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM contacts_projection WHERE wallet_id = $1",
-        )
-        .bind(ctx.wallet_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-        Ok(all_contacts.into_iter().collect())
-    } else {
-        Ok(explicit.into_iter().collect()) // Specific contacts only
-    }
+    Ok(ids.into_iter().collect())
 }
 
 /// Filter events to return only those readable by user

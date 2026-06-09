@@ -1278,15 +1278,48 @@ impl Database {
                 .await;
             }
 
+            // Contact added to / removed from a contact_group.
+            // aggregate_id is the contact_group id; data carries the contact_id.
+            ED::ContactGroupMemberAdded { data } => {
+                let contact_id_str =
+                    data.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(contact_id) = Uuid::parse_str(contact_id_str) {
+                    let _ = sqlx::query(
+                        r#"
+                        INSERT INTO contact_group_members (contact_id, contact_group_id)
+                        VALUES ($1, $2)
+                        ON CONFLICT (contact_id, contact_group_id) DO NOTHING
+                        "#,
+                    )
+                    .bind(contact_id)
+                    .bind(aggregate_id)
+                    .execute(&self.pool)
+                    .await;
+                }
+            }
+
+            ED::ContactGroupMemberRemoved { data } => {
+                let contact_id_str =
+                    data.get("contact_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Ok(contact_id) = Uuid::parse_str(contact_id_str) {
+                    let _ = sqlx::query(
+                        "DELETE FROM contact_group_members WHERE contact_id = $1 AND contact_group_id = $2",
+                    )
+                    .bind(contact_id)
+                    .bind(aggregate_id)
+                    .execute(&self.pool)
+                    .await;
+                }
+            }
+
             // The following permission variants don't update operational projection tables here.
-            // (Group memberships, matrix changes, ownership are handled by repository-level
-            // operations triggered separately; the cache layer reacts via handle_cache_invalidation_for_event.)
-            ED::ContactGroupMemberAdded { .. }
-            | ED::ContactGroupMemberRemoved { .. }
-            | ED::PermissionMatrixSet { .. }
+            // PermissionMatrixSet is applied directly by the put_permission_matrix handler
+            // (see set_permission_matrix_entries_impl). WalletDeleted / OwnershipTransferred
+            // don't have applier logic yet.
+            ED::PermissionMatrixSet { .. }
             | ED::WalletDeleted { .. }
             | ED::OwnershipTransferred { .. } => {
-                // No-op for projection application; these are handled elsewhere.
+                // No-op for projection application; handled elsewhere or not implemented.
             }
 
             _ => {
