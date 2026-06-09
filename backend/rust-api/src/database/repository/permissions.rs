@@ -962,7 +962,12 @@ impl Database {
                 }
             }
 
-            // New user added to wallet - populate cache
+            // New user added to wallet - populate matrix cache AND backfill the
+            // readable-events cache. The matrix cache covers future permission
+            // CHECKS; the readable-events cache holds the per-user view of
+            // existing history. Without the rebuild, a freshly-added user has
+            // an empty user_readable_events row and sees zero events on first
+            // sync — even when defaults grant them read on everything.
             EventData::WalletUserAdded { data } => {
                 if let Some(user_id_str) = data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
@@ -972,6 +977,16 @@ impl Database {
                         {
                             tracing::warn!(
                                 "Failed to compute permission matrix for new user {}: {:?}",
+                                user_id,
+                                e
+                            );
+                        }
+                        if let Err(e) = self
+                            .rebuild_readable_events_for_user_impl(wallet_id, user_id)
+                            .await
+                        {
+                            tracing::warn!(
+                                "Failed to backfill readable events for new user {}: {:?}",
                                 user_id,
                                 e
                             );
@@ -1128,7 +1143,9 @@ impl Database {
                 }
             }
 
-            // New user added to wallet - populate cache
+            // New user added to wallet - populate matrix cache + backfill
+            // user_readable_events from prior history. See the typed variant
+            // for the rationale.
             "WALLET_USER_ADDED" => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
@@ -1138,6 +1155,16 @@ impl Database {
                         {
                             tracing::warn!(
                                 "Failed to compute permission matrix for new user {}: {:?}",
+                                user_id,
+                                e
+                            );
+                        }
+                        if let Err(e) = self
+                            .rebuild_readable_events_for_user_impl(wallet_id, user_id)
+                            .await
+                        {
+                            tracing::warn!(
+                                "Failed to backfill readable events for new user {}: {:?}",
                                 user_id,
                                 e
                             );
