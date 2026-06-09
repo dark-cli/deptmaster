@@ -14,7 +14,6 @@ pub struct EventRow {
     pub user_id: Uuid,
     pub created_at: NaiveDateTime,
     pub version: i32,
-    pub idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,7 +27,6 @@ pub struct Event {
     pub user_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub version: i32,
-    pub idempotency_key: Option<String>,
 }
 
 impl From<EventRow> for Event {
@@ -43,7 +41,6 @@ impl From<EventRow> for Event {
             user_id: row.user_id,
             created_at: row.created_at.and_utc(),
             version: row.version,
-            idempotency_key: row.idempotency_key,
         }
     }
 }

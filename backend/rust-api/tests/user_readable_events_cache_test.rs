@@ -96,7 +96,6 @@ async fn test_cache_populated_via_sync_api() {
         user_id: owner_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Test Contact".to_string(),
             username: None,
@@ -171,7 +170,6 @@ async fn test_cache_per_user_via_sync() {
         user_id: user1_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Contact 1".to_string(),
             username: None,
@@ -189,7 +187,6 @@ async fn test_cache_per_user_via_sync() {
         user_id: user2_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Contact 2".to_string(),
             username: None,
@@ -273,7 +270,6 @@ async fn test_cache_deletion_on_permission_change() {
         user_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Contact 1".to_string(),
             username: None,
@@ -291,7 +287,6 @@ async fn test_cache_deletion_on_permission_change() {
         user_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Contact 2".to_string(),
             username: None,
@@ -368,7 +363,6 @@ async fn test_cache_uniqueness_per_user() {
         user_id: user1_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Shared Contact".to_string(),
             username: None,
@@ -507,7 +501,6 @@ async fn test_cache_accumulates_multiple_events() {
             user_id,
             created_at: Utc::now(),
             version: 1,
-            idempotency_key: Uuid::new_v4().to_string(),
             event_data: EventData::ContactCreated {
                 name: format!("Contact {}", i),
                 username: None,
@@ -562,7 +555,6 @@ async fn test_cache_accumulates_multiple_events() {
             user_id,
             created_at: Utc::now(),
             version: 1,
-            idempotency_key: Uuid::new_v4().to_string(),
             event_data: EventData::ContactCreated {
                 name: format!("Contact {}", i + 3),
                 username: None,

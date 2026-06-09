@@ -244,9 +244,9 @@ impl EventData {
 /// This separates concerns: metadata (id, wallet_id, user_id, created_at, version) from
 /// event-specific payload (in event_data).
 ///
-/// CRITICAL: The `id` (event_id) field is generated ONLY by the database at insert time.
-/// Client must NOT provide it. If client sends "id" field, deserialization will fail.
-/// This ensures the database is the single source of truth for event_id generation.
+/// Clients generate `id` (UUID v4) locally. The server accepts it as-is and uses
+/// `(wallet_id, id)` as the dedup + identity key. There is no separate
+/// idempotency_key — retries send the same `id` and ON CONFLICT handles them.
 #[derive(Debug, Clone, Serialize)]
 pub struct DomainEvent {
     pub id: Uuid,
@@ -255,22 +255,9 @@ pub struct DomainEvent {
     pub user_id: Uuid,
     pub created_at: DateTime<Utc>,
     pub version: i32,
-    pub idempotency_key: String,
     pub event_data: EventData,
 }
 
-// Custom deserialization.
-//
-// Clients generate event_ids locally (UUID v4) so offline operations can reference
-// them (e.g. UNDO events need to point at the event they're undoing — that id must
-// exist before the original is synced). The server accepts the client-provided id
-// as-is. Uniqueness is enforced per-wallet via (wallet_id, event_id) at the DB
-// layer; UUID v4 collisions at our scale are ~10^-18 even globally, so per-wallet
-// is more than safe.
-//
-// idempotency_key is accepted for backward compatibility but is no longer the
-// dedup key. If the client doesn't send one we generate a value derived from id;
-// nothing reads it as load-bearing today.
 impl<'de> Deserialize<'de> for DomainEvent {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -286,14 +273,11 @@ impl<'de> Deserialize<'de> for DomainEvent {
             #[serde(deserialize_with = "deserialize_datetime_utc")]
             created_at: DateTime<Utc>,
             version: i32,
-            #[serde(default)]
-            idempotency_key: Option<String>,
             event_data: EventData,
         }
 
         let dto = DomainEventDto::deserialize(deserializer)?;
         let id = dto.id.unwrap_or_else(Uuid::new_v4);
-        let idempotency_key = dto.idempotency_key.unwrap_or_else(|| id.to_string());
 
         Ok(DomainEvent {
             id,
@@ -302,7 +286,6 @@ impl<'de> Deserialize<'de> for DomainEvent {
             user_id: dto.user_id,
             created_at: dto.created_at,
             version: dto.version,
-            idempotency_key,
             event_data: dto.event_data,
         })
     }

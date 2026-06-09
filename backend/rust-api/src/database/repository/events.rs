@@ -118,7 +118,6 @@ struct EventRowDb {
     created_at: NaiveDateTime,
     #[sqlx(rename = "event_version")]
     version: i32,
-    idempotency_key: Option<String>,
 }
 
 impl From<EventRowDb> for EventRow {
@@ -134,7 +133,6 @@ impl From<EventRowDb> for EventRow {
             user_id: db.user_id,
             created_at: db.created_at,
             version: db.version,
-            idempotency_key: db.idempotency_key,
         }
     }
 }
@@ -170,10 +168,6 @@ impl Database {
             user_id: event.user_id,
             created_at: event.created_at,
             version: event.version,
-            idempotency_key: event
-                .idempotency_key
-                .clone()
-                .unwrap_or_else(|| Uuid::new_v4().to_string()),
             event_data,
         })
     }
@@ -188,7 +182,7 @@ impl Database {
                 sqlx::query_as::<_, EventRowDb>(
                     r#"
                     SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
-                           wallet_id, user_id, created_at, event_version, idempotency_key
+                           wallet_id, user_id, created_at, event_version
                     FROM events
                     WHERE wallet_id = $1 AND created_at > $2
                     ORDER BY created_at ASC
@@ -203,7 +197,7 @@ impl Database {
                 sqlx::query_as::<_, EventRowDb>(
                     r#"
                     SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
-                           wallet_id, user_id, created_at, event_version, idempotency_key
+                           wallet_id, user_id, created_at, event_version
                     FROM events
                     WHERE wallet_id = $1
                     ORDER BY created_at ASC
@@ -232,7 +226,7 @@ impl Database {
         let row = sqlx::query_as::<_, EventRowDb>(
             r#"
             SELECT id, event_id, aggregate_type, aggregate_id, event_type, event_data,
-                   wallet_id, user_id, created_at, event_version, idempotency_key
+                   wallet_id, user_id, created_at, event_version
             FROM events
             WHERE event_id = $1
             "#,
@@ -263,7 +257,7 @@ impl Database {
                 sqlx::query_as::<_, EventRowDb>(
                     r#"
                     SELECT e.id, e.event_id, e.aggregate_type, e.aggregate_id, e.event_type,
-                           e.event_data, e.wallet_id, e.user_id, e.created_at, e.event_version, e.idempotency_key
+                           e.event_data, e.wallet_id, e.user_id, e.created_at, e.event_version
                     FROM events e
                     INNER JOIN user_readable_events ure ON e.event_id = ure.event_id
                     WHERE e.wallet_id = $1 AND ure.user_id = $2 AND e.created_at > $3
@@ -280,7 +274,7 @@ impl Database {
                 sqlx::query_as::<_, EventRowDb>(
                     r#"
                     SELECT e.id, e.event_id, e.aggregate_type, e.aggregate_id, e.event_type,
-                           e.event_data, e.wallet_id, e.user_id, e.created_at, e.event_version, e.idempotency_key
+                           e.event_data, e.wallet_id, e.user_id, e.created_at, e.event_version
                     FROM events e
                     INNER JOIN user_readable_events ure ON e.event_id = ure.event_id
                     WHERE e.wallet_id = $1 AND ure.user_id = $2
@@ -318,12 +312,11 @@ impl Database {
         wallet_id: Uuid,
         user_id: Uuid,
         version: i32,
-        idempotency_key: Option<String>,
     ) -> Result<i64, DbError> {
         let result = sqlx::query_scalar::<_, i64>(
             r#"
-            INSERT INTO events (event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, event_version, idempotency_key, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            INSERT INTO events (event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, event_version, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
             ON CONFLICT (wallet_id, event_id) DO NOTHING
             RETURNING id
             "#
@@ -336,7 +329,6 @@ impl Database {
         .bind(wallet_id)
         .bind(user_id)
         .bind(version)
-        .bind(&idempotency_key)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -356,7 +348,6 @@ impl Database {
         wallet_id: Uuid,
         user_id: Uuid,
         version: i32,
-        idempotency_key: Option<String>,
         domain_event: &DomainEvent,
     ) -> Result<i64, DbError> {
         // Step 1: Insert event into database
@@ -370,7 +361,6 @@ impl Database {
                 wallet_id,
                 user_id,
                 version,
-                idempotency_key,
             )
             .await?;
 

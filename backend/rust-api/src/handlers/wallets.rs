@@ -1369,46 +1369,31 @@ pub struct MatrixEntry {
 
 /// Request body for one (user_group, contact_group) entry on PUT /permission-matrix.
 ///
-/// Accepts two shapes for backwards compatibility:
-/// - New shape: `allowed_actions` and/or `denied_actions` (either may be omitted/empty).
-///   This is the only way to set deny rows.
-/// - Legacy shape: `action_names` — treated as allowed-only. No denies set or cleared.
-///
-/// When BOTH shapes are present, the new fields take precedence. When BOTH new fields
-/// are absent and `action_names` is also absent, the entry is treated as empty (all
-/// existing permissions for the pair are removed).
+/// `allowed_actions` and `denied_actions` are independent; both may be empty (the entry
+/// clears all existing permissions for that pair). Three states per action per pair:
+///     unset (no row)  ·  allowed (row, is_deny=false)  ·  denied (row, is_deny=true)
+/// Resolution across all the user's groups is allow_union − deny_union (deny wins).
 #[derive(Deserialize)]
 pub struct PutPermissionMatrixRequest {
     pub user_group_id: String,
     pub contact_group_id: String,
     #[serde(default)]
-    pub allowed_actions: Option<Vec<String>>,
+    pub allowed_actions: Vec<String>,
     #[serde(default)]
-    pub denied_actions: Option<Vec<String>>,
-    #[serde(default)]
-    pub action_names: Option<Vec<String>>,
+    pub denied_actions: Vec<String>,
 }
 
 impl PutPermissionMatrixRequest {
     /// Normalize the request into (allowed, denied) action-name lists.
     /// Strips the deprecated `events:read` value (no-op on backend).
     fn allowed_denied(&self) -> (Vec<String>, Vec<String>) {
-        let allowed = self
-            .allowed_actions
-            .clone()
-            .or_else(|| self.action_names.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|a| a != "events:read")
-            .collect();
-        let denied = self
-            .denied_actions
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|a| a != "events:read")
-            .collect();
-        (allowed, denied)
+        let strip = |v: &[String]| -> Vec<String> {
+            v.iter()
+                .filter(|a| a.as_str() != "events:read")
+                .cloned()
+                .collect()
+        };
+        (strip(&self.allowed_actions), strip(&self.denied_actions))
     }
 }
 
@@ -2196,7 +2181,6 @@ pub async fn add_contact_group_member(
             user_id: auth_user.user_id,
             created_at: chrono::Utc::now(),
             version: 1,
-            idempotency_key: Uuid::new_v4().to_string(),
             event_data: crate::domain::EventData::ContactGroupMemberAdded {
                 data: serde_json::json!({
                     "contact_id": contact_uuid.to_string(),
@@ -2303,7 +2287,6 @@ pub async fn remove_contact_group_member(
             user_id: auth_user.user_id,
             created_at: chrono::Utc::now(),
             version: 1,
-            idempotency_key: Uuid::new_v4().to_string(),
             event_data: crate::domain::EventData::ContactGroupMemberRemoved {
                 data: serde_json::json!({
                     "contact_id": contact_uuid.to_string(),

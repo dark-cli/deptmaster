@@ -42,7 +42,6 @@ pub trait DatabaseRepository: Send + Sync {
         wallet_id: Uuid,
         user_id: Uuid,
         version: i32,
-        idempotency_key: Option<String>,
     ) -> Result<i64, DbError>;
 
     async fn delete_event(&self, event_id: Uuid) -> Result<bool, DbError>;
@@ -541,7 +540,6 @@ impl DatabaseRepository for Database {
         wallet_id: Uuid,
         user_id: Uuid,
         version: i32,
-        idempotency_key: Option<String>,
     ) -> Result<i64, DbError> {
         self.insert_event_impl(
             event_id,
@@ -552,7 +550,6 @@ impl DatabaseRepository for Database {
             wallet_id,
             user_id,
             version,
-            idempotency_key,
         )
         .await
     }

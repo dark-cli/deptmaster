@@ -72,7 +72,8 @@ fn set_matrix_actions(
     let entries = serde_json::json!([{
         "user_group_id": user_group_id,
         "contact_group_id": contact_group_id,
-        "action_names": actions
+        "allowed_actions": actions,
+        "denied_actions": []
     }]);
     put_wallet_permission_matrix(wallet_id.to_string(), entries.to_string())
 }

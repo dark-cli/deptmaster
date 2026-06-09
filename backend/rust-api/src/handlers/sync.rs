@@ -309,7 +309,6 @@ async fn insert_event(
             wallet_id,
             user_id,
             domain_event.version,
-            Some(domain_event.idempotency_key.clone()),
             domain_event,
         )
         .await?;
@@ -395,7 +394,6 @@ pub async fn insert_permission_event_and_apply(
             wallet_id,
             user_id,
             1,
-            Some(Uuid::new_v4().to_string()),
         )
         .await
         .map_err(|_| sqlx::Error::RowNotFound)?;

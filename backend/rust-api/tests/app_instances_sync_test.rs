@@ -209,7 +209,6 @@ async fn test_sync_read_permission_filter_and_full_pull() {
         user_id: owner_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Contact A".to_string(),
             username: None,
@@ -226,7 +225,6 @@ async fn test_sync_read_permission_filter_and_full_pull() {
         user_id: owner_id,
         created_at: Utc::now(),
         version: 1,
-        idempotency_key: Uuid::new_v4().to_string(),
         event_data: EventData::ContactCreated {
             name: "Contact B".to_string(),
             username: None,
