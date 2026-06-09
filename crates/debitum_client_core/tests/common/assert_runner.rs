@@ -7,16 +7,19 @@
 fn parse_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut buf = String::new();
-    let mut in_quotes = false;
+    // Support both `"..."` and `'...'` quoting (some tests mix them). Only the
+    // matching opener closes; an apostrophe inside `"..."` is a literal.
+    let mut quote: Option<char> = None;
     for c in input.chars() {
-        if c == '"' {
-            in_quotes = !in_quotes;
-        } else if c == ' ' && !in_quotes {
-            if !buf.is_empty() {
-                args.push(std::mem::take(&mut buf));
+        match (quote, c) {
+            (Some(opener), ch) if ch == opener => quote = None,
+            (None, '"') | (None, '\'') => quote = Some(c),
+            (None, ' ') => {
+                if !buf.is_empty() {
+                    args.push(std::mem::take(&mut buf));
+                }
             }
-        } else {
-            buf.push(c);
+            _ => buf.push(c),
         }
     }
     if !buf.is_empty() {
@@ -27,7 +30,10 @@ fn parse_args(input: &str) -> Vec<String> {
 
 fn unquote(s: &str) -> String {
     let s = s.trim();
-    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"'))
+            || (s.starts_with('\'') && s.ends_with('\'')))
+    {
         s[1..s.len() - 1].to_string()
     } else {
         s.to_string()
@@ -131,6 +137,26 @@ fn run_one(
             let first = contacts.first().and_then(|c| c["name"].as_str()).unwrap_or("");
             if first != name {
                 return Err(format!("contact 0 name \"{}\"; got \"{}\"", name, first));
+            }
+            return Ok(());
+        }
+    }
+
+    // transaction description "Foo"  — at least one transaction has this description.
+    // transaction <i> description "Foo"  — the i-th transaction has this description.
+    // Mirrors the singular `contact` action pattern for use in `member sees own
+    // transaction` style assertions after a single-transaction create.
+    if action == "transaction" {
+        if args.len() >= 3 && args[1].to_lowercase() == "description" {
+            let desc = unquote(args[2]);
+            let found = transactions
+                .iter()
+                .any(|t| t["description"].as_str() == Some(desc.as_str()));
+            if !found {
+                return Err(format!(
+                    "transaction description \"{}\" not found; got {:?}",
+                    desc, transactions
+                ));
             }
             return Ok(());
         }

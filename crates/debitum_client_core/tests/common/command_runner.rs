@@ -7,24 +7,29 @@
 //! Full vocabulary: see project docs at `docs/INTEGRATION_TEST_COMMANDS.md`.
 
 use debitum_client_core::{
-    create_contact, create_transaction, delete_contact, delete_transaction,
-    get_transaction, manual_sync, update_contact, update_transaction,
+    create_contact, create_transaction, delete_contact, delete_transaction, get_transaction,
+    list_wallet_contact_groups, list_wallet_user_groups, manual_sync,
+    put_wallet_permission_matrix, update_contact, update_transaction,
 };
 use std::collections::HashMap;
 
 fn parse_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut buf = String::new();
-    let mut in_quotes = false;
+    // Tracks the active opening quote char, if any. Tests mix `"..."` and `'...'`
+    // so we support both — but only honour the matching closer (e.g. a `'` inside
+    // `"..."` is a literal apostrophe, not a closer).
+    let mut quote: Option<char> = None;
     for c in input.chars() {
-        if c == '"' {
-            in_quotes = !in_quotes;
-        } else if c == ' ' && !in_quotes {
-            if !buf.is_empty() {
-                args.push(std::mem::take(&mut buf));
+        match (quote, c) {
+            (Some(opener), ch) if ch == opener => quote = None,
+            (None, '"') | (None, '\'') => quote = Some(c),
+            (None, ' ') => {
+                if !buf.is_empty() {
+                    args.push(std::mem::take(&mut buf));
+                }
             }
-        } else {
-            buf.push(c);
+            _ => buf.push(c),
         }
     }
     if !buf.is_empty() {
@@ -33,9 +38,25 @@ fn parse_args(input: &str) -> Vec<String> {
     args
 }
 
+/// Locate a group id by its `name` field inside a JSON list returned from
+/// list_wallet_user_groups / list_wallet_contact_groups (either a bare array
+/// or `{groups: [...]}`).
+fn find_group_id(json: &str, name: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let arr = v.get("groups").and_then(|g| g.as_array()).cloned().or_else(|| v.as_array().cloned())
+        .ok_or_else(|| "Response is neither {groups:[...]} nor an array".to_string())?;
+    arr.iter()
+        .find(|g| g.get("name").and_then(|n| n.as_str()) == Some(name))
+        .and_then(|g| g.get("id").and_then(|i| i.as_str()).map(String::from))
+        .ok_or_else(|| format!("Group '{}' not found in response", name))
+}
+
 fn unquote(s: &str) -> &str {
     let s = s.trim();
-    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"'))
+            || (s.starts_with('\'') && s.ends_with('\'')))
+    {
         &s[1..s.len() - 1]
     } else {
         s
@@ -87,7 +108,53 @@ impl CommandRunner {
             self.do_transaction(&args[1..], command)?;
             return Ok(());
         }
+        if action == "permission" {
+            self.do_permission(&args[1..], command)?;
+            return Ok(());
+        }
         Err(format!("Unknown action: {}", action))
+    }
+
+    /// `permission grant-full` / `permission grant-read` / `permission revoke-all`
+    ///
+    /// All three operate on the all_users user group × all_contacts contact group pair
+    /// (the wallet's default "everyone gets these permissions on every contact" axis).
+    /// Used by tests to simulate the wallet owner adjusting baseline member permissions.
+    fn do_permission(&mut self, args: &[&str], original: &str) -> Result<(), String> {
+        if args.is_empty() {
+            return Err(format!("Permission command requires action: {}", original));
+        }
+        let wallet_id = debitum_client_core::get_current_wallet_id()
+            .ok_or_else(|| "No wallet selected".to_string())?;
+        let ug_all_users = find_group_id(&list_wallet_user_groups(wallet_id.clone())?, "all_users")?;
+        let cg_all_contacts =
+            find_group_id(&list_wallet_contact_groups(wallet_id.clone())?, "all_contacts")?;
+        let (allowed, denied): (Vec<&str>, Vec<&str>) = match args[0].to_lowercase().as_str() {
+            "grant-full" => (
+                vec![
+                    "contact:create",
+                    "contact:read",
+                    "contact:update",
+                    "contact:delete",
+                    "transaction:create",
+                    "transaction:read",
+                    "transaction:update",
+                    "transaction:delete",
+                ],
+                vec![],
+            ),
+            "grant-read" => (vec!["contact:read", "transaction:read"], vec![]),
+            "revoke-all" => (vec![], vec![]),
+            other => return Err(format!("Unknown permission subcommand: {}", other)),
+        };
+        let entry = serde_json::json!({
+            "user_group_id": ug_all_users,
+            "contact_group_id": cg_all_contacts,
+            "allowed_actions": allowed,
+            "denied_actions": denied,
+        });
+        let entries = serde_json::json!([entry]);
+        put_wallet_permission_matrix(wallet_id, entries.to_string())
     }
 
     fn do_contact(&mut self, args: &[&str], original: &str) -> Result<(), String> {

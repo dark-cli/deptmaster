@@ -1140,6 +1140,26 @@ impl Database {
                     } else {
                         tracing::info!("Successfully inserted wallet user");
                     }
+
+                    // Add to the wallet's all_users system group. all_users is the
+                    // implicit "everyone in this wallet" group: the default permission
+                    // matrix is keyed off it (see initialize_wallet_permissions in
+                    // handlers/wallets.rs). Without this, a freshly-added member is
+                    // in wallet_users but in no permission group, so every action they
+                    // attempt is rejected — they're a wallet member with no permissions.
+                    let _ = sqlx::query(
+                        r#"
+                        INSERT INTO user_group_members (user_id, user_group_id)
+                        SELECT $2, ug.id
+                        FROM user_groups ug
+                        WHERE ug.wallet_id = $1 AND ug.name = 'all_users'
+                        ON CONFLICT (user_id, user_group_id) DO NOTHING
+                        "#,
+                    )
+                    .bind(wallet_id)
+                    .bind(perm_user_id)
+                    .execute(&self.pool)
+                    .await;
                 }
             }
 
