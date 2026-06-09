@@ -1364,7 +1364,8 @@ pub struct PermissionActionResponse {
 pub struct MatrixEntry {
     pub user_group_id: String,
     pub contact_group_id: String,
-    pub action_names: Vec<String>,
+    pub allowed_actions: Vec<String>,
+    pub denied_actions: Vec<String>,
 }
 
 /// Request body for one (user_group, contact_group) entry on PUT /permission-matrix.
@@ -2396,12 +2397,15 @@ pub async fn get_permission_matrix(
 
     let list: Vec<MatrixEntry> = matrix
         .into_iter()
-        .map(|(user_group_id, contact_group_id, mut action_names)| {
-            action_names.retain(|a| a != "events:read");
+        .map(|(user_group_id, contact_group_id, mut allowed, mut denied)| {
+            // Filter out the deprecated `events:read` action both ways.
+            allowed.retain(|a| a != "events:read");
+            denied.retain(|a| a != "events:read");
             MatrixEntry {
                 user_group_id: user_group_id.to_string(),
                 contact_group_id: contact_group_id.to_string(),
-                action_names,
+                allowed_actions: allowed,
+                denied_actions: denied,
             }
         })
         .collect();

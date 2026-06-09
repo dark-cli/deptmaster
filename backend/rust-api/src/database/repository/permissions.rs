@@ -512,14 +512,26 @@ impl Database {
         Ok(exists)
     }
 
+    /// Returns one entry per (user_group, contact_group) pair with allow/deny
+    /// action lists kept separate. Unset actions don't appear in either list.
+    /// Tuple shape: (user_group_id, contact_group_id, allowed_actions, denied_actions).
     pub async fn get_permission_matrix_impl(
         &self,
         wallet_id: Uuid,
-    ) -> Result<Vec<(Uuid, Uuid, Vec<String>)>, DbError> {
+    ) -> Result<Vec<(Uuid, Uuid, Vec<String>, Vec<String>)>, DbError> {
         let rows = sqlx::query(
             r#"
-            SELECT m.user_group_id, m.contact_group_id,
-                   array_agg(pa.name ORDER BY pa.name) as action_names
+            SELECT
+              m.user_group_id,
+              m.contact_group_id,
+              COALESCE(
+                array_agg(pa.name ORDER BY pa.name) FILTER (WHERE m.is_deny = false),
+                ARRAY[]::text[]
+              ) AS allowed_actions,
+              COALESCE(
+                array_agg(pa.name ORDER BY pa.name) FILTER (WHERE m.is_deny = true),
+                ARRAY[]::text[]
+              ) AS denied_actions
             FROM group_permission_matrix m
             JOIN permission_actions pa ON pa.id = m.permission_action_id
             JOIN user_groups ug ON ug.id = m.user_group_id AND ug.wallet_id = $1
@@ -536,8 +548,9 @@ impl Database {
             .map(|row| {
                 let user_group_id: Uuid = row.get("user_group_id");
                 let contact_group_id: Uuid = row.get("contact_group_id");
-                let action_names: Vec<String> = row.get("action_names");
-                (user_group_id, contact_group_id, action_names)
+                let allowed_actions: Vec<String> = row.get("allowed_actions");
+                let denied_actions: Vec<String> = row.get("denied_actions");
+                (user_group_id, contact_group_id, allowed_actions, denied_actions)
             })
             .collect();
 

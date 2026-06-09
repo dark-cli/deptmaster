@@ -357,10 +357,11 @@ pub trait DatabaseRepository: Send + Sync {
         wallet_id: Uuid,
     ) -> Result<bool, DbError>;
 
+    /// Returns (user_group_id, contact_group_id, allowed_actions, denied_actions) per pair.
     async fn get_permission_matrix(
         &self,
         wallet_id: Uuid,
-    ) -> Result<Vec<(Uuid, Uuid, Vec<String>)>, DbError>;
+    ) -> Result<Vec<(Uuid, Uuid, Vec<String>, Vec<String>)>, DbError>;
 
     // ============ USERS ============
     async fn get_user_by_email(&self, email: &str) -> Result<Option<User>, DbError>;
@@ -969,7 +970,7 @@ impl DatabaseRepository for Database {
     async fn get_permission_matrix(
         &self,
         wallet_id: Uuid,
-    ) -> Result<Vec<(Uuid, Uuid, Vec<String>)>, DbError> {
+    ) -> Result<Vec<(Uuid, Uuid, Vec<String>, Vec<String>)>, DbError> {
         self.get_permission_matrix_impl(wallet_id).await
     }
 
