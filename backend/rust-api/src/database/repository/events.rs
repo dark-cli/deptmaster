@@ -335,42 +335,6 @@ impl Database {
         Ok(result.unwrap_or(0))
     }
 
-    /// Insert event and handle permission matrix cache invalidation.
-    /// This is the public interface for event insertion - it handles both storage and cache.
-    /// The database owns cache management (sync handler doesn't know about it).
-    pub async fn insert_event_with_cache_handling(
-        &self,
-        event_id: Uuid,
-        aggregate_id: Uuid,
-        aggregate_type: String,
-        event_type: String,
-        data: Value,
-        wallet_id: Uuid,
-        user_id: Uuid,
-        version: i32,
-        domain_event: &DomainEvent,
-    ) -> Result<i64, DbError> {
-        // Step 1: Insert event into database
-        let inserted_id = self
-            .insert_event_impl(
-                event_id,
-                aggregate_id,
-                aggregate_type,
-                event_type,
-                data,
-                wallet_id,
-                user_id,
-                version,
-            )
-            .await?;
-
-        // Step 2: Handle permission cache invalidation (database responsibility)
-        self.handle_cache_invalidation_for_event(wallet_id, domain_event)
-            .await;
-
-        Ok(inserted_id)
-    }
-
     /// Populate readable events cache after synced events are inserted.
     /// This is called by the sync handler after inserting a batch of client events.
     /// Database responsibility: make events visible to users based on their permissions.

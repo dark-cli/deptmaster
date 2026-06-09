@@ -243,10 +243,14 @@ pub async fn post_sync_events(
     }
 
     if !new_events.is_empty() {
-        // Apply events to projections FIRST. populate_events_cache_after_sync (below) computes
-        // permissions by querying contacts_projection / transactions_projection — if those don't
-        // reflect the just-inserted events yet, the cache will think nothing is readable and
-        // pulls will return 0 events. Order matters.
+        // Apply events to projections FIRST. Two things downstream depend on the projection
+        // tables being up-to-date:
+        //   1. handle_cache_invalidation_for_event (next) reads contact_group_members,
+        //      user_group_members, group_permission_matrix to rebuild user_readable_events —
+        //      and the applier just wrote to those tables.
+        //   2. populate_events_cache_after_sync (after that) reads contacts_projection /
+        //      transactions_projection to decide readability.
+        // Running cache work before apply leaves both queries looking at stale state.
         let event_ids: Vec<Uuid> = new_events.iter().map(|e| e.id).collect();
         apply_events_batch(&db, wallet_id, user_id, &event_ids).await;
 
@@ -259,9 +263,13 @@ pub async fn post_sync_events(
             }
         }
 
+        // Permission matrix cache + user_readable_events rebuild, per event. Only matters
+        // for permission-shape events; the handler short-circuits for everything else.
+        for ev in &new_events {
+            db.handle_cache_invalidation_for_event(wallet_id, ev).await;
+        }
+
         // Now populate the readable-events cache against the up-to-date projection state.
-        // (Permission matrix cache invalidation is handled inside insert_event_with_cache_handling
-        // at the database layer; the sync handler doesn't manage that one.)
         if let Err(e) = db
             .populate_events_cache_after_sync(wallet_id, &new_events)
             .await
@@ -297,10 +305,10 @@ async fn insert_event(
         obj.remove("type");
     }
 
-    // Insert event and let database handle permission cache invalidation
-    // This is the public interface - it handles both storage and cache
+    // Pure insert. Cache invalidation runs in post_sync_events after the batch apply so
+    // the rebuild sees the post-apply projection state (group membership, matrix rows).
     let inserted_id = db
-        .insert_event_with_cache_handling(
+        .insert_event_impl(
             domain_event.id,
             domain_event.aggregate_id,
             domain_event.aggregate_type_enum().as_str().to_string(),
@@ -309,7 +317,6 @@ async fn insert_event(
             wallet_id,
             user_id,
             domain_event.version,
-            domain_event,
         )
         .await?;
 
@@ -383,7 +390,7 @@ pub async fn insert_permission_event_and_apply(
     let event_id = Uuid::new_v4();
     let db = Database::new((*state.db_pool).clone());
 
-    // Insert event
+    // 1. Insert event
     let _ = db
         .insert_event_impl(
             event_id,
@@ -398,11 +405,11 @@ pub async fn insert_permission_event_and_apply(
         .await
         .map_err(|_| sqlx::Error::RowNotFound)?;
 
-    // Handle permission matrix cache invalidation (database responsibility)
-    db.handle_cache_invalidation_for_event_raw(wallet_id, event_type, &event_data)
-        .await;
-
-    // Apply event to projections
+    // 2. Apply event to projections. MUST run before cache invalidation: the
+    //    rebuild of user_readable_events reads contact_group_members,
+    //    user_group_members, group_permission_matrix — all of which the applier
+    //    updates from this event. Running invalidation first leaves the rebuild
+    //    looking at stale state.
     let rows: Vec<_> = sqlx::query(
         "SELECT id, event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, created_at, event_version FROM events WHERE event_id = $1 AND wallet_id = $2"
     )
@@ -422,6 +429,11 @@ pub async fn insert_permission_event_and_apply(
             tracing::error!("Error applying event: {:?}", e);
         }
     }
+
+    // 3. Handle permission matrix cache invalidation + user_readable_events
+    //    rebuild (database responsibility). Now sees the post-apply projection state.
+    db.handle_cache_invalidation_for_event_raw(wallet_id, event_type, &event_data)
+        .await;
 
     // Permission events are readable by all wallet users - add to their readable events cache
     let wallet_users = match db.get_wallet_users_impl(wallet_id).await {
