@@ -38,7 +38,7 @@ impl AppInstance {
         )
         .await;
         let json = result.expect("get_sync_events");
-        json.0
+        json.0.events
     }
 
     /// Call get_sync_hash.

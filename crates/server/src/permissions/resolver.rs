@@ -108,29 +108,37 @@ pub async fn can_perform(
     Ok(allowed.iter().any(|a| a.implies(action)))
 }
 
-/// Rebuild user readable events cache by computing permissions for all events
+/// Rebuild the per-user readable-events cache (and its incremental hash) from
+/// scratch. Use after any change that may have flipped visibility for the user
+/// (matrix update, group membership change, fresh wallet join).
+///
+/// Both the readable-events set and the `user_event_hashes` row are reset and
+/// repopulated. `filter_readable_events` returns events in canonical
+/// `events.id ASC` order so the rebuilt hash matches the value an incremental
+/// `add_readable_event_impl` sequence would produce.
 pub async fn rebuild_readable_events_cache(
     pool: &PgPool,
     ctx: &PermissionContext,
     all_events: &[domain::DomainEvent],
 ) -> Result<(), DbError> {
-    // Delete existing cache
+    // Wipe the cache + reset the hash. Both are derived state for this user.
     sqlx::query("DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2")
         .bind(ctx.wallet_id)
         .bind(ctx.user_id)
         .execute(pool)
+        .await?;
+    crate::database::repository::hash::UserEventHash::reset(pool, ctx.wallet_id, ctx.user_id)
         .await?;
 
     if all_events.is_empty() {
         return Ok(());
     }
 
-    // Compute readable events and populate cache
+    // filter_readable_events returns canonical-ordered events.id ASC. Insert
+    // and fold each into the hash in the same order an incremental sync would.
     let readable_ids = filter_readable_events(pool, ctx, all_events).await?;
-
-    // Batch insert readable events
     for event_id in readable_ids {
-        sqlx::query(
+        let inserted = sqlx::query(
             r#"
             INSERT INTO user_readable_events (wallet_id, user_id, event_id)
             VALUES ($1, $2, $3)
@@ -141,7 +149,15 @@ pub async fn rebuild_readable_events_cache(
         .bind(ctx.user_id)
         .bind(event_id)
         .execute(pool)
-        .await?;
+        .await?
+        .rows_affected();
+
+        if inserted > 0 {
+            crate::database::repository::hash::UserEventHash::calculate_and_store(
+                pool, ctx.wallet_id, ctx.user_id, event_id,
+            )
+            .await?;
+        }
     }
 
     Ok(())
@@ -212,9 +228,15 @@ pub async fn filter_readable_events(
     let permitted_transaction_contact_uuids: Vec<Uuid> =
         permitted_transaction_contacts.iter().copied().collect();
 
+    // No DISTINCT: each row in `events` is one event, and the OR conditions
+    // are over mutually-exclusive aggregate_types, so a single event can only
+    // match one clause. Ordering by `e.id ASC` (the BIGSERIAL insertion key)
+    // gives canonical event order — required so that the incremental
+    // user_event_hashes value matches what a fresh sequential sync would
+    // produce. (DISTINCT here would forbid ORDER BY on a non-selected column.)
     let readable_ids: Vec<Uuid> = sqlx::query_scalar(
         r#"
-        SELECT DISTINCT e.event_id
+        SELECT e.event_id
         FROM events e
         WHERE e.wallet_id = $1
           AND e.event_id = ANY($2::uuid[])
@@ -246,6 +268,7 @@ pub async fn filter_readable_events(
             -- Permission and wallet events: broadcast to all wallet users.
             OR (e.aggregate_type = 'permission' OR e.aggregate_type = 'wallet')
           )
+        ORDER BY e.id ASC
         "#,
     )
     .bind(ctx.wallet_id)

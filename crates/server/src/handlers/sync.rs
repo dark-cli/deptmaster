@@ -85,6 +85,18 @@ pub struct SyncEventsResponse {
     pub conflicts: Vec<String>,
 }
 
+/// Response shape of `GET /sync/events`. `server_hash` is the incremental
+/// MD5 of this user's `user_readable_events` set (see migration 027 +
+/// `UserEventHash::calculate_and_store`). Client stores it after each pull
+/// and compares against the next pull's hash — mismatch means the user's
+/// visible set changed (permission revoke, group membership flip, etc.)
+/// and the client must wipe + repull.
+#[derive(Serialize)]
+pub struct GetSyncEventsResponse {
+    pub events: Vec<SyncEvent>,
+    pub server_hash: String,
+}
+
 // ============ QUERY TYPES ============
 
 #[derive(Deserialize)]
@@ -130,7 +142,7 @@ pub async fn get_sync_events(
     State(state): State<AppState>,
     Extension(wallet_context): Extension<WalletContext>,
     Extension(auth_user): Extension<AuthUser>,
-) -> Result<Json<Vec<SyncEvent>>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<GetSyncEventsResponse>, (StatusCode, Json<serde_json::Value>)> {
     let wallet_id = wallet_context.wallet_id;
     let user_id = auth_user.user_id;
     let db = Database::new((*state.db_pool).clone());
@@ -167,7 +179,18 @@ pub async fn get_sync_events(
         })
         .collect();
 
-    Ok(Json(sync_events))
+    // Incremental hash over this user's readable set. Empty string for users
+    // with no readable events yet (first sync against an empty wallet).
+    let server_hash = crate::database::repository::hash::UserEventHash::get_hash(
+        &state.db_pool, wallet_id, user_id,
+    )
+    .await
+    .unwrap_or_default();
+
+    Ok(Json(GetSyncEventsResponse {
+        events: sync_events,
+        server_hash,
+    }))
 }
 
 fn is_undo_event(event_data: &EventData) -> bool {

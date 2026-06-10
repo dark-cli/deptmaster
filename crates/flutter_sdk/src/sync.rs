@@ -19,6 +19,10 @@ fn last_sync_key(wallet_id: &str) -> String {
     format!("last_sync_timestamp_{}", wallet_id)
 }
 
+fn server_hash_key(wallet_id: &str) -> String {
+    format!("server_hash_{}", wallet_id)
+}
+
 /// If the server has revoked or granted contact:read / transaction:read since last sync, clear
 /// local wallet data and full resync so the client sees exactly what they are allowed to see
 /// (revoke: less data; grant: more data without needing logout/login).
@@ -264,7 +268,7 @@ pub fn pull_and_merge() -> Result<(), String> {
         );
     }
     rust_log!("[debitum_rs] pull_and_merge: requesting server events");
-    let mut server_events = api::get_sync_events(since.clone())?;
+    let (mut server_events, mut server_hash) = api::get_sync_events(since.clone())?;
     rust_log!("[debitum_rs] pull_and_merge: server returned {} events for wallet {}", server_events.len(), wallet_id);
 
     // If this was incremental and the batch includes permission events, our visible set may have changed — do a full resync.
@@ -275,7 +279,9 @@ pub fn pull_and_merge() -> Result<(), String> {
         rust_log!("[debitum_rs] pull_and_merge: permission event in batch — clearing and full pull so view is up to date");
         let _ = storage::config_remove(&perms_cache_key(&wallet_id));
         storage::events_delete_all_for_wallet(&wallet_id)?;
-        server_events = api::get_sync_events(None)?;
+        let refetched = api::get_sync_events(None)?;
+        server_events = refetched.0;
+        server_hash = refetched.1;
     } else if is_full_pull && local_count == 0 {
         // First sync, nothing local to lose. (No-op — there's nothing to delete.)
         rust_log!("[debitum_rs] pull_and_merge: full pull on empty wallet — just absorbing server events");
@@ -317,6 +323,11 @@ pub fn pull_and_merge() -> Result<(), String> {
         .map(String::from)
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
     storage::config_set(&last_sync_key(&wallet_id), &ts_to_save)?;
+    // Stash the server's incremental hash so the next pull can detect
+    // visibility changes by comparison. Wiring the comparison into the sync
+    // path (and ripping out check_read_revoked_and_resync) is the next step;
+    // for now we just make sure the value is persisted.
+    storage::config_set(&server_hash_key(&wallet_id), &server_hash)?;
     Ok(())
 }
 

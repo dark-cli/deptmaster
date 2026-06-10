@@ -96,7 +96,15 @@ pub fn register(username: String, password: String) -> Result<(), String> {
 
 /// GET /api/wallets/<wallet_id>/sync/events?since=... (internal; not exposed to FFI).
 /// wallet_id is path-only — backend's wallet_context middleware doesn't read header/query.
-pub(crate) fn get_sync_events(since: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+/// GET `/api/wallets/<wallet_id>/sync/events`.
+///
+/// Returns `(events, server_hash)`. `server_hash` is the server's incremental
+/// MD5 of this user's readable-events set — store it after applying so the
+/// next pull can detect visibility changes (permission revoke, group flip)
+/// by hash mismatch instead of polling `/me/permissions`.
+pub(crate) fn get_sync_events(
+    since: Option<String>,
+) -> Result<(Vec<serde_json::Value>, String), String> {
     let base = base_url()?;
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
@@ -116,13 +124,25 @@ pub(crate) fn get_sync_events(since: Option<String>) -> Result<Vec<serde_json::V
         let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
         if status.as_u16() == 401 && text.contains("DEBITUM_AUTH_DECLINED") {
-            return Err::<Vec<serde_json::Value>, String>("DEBITUM_AUTH_DECLINED".to_string());
+            return Err::<(Vec<serde_json::Value>, String), String>(
+                "DEBITUM_AUTH_DECLINED".to_string(),
+            );
         }
         if !status.is_success() {
             return Err(format!("{} {}", status, text));
         }
-        let arr: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-        Ok(arr)
+        let body: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        let events = body
+            .get("events")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let server_hash = body
+            .get("server_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Ok((events, server_hash))
     })
 }
 
