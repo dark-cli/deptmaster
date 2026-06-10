@@ -44,7 +44,7 @@ fn chain_hash<'a, I: IntoIterator<Item = &'a str>>(starting_hash: &str, event_id
 /// expects for a given (aggregate_type, event_type) pair. Returns `None` for unknown
 /// combinations so the caller can skip the event rather than send something the server
 /// will reject.
-fn event_data_discriminator(aggregate_type: &str, event_type: &str) -> Option<&'static str> {
+pub(crate) fn event_data_discriminator(aggregate_type: &str, event_type: &str) -> Option<&'static str> {
     match (aggregate_type, event_type) {
         ("contact", "CREATED") => Some("contact_created"),
         ("contact", "UPDATED") => Some("contact_updated"),
@@ -178,6 +178,10 @@ pub fn push_unsynced() -> Result<(), String> {
                 let events = storage::events_get_all(&wallet_id)?;
                 let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
                 storage::state_save(&wallet_id, &contacts, &transactions)?;
+                // Same as above: the contacts/transactions SQLite tables also
+                // need to forget the rolled-back events, otherwise the
+                // denied entity stays visible via get_contacts.
+                rebuild_projection_tables(&wallet_id, &events)?;
                 return Err(format!("DEBITUM_INSUFFICIENT_WALLET_PERMISSION (dropped {} local pending events)", dropped));
             }
             // Network/offline or other error: do NOT fail the write. Events stay unsynced and will sync later.
@@ -410,4 +414,54 @@ fn parse_server_event_for_applier(
         "event_data": event_data,
     });
     serde_json::from_value::<domain::DomainEvent>(dto).ok()
+}
+
+/// Wipe contacts / transactions / permission tables for a wallet and
+/// re-apply the given events in order. Used by code paths that mutate
+/// the events log out-of-band — push rollback after the server rejects
+/// pending events, future UNDO arrival, etc. — to keep the projection
+/// tables consistent with the events log.
+///
+/// Events are converted via the same reshape `parse_server_event_for_applier`
+/// uses for incoming server events. Stored events that can't be reshaped
+/// are skipped silently (same defensive posture as the rest of the sync
+/// code).
+pub(crate) fn rebuild_projection_tables(
+    wallet_id: &str,
+    events: &[storage::StoredEvent],
+) -> Result<(), String> {
+    use crate::sdk_projection::SdkProjection;
+    use rusqlite::params;
+    crate::storage::with_db(|conn| {
+        conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM wallet_users WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
+        Ok(())
+    })?;
+    let mut proj = SdkProjection::new();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    for e in events {
+        let ev_json = serde_json::json!({
+            "id": e.id,
+            "aggregate_type": e.aggregate_type,
+            "aggregate_id": e.aggregate_id,
+            "event_type": e.event_type,
+            "event_data": serde_json::from_str::<serde_json::Value>(&e.event_data)
+                .unwrap_or(serde_json::Value::Null),
+            "timestamp": e.timestamp,
+            "version": e.version,
+            "wallet_id": e.wallet_id,
+        });
+        if let Some(de) = parse_server_event_for_applier(&ev_json, wallet_id) {
+            if let Err(err) = rt.block_on(applier::apply(&mut proj, &de)) {
+                rust_log!("[debitum_rs] rebuild_projection_tables: apply failed: {:?}", err);
+            }
+        }
+    }
+    Ok(())
 }

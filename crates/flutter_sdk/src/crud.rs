@@ -4,6 +4,7 @@
 use crate::ids::{ContactId, TransactionId, WalletId};
 use crate::rust_log;
 use crate::models::{Contact, Currency, Transaction};
+use crate::sdk_projection::SdkProjection;
 use crate::state_builder;
 use crate::storage;
 use crate::sync;
@@ -14,6 +15,61 @@ fn ensure_wallet() -> Result<String, String> {
     let s = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
     WalletId::parse(&s).map(|w| w.as_str().to_string())
+}
+
+/// Reshape a locally-created [`storage::StoredEvent`] into a typed
+/// [`domain::DomainEvent`] and run it through `applier::apply` so the
+/// SDK's contacts / transactions / permission SQLite tables stay in
+/// sync with what state_builder produces from the events log. The
+/// `user_id` claim from the stored JWT is used as the event's user;
+/// missing claims default to nil-UUID (no harm — the SDK's projection
+/// methods don't consult event.user_id).
+fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
+    let discriminator = sync::event_data_discriminator(&e.aggregate_type, &e.event_type);
+    let Some(discriminator) = discriminator else {
+        // Unknown shape (shouldn't happen for events we generate locally);
+        // skip silently, same as parse_server_event_for_applier.
+        return Ok(());
+    };
+    let event_data_val: serde_json::Value = serde_json::from_str(&e.event_data)
+        .map_err(|err| err.to_string())?;
+    let mut payload = event_data_val;
+    if let Some(obj) = payload.as_object_mut() {
+        if e.aggregate_type == "permission" && !obj.contains_key("data") {
+            let inner = serde_json::Value::Object(obj.clone());
+            obj.clear();
+            obj.insert("data".to_string(), inner);
+        }
+        obj.insert(
+            "type".to_string(),
+            serde_json::Value::String(discriminator.to_string()),
+        );
+    }
+    let dto = serde_json::json!({
+        "id": e.id,
+        "aggregate_id": e.aggregate_id,
+        "wallet_id": e.wallet_id,
+        "user_id": crate::current_user_id_or_nil(),
+        "created_at": e.timestamp,
+        "version": e.version,
+        "event_data": payload,
+    });
+    let domain_event = match serde_json::from_value::<domain::DomainEvent>(dto) {
+        Ok(de) => de,
+        Err(err) => {
+            rust_log!("[debitum_rs] apply_event_locally: deserialize failed: {}", err);
+            return Ok(());
+        }
+    };
+    let mut proj = SdkProjection::new();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| err.to_string())?;
+    if let Err(err) = rt.block_on(applier::apply(&mut proj, &domain_event)) {
+        rust_log!("[debitum_rs] applier::apply failed for local event: {:?}", err);
+    }
+    Ok(())
 }
 
 fn rebuild_and_save(wallet_id: &str) -> Result<(), String> {
@@ -55,6 +111,11 @@ fn append_event(
         synced: false,
     };
     storage::events_insert(&e)?;
+    // Feed the new event through applier so the contacts/transactions
+    // SQLite tables stay in sync with the in-memory state_builder
+    // projection. Errors are logged but not propagated — same defensive
+    // posture as the equivalent loop in sync::pull_and_merge.
+    apply_event_locally(&e)?;
     rebuild_and_save(wallet_id)?;
     // Add total_debt to event_data so the chart can display this event (matches server behavior)
     if let Some((contacts, _)) = storage::state_load(wallet_id)? {
@@ -111,23 +172,13 @@ pub fn create_contact(
 
 pub fn get_contacts() -> Result<String, String> {
     let wallet_id = ensure_wallet()?;
-    if let Some((contacts, _)) = storage::state_load(&wallet_id)? {
-        return Ok(serde_json::to_string(&contacts).map_err(|e| e.to_string())?);
-    }
-    let events = storage::events_get_all(&wallet_id)?;
-    let (contacts, _) = state_builder::build_state_from_stored(&events)?;
-    storage::state_save(&wallet_id, &contacts, &[])?;
+    let contacts = storage::load_contacts_from_tables(&wallet_id)?;
     Ok(serde_json::to_string(&contacts).map_err(|e| e.to_string())?)
 }
 
 pub fn get_transactions() -> Result<String, String> {
     let wallet_id = ensure_wallet()?;
-    if let Some((_, transactions)) = storage::state_load(&wallet_id)? {
-        return Ok(serde_json::to_string(&transactions).map_err(|e| e.to_string())?);
-    }
-    let events = storage::events_get_all(&wallet_id)?;
-    let (_, transactions) = state_builder::build_state_from_stored(&events)?;
-    storage::state_save(&wallet_id, &[], &transactions)?;
+    let transactions = storage::load_transactions_from_tables(&wallet_id)?;
     Ok(serde_json::to_string(&transactions).map_err(|e| e.to_string())?)
 }
 

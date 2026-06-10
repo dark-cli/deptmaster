@@ -240,11 +240,25 @@ pub fn clear_all() -> Result<(), String> {
 
 /// Clear all local data for a specific wallet (events, state, last_sync_timestamp).
 /// Use when read permissions are revoked so client can resync from server.
+/// Drop everything wallet-scoped from local storage. Used when the
+/// permission view diverges and the SDK needs a clean slate before
+/// repulling. All tables that hold per-wallet projection state must be
+/// cleared together — leaving any of them populated risks the SDK
+/// showing stale data the user has lost access to.
 pub fn clear_wallet(wallet_id: &str) -> Result<(), String> {
     let key = format!("last_sync_timestamp_{}", wallet_id);
     with_db(|conn| {
         conn.execute("DELETE FROM events WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM state WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
+        // Permission tables: contact_group_members / user_group_members
+        // are cascaded via PRAGMA foreign_keys; deleting user_groups +
+        // contact_groups for this wallet takes their members with them.
+        // wallet_users is its own row.
+        conn.execute("DELETE FROM wallet_users WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM config WHERE key = ?1", params![key])?;
         Ok(())
     })
@@ -370,9 +384,18 @@ pub fn events_delete_unsynced(wallet_id: &str) -> Result<u64, String> {
 }
 
 /// Delete all events for a wallet. Used on full pull so local state is replaced by server response (permission-filtered).
+/// Drop only the events + their derived projection tables for a wallet.
+/// Used by the hash-divergence path in pull_and_merge before refetching
+/// from the server. Same wipe scope as `clear_wallet` minus the
+/// last_sync_timestamp config row (which the caller manages).
 pub fn events_delete_all_for_wallet(wallet_id: &str) -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM events WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM wallet_users WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
         Ok(())
     })
 }
@@ -429,6 +452,106 @@ pub fn state_save(wallet_id: &str, contacts: &[Contact], transactions: &[Transac
             params![wallet_id, contacts_json, transactions_json, updated_at],
         )?;
         Ok(())
+    })
+}
+
+/// Load contacts + transactions for a wallet straight from the new SQLite
+/// tables. Returns Contact / Transaction in the same wire shape that
+/// state_builder produced, including the computed `balance` field per
+/// contact (SUM of that contact's transaction amounts).
+///
+/// Used by get_contacts / get_transactions after step 2 of state_builder
+/// retirement. The state JSON blob is no longer consulted by these
+/// callers; the blob may still exist in older DBs but is treated as
+/// vestigial. Step 3 deletes the `state` table outright.
+pub fn load_contacts_from_tables(wallet_id: &str) -> Result<Vec<Contact>, String> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT c.id, c.name, c.username, c.phone, c.email, c.notes,
+                   c.created_at, c.updated_at, c.is_synced, c.wallet_id,
+                   COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.contact_id = c.id), 0) AS balance
+              FROM contacts c
+             WHERE c.wallet_id = ?1
+             ORDER BY c.name COLLATE NOCASE
+            "#,
+        )?;
+        let rows = stmt.query_map(params![wallet_id], |r| {
+            Ok(Contact {
+                id: r.get::<_, String>(0)?,
+                name: r.get::<_, String>(1)?,
+                username: r.get::<_, Option<String>>(2)?,
+                phone: r.get::<_, Option<String>>(3)?,
+                email: r.get::<_, Option<String>>(4)?,
+                notes: r.get::<_, Option<String>>(5)?,
+                created_at: r.get::<_, String>(6)?,
+                updated_at: r.get::<_, String>(7)?,
+                is_synced: r.get::<_, i32>(8)? != 0,
+                balance: r.get::<_, i64>(10)?,
+                wallet_id: r.get::<_, Option<String>>(9)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    })
+}
+
+pub fn load_transactions_from_tables(wallet_id: &str) -> Result<Vec<Transaction>, String> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, contact_id, type, direction, amount, currency, description,
+                   transaction_date, due_date, created_at, updated_at, is_synced, wallet_id
+              FROM transactions
+             WHERE wallet_id = ?1
+             ORDER BY transaction_date DESC, created_at DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![wallet_id], |r| {
+            let type_str: String = r.get(2)?;
+            let direction_str: String = r.get(3)?;
+            let currency_str: String = r.get(5)?;
+            // Same string-to-enum mapping state_builder used; tolerant of
+            // anything-else for type (defaults to Money) and direction
+            // (defaults to Owed). Currency is stored canonically so a
+            // missing match is a malformed row — fall back to IQD.
+            let type_ = if type_str == "item" {
+                crate::models::TransactionType::Item
+            } else {
+                crate::models::TransactionType::Money
+            };
+            let direction = if direction_str == "lent" {
+                crate::models::TransactionDirection::Lent
+            } else {
+                crate::models::TransactionDirection::Owed
+            };
+            let currency = crate::models::Currency::from_str(&currency_str)
+                .unwrap_or(crate::models::Currency::IQD);
+            Ok(Transaction {
+                id: r.get::<_, String>(0)?,
+                contact_id: r.get::<_, String>(1)?,
+                type_,
+                direction,
+                amount: r.get::<_, i64>(4)?,
+                currency,
+                description: r.get::<_, Option<String>>(6)?,
+                transaction_date: r.get::<_, String>(7)?,
+                due_date: r.get::<_, Option<String>>(8)?,
+                image_paths: Vec::new(),
+                created_at: r.get::<_, String>(9)?,
+                updated_at: r.get::<_, String>(10)?,
+                is_synced: r.get::<_, i32>(11)? != 0,
+                wallet_id: r.get::<_, Option<String>>(12)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     })
 }
 

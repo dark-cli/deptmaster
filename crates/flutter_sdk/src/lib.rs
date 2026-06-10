@@ -706,6 +706,14 @@ fn jwt_payload(token: &str) -> Option<JwtPayload> {
     Some(JwtPayload { username, expired })
 }
 
+/// Extract `user_id` claim from the stored JWT, returning the nil UUID
+/// if no token / no claim. Used when constructing local DomainEvents
+/// to feed through applier::apply — projection methods on the SDK
+/// don't consult event.user_id so the fallback is harmless.
+pub(crate) fn current_user_id_or_nil() -> String {
+    current_user_id().unwrap_or_else(|| uuid::Uuid::nil().to_string())
+}
+
 /// Extract `user_id` claim from the stored JWT. Returns `None` if no
 /// token, the token is malformed, or the claim is missing.
 fn current_user_id() -> Option<String> {
