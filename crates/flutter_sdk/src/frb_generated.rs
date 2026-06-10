@@ -1048,39 +1048,6 @@ fn wire__crate__add_wallet_user_group_member_impl(
         },
     )
 }
-fn wire__crate__state_builder__build_state_from_stored_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "build_state_from_stored",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_events = <Vec<crate::storage::StoredEvent>>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::state_builder::build_state_from_stored(&api_events)?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
 fn wire__crate__bulk_delete_contacts_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5156,78 +5123,6 @@ fn wire__crate__set_preference_impl(
         },
     )
 }
-fn wire__crate__storage__state_load_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "state_load",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_wallet_id = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::state_load(&api_wallet_id)?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
-fn wire__crate__storage__state_save_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "state_save",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_wallet_id = <String>::sse_decode(&mut deserializer);
-            let api_contacts = <Vec<crate::models::Contact>>::sse_decode(&mut deserializer);
-            let api_transactions = <Vec<crate::models::Transaction>>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::state_save(
-                        &api_wallet_id,
-                        &api_contacts,
-                        &api_transactions,
-                    )?;
-                    Ok(output_ok)
-                })())
-            }
-        },
-    )
-}
 fn wire__crate__ids__transaction_id_as_str_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6353,12 +6248,6 @@ fn pde_ffi_dispatcher_primary_impl(
         20 => wire__crate__api__add_user_to_wallet_api_impl(port, ptr, rust_vec_len, data_len),
         21 => wire__crate__add_wallet_contact_group_member_impl(port, ptr, rust_vec_len, data_len),
         22 => wire__crate__add_wallet_user_group_member_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__state_builder__build_state_from_stored_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
         24 => wire__crate__bulk_delete_contacts_impl(port, ptr, rust_vec_len, data_len),
         25 => wire__crate__crud__bulk_delete_contacts_impl(port, ptr, rust_vec_len, data_len),
         26 => wire__crate__bulk_delete_transactions_impl(port, ptr, rust_vec_len, data_len),
@@ -6512,8 +6401,6 @@ fn pde_ffi_dispatcher_primary_impl(
         141 => wire__crate__set_current_wallet_id_impl(port, ptr, rust_vec_len, data_len),
         142 => wire__crate__set_network_offline_impl(port, ptr, rust_vec_len, data_len),
         143 => wire__crate__set_preference_impl(port, ptr, rust_vec_len, data_len),
-        144 => wire__crate__storage__state_load_impl(port, ptr, rust_vec_len, data_len),
-        145 => wire__crate__storage__state_save_impl(port, ptr, rust_vec_len, data_len),
         146 => wire__crate__ids__transaction_id_as_str_impl(port, ptr, rust_vec_len, data_len),
         147 => wire__crate__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),
         148 => wire__crate__crud__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),

@@ -1,17 +1,10 @@
 //! SDK-side implementation of [`applier::Projection`].
 //!
-//! Today it covers ONLY permission events (wallet membership, user/contact
-//! groups, group memberships). Contact and transaction events stay in
-//! [`crate::state_builder`] for now — those still compute the
-//! `Vec<Contact>` / `Vec<Transaction>` projection from the events table,
-//! serialized into the `state` JSON blob. A future step will fold them
-//! into this impl too and SDK will get proper contacts / transactions
-//! tables in SQLite.
-//!
-//! Permission events DO need to land in real SQLite tables because the
-//! SDK uses them to resolve permissions locally for UX feedback (greying
-//! out buttons the user can't tap, etc.). The server stays authoritative
-//! for enforcement on push.
+//! Covers contact, transaction, and permission events. The SDK keeps
+//! its own SQLite mirror of the server's projection tables so that
+//! reads (get_contacts / get_transactions / can_perform) can answer
+//! locally without round-tripping. The server stays authoritative for
+//! enforcement on push.
 //!
 //! All trait methods are async (the trait is async — server needs it).
 //! Each method body wraps a sync `rusqlite` call in `async {}`. No real
@@ -49,12 +42,8 @@ impl Projection for SdkProjection {
 
     // ---------- Contact / Transaction CRUD ----------
     //
-    // Writes to the new `contacts` / `transactions` SQLite tables. State_builder
-    // still rebuilds the in-memory + state-blob projection for reads (step 2
-    // of state_builder retirement switches reads over). For now these are
-    // dual-writes: same events, two stores, blob is authoritative until reads
-    // move over. The SDK has no soft-delete column — `soft_delete_*` here is
-    // a hard DELETE, matching state_builder's existing behavior.
+    // Writes to the `contacts` / `transactions` SQLite tables. The SDK
+    // has no soft-delete column — `soft_delete_*` here is a hard DELETE.
 
     async fn upsert_contact_row(
         &mut self,
@@ -296,9 +285,7 @@ impl Projection for SdkProjection {
         let currency = currency.unwrap_or("IQD").to_string();
         let description = description.map(String::from);
         // SDK stores dates as the raw "%Y-%m-%d" strings the wire format
-        // carries; state_builder also keeps them in that shape via
-        // NaiveDate <-> String at boundaries. Today's date is the fallback
-        // when not supplied (matches state_builder's `Utc::now().date_naive()`).
+        // carries. Today's date is the fallback when not supplied.
         let txn_date = transaction_date
             .map(String::from)
             .unwrap_or_else(|| chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string());

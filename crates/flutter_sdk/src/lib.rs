@@ -17,7 +17,6 @@ mod log_bridge;
 mod models;
 mod sdk_projection;
 mod sdk_store;
-mod state_builder;
 mod storage;
 mod sync;
 mod backoff;

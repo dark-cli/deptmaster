@@ -5,10 +5,10 @@ use crate::ids::{ContactId, TransactionId, WalletId};
 use crate::rust_log;
 use crate::models::{Contact, Currency, Transaction};
 use crate::sdk_projection::SdkProjection;
-use crate::state_builder;
 use crate::storage;
 use crate::sync;
 use chrono::NaiveDate;
+use rusqlite::params;
 use uuid::Uuid;
 
 fn ensure_wallet() -> Result<String, String> {
@@ -19,11 +19,10 @@ fn ensure_wallet() -> Result<String, String> {
 
 /// Reshape a locally-created [`storage::StoredEvent`] into a typed
 /// [`domain::DomainEvent`] and run it through `applier::apply` so the
-/// SDK's contacts / transactions / permission SQLite tables stay in
-/// sync with what state_builder produces from the events log. The
-/// `user_id` claim from the stored JWT is used as the event's user;
-/// missing claims default to nil-UUID (no harm — the SDK's projection
-/// methods don't consult event.user_id).
+/// SDK's contacts / transactions / permission SQLite tables reflect
+/// the new event. The `user_id` claim from the stored JWT is used as
+/// the event's user; missing claims default to nil-UUID (no harm —
+/// the SDK's projection methods don't consult event.user_id).
 fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
     let discriminator = sync::event_data_discriminator(&e.aggregate_type, &e.event_type);
     let Some(discriminator) = discriminator else {
@@ -72,12 +71,29 @@ fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
     Ok(())
 }
 
-fn rebuild_and_save(wallet_id: &str) -> Result<(), String> {
+/// Wipe and re-apply every event for the wallet (UNDO-aware). Needed
+/// after appending an UNDO locally, since applier::apply is a no-op
+/// for UNDO variants and the undone event's effect still sits in the
+/// projection tables.
+fn rebuild_projection_for_wallet(wallet_id: &str) -> Result<(), String> {
     let events = storage::events_get_all(wallet_id)?;
-    let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
-    storage::state_save(wallet_id, &contacts, &transactions)?;
-    sync::push_unsynced()?;
-    Ok(())
+    sync::rebuild_projection_tables(wallet_id, &events)
+}
+
+/// Sum the balance column on the projection table to compute the
+/// wallet's total debt (used to stamp events for the chart).
+fn wallet_total_debt(wallet_id: &str) -> Result<i64, String> {
+    let wid = wallet_id.to_string();
+    storage::with_db(|conn| {
+        let total: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(balance), 0) FROM contacts WHERE wallet_id = ?1",
+                params![wid],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        Ok(total)
+    })
 }
 
 fn append_event(
@@ -111,20 +127,24 @@ fn append_event(
         synced: false,
     };
     storage::events_insert(&e)?;
-    // Feed the new event through applier so the contacts/transactions
-    // SQLite tables stay in sync with the in-memory state_builder
-    // projection. Errors are logged but not propagated — same defensive
-    // posture as the equivalent loop in sync::pull_and_merge.
+    // Feed the new event through applier so the contacts / transactions
+    // SQLite tables reflect this event. Errors are logged but not
+    // propagated — same defensive posture as `sync::pull_and_merge`.
     apply_event_locally(&e)?;
-    rebuild_and_save(wallet_id)?;
-    // Add total_debt to event_data so the chart can display this event (matches server behavior)
-    if let Some((contacts, _)) = storage::state_load(wallet_id)? {
-        let total_debt: i64 = contacts.iter().map(|c| c.balance).sum();
-        let mut data = serde_json::from_str::<serde_json::Value>(&event_data_str).unwrap_or(event_data);
-        data["total_debt"] = serde_json::json!(total_debt);
-        let updated = serde_json::to_string(&data).map_err(|e| e.to_string())?;
-        storage::events_update_event_data(&id, &updated)?;
+    // applier::apply is a no-op for UNDO; the undone event's effect is
+    // still in the tables. A full rebuild is the simplest way to
+    // remove it — UNDOs are rare, so the cost is acceptable.
+    if event_type == "UNDO" {
+        rebuild_projection_for_wallet(wallet_id)?;
     }
+    sync::push_unsynced()?;
+    // Stamp the new event with total_debt so the chart can plot it
+    // (matches the server's denormalized total_debt column).
+    let total_debt = wallet_total_debt(wallet_id)?;
+    let mut data = serde_json::from_str::<serde_json::Value>(&event_data_str).unwrap_or(event_data);
+    data["total_debt"] = serde_json::json!(total_debt);
+    let updated = serde_json::to_string(&data).map_err(|e| e.to_string())?;
+    storage::events_update_event_data(&id, &updated)?;
     Ok(())
 }
 
@@ -162,9 +182,7 @@ pub fn create_contact(
         }
     }
     append_event(&wallet_id, "contact", &id, "CREATED", data)?;
-    let events = storage::events_get_all(&wallet_id)?;
-    let (contacts, _) = state_builder::build_state_from_stored(&events)?;
-    contacts
+    storage::load_contacts_from_tables(&wallet_id)?
         .into_iter()
         .find(|c| c.id == id)
         .ok_or_else(|| "Contact not found after create".to_string())
@@ -237,9 +255,7 @@ pub fn create_transaction(
         data["due_date"] = serde_json::json!(d.format("%Y-%m-%d").to_string());
     }
     append_event(&wallet_id, "transaction", &id, "CREATED", data)?;
-    let events = storage::events_get_all(&wallet_id)?;
-    let (_, transactions) = state_builder::build_state_from_stored(&events)?;
-    transactions
+    storage::load_transactions_from_tables(&wallet_id)?
         .into_iter()
         .find(|t| t.id == id)
         .ok_or_else(|| "Transaction not found after create".to_string())

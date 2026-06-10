@@ -2,7 +2,6 @@
 
 use crate::api;
 use crate::rust_log;
-use crate::state_builder;
 use crate::storage;
 use md5::{Digest, Md5};
 
@@ -176,11 +175,9 @@ pub fn push_unsynced() -> Result<(), String> {
                     wallet_id
                 );
                 let events = storage::events_get_all(&wallet_id)?;
-                let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
-                storage::state_save(&wallet_id, &contacts, &transactions)?;
-                // Same as above: the contacts/transactions SQLite tables also
-                // need to forget the rolled-back events, otherwise the
-                // denied entity stays visible via get_contacts.
+                // Forget the rolled-back events: rebuild from the remaining
+                // synced ones. Wipes + re-applies; UNDO-aware so any
+                // pending UNDO chains stay consistent.
                 rebuild_projection_tables(&wallet_id, &events)?;
                 return Err(format!("DEBITUM_INSUFFICIENT_WALLET_PERMISSION (dropped {} local pending events)", dropped));
             }
@@ -290,13 +287,11 @@ pub fn pull_and_merge() -> Result<(), String> {
         };
         storage::events_insert(&stored)?;
     }
-    // Feed each newly-stored event through applier::apply so the permission
-    // tables in SQLite stay in sync with the events log. Today applier's
-    // SDK impl is a no-op for contact / transaction events (state_builder
-    // below still owns those); permission events DO write to the SQLite
-    // permission tables. Failures are logged and swallowed so a single
-    // bad event doesn't abort the whole sync — same defensive posture as
-    // the existing event-store code paths.
+    // Feed each newly-stored event through applier::apply so the
+    // contacts / transactions / permission tables in SQLite stay in
+    // sync with the events log. Failures are logged and swallowed so a
+    // single bad event doesn't abort the whole sync — same defensive
+    // posture as the existing event-store code paths.
     if !server_events.is_empty() {
         let mut proj = crate::sdk_projection::SdkProjection::new();
         let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
@@ -310,15 +305,25 @@ pub fn pull_and_merge() -> Result<(), String> {
                 None => {
                     // Skip events whose shape we can't reconstruct as a
                     // DomainEvent; they still landed in the events table
-                    // above and will be picked up by state_builder.
+                    // above and will be processed on next rebuild.
                 }
             }
         }
     }
 
-    let events = storage::events_get_all(&wallet_id)?;
-    let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
-    storage::state_save(&wallet_id, &contacts, &transactions)?;
+    // If this batch contained any UNDO events, rebuild the projection tables
+    // from scratch (UNDO-aware). The per-event applier::apply pass above is a
+    // no-op for UNDO variants, so the projection would otherwise still
+    // contain the undone event's effects. Rebuilds are rare (UNDOs are rare),
+    // so the cost is acceptable.
+    let batch_has_undo = server_events.iter().any(|ev| {
+        ev.get("event_type").and_then(|v| v.as_str()) == Some("UNDO")
+    });
+    if batch_has_undo {
+        let all_events = storage::events_get_all(&wallet_id)?;
+        rebuild_projection_tables(&wallet_id, &all_events)?;
+    }
+
     // Always advance last_sync_timestamp — using the newest server event's timestamp if any,
     // else "now". Without the fallback, repeated empty-response syncs would all re-trigger the
     // full-pull path, which is destructive when local has data.
@@ -419,19 +424,37 @@ fn parse_server_event_for_applier(
 /// Wipe contacts / transactions / permission tables for a wallet and
 /// re-apply the given events in order. Used by code paths that mutate
 /// the events log out-of-band — push rollback after the server rejects
-/// pending events, future UNDO arrival, etc. — to keep the projection
-/// tables consistent with the events log.
+/// pending events, UNDO event arrival — to keep the projection tables
+/// consistent with the events log.
 ///
-/// Events are converted via the same reshape `parse_server_event_for_applier`
-/// uses for incoming server events. Stored events that can't be reshaped
-/// are skipped silently (same defensive posture as the rest of the sync
-/// code).
+/// UNDO handling: events whose id is named in some later event's
+/// `undone_event_id` are SKIPPED. applier::apply treats UNDO itself
+/// as a no-op, so a vanilla re-apply would leave the undone event's
+/// effects in the tables. The filter pass below is the minimum
+/// needed to keep parity.
 pub(crate) fn rebuild_projection_tables(
     wallet_id: &str,
     events: &[storage::StoredEvent],
 ) -> Result<(), String> {
     use crate::sdk_projection::SdkProjection;
     use rusqlite::params;
+    use std::collections::HashSet;
+
+    // Collect ids referenced by UNDO events — these events are filtered
+    // out of the apply pass below. (UNDO events themselves are also
+    // skipped because applier::apply is a no-op for them.)
+    let undone_ids: HashSet<String> = events
+        .iter()
+        .filter(|e| e.event_type == "UNDO")
+        .filter_map(|e| {
+            serde_json::from_str::<serde_json::Value>(&e.event_data)
+                .ok()?
+                .get("undone_event_id")?
+                .as_str()
+                .map(String::from)
+        })
+        .collect();
+
     crate::storage::with_db(|conn| {
         conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
@@ -446,6 +469,12 @@ pub(crate) fn rebuild_projection_tables(
         .build()
         .map_err(|e| e.to_string())?;
     for e in events {
+        if e.event_type == "UNDO" {
+            continue;
+        }
+        if undone_ids.contains(&e.id) {
+            continue;
+        }
         let ev_json = serde_json::json!({
             "id": e.id,
             "aggregate_type": e.aggregate_type,

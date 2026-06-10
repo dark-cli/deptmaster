@@ -1,4 +1,4 @@
-//! SQLite storage: config, events, projection state.
+//! SQLite storage: config, events, projection tables.
 //! Single process-wide instance (global Mutex<Connection>) so Dart only needs to init once.
 
 use crate::models::{Contact, Transaction};
@@ -71,13 +71,6 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_events_wallet ON events(wallet_id);
         CREATE INDEX IF NOT EXISTS idx_events_synced ON events(synced);
 
-        CREATE TABLE IF NOT EXISTS state (
-            wallet_id TEXT PRIMARY KEY,
-            contacts_json TEXT NOT NULL,
-            transactions_json TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
         -- ============ Permission tables ============
         --
         -- Mirror of the server's permission schema (migrations 014 + 020),
@@ -144,11 +137,8 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         -- ============ Contact / Transaction projection tables ============
         --
         -- Populated by SdkProjection (applier::apply) as contact / transaction
-        -- events flow in. Mirrors what state_builder.rs builds in-memory and
-        -- writes to the `state` JSON blob. The intent is to retire the JSON
-        -- blob and have SQLite be the source of truth; until step 2 switches
-        -- the read path over, these tables are dual-written and the blob
-        -- remains authoritative.
+        -- events flow in. SQLite is the source of truth for what
+        -- get_contacts / get_transactions return.
 
         CREATE TABLE IF NOT EXISTS contacts (
             id TEXT PRIMARY KEY,
@@ -230,7 +220,11 @@ pub fn clear_all() -> Result<(), String> {
         conn.execute_batch(
             r#"
             DELETE FROM events;
-            DELETE FROM state;
+            DELETE FROM contacts;
+            DELETE FROM transactions;
+            DELETE FROM wallet_users;
+            DELETE FROM user_groups;
+            DELETE FROM contact_groups;
             DELETE FROM config;
             "#,
         )?;
@@ -238,18 +232,16 @@ pub fn clear_all() -> Result<(), String> {
     })
 }
 
-/// Clear all local data for a specific wallet (events, state, last_sync_timestamp).
-/// Use when read permissions are revoked so client can resync from server.
 /// Drop everything wallet-scoped from local storage. Used when the
 /// permission view diverges and the SDK needs a clean slate before
-/// repulling. All tables that hold per-wallet projection state must be
-/// cleared together — leaving any of them populated risks the SDK
-/// showing stale data the user has lost access to.
+/// repulling, or when read access is revoked. All tables that hold
+/// per-wallet projection state must be cleared together — leaving any
+/// of them populated risks the SDK showing stale data the user has
+/// lost access to.
 pub fn clear_wallet(wallet_id: &str) -> Result<(), String> {
     let key = format!("last_sync_timestamp_{}", wallet_id);
     with_db(|conn| {
         conn.execute("DELETE FROM events WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM state WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
         // Permission tables: contact_group_members / user_group_members
@@ -438,32 +430,9 @@ pub fn events_get_for_aggregate(
     })
 }
 
-// State (projection cache)
-pub fn state_save(wallet_id: &str, contacts: &[Contact], transactions: &[Transaction]) -> Result<(), String> {
-    let contacts_json = serde_json::to_string(contacts).map_err(|e| e.to_string())?;
-    let transactions_json = serde_json::to_string(transactions).map_err(|e| e.to_string())?;
-    let updated_at = chrono::Utc::now().to_rfc3339();
-    with_db(|conn| {
-        conn.execute(
-            r#"
-            INSERT INTO state (wallet_id, contacts_json, transactions_json, updated_at) VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT(wallet_id) DO UPDATE SET contacts_json = ?2, transactions_json = ?3, updated_at = ?4
-            "#,
-            params![wallet_id, contacts_json, transactions_json, updated_at],
-        )?;
-        Ok(())
-    })
-}
-
-/// Load contacts + transactions for a wallet straight from the new SQLite
-/// tables. Returns Contact / Transaction in the same wire shape that
-/// state_builder produced, including the computed `balance` field per
-/// contact (SUM of that contact's transaction amounts).
-///
-/// Used by get_contacts / get_transactions after step 2 of state_builder
-/// retirement. The state JSON blob is no longer consulted by these
-/// callers; the blob may still exist in older DBs but is treated as
-/// vestigial. Step 3 deletes the `state` table outright.
+/// Load contacts for a wallet straight from the projection table. The
+/// computed `balance` field per contact is SUM of that contact's
+/// transaction amounts, computed in SQL.
 pub fn load_contacts_from_tables(wallet_id: &str) -> Result<Vec<Contact>, String> {
     with_db(|conn| {
         let mut stmt = conn.prepare(
@@ -514,10 +483,9 @@ pub fn load_transactions_from_tables(wallet_id: &str) -> Result<Vec<Transaction>
             let type_str: String = r.get(2)?;
             let direction_str: String = r.get(3)?;
             let currency_str: String = r.get(5)?;
-            // Same string-to-enum mapping state_builder used; tolerant of
-            // anything-else for type (defaults to Money) and direction
-            // (defaults to Owed). Currency is stored canonically so a
-            // missing match is a malformed row — fall back to IQD.
+            // Tolerant string-to-enum: unknown type defaults to Money,
+            // unknown direction to Owed. Currency is stored canonically
+            // so a missing match is a malformed row — fall back to IQD.
             let type_ = if type_str == "item" {
                 crate::models::TransactionType::Item
             } else {
@@ -555,23 +523,3 @@ pub fn load_transactions_from_tables(wallet_id: &str) -> Result<Vec<Transaction>
     })
 }
 
-pub fn state_load(wallet_id: &str) -> Result<Option<(Vec<Contact>, Vec<Transaction>)>, String> {
-    let pair = with_db(|conn| {
-        let mut stmt = conn.prepare("SELECT contacts_json, transactions_json FROM state WHERE wallet_id = ?1")?;
-        let mut rows = stmt.query(params![wallet_id])?;
-        if let Some(row) = rows.next()? {
-            let contacts_json: String = row.get(0)?;
-            let transactions_json: String = row.get(1)?;
-            return Ok(Some((contacts_json, transactions_json)));
-        }
-        Ok(None)
-    })?;
-    match pair {
-        Some((contacts_json, transactions_json)) => {
-            let contacts: Vec<Contact> = serde_json::from_str(&contacts_json).map_err(|e| e.to_string())?;
-            let transactions: Vec<Transaction> = serde_json::from_str(&transactions_json).map_err(|e| e.to_string())?;
-            Ok(Some((contacts, transactions)))
-        }
-        None => Ok(None),
-    }
-}
