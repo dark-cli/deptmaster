@@ -1,9 +1,9 @@
 // Test helpers for setting up test database and data
 
 use chrono::Utc;
-use api::middleware::auth::AuthUser;
-use api::middleware::wallet_context::WalletContext;
-use api::permissions::WalletRole;
+use server::middleware::auth::AuthUser;
+use server::middleware::wallet_context::WalletContext;
+use server::permissions::WalletRole;
 use sqlx::PgPool;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -260,14 +260,14 @@ pub async fn setup_contact_for_wallet(
 /// Create AppState for tests
 pub fn create_test_app_state(
     pool: PgPool,
-    config: std::sync::Arc<api::config::Config>,
-    broadcast_tx: api::websocket::BroadcastChannel,
-) -> api::AppState {
+    config: std::sync::Arc<server::config::Config>,
+    broadcast_tx: server::websocket::BroadcastChannel,
+) -> server::AppState {
     use std::sync::Arc;
-    api::AppState {
+    server::AppState {
         db_pool: Arc::new(pool),
         config,
         broadcast_tx,
-        rate_limiter: api::middleware::rate_limit::RateLimiter::new(100, 60),
+        rate_limiter: server::middleware::rate_limit::RateLimiter::new(100, 60),
     }
 }

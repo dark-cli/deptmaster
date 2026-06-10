@@ -1,5 +1,5 @@
-use api::database::models::UserSettings;
-use api::database::repository::{Database, DatabaseRepository};
+use server::database::models::UserSettings;
+use server::database::repository::{Database, DatabaseRepository};
 
 mod test_helpers;
 use test_helpers::*;

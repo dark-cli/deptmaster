@@ -1,4 +1,4 @@
-use api::permissions::{
+use server::permissions::{
     Action, PermissionContext, PermissionModel, Resource, WalletRole,
 };
 use uuid::Uuid;

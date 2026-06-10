@@ -335,7 +335,7 @@ cmd_reset_database_complete() {
         print_warning "Server not ready, skipping admin password reset"
         print_warning "You may need to run: $0 set-admin-password admin $default_admin_password"
     else
-        (cd "$ROOT_DIR/crates/api" && cargo run --bin set_admin_password -- "admin" "$default_admin_password" > /dev/null 2>&1) && {
+        (cd "$ROOT_DIR/crates/server" && cargo run --bin set_admin_password -- "admin" "$default_admin_password" > /dev/null 2>&1) && {
             print_success "Admin password reset to: $default_admin_password"
         } || {
             print_warning "Failed to reset admin password (may need to run manually)"
@@ -417,7 +417,7 @@ EOF
     fi
     
     if [ "$USE_SQLX" = true ]; then
-        if (cd "$ROOT_DIR/crates/api" && timeout 10 sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1); then
+        if (cd "$ROOT_DIR/crates/server" && timeout 10 sqlx migrate run --database-url "postgresql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME" > /dev/null 2>&1); then
             print_info "Migrations completed via sqlx"
         else
             print_warning "sqlx migration failed or timed out, using manual migrations..."
@@ -428,16 +428,16 @@ EOF
     # Manual migration fallback (always run if sqlx failed or doesn't exist)
     if [ "$USE_SQLX" = false ]; then
         print_info "Running migrations manually..."
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/001_initial_schema.sql" > /dev/null 2>&1
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/002_remove_transaction_settled.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/003_add_due_date.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/004_user_settings.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/005_create_default_user.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/006_add_username_to_contacts.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/007_add_idempotency_and_versions.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/008_add_projection_snapshots.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/009_add_login_logs.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/010_add_admin_users.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/001_initial_schema.sql" > /dev/null 2>&1
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/002_remove_transaction_settled.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/003_add_due_date.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/004_user_settings.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/005_create_default_user.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/006_add_username_to_contacts.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/007_add_idempotency_and_versions.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/008_add_projection_snapshots.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/009_add_login_logs.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/010_add_admin_users.sql" > /dev/null 2>&1 || true
     fi
     
     # Ensure only the "max" user exists (clean up any other users)
@@ -471,8 +471,8 @@ EOF
     # Run wallet migrations after "max" exists so default wallet is assigned to max (not to pre-005 user)
     if [ "$USE_SQLX" = false ]; then
         print_info "Running wallet migrations (011, 012)..."
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/011_create_wallets.sql" > /dev/null 2>&1 || true
-        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/api/migrations/012_add_wallet_id_to_tables.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/011_create_wallets.sql" > /dev/null 2>&1 || true
+        docker exec -i debt_tracker_postgres psql -U "$DB_USER" -d "$DB_NAME" < "$ROOT_DIR/crates/server/migrations/012_add_wallet_id_to_tables.sql" > /dev/null 2>&1 || true
     else
         # Sqlx already ran 001-012; block above may have replaced users. Ensure every user has a wallet.
         print_info "Ensuring all users have a wallet..."
@@ -668,26 +668,26 @@ cmd_start_server_docker() {
     if [ "$SKIP_SERVER_BUILD" != true ]; then
         print_step "Building server (this may take a minute)..."
         if [ "$VERBOSE" = true ]; then
-            (cd "$ROOT_DIR/crates/api" && cargo build --release) || {
+            (cd "$ROOT_DIR/crates/server" && cargo build --release) || {
                 print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
                 exit 1
             }
         else
-            (cd "$ROOT_DIR/crates/api" && cargo build --release 2>&1 | tee /tmp/cargo-build.log) || true
+            (cd "$ROOT_DIR/crates/server" && cargo build --release 2>&1 | tee /tmp/cargo-build.log) || true
             if [ "${PIPESTATUS[0]}" -ne 0 ]; then
                 print_error "Build failed. Check Rust version (requires 1.88+). Run: rustup update"
                 print_error "Build log: /tmp/cargo-build.log"
                 exit 1
             fi
         fi
-    elif [ ! -f "$ROOT_DIR/crates/api/target/release/api" ]; then
+    elif [ ! -f "$ROOT_DIR/crates/server/target/release/server" ]; then
         print_error "Server binary not found and --skip-server-build was used. Build first: $0 build-server"
         exit 1
     fi
     
     # Start server
     print_info "Starting server..."
-    nohup "$ROOT_DIR/crates/api/target/release/api" > /tmp/api.log 2>&1 &
+    nohup "$ROOT_DIR/crates/server/target/release/server" > /tmp/api.log 2>&1 &
     
     wait_for_service "http://localhost:8000/health" "API Server" 30 1
     if [ "$VERBOSE" = true ]; then
@@ -706,14 +706,14 @@ cmd_start_server_docker_no_build() {
     cmd_start_docker_services > /dev/null 2>&1 || cmd_start_docker_services
     
     # Check if binary exists
-    if [ ! -f "$ROOT_DIR/crates/api/target/release/api" ]; then
+    if [ ! -f "$ROOT_DIR/crates/server/target/release/server" ]; then
         print_error "Server binary not found. Please build first: $0 build-server"
         exit 1
     fi
     
     # Start server
     print_info "Starting server..."
-    nohup "$ROOT_DIR/crates/api/target/release/api" > /tmp/api.log 2>&1 &
+    nohup "$ROOT_DIR/crates/server/target/release/server" > /tmp/api.log 2>&1 &
     
     wait_for_service "http://localhost:8000/health" "API Server" 30 1 > /dev/null 2>&1
     if [ "$VERBOSE" = true ]; then
@@ -844,14 +844,14 @@ cmd_start_server_direct() {
     fi
     if [[ -n "$CARGO_WATCH_BIN" ]]; then
         print_info "Using cargo-watch for auto-reload (USE_CARGO_WATCH=1)"
-        (cd "$ROOT_DIR/crates/api" && "$CARGO_WATCH_BIN" \
-            --watch "$ROOT_DIR/crates/api/src" \
-            --watch "$ROOT_DIR/crates/api/static" \
-            -x 'run --bin api')
+        (cd "$ROOT_DIR/crates/server" && "$CARGO_WATCH_BIN" \
+            --watch "$ROOT_DIR/crates/server/src" \
+            --watch "$ROOT_DIR/crates/server/static" \
+            -x 'run --bin server')
     else
         print_info "Starting server (restart manually after code changes)"
         print_info "For auto-reload: USE_CARGO_WATCH=1 $0 start-server-direct (after: cargo install cargo-watch)"
-        (cd "$ROOT_DIR/crates/api" && cargo run --bin api)
+        (cd "$ROOT_DIR/crates/server" && cargo run --bin server)
     fi
 }
 
@@ -860,7 +860,7 @@ cmd_build_server() {
     
     print_info "Building server..."
     
-    (cd "$ROOT_DIR/crates/api" && cargo build --release)
+    (cd "$ROOT_DIR/crates/server" && cargo build --release)
     
     print_success "Build complete"
 }
@@ -2338,7 +2338,7 @@ cmd_set_admin_password() {
     # Use Rust binary to set admin password (more reliable)
     print_info "Setting admin password..."
     
-    if (cd "$ROOT_DIR/crates/api" && cargo run --bin set_admin_password -- "$username" "$password" 2>&1 | grep -q "✅"); then
+    if (cd "$ROOT_DIR/crates/server" && cargo run --bin set_admin_password -- "$username" "$password" 2>&1 | grep -q "✅"); then
         print_success "Admin password updated successfully!"
         echo ""
         echo "📧 Username: $username"

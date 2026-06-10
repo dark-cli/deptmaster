@@ -2,7 +2,7 @@
 //! Verifies that the cache is correctly populated, invalidated, and cleaned up
 //! across user add/remove and permission change events
 
-use api::database::repository::Database;
+use server::database::repository::Database;
 use uuid::Uuid;
 
 mod test_helpers;

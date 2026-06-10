@@ -10,11 +10,11 @@
 // 8. Updating user roles in wallets
 
 use chrono;
-use api::config::Config;
-use api::handlers::wallets;
-use api::middleware::auth::AuthUser;
-use api::permissions::WalletRole;
-use api::websocket;
+use server::config::Config;
+use server::handlers::wallets;
+use server::middleware::auth::AuthUser;
+use server::permissions::WalletRole;
+use server::websocket;
 use std::sync::Arc;
 use uuid::Uuid;
 
