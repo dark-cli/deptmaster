@@ -16,6 +16,7 @@ mod ids;
 mod log_bridge;
 mod models;
 mod sdk_projection;
+mod sdk_store;
 mod state_builder;
 mod storage;
 mod sync;
@@ -703,6 +704,112 @@ fn jwt_payload(token: &str) -> Option<JwtPayload> {
         chrono::Utc::now().timestamp() >= exp_sec
     });
     Some(JwtPayload { username, expired })
+}
+
+/// Extract `user_id` claim from the stored JWT. Returns `None` if no
+/// token, the token is malformed, or the claim is missing.
+fn current_user_id() -> Option<String> {
+    let token = storage::config_get("token").ok().and_then(|o| o)?;
+    if token.is_empty() {
+        return None;
+    }
+    use base64::Engine;
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1].as_bytes())
+        .ok()?;
+    let payload_str = String::from_utf8(decoded).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&payload_str).ok()?;
+    json.as_object()?
+        .get("user_id")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Can the current user (taken from the stored JWT) perform `action_name`
+/// (e.g. `"contact:create"`, `"transaction:read"`) on the resource named
+/// by `(resource_type, resource_id)`?
+///
+/// `resource_type` is one of:
+///   - `"contact"`, `"transaction"`, `"wallet"`,
+///     `"contact_group"`, `"user_group"` — `resource_id` is the entity UUID.
+///   - `"all_contacts"`, `"all_transactions"`, `"all_user_groups"` —
+///     wildcard; `resource_id` is ignored.
+///
+/// Resolves entirely from the SDK's local SQLite permission tables —
+/// no network call. The same rules the server enforces (3-state matrix,
+/// deny wins, all_contacts wildcard) via the shared `resolver` crate.
+/// Returns `Ok(false)` if no JWT / no current wallet (rather than an
+/// error) so UI callers can use this from anywhere.
+pub fn can_perform(
+    action_name: String,
+    resource_type: String,
+    resource_id: Option<String>,
+) -> Result<bool, String> {
+    use domain::{Action, PermissionContext, WalletRole};
+
+    let token = match storage::config_get("token").ok().and_then(|o| o) {
+        Some(t) if !t.is_empty() => t,
+        _ => return Ok(false),
+    };
+    // Token validity check first (cheap), then extract user_id.
+    if jwt_payload(&token).map(|p| p.expired).unwrap_or(true) {
+        return Ok(false);
+    }
+    let user_id_str = match current_user_id() {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+    let wallet_id_str = match storage::config_get("current_wallet_id").ok().and_then(|o| o) {
+        Some(w) if !w.is_empty() => w,
+        _ => return Ok(false),
+    };
+
+    let user_id = uuid::Uuid::parse_str(&user_id_str).map_err(|e| e.to_string())?;
+    let wallet_id = uuid::Uuid::parse_str(&wallet_id_str).map_err(|e| e.to_string())?;
+
+    let resource = parse_resource(&resource_type, resource_id.as_deref())?;
+    let action = match Action::from_str(&action_name) {
+        Some(a) => a,
+        None => return Ok(false),
+    };
+
+    // Role doesn't affect resolver output (the store does its own owner check)
+    // but PermissionContext needs one. Member is the conservative default.
+    let ctx = PermissionContext::new(wallet_id, user_id, WalletRole::Member);
+    let store = sdk_store::SdkPermissionStore::new();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let allowed = rt
+        .block_on(resolver::resolve_actions(&store, &ctx, &resource))
+        .map_err(|e| format!("{:?}", e))?;
+    // `implies()` so e.g. ContactUpdate also satisfies a ContactRead check
+    // (the model's dependency rules — see Action::implies).
+    Ok(allowed.iter().any(|a| a.implies(action)))
+}
+
+fn parse_resource(kind: &str, id: Option<&str>) -> Result<domain::Resource, String> {
+    use domain::Resource;
+    let parse_id = |label: &str| -> Result<uuid::Uuid, String> {
+        let s = id.ok_or_else(|| format!("{} needs a resource_id", label))?;
+        uuid::Uuid::parse_str(s).map_err(|e| format!("invalid uuid for {}: {}", label, e))
+    };
+    match kind {
+        "contact" => Ok(Resource::Contact(parse_id("contact")?)),
+        "transaction" => Ok(Resource::Transaction(parse_id("transaction")?)),
+        "wallet" => Ok(Resource::Wallet(parse_id("wallet")?)),
+        "contact_group" => Ok(Resource::ContactGroup(parse_id("contact_group")?)),
+        "user_group" => Ok(Resource::UserGroup(parse_id("user_group")?)),
+        "all_contacts" => Ok(Resource::AllContacts),
+        "all_transactions" => Ok(Resource::AllTransactions),
+        "all_user_groups" => Ok(Resource::AllUserGroups),
+        other => Err(format!("unknown resource_type: {}", other)),
+    }
 }
 
 // Kept for compatibility

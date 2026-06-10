@@ -26,6 +26,11 @@ domain = { path = "../domain" }
 # Transaction events still flow through state_builder.rs for now; a future
 # step replaces that too.
 applier = { path = "../applier" }
+
+# Shared permission resolution. SDK uses it to answer "can the user do X?"
+# locally for UX (greying out buttons, etc.) — exact same rules the server
+# enforces on push.
+resolver = { path = "../resolver" }
 chrono = { version = "0.4", features = ["serde"] }
 flutter_rust_bridge = "=2.11.1"
 log = "0.4"
