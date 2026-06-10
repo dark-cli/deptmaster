@@ -4,16 +4,7 @@ use crate::api;
 use crate::rust_log;
 use crate::state_builder;
 use crate::storage;
-use domain::Action;
-
-/// Actions whose grant/revoke triggers a full resync (so the local view matches
-/// what the server now considers visible). Named via the shared `domain::Action`
-/// enum rather than literal strings so a server-side rename can't silently
-/// drift from the client.
-const READ_ACTIONS: &[Action] = &[Action::ContactRead, Action::TransactionRead];
-fn perms_cache_key(wallet_id: &str) -> String {
-    format!("perms_cache_{}", wallet_id)
-}
+use md5::{Digest, Md5};
 
 fn last_sync_key(wallet_id: &str) -> String {
     format!("last_sync_timestamp_{}", wallet_id)
@@ -23,61 +14,30 @@ fn server_hash_key(wallet_id: &str) -> String {
     format!("server_hash_{}", wallet_id)
 }
 
-/// If the server has revoked or granted contact:read / transaction:read since last sync, clear
-/// local wallet data and full resync so the client sees exactly what they are allowed to see
-/// (revoke: less data; grant: more data without needing logout/login).
-fn check_read_revoked_and_resync(wallet_id: &str) -> Result<(), String> {
-    let current_json = api::get_my_permissions_api(wallet_id)?;
-    let current: serde_json::Value = serde_json::from_str(&current_json).map_err(|e| e.to_string())?;
-    let actions = current
-        .get("actions")
-        .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-        .unwrap_or_default();
-    let current_set: std::collections::HashSet<&str> = actions.iter().copied().collect();
+/// Mirror of the server's incremental hash (see migration 027 +
+/// `crates/server/src/database/repository/hash.rs::UserEventHash::calculate_and_store`).
+///
+/// The server folds each new event into the user's running hash via
+/// `MD5(prev_hash + event_id)` where `event_id` is the canonical UUID
+/// string. We compute the same chain locally so a post-pull comparison can
+/// detect when the server's readable set diverges from "previous state +
+/// the events you just gave me" — i.e., when events were REMOVED from our
+/// view (a permission revoke or group-membership change), which the
+/// `since`-based incremental pull would otherwise miss silently.
+fn fold_event_id(prev_hash: &str, event_id: &str) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(prev_hash.as_bytes());
+    hasher.update(event_id.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
 
-    let cached_json = storage::config_get(&perms_cache_key(wallet_id))?;
-    storage::config_set(&perms_cache_key(wallet_id), &current_json)?;
-
-    let cached = match cached_json {
-        Some(s) => s,
-        None => return Ok(()),
-    };
-    let cached_val: serde_json::Value = match serde_json::from_str(&cached) {
-        Ok(v) => v,
-        Err(_) => return Ok(()),
-    };
-    let cached_actions = cached_val
-        .get("actions")
-        .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-        .unwrap_or_default();
-    let cached_set: std::collections::HashSet<&str> = cached_actions.iter().copied().collect();
-
-    let read_revoked = READ_ACTIONS.iter().any(|action| {
-        let name = action.as_str();
-        cached_set.contains(name) && !current_set.contains(name)
-    });
-    let read_granted = READ_ACTIONS.iter().any(|action| {
-        let name = action.as_str();
-        !cached_set.contains(name) && current_set.contains(name)
-    });
-    if read_revoked {
-        rust_log!(
-            "[debitum_rs] read permission revoked for wallet {} — clearing local data and resyncing",
-            wallet_id
-        );
-        storage::clear_wallet(wallet_id)?;
-        pull_and_merge()?;
-    } else if read_granted {
-        rust_log!(
-            "[debitum_rs] read permission granted for wallet {} — clearing local data and resyncing so new data appears",
-            wallet_id
-        );
-        storage::clear_wallet(wallet_id)?;
-        pull_and_merge()?;
+/// Apply `fold_event_id` over each event in order, starting from `starting_hash`.
+fn chain_hash<'a, I: IntoIterator<Item = &'a str>>(starting_hash: &str, event_ids: I) -> String {
+    let mut acc = starting_hash.to_string();
+    for id in event_ids {
+        acc = fold_event_id(&acc, id);
     }
-    Ok(())
+    acc
 }
 
 /// Build the snake_case discriminator the server's `EventData` (serde `#[tag = "type"]`)
@@ -199,18 +159,10 @@ pub fn push_unsynced() -> Result<(), String> {
                 accepted.len()
             );
             storage::events_mark_synced(&accepted)?;
-            // Contact group membership may have changed; clear permission cache so next check refetches.
-            let had_contact_group_change = unsynced.iter().any(|e| {
-                e.aggregate_type == "contact"
-                    && e.event_type == "UPDATED"
-                    && serde_json::from_str::<serde_json::Value>(&e.event_data)
-                        .ok()
-                        .map(|d| d.get("group_ids").is_some())
-                        .unwrap_or(false)
-            });
-            if had_contact_group_change {
-                let _ = storage::config_remove(&perms_cache_key(&wallet_id));
-            }
+            // No need to invalidate any local permission cache here: the next
+            // pull's hash comparison will detect any visibility change caused
+            // by this push (contact-group membership flip, etc.) and trigger
+            // a wipe + full-repull as needed.
             Ok(())
         }
         Err(e) => {
@@ -271,17 +223,40 @@ pub fn pull_and_merge() -> Result<(), String> {
     let (mut server_events, mut server_hash) = api::get_sync_events(since.clone())?;
     rust_log!("[debitum_rs] pull_and_merge: server returned {} events for wallet {}", server_events.len(), wallet_id);
 
-    // If this was incremental and the batch includes permission events, our visible set may have changed — do a full resync.
-    let has_permission_event = server_events.iter().any(|ev| {
-        ev.get("aggregate_type").and_then(|v| v.as_str()) == Some("permission")
-    });
-    if !is_full_pull && has_permission_event {
-        rust_log!("[debitum_rs] pull_and_merge: permission event in batch — clearing and full pull so view is up to date");
-        let _ = storage::config_remove(&perms_cache_key(&wallet_id));
+    // Hash-based divergence check: did the user's readable set change in a way
+    // that an incremental pull would miss? Fold the returned events onto our
+    // last-known server hash and compare to the server's current hash.
+    //
+    //   - For an incremental pull, the starting point is the hash we stashed
+    //     last time. If the server only APPENDED events since then, our
+    //     fold reproduces the server's current hash exactly. If events were
+    //     REMOVED from our view (permission revoke, group membership flip),
+    //     the fold diverges → we wipe and full-pull to converge.
+    //
+    //   - For a full pull (first sync OR a prior wipe), the starting point is
+    //     empty; the server returns the complete readable set and our fold
+    //     should equal the server hash. If it doesn't, something is off
+    //     (clock skew, hash impl drift) — we log but don't loop.
+    let previous_hash = storage::config_get(&server_hash_key(&wallet_id))?.unwrap_or_default();
+    let starting_hash = if is_full_pull { String::new() } else { previous_hash };
+    let event_ids_iter = server_events
+        .iter()
+        .filter_map(|ev| ev.get("id").and_then(|v| v.as_str()));
+    let computed_hash = chain_hash(&starting_hash, event_ids_iter);
+    let hash_diverged = !is_full_pull && computed_hash != server_hash;
+    if hash_diverged {
+        rust_log!(
+            "[debitum_rs] pull_and_merge: hash diverged (server={}, computed={}) — events removed from view; clearing and full pull",
+            server_hash, computed_hash
+        );
         storage::events_delete_all_for_wallet(&wallet_id)?;
         let refetched = api::get_sync_events(None)?;
         server_events = refetched.0;
         server_hash = refetched.1;
+        // Don't re-verify after the full pull: trust the server's hash blob and
+        // store it as-is. A second mismatch would mean our local md5 chain is
+        // diverging from the server's, which is a bug to fix, not a state to
+        // recover from.
     } else if is_full_pull && local_count == 0 {
         // First sync, nothing local to lose. (No-op — there's nothing to delete.)
         rust_log!("[debitum_rs] pull_and_merge: full pull on empty wallet — just absorbing server events");
@@ -323,31 +298,21 @@ pub fn pull_and_merge() -> Result<(), String> {
         .map(String::from)
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
     storage::config_set(&last_sync_key(&wallet_id), &ts_to_save)?;
-    // Stash the server's incremental hash so the next pull can detect
-    // visibility changes by comparison. Wiring the comparison into the sync
-    // path (and ripping out check_read_revoked_and_resync) is the next step;
-    // for now we just make sure the value is persisted.
+    // Stash the server's hash for the NEXT pull's divergence check (above).
     storage::config_set(&server_hash_key(&wallet_id), &server_hash)?;
     Ok(())
 }
 
-/// Full sync: push then pull. After pull, if read permission was revoked (contact:read or
-/// transaction:read removed), clear wallet data and full resync so local state matches server.
+/// Full sync: push, then pull. The pull handles visibility-change detection
+/// itself via the hash comparison — no separate "check permissions" pass.
 pub fn full_sync() -> Result<(), String> {
     push_unsynced()?;
-    pull_and_merge()?;
-    if let Some(wallet_id) = storage::config_get("current_wallet_id")? {
-        if !wallet_id.is_empty() {
-            let _ = check_read_revoked_and_resync(&wallet_id);
-        }
-    }
-    Ok(())
+    pull_and_merge()
 }
 
 /// Clear local wallet data and full pull so the client sees the server's permission-filtered view.
 /// Use after permission matrix or group membership changes (hot update without logout).
 pub fn clear_wallet_and_resync(wallet_id: &str) -> Result<(), String> {
-    let _ = storage::config_remove(&perms_cache_key(wallet_id));
     rust_log!(
         "[debitum_rs] permission-related change for wallet {} — clearing local data and full resync",
         wallet_id
