@@ -4,8 +4,13 @@ use crate::api;
 use crate::rust_log;
 use crate::state_builder;
 use crate::storage;
+use domain::Action;
 
-const READ_ACTIONS: &[&str] = &["contact:read", "transaction:read"];
+/// Actions whose grant/revoke triggers a full resync (so the local view matches
+/// what the server now considers visible). Named via the shared `domain::Action`
+/// enum rather than literal strings so a server-side rename can't silently
+/// drift from the client.
+const READ_ACTIONS: &[Action] = &[Action::ContactRead, Action::TransactionRead];
 fn perms_cache_key(wallet_id: &str) -> String {
     format!("perms_cache_{}", wallet_id)
 }
@@ -46,10 +51,12 @@ fn check_read_revoked_and_resync(wallet_id: &str) -> Result<(), String> {
     let cached_set: std::collections::HashSet<&str> = cached_actions.iter().copied().collect();
 
     let read_revoked = READ_ACTIONS.iter().any(|action| {
-        cached_set.contains(action) && !current_set.contains(*action)
+        let name = action.as_str();
+        cached_set.contains(name) && !current_set.contains(name)
     });
     let read_granted = READ_ACTIONS.iter().any(|action| {
-        !cached_set.contains(action) && current_set.contains(*action)
+        let name = action.as_str();
+        !cached_set.contains(name) && current_set.contains(name)
     });
     if read_revoked {
         rust_log!(
