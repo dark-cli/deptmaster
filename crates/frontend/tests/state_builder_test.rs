@@ -1,7 +1,7 @@
 //! Port of Flutter state_builder_test.dart – build state from events, UNDO, balances.
 
-use debitum_frontend::models::Event;
-use debitum_frontend::state_builder;
+use frontend::models::Event;
+use frontend::state_builder;
 use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 

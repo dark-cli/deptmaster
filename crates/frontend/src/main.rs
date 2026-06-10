@@ -4,7 +4,7 @@
 #[cfg(feature = "desktop")]
 fn main() {
     use dioxus::prelude::*;
-    use debitum_frontend::app::App;
+    use frontend::app::App;
     launch(App);
 }
 

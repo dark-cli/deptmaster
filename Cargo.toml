@@ -4,5 +4,5 @@ members = [
     "crates/api",
     "crates/client_core",
     "crates/domain",
-    "frontend",
+    "crates/frontend",
 ]

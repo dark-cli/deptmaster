@@ -1,11 +1,11 @@
 [package]
-name = "debitum-frontend"
+name = "frontend"
 version = "0.1.0"
 edition = "2021"
 description = "Debitum debt tracker - Dioxus frontend (Google-free)"
 
 [lib]
-name = "debitum_frontend"
+name = "frontend"
 path = "src/lib.rs"
 
 [features]
