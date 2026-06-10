@@ -4,5 +4,6 @@ members = [
     "crates/server",
     "crates/flutter_sdk",
     "crates/domain",
+    "crates/applier",
     "crates/web",
 ]
