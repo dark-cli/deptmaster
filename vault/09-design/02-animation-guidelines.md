@@ -8,7 +8,7 @@ tags:
 
 # Animation & Motion Guidelines
 
-**Status:** Wishlist captured from the prior design audit (formerly `mobile/DESIGN_MODERNIZATION_PLAN.md`). These are targets for the Flutter UI, not implemented contracts. Use them as the brief when adding new screens or polishing existing ones.
+**Status:** Mixed. The "Principles", "Page transitions", and "Micro-interactions" sections are wishlist (from the prior design audit). The **Glitch motion vocabulary** section is implemented and shipping in `mobile/lib/widgets/`.
 
 Companion to [[01-theme-catalog]] — themes give the *look*, this gives the *behavior over time*.
 
@@ -51,6 +51,38 @@ These transitions matter most after a sync completes — they're how the user pe
 ## Theme transitions
 
 When the user toggles light/dark, animate the color crossfade (don't snap). 300 ms is enough; longer feels sluggish.
+
+---
+
+## Glitch motion vocabulary (implemented)
+
+The app has a distinctive "digital signal failure / chromatic aberration" motion language for value changes. The aesthetic is intentional — when a balance or a transaction list updates, the UI briefly **glitches** rather than fading: text shakes, color channels split, random scramble characters flash in. It reads as "the world just changed" louder than a fade does.
+
+The vocabulary is implemented as a small set of composable widgets in `mobile/lib/widgets/`:
+
+### `GlitchScrambleOverlay`
+The visual primitive. Paints random characters (default set: `@#$%^&*`) across its bounds at a controllable `intensity` (0.0–1.0), `seed`, font size, and opacity. Used as a layer on top of changing content during a transition.
+
+### `GlitchTransition`
+Wraps a single child with an `Animation<double>`. While animating: applies translation jitter (default `maxX = 4 px`, `maxY = 2 px`), random opacity flicker (20% chance per frame, drops to 0.6), and optionally overlays `GlitchScrambleOverlay`. Lightweight — does not duplicate the child widget tree.
+
+### `AnimatedPixelatedText`
+Text widget that transitions value changes with chromatic-aberration: separates the red and blue color channels and shakes them independently for 400 ms while a scramble overlay (6–10 chars from `@#$%^&*`) flashes. Optional `animateFromEmpty` plays the same effect when text first appears from empty. This is the headline glitch effect — most visible on dashboard balances and transaction amounts.
+
+### `FlashOnChange`
+Wraps a child + a `signature` value. When the signature changes, fires a 250 ms flash overlay (color or glitch flavor, configurable). Used on list rows to say "this row just updated" without rebuilding the list. Token-based — first build and selection toggles don't fire it; only real signature changes do.
+
+### `DiffAnimatedList`
+Not glitch-specific, but it's the partner widget. Diffs a `List<T>` by stable item id and animates insertions / removals via Flutter's `AnimatedList`. Default duration 800 ms. Reorders can be disabled (`animateReorder: false`) to avoid moves when the list shuffles for non-meaningful reasons. Pairs with `FlashOnChange` inside each item builder so existing items can glitch while new ones slide in.
+
+### Where it's used
+Dashboard, contacts list, contact-transactions screen, transactions list, and the contact list item itself. Triggered by sync completion, by event replay landing a new value, and by signature changes on individual rows.
+
+### When to reach for it
+Use the glitch family when the change is **data-driven** and represents real world state moving (a balance updates, a new transaction lands, a contact's permissions change). Don't use it for navigation, button presses, or anything where the user did the thing — those are micro-interactions and belong in the Material vocabulary above. Mixing the two languages on the same screen weakens both.
+
+### Tuning knobs
+All effects expose their intensity, duration, and seed parameters. The defaults are conservative on purpose (`maxX = 4` not `12`; flicker 20% not 40%) — these were reduced from earlier values that felt too aggressive. If new screens want a louder glitch, prefer increasing duration over increasing per-frame intensity; it's the difference between "system blip" and "something is broken."
 
 ## Performance budget
 
