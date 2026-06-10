@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/server",
-    "crates/sdk",
+    "crates/flutter_sdk",
     "crates/domain",
     "crates/web",
 ]
