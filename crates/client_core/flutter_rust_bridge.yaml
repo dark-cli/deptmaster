@@ -1,4 +1,4 @@
-# Run from crates/debitum_client_core: flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
+# Run from crates/client_core: flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
 rust_input: crate
 rust_root: .
 dart_output: ../../mobile/lib/src

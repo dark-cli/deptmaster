@@ -82,8 +82,8 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-    stem: 'debitum_client_core',
-    ioDirectory: '../crates/debitum_client_core/target/release/',
+    stem: 'client_core',
+    ioDirectory: '../crates/client_core/target/release/',
     webPrefix: 'pkg/',
   );
 }

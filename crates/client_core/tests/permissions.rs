@@ -5,7 +5,7 @@
 
 use crate::common::app_instance::{create_unique_test_user_and_wallet, AppInstance};
 use crate::common::test_helpers::test_server_url;
-use debitum_client_core::{
+use client_core::{
     add_user_to_wallet,
     add_wallet_contact_group_member,
     add_wallet_user_group_member,

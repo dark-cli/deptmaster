@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/api",
-    "crates/debitum_client_core",
+    "crates/client_core",
     "crates/domain",
     "frontend",
 ]

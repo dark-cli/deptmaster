@@ -1,5 +1,5 @@
 [package]
-name = "debitum_client_core"
+name = "client_core"
 version = "0.1.0"
 edition = "2021"
 # Disable autodiscovery of integration tests: tests/single_app.rs etc. are NOT

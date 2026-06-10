@@ -206,7 +206,7 @@ class RustLoadErrorScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final rawError = Api.initError ?? '';
     final error = rawError.isEmpty
-        ? 'Rust library (libdebitum_client_core.so) could not be loaded.'
+        ? 'Rust library (libclient_core.so) could not be loaded.'
         : rawError;
     final isAndroid = defaultTargetPlatform == TargetPlatform.android;
     return Scaffold(

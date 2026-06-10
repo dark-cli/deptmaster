@@ -969,7 +969,7 @@ resolve_flutter_cmd() {
 # Build and prepare Rust bridge so Dart and native lib are in sync. Call before run-flutter-app.
 prepare_rust_bridge_for_flutter() {
     local platform="$1"
-    local crate_dir="$ROOT_DIR/crates/debitum_client_core"
+    local crate_dir="$ROOT_DIR/crates/client_core"
     local jni_libs_dir="$ROOT_DIR/mobile/android/app/src/main/jniLibs"
     
     print_info "Preparing Rust bridge (codegen + build for $platform)..."
@@ -1028,9 +1028,9 @@ prepare_rust_bridge_for_flutter() {
         }
         # Verify at least one ABI has the .so (cargo-ndk puts them in arm64-v8a, armeabi-v7a, etc.)
         local so_count
-        so_count=$(find "$jni_libs_dir" -name "libdebitum_client_core.so" 2>/dev/null | wc -l)
+        so_count=$(find "$jni_libs_dir" -name "libclient_core.so" 2>/dev/null | wc -l)
         if [ "${so_count:-0}" -eq 0 ]; then
-            print_error "No libdebitum_client_core.so found under $jni_libs_dir. cargo ndk may have written to a different path."
+            print_error "No libclient_core.so found under $jni_libs_dir. cargo ndk may have written to a different path."
             exit 1
         fi
         print_success "Rust Android libs ready in jniLibs/ ($so_count ABI(s))"
@@ -1040,9 +1040,9 @@ prepare_rust_bridge_for_flutter() {
             :
         else
             (cd "$crate_dir" && cargo build 2>&1) || exit 1
-            if [ -f "$crate_dir/target/debug/libdebitum_client_core.so" ]; then
+            if [ -f "$crate_dir/target/debug/libclient_core.so" ]; then
                 mkdir -p "$crate_dir/target/release"
-                cp -f "$crate_dir/target/debug/libdebitum_client_core.so" "$crate_dir/target/release/" 2>/dev/null || true
+                cp -f "$crate_dir/target/debug/libclient_core.so" "$crate_dir/target/release/" 2>/dev/null || true
             fi
         fi
         print_success "Rust Linux lib ready"
@@ -1168,12 +1168,12 @@ cmd_run_flutter_app() {
             print_error "--instances N (N>=2) requires --separate-instance on Linux."
             exit 1
         fi
-        # Rust FFI: loader looks for libdebitum_client_core.so in target/release
-        local rust_lib_dir="$ROOT_DIR/crates/debitum_client_core/target/release"
-        if [ -f "$rust_lib_dir/libdebitum_client_core.so" ]; then
+        # Rust FFI: loader looks for libclient_core.so in target/release
+        local rust_lib_dir="$ROOT_DIR/crates/client_core/target/release"
+        if [ -f "$rust_lib_dir/libclient_core.so" ]; then
             export LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         else
-            echo -e "${YELLOW}⚠ Rust lib not found at $rust_lib_dir - run: cd crates/debitum_client_core && cargo build --release (or: cp target/debug/libdebitum_client_core.so target/release/)${NC}" >&2
+            echo -e "${YELLOW}⚠ Rust lib not found at $rust_lib_dir - run: cd crates/client_core && cargo build --release (or: cp target/debug/libclient_core.so target/release/)${NC}" >&2
         fi
         # Clean app data if --clear-app-data flag is set
         if [ "$CLEAR_APP_DATA" = true ]; then
@@ -1445,7 +1445,7 @@ cmd_test_integration() {
         exit 1
     fi
 
-    (cd "$ROOT_DIR/crates/debitum_client_core" \
+    (cd "$ROOT_DIR/crates/client_core" \
         && cargo nextest run --run-ignored all --no-fail-fast)
 
     print_success "Integration tests complete"

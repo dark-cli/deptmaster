@@ -3,7 +3,7 @@
 //! This crate is the **single source of truth** for types that cross the
 //! client/server boundary: event payloads, permission actions, resource
 //! identifiers, wallet roles. Both `backend/rust-api` and
-//! `crates/debitum_client_core` depend on this crate so a struct change
+//! `crates/client_core` depend on this crate so a struct change
 //! shows up as a compile error on both sides instead of as a runtime JSON
 //! mismatch.
 //!
@@ -18,7 +18,7 @@
 //!
 //! Anything that touches I/O, DB rows, async runtimes, or
 //! flutter_rust_bridge. Those stay in the platform crates (`backend/rust-api`,
-//! `debitum_client_core`). Dependencies are kept to serde + uuid + chrono so
+//! `client_core`). Dependencies are kept to serde + uuid + chrono so
 //! the crate compiles for any target — server x86_64, mobile aarch64,
 //! frontend wasm32.
 
