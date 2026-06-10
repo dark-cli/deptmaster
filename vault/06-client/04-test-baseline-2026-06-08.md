@@ -12,28 +12,37 @@ Series of fixes that landed today against the integration tests in
 single `integration` test binary; per-file binaries are disabled
 (`autotests = false`) since they're just modules of `integration.rs`.
 
-**Final baseline: 22/40 passing (55%)** — over the >50% goal.
+**2026-06-08 snapshot: 22/40 passing (55%)** — over the >50% goal.
+**2026-06-10 baseline: 45/47 passing under nextest (~29s vs ~177s sequential).**
+See "Run instructions" below for the standard workflow.
 
 ---
 
 ## Run instructions
 
+**Always use `cargo-nextest`.** Each test runs in its own process, parallel
+across CPU cores. ~6x faster than `cargo test --test-threads=1` AND eliminates
+the shared-SQLite-globals contamination that drove most of the sequential-run
+flakiness. `scripts/manage.sh test-integration` enforces this — there's no
+fallback to `cargo test`.
+
 ```bash
-# 1. Build backend (one-time per code change)
-cd backend/rust-api && cargo build --bin debt-tracker-api
+# One-time install if you don't have it
+cargo install cargo-nextest --locked
 
-# 2. Start it (background; ./scripts/manage.sh start-server-direct blocks)
-DATABASE_URL="postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker" \
-PORT=8000 RUST_LOG=info \
-JWT_SECRET="your-secret-key-change-in-production" \
-JWT_EXPIRATION=3600 RATE_LIMIT_REQUESTS=0 \
-  /home/max/dev/deptmaster/backend/rust-api/target/debug/debt-tracker-api \
-  > /tmp/debt-tracker-api.log 2>&1 &
+# 1. Start the backend (scripts/run-server-dev.sh sets the high rate limit
+#    the parallel runner needs)
+./scripts/run-server-dev.sh
 
-# 3. Run tests sequentially (process-wide thread-local state in the client)
-cd crates/debitum_client_core
-cargo test --test integration -- --ignored --test-threads=1
+# 2. Run the suite
+./scripts/manage.sh test-integration
+# or directly:
+cd crates/debitum_client_core && cargo nextest run --run-ignored all --no-fail-fast
 ```
+
+The dev server defaults `RATE_LIMIT_REQUESTS=100000`. The production default
+(100/min) blocks the parallel runner immediately — if you see `429 Too Many
+Requests` in test failures, the rate limit is the cause, not your code.
 
 ---
 

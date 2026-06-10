@@ -1429,25 +1429,24 @@ cmd_show_android_logs() {
 cmd_test_integration() {
     validate_flags "test-integration"
 
-    print_step "Running client-core integration tests (Rust)..."
+    print_step "Running client-core integration tests (Rust, cargo-nextest)..."
 
-    # Prefer cargo-nextest: runs each test in its own process with parallelism
-    # across CPU cores. ~6x faster than `cargo test`'s in-process scheduler.
-    # Each test gets its own thread-local SQLite — no cross-test contamination.
+    # We deliberately use cargo-nextest exclusively (no cargo test fallback):
+    # each test in its own process, parallel across CPU cores. ~6x faster than
+    # `cargo test --test-threads=1` AND eliminates the shared-SQLite-globals
+    # contamination that drove most of the sequential-run flakiness.
     #
-    # The shared backend must have a high rate limit; the API uses 100/min by
-    # default, which 12 parallel test processes blow through immediately. Set
-    # RATE_LIMIT_REQUESTS to a very high value when starting the dev server.
-    if command -v cargo-nextest >/dev/null 2>&1; then
-        print_info "Using cargo-nextest (parallel)"
-        (cd "$ROOT_DIR/crates/debitum_client_core" \
-            && cargo nextest run --run-ignored all --no-fail-fast)
-    else
-        print_warning "cargo-nextest not installed; falling back to sequential cargo test"
-        print_warning "Install with: cargo install cargo-nextest --locked"
-        (cd "$ROOT_DIR/crates/debitum_client_core" \
-            && cargo test --test integration -- --ignored --test-threads=1)
+    # Requires: the shared dev backend started with a high rate limit. The API
+    # defaults to 100/min, which the parallel runner blows through instantly —
+    # scripts/run-server-dev.sh sets RATE_LIMIT_REQUESTS=100000 by default.
+    if ! command -v cargo-nextest >/dev/null 2>&1; then
+        print_error "cargo-nextest is required for this command."
+        print_info "Install with: cargo install cargo-nextest --locked"
+        exit 1
     fi
+
+    (cd "$ROOT_DIR/crates/debitum_client_core" \
+        && cargo nextest run --run-ignored all --no-fail-fast)
 
     print_success "Integration tests complete"
 }
