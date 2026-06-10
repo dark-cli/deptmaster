@@ -47,48 +47,122 @@ impl Projection for SdkProjection {
         Ok(())
     }
 
-    // ---------- Contact / Transaction CRUD: STUBS ----------
+    // ---------- Contact / Transaction CRUD ----------
     //
-    // state_builder.rs still owns these — when migrated, replace with
-    // real SQLite calls into per-wallet contacts / transactions tables.
+    // Writes to the new `contacts` / `transactions` SQLite tables. State_builder
+    // still rebuilds the in-memory + state-blob projection for reads (step 2
+    // of state_builder retirement switches reads over). For now these are
+    // dual-writes: same events, two stores, blob is authoritative until reads
+    // move over. The SDK has no soft-delete column — `soft_delete_*` here is
+    // a hard DELETE, matching state_builder's existing behavior.
 
     async fn upsert_contact_row(
         &mut self,
-        _id: Uuid,
-        _wallet_id: Uuid,
+        id: Uuid,
+        wallet_id: Uuid,
         _user_id: Uuid,
-        _name: &str,
-        _username: Option<&str>,
-        _phone: Option<&str>,
-        _email: Option<&str>,
-        _notes: Option<&str>,
+        name: &str,
+        username: Option<&str>,
+        phone: Option<&str>,
+        email: Option<&str>,
+        notes: Option<&str>,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        let now = chrono::Utc::now().to_rfc3339();
+        let id_s = id.to_string();
+        let wallet_s = wallet_id.to_string();
+        let name_s = name.to_string();
+        let username = username.map(String::from);
+        let phone = phone.map(String::from);
+        let email = email.map(String::from);
+        let notes = notes.map(String::from);
+        with_db(|conn| {
+            conn.execute(
+                r#"
+                INSERT INTO contacts (id, wallet_id, name, username, phone, email, notes,
+                                      created_at, updated_at, is_synced)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 1)
+                ON CONFLICT(id) DO UPDATE SET
+                    name       = excluded.name,
+                    username   = excluded.username,
+                    phone      = excluded.phone,
+                    email      = excluded.email,
+                    notes      = excluded.notes,
+                    updated_at = excluded.updated_at
+                "#,
+                params![id_s, wallet_s, name_s, username, phone, email, notes, now],
+            )?;
+            Ok(())
+        })
     }
 
     async fn update_contact_row(
         &mut self,
-        _id: Uuid,
-        _wallet_id: Uuid,
-        _patch: ContactPatch,
+        id: Uuid,
+        wallet_id: Uuid,
+        patch: ContactPatch,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        // SQLite's COALESCE behaves the same as Postgres for our patch
+        // semantics: Some(v) overrides, None preserves.
+        let now = chrono::Utc::now().to_rfc3339();
+        let id_s = id.to_string();
+        let wallet_s = wallet_id.to_string();
+        with_db(|conn| {
+            conn.execute(
+                r#"
+                UPDATE contacts SET
+                    name       = COALESCE(?3, name),
+                    username   = COALESCE(?4, username),
+                    phone      = COALESCE(?5, phone),
+                    email      = COALESCE(?6, email),
+                    notes      = COALESCE(?7, notes),
+                    updated_at = ?8
+                WHERE id = ?1 AND wallet_id = ?2
+                "#,
+                params![
+                    id_s,
+                    wallet_s,
+                    patch.name,
+                    patch.username,
+                    patch.phone,
+                    patch.email,
+                    patch.notes,
+                    now
+                ],
+            )?;
+            Ok(())
+        })
     }
 
     async fn soft_delete_contact_row(
         &mut self,
-        _id: Uuid,
-        _wallet_id: Uuid,
+        id: Uuid,
+        wallet_id: Uuid,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        let id_s = id.to_string();
+        let wallet_s = wallet_id.to_string();
+        with_db(|conn| {
+            conn.execute(
+                "DELETE FROM contacts WHERE id = ?1 AND wallet_id = ?2",
+                params![id_s, wallet_s],
+            )?;
+            Ok(())
+        })
     }
 
     async fn soft_delete_transactions_for_contact(
         &mut self,
-        _contact_id: Uuid,
-        _wallet_id: Uuid,
+        contact_id: Uuid,
+        wallet_id: Uuid,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        let cid = contact_id.to_string();
+        let wallet_s = wallet_id.to_string();
+        with_db(|conn| {
+            conn.execute(
+                "DELETE FROM transactions WHERE contact_id = ?1 AND wallet_id = ?2",
+                params![cid, wallet_s],
+            )?;
+            Ok(())
+        })
     }
 
     async fn add_contact_to_system_group(
@@ -179,49 +253,140 @@ impl Projection for SdkProjection {
 
     async fn contact_is_active(
         &self,
-        _contact_id: Uuid,
-        _wallet_id: Uuid,
+        contact_id: Uuid,
+        wallet_id: Uuid,
     ) -> Result<bool, Self::Error> {
-        // SDK doesn't track contact tombstones in SQLite yet. Treat all
-        // contacts as active so TransactionCreated never silently skips
-        // events — matches the pre-applier SDK behavior (state_builder
-        // never had this check). Replace with a real query once
-        // contacts move into a proper SQLite table.
-        Ok(true)
+        // Real query now that contacts have a SQLite table. Mirrors
+        // server's "is_deleted = false" check, but since SDK hard-deletes
+        // rather than tombstoning, "exists" is "active."
+        let cid = contact_id.to_string();
+        let wallet_s = wallet_id.to_string();
+        with_db(|conn| {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM contacts WHERE id = ?1 AND wallet_id = ?2)",
+                    params![cid, wallet_s],
+                    |r| r.get::<_, i64>(0).map(|n| n != 0),
+                )
+                .unwrap_or(false);
+            Ok(exists)
+        })
     }
 
     async fn upsert_transaction_row(
         &mut self,
-        _id: Uuid,
-        _wallet_id: Uuid,
+        id: Uuid,
+        wallet_id: Uuid,
         _user_id: Uuid,
-        _contact_id: Uuid,
-        _amount: i64,
-        _direction: &str,
-        _transaction_type: Option<&str>,
-        _currency: Option<&str>,
-        _description: Option<&str>,
-        _transaction_date: Option<&str>,
-        _due_date: Option<&str>,
+        contact_id: Uuid,
+        amount: i64,
+        direction: &str,
+        transaction_type: Option<&str>,
+        currency: Option<&str>,
+        description: Option<&str>,
+        transaction_date: Option<&str>,
+        due_date: Option<&str>,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        let now = chrono::Utc::now().to_rfc3339();
+        let id_s = id.to_string();
+        let wallet_s = wallet_id.to_string();
+        let cid = contact_id.to_string();
+        let direction = direction.to_string();
+        let tx_type = transaction_type.unwrap_or("money").to_string();
+        let currency = currency.unwrap_or("IQD").to_string();
+        let description = description.map(String::from);
+        // SDK stores dates as the raw "%Y-%m-%d" strings the wire format
+        // carries; state_builder also keeps them in that shape via
+        // NaiveDate <-> String at boundaries. Today's date is the fallback
+        // when not supplied (matches state_builder's `Utc::now().date_naive()`).
+        let txn_date = transaction_date
+            .map(String::from)
+            .unwrap_or_else(|| chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string());
+        let due_date = due_date.map(String::from);
+        with_db(|conn| {
+            conn.execute(
+                r#"
+                INSERT INTO transactions (id, wallet_id, contact_id, type, direction, amount,
+                                          currency, description, transaction_date, due_date,
+                                          created_at, updated_at, is_synced)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 1)
+                ON CONFLICT(id) DO UPDATE SET
+                    contact_id       = excluded.contact_id,
+                    type             = excluded.type,
+                    direction        = excluded.direction,
+                    amount           = excluded.amount,
+                    currency         = excluded.currency,
+                    description      = excluded.description,
+                    transaction_date = excluded.transaction_date,
+                    due_date         = excluded.due_date,
+                    updated_at       = excluded.updated_at
+                "#,
+                params![
+                    id_s, wallet_s, cid, tx_type, direction, amount, currency, description,
+                    txn_date, due_date, now
+                ],
+            )?;
+            Ok(())
+        })
     }
 
     async fn update_transaction_row(
         &mut self,
-        _id: Uuid,
-        _wallet_id: Uuid,
-        _patch: TransactionPatch,
+        id: Uuid,
+        wallet_id: Uuid,
+        patch: TransactionPatch,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        let now = chrono::Utc::now().to_rfc3339();
+        let id_s = id.to_string();
+        let wallet_s = wallet_id.to_string();
+        let contact_id_s = patch.contact_id.map(|u| u.to_string());
+        with_db(|conn| {
+            conn.execute(
+                r#"
+                UPDATE transactions SET
+                    contact_id       = COALESCE(?3, contact_id),
+                    type             = COALESCE(?4, type),
+                    direction        = COALESCE(?5, direction),
+                    amount           = COALESCE(?6, amount),
+                    currency         = COALESCE(?7, currency),
+                    description      = COALESCE(?8, description),
+                    transaction_date = COALESCE(?9, transaction_date),
+                    due_date         = COALESCE(?10, due_date),
+                    updated_at       = ?11
+                WHERE id = ?1 AND wallet_id = ?2
+                "#,
+                params![
+                    id_s,
+                    wallet_s,
+                    contact_id_s,
+                    patch.transaction_type,
+                    patch.direction,
+                    patch.amount,
+                    patch.currency,
+                    patch.description,
+                    patch.transaction_date,
+                    patch.due_date,
+                    now
+                ],
+            )?;
+            Ok(())
+        })
     }
 
     async fn soft_delete_transaction_row(
         &mut self,
-        _id: Uuid,
-        _wallet_id: Uuid,
+        id: Uuid,
+        wallet_id: Uuid,
     ) -> Result<(), Self::Error> {
-        Ok(())
+        let id_s = id.to_string();
+        let wallet_s = wallet_id.to_string();
+        with_db(|conn| {
+            conn.execute(
+                "DELETE FROM transactions WHERE id = ?1 AND wallet_id = ?2",
+                params![id_s, wallet_s],
+            )?;
+            Ok(())
+        })
     }
 
     // ---------- Wallet membership ----------

@@ -167,16 +167,22 @@ impl PermissionStore for SdkPermissionStore {
 
     async fn all_contact_ids_in_wallet(
         &self,
-        _wallet_id: Uuid,
+        wallet_id: Uuid,
     ) -> Result<HashSet<Uuid>, Self::Error> {
-        // SDK has no contacts SQLite table yet — contacts live in the state
-        // JSON blob (state_builder.rs). Returning empty here makes
-        // permitted_contacts_for_action on the SDK no-op for all_contacts
-        // grants. The two real callers we care about now (can_perform via
-        // resolve_actions for UX) don't use this method. When the SDK
-        // migrates contacts/transactions into proper SQLite tables, this
-        // becomes one SELECT.
-        Ok(HashSet::new())
+        let wid = wallet_id.to_string();
+        with_db(|conn| {
+            let mut stmt = conn.prepare("SELECT id FROM contacts WHERE wallet_id = ?1")?;
+            let rows = stmt.query_map(params![wid], |r| r.get::<_, String>(0))?;
+            let mut set = HashSet::new();
+            for row in rows {
+                if let Ok(s) = row {
+                    if let Ok(u) = Uuid::parse_str(&s) {
+                        set.insert(u);
+                    }
+                }
+            }
+            Ok(set)
+        })
     }
 
     async fn contact_ids_in_group(

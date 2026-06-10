@@ -140,6 +140,47 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
             role TEXT NOT NULL,
             PRIMARY KEY (wallet_id, user_id)
         );
+
+        -- ============ Contact / Transaction projection tables ============
+        --
+        -- Populated by SdkProjection (applier::apply) as contact / transaction
+        -- events flow in. Mirrors what state_builder.rs builds in-memory and
+        -- writes to the `state` JSON blob. The intent is to retire the JSON
+        -- blob and have SQLite be the source of truth; until step 2 switches
+        -- the read path over, these tables are dual-written and the blob
+        -- remains authoritative.
+
+        CREATE TABLE IF NOT EXISTS contacts (
+            id TEXT PRIMARY KEY,
+            wallet_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            username TEXT,
+            phone TEXT,
+            email TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            is_synced INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_contacts_wallet ON contacts(wallet_id);
+
+        CREATE TABLE IF NOT EXISTS transactions (
+            id TEXT PRIMARY KEY,
+            wallet_id TEXT NOT NULL,
+            contact_id TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'money',
+            direction TEXT NOT NULL DEFAULT 'owed',
+            amount INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'IQD',
+            description TEXT,
+            transaction_date TEXT NOT NULL,
+            due_date TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            is_synced INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_transactions_wallet ON transactions(wallet_id);
+        CREATE INDEX IF NOT EXISTS idx_transactions_contact ON transactions(contact_id);
         "#,
     )
     .map_err(|e| e.to_string())?;
