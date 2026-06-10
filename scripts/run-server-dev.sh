@@ -26,6 +26,13 @@ export RUST_LOG="${RUST_LOG:-debug}"
 export JWT_SECRET="${JWT_SECRET:-your-secret-key-change-in-production}"
 export JWT_EXPIRATION="${JWT_EXPIRATION:-3600}"
 
+# Raise the rate limit so the parallel client integration suite (cargo nextest,
+# ~12 processes) doesn't get 429ed. Production default (100/60s) is fine for a
+# single browser but blocks the test runner. Override via env if you specifically
+# want to test rate-limit behavior.
+export RATE_LIMIT_REQUESTS="${RATE_LIMIT_REQUESTS:-100000}"
+export RATE_LIMIT_WINDOW="${RATE_LIMIT_WINDOW:-60}"
+
 echo "Configuration:"
 echo "  DATABASE_URL: $DATABASE_URL"
 echo "  PORT: $PORT"
