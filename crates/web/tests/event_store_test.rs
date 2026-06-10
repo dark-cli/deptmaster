@@ -1,7 +1,7 @@
 //! Event store tests: append, list, filter (no Dioxus/desktop required for logic).
 //! Run with: cargo test -- --test-threads=1 (global event store is shared).
 
-use frontend::event_store;
+use web::event_store;
 use chrono::Utc;
 use std::collections::HashMap;
 

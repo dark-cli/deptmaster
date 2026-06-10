@@ -1,10 +1,10 @@
-//! Debitum frontend - Dioxus app (Google-free).
+//! Debitum web - Dioxus app (Google-free).
 //! Default: web (cargo run). Desktop: cargo run --features desktop.
 
 #[cfg(feature = "desktop")]
 fn main() {
     use dioxus::prelude::*;
-    use frontend::app::App;
+    use web::app::App;
     launch(App);
 }
 

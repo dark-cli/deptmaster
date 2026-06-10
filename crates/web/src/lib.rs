@@ -1,4 +1,4 @@
-//! Debitum frontend library: models, state builder, event store, UI.
+//! Debitum web library: models, state builder, event store, UI.
 
 pub mod app;
 pub mod event_store;

@@ -1,7 +1,7 @@
 //! Port of Flutter state_builder_test.dart – build state from events, UNDO, balances.
 
-use frontend::models::Event;
-use frontend::state_builder;
+use web::models::Event;
+use web::state_builder;
 use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 
