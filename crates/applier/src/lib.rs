@@ -2,37 +2,34 @@
 //!
 //! Both the server (Postgres) and the SDK (SQLite) need to take a stream of
 //! events and mutate their local projection tables to reflect them. The rules
-//! are identical on both sides — "a `ContactCreated` event inserts this row
-//! with these fields, a `ContactDeleted` event soft-deletes the row, a
-//! `PermissionMatrixSet` event upserts these matrix rows" — but the storage
-//! mechanics are not (sqlx vs rusqlite, async vs sync, owned pool vs &mut
-//! conn).
+//! are identical on both sides — "a `ContactCreated` event inserts this row,
+//! also auto-adds the contact to `all_contacts`, then attaches to any
+//! requested groups; a `ContactDeleted` soft-deletes the row AND cascades
+//! to its transactions" — but the storage mechanics aren't (sqlx vs
+//! rusqlite, async vs sync, owned pool vs &mut conn).
 //!
-//! This crate factors out the rules. It defines a [`Projection`] trait whose
-//! methods are the LOW-LEVEL mutations a projection store needs to support
-//! (insert_contact, update_contact, delete_contact_cascade, …). It then
-//! defines [`apply`], a single async function that exhaustively matches
-//! every variant of [`domain::EventData`] and translates it into trait calls.
+//! This crate factors out the rules. The [`Projection`] trait is a small set
+//! of LOW-LEVEL storage mutations (upsert this row, soft-delete that row,
+//! cascade-delete transactions for this contact, …). The [`apply`] function
+//! pattern-matches on every [`domain::EventData`] variant and translates
+//! each one into a sequence of trait calls. The per-variant rules live in
+//! `apply` alone; impls just translate to SQL.
 //!
-//! Server implements `Projection` against a Postgres connection. SDK
-//! implements it against a SQLite connection. The `match` over EventData
-//! lives in exactly one place; the compiler enforces exhaustive handling on
-//! both sides forever after.
+//! ## Server-only context
 //!
-//! ## Out of scope
-//!
-//! - Soft-deletion display rules (`is_deleted` filtering at read time).
-//! - Permission resolution / matrix queries (lives in `crates/server`'s
-//!   permissions module — that's a query concern, not an apply concern).
-//! - Cache invalidation (`user_readable_events`, the incremental hash).
-//!   Those wrap around `apply` on the server side; SDK doesn't have them.
+//! Server's projection tables track a `last_event_id` (BIGSERIAL) per row
+//! for snapshot bookkeeping; that's a server-only concern the trait doesn't
+//! expose. Instead, the server's impl stashes the per-event context (event
+//! id, position, wallet/user, timestamp) inside the impl via
+//! [`Projection::set_event_context`] before each apply call. SDK's impl
+//! leaves the default no-op.
 //!
 //! ## Status
 //!
-//! Skeleton only at the moment: the `Projection` trait is defined and `apply`
-//! is wired to fail loudly on every variant via `todo!()`. The real
-//! per-variant handlers land in step 3, alongside concrete impls of
-//! `Projection` for both sides.
+//! Step 3a covers **contact** events. Transaction and permission events
+//! still flow through the server's existing `apply_*_typed` paths; the
+//! `apply()` body has placeholder no-op branches for them. 3b/3c migrate
+//! those.
 
 use async_trait::async_trait;
 use domain::DomainEvent;
@@ -41,223 +38,213 @@ use uuid::Uuid;
 pub mod patches;
 pub use patches::{ContactPatch, TransactionPatch};
 
-/// Anything that can have events applied to it. Methods are the discrete
-/// mutations the applier needs to perform — one per kind of state change,
-/// NOT one per event variant. Multiple event variants may translate to the
-/// same trait call (e.g., `ContactUndone` of a `Deleted` event ends up
-/// calling `insert_contact` again).
+/// Storage backend for projections. Implementors:
 ///
-/// Implementors:
-/// - **Server** (`crates/server`): wraps a `&PgPool` / `&mut PgConnection`.
-///   Each method emits one or more sqlx queries against the appropriate
-///   projection table.
-/// - **SDK** (`crates/flutter_sdk`): wraps a `&mut rusqlite::Connection`.
-///   Each method runs the equivalent SQLite statement.
-///
-/// All methods are `async` because the server side needs it. The SDK's sync
-/// rusqlite calls just don't `.await` anything internally.
+/// - **Server** (`crates/server`): wraps `&PgPool` + per-event metadata
+///   (event_db_id, wallet_id, user_id, created_at) set via
+///   [`Projection::set_event_context`]. Each mutation emits one or more
+///   sqlx queries.
+/// - **SDK** (`crates/flutter_sdk`): wraps `&mut rusqlite::Connection`.
+///   Each mutation runs an equivalent SQLite statement. The per-event
+///   context default no-op fits — SDK doesn't track `last_event_id`.
 #[async_trait]
 pub trait Projection {
     type Error: std::fmt::Debug + Send;
 
-    // ---------- Contacts ----------
+    /// Optional per-event bookkeeping the impl may need. Called by
+    /// [`apply`] right before processing each event so the impl can stash
+    /// `event.id`, `event.created_at`, etc. for use inside its CRUD calls.
+    async fn set_event_context(&mut self, _event: &DomainEvent) -> Result<(), Self::Error> {
+        Ok(())
+    }
 
-    async fn insert_contact(
+    // ---------- Contact CRUD ----------
+
+    /// Insert-or-update the contact row by id. Fields are passed by value;
+    /// for first creation this writes them all. For an idempotent replay
+    /// the impl should overwrite the row (no field-merge — that's
+    /// `update_contact_row`'s job).
+    async fn upsert_contact_row(
         &mut self,
         id: Uuid,
-        name: String,
-        username: Option<String>,
-        phone: Option<String>,
-        email: Option<String>,
-        notes: Option<String>,
-        group_ids: Vec<Uuid>,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        name: &str,
+        username: Option<&str>,
+        phone: Option<&str>,
+        email: Option<&str>,
+        notes: Option<&str>,
     ) -> Result<(), Self::Error>;
 
-    async fn update_contact(
+    /// Patch update: any `Some(v)` overwrites the existing field; any
+    /// `None` leaves it alone. Implementations use `COALESCE($new, col)`
+    /// (Postgres) or load-then-merge (SQLite).
+    async fn update_contact_row(
         &mut self,
         id: Uuid,
+        wallet_id: Uuid,
         patch: ContactPatch,
     ) -> Result<(), Self::Error>;
 
-    /// Soft-delete the contact AND every transaction that referenced it.
-    /// Server marks `is_deleted = true`; SDK removes from the in-memory map.
-    async fn delete_contact_cascade(
+    /// Mark the contact as deleted (soft-delete). Does NOT cascade —
+    /// `apply` calls [`Self::soft_delete_transactions_for_contact`]
+    /// explicitly so the rule is visible at the apply site.
+    async fn soft_delete_contact_row(
         &mut self,
         id: Uuid,
-        comment: Option<String>,
+        wallet_id: Uuid,
     ) -> Result<(), Self::Error>;
 
-    // ---------- Transactions ----------
-
-    async fn insert_transaction(
+    /// Soft-delete every transaction that referenced this contact. Used by
+    /// `apply` when handling [`domain::EventData::ContactDeleted`] (cascade
+    /// semantics live in apply, not in `soft_delete_contact_row`).
+    async fn soft_delete_transactions_for_contact(
         &mut self,
-        id: Uuid,
         contact_id: Uuid,
-        amount: i64,
-        direction: String,
-        transaction_type: Option<String>,
-        currency: Option<String>,
-        description: Option<String>,
-        transaction_date: Option<String>,
-        due_date: Option<String>,
-    ) -> Result<(), Self::Error>;
-
-    async fn update_transaction(
-        &mut self,
-        id: Uuid,
-        patch: TransactionPatch,
-    ) -> Result<(), Self::Error>;
-
-    async fn delete_transaction(
-        &mut self,
-        id: Uuid,
-        comment: Option<String>,
-    ) -> Result<(), Self::Error>;
-
-    // ---------- Undo ----------
-
-    /// Reverse the effects of `undone_event_id`. The applier looks up that
-    /// event (via [`load_event`]) and inverts its effect — e.g., a
-    /// `ContactDeleted` undo re-inserts the contact, a `ContactUpdated`
-    /// undo restores the pre-update values. Implementations need access to
-    /// the event log to fetch the undone event, hence the helper.
-    async fn undo_event(
-        &mut self,
-        undone_event_id: Uuid,
-    ) -> Result<(), Self::Error>;
-
-    // ---------- Permissions ----------
-    //
-    // The 14 permission-event variants live in `domain::EventData` for both
-    // sides. Server has had projection tables for these since migration
-    // 014; SDK gains them in step 2 of Phase 0.2.
-
-    async fn add_wallet_user(
-        &mut self,
         wallet_id: Uuid,
-        user_id: Uuid,
-        role: String,
     ) -> Result<(), Self::Error>;
 
-    async fn remove_wallet_user(
-        &mut self,
-        wallet_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<(), Self::Error>;
+    // ---------- Contact group memberships ----------
 
-    async fn set_wallet_user_role(
+    /// Add the contact to a wallet-scoped system group by its well-known
+    /// name (e.g., `"all_contacts"`). System groups are seeded on wallet
+    /// creation and looked up by `(wallet_id, name)`. No-op if the group
+    /// doesn't exist (defensive — should always exist).
+    async fn add_contact_to_system_group(
         &mut self,
-        wallet_id: Uuid,
-        user_id: Uuid,
-        role: String,
-    ) -> Result<(), Self::Error>;
-
-    async fn insert_user_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-        name: String,
-    ) -> Result<(), Self::Error>;
-
-    async fn update_user_group(
-        &mut self,
-        id: Uuid,
-        name: Option<String>,
-    ) -> Result<(), Self::Error>;
-
-    async fn delete_user_group(
-        &mut self,
-        id: Uuid,
-    ) -> Result<(), Self::Error>;
-
-    async fn add_user_group_member(
-        &mut self,
-        user_group_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<(), Self::Error>;
-
-    async fn remove_user_group_member(
-        &mut self,
-        user_group_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<(), Self::Error>;
-
-    async fn insert_contact_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-        name: String,
-    ) -> Result<(), Self::Error>;
-
-    async fn update_contact_group(
-        &mut self,
-        id: Uuid,
-        name: Option<String>,
-    ) -> Result<(), Self::Error>;
-
-    async fn delete_contact_group(
-        &mut self,
-        id: Uuid,
-    ) -> Result<(), Self::Error>;
-
-    async fn add_contact_group_member(
-        &mut self,
-        contact_group_id: Uuid,
         contact_id: Uuid,
+        wallet_id: Uuid,
+        system_group_name: &str,
     ) -> Result<(), Self::Error>;
 
-    async fn remove_contact_group_member(
+    /// Add the contact to specific groups by id. Each id is validated
+    /// against `wallet_id` (silently skipped if it doesn't belong to this
+    /// wallet — same defensive policy as the server). Duplicates are
+    /// silently ignored.
+    async fn add_contact_to_groups(
         &mut self,
-        contact_group_id: Uuid,
         contact_id: Uuid,
-    ) -> Result<(), Self::Error>;
-
-    /// Replace the (user_group, contact_group) cell of the matrix with the
-    /// given allow + deny action lists. The set operation is total — any
-    /// pre-existing rows for this cell are wiped first.
-    async fn set_permission_matrix_cell(
-        &mut self,
-        user_group_id: Uuid,
-        contact_group_id: Uuid,
-        allowed_actions: Vec<String>,
-        denied_actions: Vec<String>,
-    ) -> Result<(), Self::Error>;
-
-    // ---------- Wallet lifecycle ----------
-
-    async fn delete_wallet(
-        &mut self,
         wallet_id: Uuid,
-        reason: Option<String>,
+        group_ids: &[Uuid],
     ) -> Result<(), Self::Error>;
 
-    async fn transfer_wallet_ownership(
+    /// Replace the contact's group memberships with exactly the given set.
+    /// Implementations DELETE existing memberships (except the system
+    /// `all_contacts` membership, which stays) and INSERT the new ones.
+    /// Validation against wallet_id same as `add_contact_to_groups`.
+    async fn replace_contact_group_memberships(
         &mut self,
+        contact_id: Uuid,
         wallet_id: Uuid,
-        from: Uuid,
-        to: Uuid,
+        group_ids: &[Uuid],
     ) -> Result<(), Self::Error>;
 }
 
 /// Apply one event to a projection. Exhaustive match over every variant of
-/// [`domain::EventData`]. The compiler enforces that every variant has a
-/// branch; adding a new variant to `EventData` is a build-time error here
-/// until it's handled.
+/// [`domain::EventData`]. The compiler enforces every variant has a branch;
+/// adding a new variant to `EventData` is a build error here until it's
+/// handled.
 ///
-/// Note: this is a skeleton. The body lands in step 3, where each branch
-/// translates the typed variant into the matching `Projection` method call.
+/// Step 3a: contact variants are wired through the trait. Transaction and
+/// permission variants are placeholders — they fall through to no-op so
+/// the existing per-side apply paths still own them. 3b/3c migrate those.
 pub async fn apply<P: Projection + Send>(
-    _projection: &mut P,
+    projection: &mut P,
     event: &DomainEvent,
 ) -> Result<(), P::Error> {
     use domain::EventData as E;
 
+    projection.set_event_context(event).await?;
+
     match &event.event_data {
-        E::ContactCreated { .. }
-        | E::ContactUpdated { .. }
-        | E::ContactDeleted { .. }
-        | E::ContactUndone { .. }
-        | E::TransactionCreated { .. }
+        // -------- Contact --------
+        E::ContactCreated {
+            name,
+            username,
+            phone,
+            email,
+            notes,
+            group_ids,
+        } => {
+            projection
+                .upsert_contact_row(
+                    event.aggregate_id,
+                    event.wallet_id,
+                    event.user_id,
+                    name,
+                    username.as_deref(),
+                    phone.as_deref(),
+                    email.as_deref(),
+                    notes.as_deref(),
+                )
+                .await?;
+            // Every contact is implicitly in `all_contacts` (system group).
+            projection
+                .add_contact_to_system_group(event.aggregate_id, event.wallet_id, "all_contacts")
+                .await?;
+            // Plus any explicitly requested groups (validated against wallet).
+            if !group_ids.is_empty() {
+                projection
+                    .add_contact_to_groups(event.aggregate_id, event.wallet_id, group_ids)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        E::ContactUpdated {
+            name,
+            username,
+            phone,
+            email,
+            notes,
+            group_ids,
+        } => {
+            let patch = ContactPatch {
+                name: name.clone(),
+                username: username.clone(),
+                phone: phone.clone(),
+                email: email.clone(),
+                notes: notes.clone(),
+                group_ids: group_ids.clone(),
+            };
+            projection
+                .update_contact_row(event.aggregate_id, event.wallet_id, patch)
+                .await?;
+            // `group_ids = Some(vec)` means "replace memberships with this
+            // exact set." `None` means "leave memberships alone."
+            if let Some(ids) = group_ids {
+                projection
+                    .replace_contact_group_memberships(event.aggregate_id, event.wallet_id, ids)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        E::ContactDeleted { .. } => {
+            projection
+                .soft_delete_contact_row(event.aggregate_id, event.wallet_id)
+                .await?;
+            // Cascade: any transactions for this contact also get soft-deleted.
+            projection
+                .soft_delete_transactions_for_contact(event.aggregate_id, event.wallet_id)
+                .await?;
+            Ok(())
+        }
+
+        E::ContactUndone { .. } => {
+            // UNDO events are filtered before dispatch (their effect is
+            // captured in undone_event_ids and skipped events). Nothing to
+            // do at apply time.
+            Ok(())
+        }
+
+        // -------- Transaction / Permission / Wallet --------
+        //
+        // Not migrated yet — Step 3b (Transaction) and 3c (Permission)
+        // will fill these branches. Today they're no-ops here; callers
+        // still route around to the server's existing apply_*_typed
+        // methods for non-contact aggregates.
+        E::TransactionCreated { .. }
         | E::TransactionUpdated { .. }
         | E::TransactionDeleted { .. }
         | E::TransactionUndone { .. }
@@ -276,12 +263,6 @@ pub async fn apply<P: Projection + Send>(
         | E::ContactGroupMemberRemoved { .. }
         | E::PermissionMatrixSet { .. }
         | E::WalletDeleted { .. }
-        | E::OwnershipTransferred { .. } => {
-            // Step 3 wires each variant to the corresponding Projection
-            // method. Keeping the exhaustive pattern here so adding a new
-            // EventData variant in the future fails to build until handled
-            // on both sides.
-            Ok(())
-        }
+        | E::OwnershipTransferred { .. } => Ok(()),
     }
 }

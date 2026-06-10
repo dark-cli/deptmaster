@@ -29,6 +29,12 @@ path = "src/bin/set_admin_password.rs"
 # for everything that crosses the wire to the client/sdk.
 domain = { path = "../domain" }
 
+# Shared event-application logic. Defines the Projection trait + apply() function
+# so server and SDK can later share per-variant translation rules. Step 3a covers
+# Contact events; Transaction (3b) and Permission (3c) still flow through the
+# server's existing apply_*_typed methods.
+applier = { path = "../applier" }
+
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }

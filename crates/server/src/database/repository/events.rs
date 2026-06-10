@@ -584,15 +584,28 @@ impl Database {
             // Type-driven dispatch by aggregate kind
             match event_data.aggregate_type() {
                 domain::AggregateType::Contact => {
-                    self.apply_contact_event_typed(
-                        &event_data,
+                    // Step 3a: contact events flow through the shared applier
+                    // crate (Projection trait). The translation rules
+                    // ("ContactCreated also adds to all_contacts", "ContactDeleted
+                    // cascades to transactions", etc.) live in applier::apply;
+                    // the SQL lives in ServerProjection.
+                    let domain_event = domain::DomainEvent {
+                        id: event_id,
                         aggregate_id,
-                        user_id,
                         wallet_id,
+                        user_id,
+                        created_at: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                            created_at, chrono::Utc,
+                        ),
+                        version: 1,
+                        event_data: event_data.clone(),
+                    };
+                    let mut proj = super::server_projection::ServerProjection::new(
+                        &self.pool,
                         event_db_id,
                         created_at,
-                    )
-                    .await?;
+                    );
+                    applier::apply(&mut proj, &domain_event).await?;
                 }
                 domain::AggregateType::Transaction => {
                     self.apply_transaction_event_typed(

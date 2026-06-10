@@ -2,6 +2,7 @@ pub mod contacts;
 pub mod events;
 pub mod hash;
 pub mod permissions;
+pub mod server_projection;
 pub mod snapshots;
 pub mod transactions;
 pub mod users;
