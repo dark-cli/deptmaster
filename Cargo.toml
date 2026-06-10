@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = [
+    "backend/rust-api",
+    "crates/debitum_client_core",
+    "crates/debitum_domain",
+    "frontend",
+]

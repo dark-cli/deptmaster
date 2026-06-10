@@ -32,9 +32,11 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
 # Database
-sqlx = { version = "0.7", features = [
+sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-native-tls",
     "postgres",
+    "macros",
+    "migrate",
     "chrono",
     "uuid",
     "json",
