@@ -16,7 +16,6 @@ use flutter_sdk::{
     create_wallet_user_group,
     delete_contact,
     get_contacts,
-    get_wallet_permission_matrix,
     manual_sync,
     join_wallet_by_code,
     list_wallet_contact_group_members,
@@ -50,15 +49,18 @@ fn group_id_by_name(groups_json: &str, name: &str) -> Result<String, String> {
     Err(format!("group named '{}' not found", name))
 }
 
+/// Return `(all_users id, all_contacts id)` — the system-group pair that
+/// holds every wallet's default permissions. Looks them up by name
+/// explicitly: previously this picked the first row out of the matrix
+/// dump, which is non-deterministic, and could grab `__owners__ × all_contacts`
+/// instead. When that happened, `set_matrix_actions(default = [])` was
+/// silently revoking OWNER permissions while leaving member defaults
+/// untouched — manifesting as "app2 sees N+1 contacts when it should see N."
 fn get_default_matrix_ids(wallet_id: &str) -> Result<(String, String), String> {
-    let json = get_wallet_permission_matrix(wallet_id.to_string())?;
-    let arr: Vec<serde_json::Value> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    let row = arr
-        .iter()
-        .find(|r| r.get("user_group_id").is_some() && r.get("contact_group_id").is_some())
-        .ok_or("Permission matrix has no row")?;
-    let ug = row["user_group_id"].as_str().ok_or("No user_group_id")?.to_string();
-    let cg = row["contact_group_id"].as_str().ok_or("No contact_group_id")?.to_string();
+    let ug_json = list_wallet_user_groups(wallet_id.to_string())?;
+    let cg_json = list_wallet_contact_groups(wallet_id.to_string())?;
+    let ug = group_id_by_name(&ug_json, "all_users")?;
+    let cg = group_id_by_name(&cg_json, "all_contacts")?;
     Ok((ug, cg))
 }
 

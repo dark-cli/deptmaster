@@ -536,7 +536,8 @@ impl Database {
             JOIN permission_actions pa ON pa.id = m.permission_action_id
             JOIN user_groups ug ON ug.id = m.user_group_id AND ug.wallet_id = $1
             JOIN contact_groups cg ON cg.id = m.contact_group_id AND cg.wallet_id = $1
-            GROUP BY m.user_group_id, m.contact_group_id
+            GROUP BY m.user_group_id, m.contact_group_id, ug.name, cg.name
+            ORDER BY ug.name, cg.name
             "#,
         )
         .bind(wallet_id)
