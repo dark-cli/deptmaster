@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-cd "$ROOT_DIR/backend/rust-api"
+cd "$ROOT_DIR/crates/api"
 
 # Colors
 GREEN='\033[0;32m'
@@ -43,10 +43,10 @@ echo ""
 if command -v cargo-watch &> /dev/null; then
     echo -e "${GREEN}Using cargo-watch for auto-reload...${NC}"
     echo "Install with: cargo install cargo-watch"
-    cargo watch -x 'run --bin debt-tracker-api'
+    cargo watch -x 'run --bin api'
 else
     echo -e "${YELLOW}Running without auto-reload. Install cargo-watch for auto-reload:${NC}"
     echo "  cargo install cargo-watch"
     echo ""
-    cargo run --bin debt-tracker-api
+    cargo run --bin api
 fi

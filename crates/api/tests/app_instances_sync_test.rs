@@ -6,14 +6,14 @@
 
 use axum::extract::Query;
 use chrono::Utc;
-use debt_tracker_api::domain::events::{DomainEvent, EventData};
-use debt_tracker_api::handlers::sync::{
+use api::domain::events::{DomainEvent, EventData};
+use api::handlers::sync::{
     get_sync_events, get_sync_hash, post_sync_events, SyncEvent, SyncEventsQuery,
 };
-use debt_tracker_api::middleware::auth::AuthUser;
-use debt_tracker_api::middleware::wallet_context::WalletContext;
-use debt_tracker_api::permissions::WalletRole;
-use debt_tracker_api::{AppState, Config};
+use api::middleware::auth::AuthUser;
+use api::middleware::wallet_context::WalletContext;
+use api::permissions::WalletRole;
+use api::{AppState, Config};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -237,7 +237,7 @@ async fn test_sync_read_permission_filter_and_full_pull() {
 
     let config =
         Arc::new(Config::from_env().expect("Config::from_env (set TEST_DATABASE_URL etc.)"));
-    let broadcast_tx = debt_tracker_api::websocket::create_broadcast_channel();
+    let broadcast_tx = api::websocket::create_broadcast_channel();
     let app_state = create_test_app_state(pool, config, broadcast_tx);
 
     // Insert events using post_sync_events from owner (which populates user_readable_events)

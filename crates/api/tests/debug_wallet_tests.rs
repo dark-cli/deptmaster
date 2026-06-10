@@ -2,10 +2,10 @@
 // Each test is completely isolated with fresh data
 
 use chrono::Utc;
-use debt_tracker_api::config::Config;
-use debt_tracker_api::handlers::wallets;
-use debt_tracker_api::middleware::auth::AuthUser;
-use debt_tracker_api::websocket;
+use api::config::Config;
+use api::handlers::wallets;
+use api::middleware::auth::AuthUser;
+use api::websocket;
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -30,7 +30,7 @@ async fn setup() -> PgPool {
     pool
 }
 
-fn create_app_state(pool: PgPool) -> debt_tracker_api::AppState {
+fn create_app_state(pool: PgPool) -> api::AppState {
     let config = Arc::new(Config::from_env().unwrap());
     let broadcast_tx = websocket::create_broadcast_channel();
     test_helpers::create_test_app_state(pool, config, broadcast_tx)
@@ -269,7 +269,7 @@ async fn test_repository_get_wallet() {
     assert!(insert_result.is_ok());
 
     // Use repository directly
-    use debt_tracker_api::database::repository::{Database, DatabaseRepository};
+    use api::database::repository::{Database, DatabaseRepository};
 
     let db = Database::new(pool.clone());
 
@@ -323,7 +323,7 @@ async fn test_repository_list_wallets() {
     println!("Insert result: {:?}", insert_result);
     assert!(insert_result.is_ok());
 
-    use debt_tracker_api::database::repository::{Database, DatabaseRepository};
+    use api::database::repository::{Database, DatabaseRepository};
 
     let db = Database::new(pool.clone());
 
@@ -372,7 +372,7 @@ async fn test_add_user_detailed() {
     println!("Step 4: Added acting user as owner");
 
     // Step 4: Test get_user_by_username directly
-    use debt_tracker_api::database::repository::{Database, DatabaseRepository};
+    use api::database::repository::{Database, DatabaseRepository};
     let db = Database::new(pool.clone());
 
     println!("\nStep 5: Testing get_user_by_username...");

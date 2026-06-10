@@ -25,7 +25,7 @@ services:
 
   api:
     build:
-      context: ./rust-api
+      context: ../crates/api
       dockerfile: Dockerfile
     container_name: debt_tracker_api
     environment:

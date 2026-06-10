@@ -2,7 +2,7 @@
 //! Verifies that the cache is correctly populated, invalidated, and cleaned up
 //! across user add/remove and permission change events
 
-use debt_tracker_api::database::repository::Database;
+use api::database::repository::Database;
 use uuid::Uuid;
 
 mod test_helpers;

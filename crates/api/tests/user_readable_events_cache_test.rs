@@ -4,14 +4,14 @@
 
 use axum::extract::{Extension, Json, State};
 use chrono::Utc;
-use debt_tracker_api::database::repository::Database;
-use debt_tracker_api::domain::events::{DomainEvent, EventData};
-use debt_tracker_api::handlers::sync::post_sync_events;
-use debt_tracker_api::middleware::auth::AuthUser;
-use debt_tracker_api::middleware::wallet_context::WalletContext;
-use debt_tracker_api::permissions::WalletRole;
-use debt_tracker_api::websocket;
-use debt_tracker_api::Config;
+use api::database::repository::Database;
+use api::domain::events::{DomainEvent, EventData};
+use api::handlers::sync::post_sync_events;
+use api::middleware::auth::AuthUser;
+use api::middleware::wallet_context::WalletContext;
+use api::permissions::WalletRole;
+use api::websocket;
+use api::Config;
 use std::sync::Arc;
 use uuid::Uuid;
 

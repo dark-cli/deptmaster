@@ -10,11 +10,11 @@
 // 8. Updating user roles in wallets
 
 use chrono;
-use debt_tracker_api::config::Config;
-use debt_tracker_api::handlers::wallets;
-use debt_tracker_api::middleware::auth::AuthUser;
-use debt_tracker_api::permissions::WalletRole;
-use debt_tracker_api::websocket;
+use api::config::Config;
+use api::handlers::wallets;
+use api::middleware::auth::AuthUser;
+use api::permissions::WalletRole;
+use api::websocket;
 use std::sync::Arc;
 use uuid::Uuid;
 

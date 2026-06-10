@@ -1,4 +1,4 @@
-use debt_tracker_api::permissions::{
+use api::permissions::{
     Action, PermissionContext, PermissionModel, Resource, WalletRole,
 };
 use uuid::Uuid;

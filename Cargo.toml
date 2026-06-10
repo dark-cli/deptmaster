@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "backend/rust-api",
+    "crates/api",
     "crates/debitum_client_core",
     "crates/domain",
     "frontend",

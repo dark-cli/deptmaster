@@ -45,7 +45,7 @@ You can override any setting:
 PORT=8001 RUST_LOG=info ./scripts/run-server-dev.sh
 ```
 
-Or create a `.env` file in `backend/rust-api/` directory:
+Or create a `.env` file in `crates/api/` directory:
 ```bash
 DATABASE_URL=postgresql://debt_tracker:dev_password@localhost:5432/debt_tracker
 REDIS_URL=redis://localhost:6379
@@ -80,5 +80,5 @@ The script will automatically use it if available.
 - Or use a different port: `PORT=8001 ./scripts/run-server-dev.sh`
 
 ### Compilation errors
-- Make sure you're in the right directory: `cd backend/rust-api`
+- Make sure you're in the right directory: `cd crates/api`
 - Try cleaning: `cargo clean && cargo build`

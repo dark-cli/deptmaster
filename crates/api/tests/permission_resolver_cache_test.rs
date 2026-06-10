@@ -1,8 +1,8 @@
 //! Tests for resolver integration with permission matrix cache
 //! Verifies that the resolver correctly uses the cached permissions for ContactGroup lookups
 
-use debt_tracker_api::database::repository::Database;
-use debt_tracker_api::permissions::{
+use api::database::repository::Database;
+use api::permissions::{
     Action, PermissionContext, PermissionModel, Resource, WalletRole,
 };
 use uuid::Uuid;

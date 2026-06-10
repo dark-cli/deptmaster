@@ -1,14 +1,14 @@
 [package]
-name = "debt-tracker-api"
+name = "api"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "debt_tracker_api"
+name = "api"
 path = "src/lib.rs"
 
 [[bin]]
-name = "debt-tracker-api"
+name = "api"
 path = "src/main.rs"
 
 [[bin]]

@@ -1,5 +1,5 @@
-use debt_tracker_api::database::models::UserSettings;
-use debt_tracker_api::database::repository::{Database, DatabaseRepository};
+use api::database::models::UserSettings;
+use api::database::repository::{Database, DatabaseRepository};
 
 mod test_helpers;
 use test_helpers::*;

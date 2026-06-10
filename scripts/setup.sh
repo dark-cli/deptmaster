@@ -101,7 +101,7 @@ echo ""
 
 # Setup backend
 print_step "Setting up backend..."
-cd backend/rust-api
+cd crates/api
 
 print_info "Installing Rust dependencies..."
 cargo build --quiet 2>/dev/null || cargo build

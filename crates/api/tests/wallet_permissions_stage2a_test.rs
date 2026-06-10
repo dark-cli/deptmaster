@@ -7,8 +7,8 @@
 //!
 //! Note: This test is ignored by default because it requires a running test database.
 
-use debt_tracker_api::handlers::wallets;
-use debt_tracker_api::middleware::auth::AuthUser;
+use api::handlers::wallets;
+use api::middleware::auth::AuthUser;
 use uuid::Uuid;
 
 mod test_helpers;
@@ -31,8 +31,8 @@ async fn stage2a_cannot_edit_wallet_you_are_not_in_but_can_view_it() {
     add_user_to_wallet(&pool, user_a, wallet_a, "owner").await;
     add_user_to_wallet(&pool, user_b, wallet_b, "owner").await;
 
-    let config = std::sync::Arc::new(debt_tracker_api::config::Config::from_env().unwrap());
-    let broadcast_tx = debt_tracker_api::websocket::create_broadcast_channel();
+    let config = std::sync::Arc::new(api::config::Config::from_env().unwrap());
+    let broadcast_tx = api::websocket::create_broadcast_channel();
     let app_state = test_helpers::create_test_app_state(pool.clone(), config, broadcast_tx);
 
     // Control: user A edits wallet A (should succeed).

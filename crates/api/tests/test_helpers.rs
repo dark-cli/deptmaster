@@ -1,9 +1,9 @@
 // Test helpers for setting up test database and data
 
 use chrono::Utc;
-use debt_tracker_api::middleware::auth::AuthUser;
-use debt_tracker_api::middleware::wallet_context::WalletContext;
-use debt_tracker_api::permissions::WalletRole;
+use api::middleware::auth::AuthUser;
+use api::middleware::wallet_context::WalletContext;
+use api::permissions::WalletRole;
 use sqlx::PgPool;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -260,14 +260,14 @@ pub async fn setup_contact_for_wallet(
 /// Create AppState for tests
 pub fn create_test_app_state(
     pool: PgPool,
-    config: std::sync::Arc<debt_tracker_api::config::Config>,
-    broadcast_tx: debt_tracker_api::websocket::BroadcastChannel,
-) -> debt_tracker_api::AppState {
+    config: std::sync::Arc<api::config::Config>,
+    broadcast_tx: api::websocket::BroadcastChannel,
+) -> api::AppState {
     use std::sync::Arc;
-    debt_tracker_api::AppState {
+    api::AppState {
         db_pool: Arc::new(pool),
         config,
         broadcast_tx,
-        rate_limiter: debt_tracker_api::middleware::rate_limit::RateLimiter::new(100, 60),
+        rate_limiter: api::middleware::rate_limit::RateLimiter::new(100, 60),
     }
 }
