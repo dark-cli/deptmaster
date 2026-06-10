@@ -23,5 +23,6 @@
 pub mod model;
 pub mod queries;
 pub mod resolver;
+pub mod server_store;
 
 pub use model::PermissionModel;

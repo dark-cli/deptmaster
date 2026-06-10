@@ -35,6 +35,10 @@ domain = { path = "../domain" }
 # server's existing apply_*_typed methods.
 applier = { path = "../applier" }
 
+# Shared permission-resolution logic. PermissionStore trait + pure-Rust
+# resolve_actions / permitted_contacts_for_action.
+resolver = { path = "../resolver" }
+
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }

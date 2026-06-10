@@ -22,73 +22,60 @@ async fn is_wallet_owner(pool: &PgPool, wallet_id: Uuid, user_id: Uuid) -> Resul
     Ok(is_owner)
 }
 
-/// Resolve allowed actions for a user on a resource
-/// Uses single JOIN query for efficiency
+/// Resolve allowed actions for a user on a resource.
+///
+/// Thin wrapper around the shared `resolver::resolve_actions`. The rules
+/// (3-state matrix, deny wins, all_contacts wildcard, owner short-circuit)
+/// live in the resolver crate; here we just plug in the server's
+/// PermissionStore impl and a cache short-circuit.
 pub async fn resolve_actions(
     pool: &PgPool,
     ctx: &PermissionContext,
     resource: &Resource,
 ) -> Result<HashSet<Action>, DbError> {
-    // Owners have all permissions
-    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
-        return Ok(Action::all().iter().copied().collect());
-    }
-
-    // Handle ContactGroup resources specially using cached permission matrix
-    if let Resource::ContactGroup(group_id) = resource {
-        // Query cached matrix: O(1) index lookup instead of expensive JOINs
-        // The cache is computed when users are added/permissions change
-        let cached_perms: Vec<(String, bool)> = sqlx::query_as(
-            r#"
-            SELECT pa.name, ucpm.is_deny
-            FROM user_permission_matrix_cache ucpm
-            JOIN permission_actions pa ON pa.id = ucpm.permission_action_id
-            WHERE ucpm.wallet_id = $1
-              AND ucpm.user_id = $2
-              AND ucpm.contact_group_id = $3
-            "#,
-        )
-        .bind(ctx.wallet_id)
-        .bind(ctx.user_id)
-        .bind(group_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-
-        // Build allowed actions, respecting deny overrides
-        let mut actions = HashSet::new();
-        for (name, is_deny) in cached_perms {
-            if !is_deny {
+    // Server-only optimization: ContactGroup resources have a precomputed
+    // user_permission_matrix_cache row. O(1) lookup beats the full
+    // resolution pipeline. Owners still skip the cache (they get
+    // Action::all unconditionally).
+    if !super::server_store::ServerPermissionStore::new(pool)
+        .is_wallet_owner(ctx.wallet_id, ctx.user_id)
+        .await?
+    {
+        if let Resource::ContactGroup(group_id) = resource {
+            let cached: Vec<(String, bool)> = sqlx::query_as(
+                r#"
+                SELECT pa.name, ucpm.is_deny
+                  FROM user_permission_matrix_cache ucpm
+                  JOIN permission_actions pa ON pa.id = ucpm.permission_action_id
+                 WHERE ucpm.wallet_id = $1 AND ucpm.user_id = $2 AND ucpm.contact_group_id = $3
+                "#,
+            )
+            .bind(ctx.wallet_id)
+            .bind(ctx.user_id)
+            .bind(group_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+            let mut allowed = HashSet::new();
+            let mut denied = HashSet::new();
+            for (name, is_deny) in cached {
                 if let Some(action) = Action::from_str(&name) {
-                    actions.insert(action);
+                    if is_deny {
+                        denied.insert(action);
+                    } else {
+                        allowed.insert(action);
+                    }
                 }
             }
-        }
-        return Ok(actions);
-    }
-
-    // Get resource ID (None for wildcard resources)
-    let resource_id = resource.id();
-
-    // Execute single query to get allowed actions for Contact/Transaction/Wallet resources
-    let action_names: Vec<String> = sqlx::query_scalar(queries::RESOLVE_ACTIONS_QUERY)
-        .bind(ctx.wallet_id)
-        .bind(ctx.user_id)
-        .bind(resource_id)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-
-    // Convert string action names to enum
-    let mut actions = HashSet::new();
-    for name in action_names {
-        if let Some(action) = Action::from_str(&name) {
-            actions.insert(action);
+            return Ok(allowed.difference(&denied).copied().collect());
         }
     }
 
-    Ok(actions)
+    let store = super::server_store::ServerPermissionStore::new(pool);
+    resolver::resolve_actions(&store, ctx, resource).await
 }
+
+use resolver::PermissionStore as _;
 
 /// Check if user can perform action on resource
 pub async fn can_perform(
@@ -191,20 +178,14 @@ pub async fn get_permitted_transaction_contacts(
 }
 
 /// Shared implementation: resolves the user's allow-minus-deny contact set for one action.
-/// See [`queries::PERMITTED_CONTACTS_FOR_ACTION`] for the SQL.
+/// Delegates to `resolver::permitted_contacts_for_action`.
 async fn permitted_contacts_for_action(
     pool: &PgPool,
     ctx: &PermissionContext,
     action: &str,
 ) -> Result<HashSet<Uuid>, DbError> {
-    let ids: Vec<Uuid> = sqlx::query_scalar(queries::PERMITTED_CONTACTS_FOR_ACTION)
-        .bind(ctx.wallet_id)
-        .bind(ctx.user_id)
-        .bind(action)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
-    Ok(ids.into_iter().collect())
+    let store = super::server_store::ServerPermissionStore::new(pool);
+    resolver::permitted_contacts_for_action(&store, ctx, action).await
 }
 
 /// Filter events to return only those readable by user
