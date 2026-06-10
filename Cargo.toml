@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/server",
-    "crates/client_core",
+    "crates/sdk",
     "crates/domain",
     "crates/frontend",
 ]

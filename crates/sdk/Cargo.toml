@@ -1,5 +1,5 @@
 [package]
-name = "client_core"
+name = "sdk"
 version = "0.1.0"
 edition = "2021"
 # Disable autodiscovery of integration tests: tests/single_app.rs etc. are NOT

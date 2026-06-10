@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use client_core::manual_sync;
+use sdk::manual_sync;
 
 use super::app_instance::AppInstance;
 use super::command_runner::CommandRunner;

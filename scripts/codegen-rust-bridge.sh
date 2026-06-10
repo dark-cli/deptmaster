@@ -4,6 +4,6 @@
 set -e
 cd "$(dirname "$0")/.."
 export PATH="${FLUTTER_ROOT:-$HOME/flutter}/bin:$PATH"
-cd crates/client_core
+cd crates/sdk
 flutter_rust_bridge_codegen generate --config-file flutter_rust_bridge.yaml
-echo "Done. Generated: mobile/lib/src/*.dart, crates/client_core/src/frb_generated.rs"
+echo "Done. Generated: mobile/lib/src/*.dart, crates/sdk/src/frb_generated.rs"

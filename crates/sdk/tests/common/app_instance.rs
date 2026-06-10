@@ -10,7 +10,7 @@
 //!
 //! So: **signup** = register only. **login** = auth only. Wallet selection and creation are separate.
 
-use client_core::{
+use sdk::{
     create_wallet, get_contacts, get_transactions, init_storage, register, set_backend_config, set_log_context,
     set_current_wallet_id, set_network_offline,
 };
@@ -114,7 +114,7 @@ impl AppInstance {
     /// Authenticate only; does not select or create a wallet. Call select_wallet() or create_wallet() after if needed.
     pub fn login(&self) -> Result<(), String> {
         self.activate()?;
-        client_core::login(self.username.clone(), self.password.clone())?;
+        sdk::login(self.username.clone(), self.password.clone())?;
         Ok(())
     }
 
@@ -140,14 +140,14 @@ impl AppInstance {
     /// Run sync (push + pull). Call when you need to force a sync (e.g. offline test).
     pub fn sync(&self) -> Result<(), String> {
         self.activate()?;
-        client_core::manual_sync()
+        sdk::manual_sync()
     }
 
     /// Run assertion commands (same style as run_commands). E.g. "contacts count 1", "contact name \"Alice\"", "events count 12". All counts are exact.
     pub fn assert_commands(&self, commands: &[&str]) -> Result<(), String> {
         self.activate()?;
         let contacts = get_contacts()?;
-        let events = client_core::get_events()?;
+        let events = sdk::get_events()?;
         let transactions = get_transactions()?;
         super::assert_runner::assert_commands(&contacts, &events, &transactions, commands)
     }
