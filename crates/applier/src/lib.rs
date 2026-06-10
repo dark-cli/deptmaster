@@ -187,6 +187,121 @@ pub trait Projection {
         id: Uuid,
         wallet_id: Uuid,
     ) -> Result<(), Self::Error>;
+
+    // ---------- Wallet membership ----------
+
+    /// Add the user to the wallet's membership table with the given role.
+    /// Upserts: if already present, role is replaced. Does NOT manage
+    /// the user's system-group membership — `apply` calls
+    /// [`Self::add_user_to_system_group`] explicitly for that rule.
+    async fn upsert_wallet_user(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<(), Self::Error>;
+
+    /// Replace the user's role in the wallet. No-op if the user isn't a
+    /// member yet (defensive — matches existing behavior).
+    async fn update_wallet_user_role(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<(), Self::Error>;
+
+    /// Remove the user from the wallet's membership table. Cascading
+    /// cleanup of their user_group_members rows happens via the DB's
+    /// ON DELETE CASCADE (server) or PRAGMA FK (SDK).
+    async fn remove_wallet_user(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), Self::Error>;
+
+    /// Add the user to a wallet-scoped system user-group by well-known
+    /// name (e.g., `"all_users"`). Mirror of
+    /// [`Self::add_contact_to_system_group`] for users.
+    async fn add_user_to_system_group(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        system_group_name: &str,
+    ) -> Result<(), Self::Error>;
+
+    // ---------- User groups ----------
+
+    /// Insert or rename a (non-system) user group. `name` overwrites on
+    /// conflict; impls don't touch the `is_system` flag.
+    async fn upsert_user_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error>;
+
+    /// Rename a non-system user group. Silently no-op for system groups
+    /// (server enforces `WHERE is_system = false`; SDK should too).
+    async fn rename_user_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error>;
+
+    /// Delete a non-system user group. Members are cleaned up by DB
+    /// cascade. Silently no-op for system groups.
+    async fn delete_user_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<(), Self::Error>;
+
+    async fn add_user_group_member(
+        &mut self,
+        user_group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), Self::Error>;
+
+    async fn remove_user_group_member(
+        &mut self,
+        user_group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), Self::Error>;
+
+    // ---------- Contact groups ----------
+
+    async fn upsert_contact_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error>;
+
+    async fn rename_contact_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error>;
+
+    async fn delete_contact_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<(), Self::Error>;
+
+    async fn add_contact_group_member(
+        &mut self,
+        contact_group_id: Uuid,
+        contact_id: Uuid,
+    ) -> Result<(), Self::Error>;
+
+    async fn remove_contact_group_member(
+        &mut self,
+        contact_group_id: Uuid,
+        contact_id: Uuid,
+    ) -> Result<(), Self::Error>;
 }
 
 /// Apply one event to a projection. Exhaustive match over every variant of
@@ -374,26 +489,157 @@ pub async fn apply<P: Projection + Send>(
             Ok(())
         }
 
-        // -------- Permission / Wallet --------
+        // -------- Permission events --------
         //
-        // Not migrated yet — Step 3c (Permission) fills these branches.
-        // Today they're no-ops here; callers still route around to the
-        // server's existing apply_permission_event_typed for these.
-        E::WalletUserAdded { .. }
-        | E::WalletUserRoleChanged { .. }
-        | E::WalletUserRemoved { .. }
-        | E::UserGroupCreated { .. }
-        | E::UserGroupUpdated { .. }
-        | E::UserGroupDeleted { .. }
-        | E::UserGroupMemberAdded { .. }
-        | E::UserGroupMemberRemoved { .. }
-        | E::ContactGroupCreated { .. }
-        | E::ContactGroupUpdated { .. }
-        | E::ContactGroupDeleted { .. }
-        | E::ContactGroupMemberAdded { .. }
-        | E::ContactGroupMemberRemoved { .. }
-        | E::PermissionMatrixSet { .. }
+        // The wire format for permission events uses `data: serde_json::Value`
+        // (the inner payload varies by variant). apply() extracts the typed
+        // fields it needs here so the Projection trait sees only well-typed
+        // args, never raw JSON.
+
+        E::WalletUserAdded { data } => {
+            let user_id = parse_uuid_field(data, "user_id");
+            let role = data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
+            if let Some(uid) = user_id {
+                projection
+                    .upsert_wallet_user(event.wallet_id, uid, role)
+                    .await?;
+                // Every wallet member is in the `all_users` system group so
+                // the default permission matrix applies to them. Without
+                // this they'd be in wallet_users but no permission group,
+                // and every action would be rejected.
+                projection
+                    .add_user_to_system_group(event.wallet_id, uid, "all_users")
+                    .await?;
+            }
+            Ok(())
+        }
+
+        E::WalletUserRoleChanged { data } => {
+            if let (Some(uid), Some(role)) = (
+                parse_uuid_field(data, "user_id"),
+                data.get("role").and_then(|v| v.as_str()),
+            ) {
+                projection
+                    .update_wallet_user_role(event.wallet_id, uid, role)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        E::WalletUserRemoved { data } => {
+            if let Some(uid) = parse_uuid_field(data, "user_id") {
+                projection.remove_wallet_user(event.wallet_id, uid).await?;
+            }
+            Ok(())
+        }
+
+        E::UserGroupCreated { data } => {
+            let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            projection
+                .upsert_user_group(event.aggregate_id, event.wallet_id, name)
+                .await?;
+            Ok(())
+        }
+
+        E::UserGroupUpdated { data } => {
+            // Covers USER_GROUP_RENAMED too (same wire effect: change name).
+            let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            projection
+                .rename_user_group(event.aggregate_id, event.wallet_id, name)
+                .await?;
+            Ok(())
+        }
+
+        E::UserGroupDeleted { .. } => {
+            projection
+                .delete_user_group(event.aggregate_id, event.wallet_id)
+                .await?;
+            Ok(())
+        }
+
+        E::UserGroupMemberAdded { data } => {
+            // aggregate_id is the user_group id; data carries the user.
+            if let Some(uid) = parse_uuid_field(data, "user_id") {
+                projection
+                    .add_user_group_member(event.aggregate_id, uid)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        E::UserGroupMemberRemoved { data } => {
+            if let Some(uid) = parse_uuid_field(data, "user_id") {
+                projection
+                    .remove_user_group_member(event.aggregate_id, uid)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        E::ContactGroupCreated { data } => {
+            let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            projection
+                .upsert_contact_group(event.aggregate_id, event.wallet_id, name)
+                .await?;
+            Ok(())
+        }
+
+        E::ContactGroupUpdated { data } => {
+            let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            projection
+                .rename_contact_group(event.aggregate_id, event.wallet_id, name)
+                .await?;
+            Ok(())
+        }
+
+        E::ContactGroupDeleted { .. } => {
+            projection
+                .delete_contact_group(event.aggregate_id, event.wallet_id)
+                .await?;
+            Ok(())
+        }
+
+        E::ContactGroupMemberAdded { data } => {
+            // aggregate_id is the contact_group id; data carries the contact_id.
+            if let Some(cid) = parse_uuid_field(data, "contact_id") {
+                projection
+                    .add_contact_group_member(event.aggregate_id, cid)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        E::ContactGroupMemberRemoved { data } => {
+            if let Some(cid) = parse_uuid_field(data, "contact_id") {
+                projection
+                    .remove_contact_group_member(event.aggregate_id, cid)
+                    .await?;
+            }
+            Ok(())
+        }
+
+        // -------- Intentional no-ops at apply layer --------
+        //
+        // PermissionMatrixSet: the put_permission_matrix HTTP handler writes
+        // to group_permission_matrix directly via set_permission_matrix_entries_impl,
+        // then emits this event for cache invalidation / WS broadcast.
+        // Applying it here would double-write. Once the SDK has its own
+        // matrix-set path (post Phase 0.4) this branch may grow.
+        //
+        // WalletDeleted / OwnershipTransferred: no projection rows are
+        // mutated by these in the current model.
+        E::PermissionMatrixSet { .. }
         | E::WalletDeleted { .. }
         | E::OwnershipTransferred { .. } => Ok(()),
     }
+}
+
+/// Parse a UUID string out of a JSON object field. Returns `None` if the
+/// field is missing, not a string, or not a valid UUID — same defensive
+/// posture as the existing handlers (events with malformed payloads are
+/// silently dropped, not rejected).
+fn parse_uuid_field(data: &serde_json::Value, field: &str) -> Option<Uuid> {
+    data.get(field)
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
 }

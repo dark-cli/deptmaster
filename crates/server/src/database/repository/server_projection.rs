@@ -452,4 +452,258 @@ impl<'a> Projection for ServerProjection<'a> {
         .await?;
         Ok(())
     }
+
+    // ---------- Wallet membership ----------
+
+    async fn upsert_wallet_user(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<(), Self::Error> {
+        let c = self.ctx();
+        sqlx::query(
+            r#"
+            INSERT INTO wallet_users (wallet_id, user_id, role, subscribed_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (wallet_id, user_id) DO UPDATE SET role = $3, subscribed_at = $4
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .bind(role)
+        .bind(c.created_at)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn update_wallet_user_role(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<(), Self::Error> {
+        sqlx::query("UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3")
+            .bind(role)
+            .bind(wallet_id)
+            .bind(user_id)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn remove_wallet_user(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        sqlx::query("DELETE FROM wallet_users WHERE wallet_id = $1 AND user_id = $2")
+            .bind(wallet_id)
+            .bind(user_id)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn add_user_to_system_group(
+        &mut self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        system_group_name: &str,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_group_members (user_id, user_group_id)
+            SELECT $2, ug.id
+              FROM user_groups ug
+             WHERE ug.wallet_id = $1 AND ug.name = $3
+            ON CONFLICT (user_id, user_group_id) DO NOTHING
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .bind(system_group_name)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    // ---------- User groups ----------
+
+    async fn upsert_user_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_groups (id, wallet_id, name, is_system)
+            VALUES ($1, $2, $3, false)
+            ON CONFLICT (id) DO UPDATE SET name = $3
+            "#,
+        )
+        .bind(id)
+        .bind(wallet_id)
+        .bind(name)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn rename_user_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            "UPDATE user_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false",
+        )
+        .bind(name)
+        .bind(id)
+        .bind(wallet_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_user_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            "DELETE FROM user_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false",
+        )
+        .bind(id)
+        .bind(wallet_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn add_user_group_member(
+        &mut self,
+        user_group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_group_members (user_id, user_group_id)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id, user_group_id) DO NOTHING
+            "#,
+        )
+        .bind(user_id)
+        .bind(user_group_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn remove_user_group_member(
+        &mut self,
+        user_group_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            "DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2",
+        )
+        .bind(user_id)
+        .bind(user_group_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    // ---------- Contact groups ----------
+
+    async fn upsert_contact_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO contact_groups (id, wallet_id, name, is_system)
+            VALUES ($1, $2, $3, false)
+            ON CONFLICT (id) DO UPDATE SET name = $3
+            "#,
+        )
+        .bind(id)
+        .bind(wallet_id)
+        .bind(name)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn rename_contact_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        name: &str,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            "UPDATE contact_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false",
+        )
+        .bind(name)
+        .bind(id)
+        .bind(wallet_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_contact_group(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            "DELETE FROM contact_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false",
+        )
+        .bind(id)
+        .bind(wallet_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn add_contact_group_member(
+        &mut self,
+        contact_group_id: Uuid,
+        contact_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO contact_group_members (contact_id, contact_group_id)
+            VALUES ($1, $2)
+            ON CONFLICT (contact_id, contact_group_id) DO NOTHING
+            "#,
+        )
+        .bind(contact_id)
+        .bind(contact_group_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn remove_contact_group_member(
+        &mut self,
+        contact_group_id: Uuid,
+        contact_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        sqlx::query(
+            "DELETE FROM contact_group_members WHERE contact_id = $1 AND contact_group_id = $2",
+        )
+        .bind(contact_id)
+        .bind(contact_group_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
 }

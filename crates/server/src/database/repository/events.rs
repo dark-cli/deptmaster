@@ -630,13 +630,28 @@ impl Database {
                     applier::apply(&mut proj, &domain_event).await?;
                 }
                 domain::AggregateType::Permission => {
-                    self.apply_permission_event_typed(
-                        &event_data,
+                    // Step 3c: permission events through applier::apply.
+                    // PermissionMatrixSet, WalletDeleted, and OwnershipTransferred
+                    // remain intentional no-ops in applier::apply (matrix
+                    // writes flow through put_permission_matrix handler;
+                    // wallet-lifecycle events have no projection rows today).
+                    let domain_event = domain::DomainEvent {
+                        id: event_id,
                         aggregate_id,
                         wallet_id,
+                        user_id,
+                        created_at: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                            created_at, chrono::Utc,
+                        ),
+                        version: 1,
+                        event_data: event_data.clone(),
+                    };
+                    let mut proj = super::server_projection::ServerProjection::new(
+                        &self.pool,
+                        event_db_id,
                         created_at,
-                    )
-                    .await?;
+                    );
+                    applier::apply(&mut proj, &domain_event).await?;
                 }
             }
         }
