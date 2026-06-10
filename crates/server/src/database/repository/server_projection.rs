@@ -12,7 +12,7 @@
 //! and routes Transaction/Permission events through the legacy
 //! `apply_*_typed` methods on `Database`.
 
-use applier::{ContactPatch, Projection};
+use applier::{ContactPatch, Projection, TransactionPatch};
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use domain::DomainEvent;
@@ -286,5 +286,170 @@ impl<'a> Projection for ServerProjection<'a> {
 
         self.add_contact_to_groups(contact_id, wallet_id, group_ids)
             .await
+    }
+
+    // ---------- Transaction CRUD ----------
+
+    async fn contact_is_active(
+        &self,
+        contact_id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<bool, Self::Error> {
+        sqlx::query_scalar(
+            r#"
+            SELECT EXISTS(
+              SELECT 1 FROM contacts_projection
+               WHERE id = $1 AND wallet_id = $2 AND is_deleted = false
+            )
+            "#,
+        )
+        .bind(contact_id)
+        .bind(wallet_id)
+        .fetch_one(self.pool)
+        .await
+    }
+
+    async fn upsert_transaction_row(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        contact_id: Uuid,
+        amount: i64,
+        direction: &str,
+        transaction_type: Option<&str>,
+        currency: Option<&str>,
+        description: Option<&str>,
+        transaction_date: Option<&str>,
+        due_date: Option<&str>,
+    ) -> Result<(), Self::Error> {
+        let c = self.ctx();
+        let tx_type = transaction_type.unwrap_or("money");
+        let currency = currency.unwrap_or("USD");
+
+        // Parse dates from "%Y-%m-%d" strings. transaction_date defaults to
+        // the event's created_at date if not provided; due_date is optional.
+        // If transaction_date is provided but unparseable, the historical
+        // behavior was to silently skip the whole event — preserved.
+        let txn_date = match transaction_date {
+            Some(d) => match chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d") {
+                Ok(parsed) => parsed,
+                Err(_) => return Ok(()), // unparseable date → skip event
+            },
+            None => c.created_at.date(),
+        };
+        let parsed_due_date = due_date
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+
+        sqlx::query(
+            r#"
+            INSERT INTO transactions_projection
+            (id, user_id, wallet_id, contact_id, type, direction, amount, currency, description,
+             transaction_date, due_date, is_deleted, created_at, updated_at, last_event_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, $12, $12, $13)
+            ON CONFLICT (id) DO UPDATE SET
+                contact_id       = EXCLUDED.contact_id,
+                type             = EXCLUDED.type,
+                direction        = EXCLUDED.direction,
+                amount           = EXCLUDED.amount,
+                currency         = EXCLUDED.currency,
+                description      = EXCLUDED.description,
+                transaction_date = EXCLUDED.transaction_date,
+                due_date         = EXCLUDED.due_date,
+                updated_at       = EXCLUDED.updated_at,
+                last_event_id    = EXCLUDED.last_event_id
+            "#,
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(wallet_id)
+        .bind(contact_id)
+        .bind(tx_type)
+        .bind(direction)
+        .bind(amount)
+        .bind(currency)
+        .bind(description)
+        .bind(txn_date)
+        .bind(parsed_due_date)
+        .bind(c.created_at)
+        .bind(c.event_db_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn update_transaction_row(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        patch: TransactionPatch,
+    ) -> Result<(), Self::Error> {
+        let c = self.ctx();
+
+        // Parse incoming date strings; unparseable → treat as None (keep
+        // existing) rather than skipping the whole event. Matches the
+        // prior apply_transaction_event_typed behavior for updates.
+        let new_transaction_date = patch
+            .transaction_date
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+        let new_due_date = patch
+            .due_date
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+
+        sqlx::query(
+            r#"
+            UPDATE transactions_projection SET
+                contact_id       = COALESCE($2, contact_id),
+                type             = COALESCE($3, type),
+                direction        = COALESCE($4, direction),
+                amount           = COALESCE($5, amount),
+                currency         = COALESCE($6, currency),
+                description      = COALESCE($7, description),
+                transaction_date = COALESCE($8, transaction_date),
+                due_date         = COALESCE($9, due_date),
+                updated_at       = $10,
+                last_event_id    = $12
+            WHERE id = $1 AND wallet_id = $11
+            "#,
+        )
+        .bind(id)
+        .bind(patch.contact_id)
+        .bind(patch.transaction_type)
+        .bind(patch.direction)
+        .bind(patch.amount)
+        .bind(patch.currency)
+        .bind(patch.description)
+        .bind(new_transaction_date)
+        .bind(new_due_date)
+        .bind(c.created_at)
+        .bind(wallet_id)
+        .bind(c.event_db_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn soft_delete_transaction_row(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<(), Self::Error> {
+        let c = self.ctx();
+        sqlx::query(
+            r#"
+            UPDATE transactions_projection
+               SET is_deleted = true, updated_at = $2, last_event_id = $4
+             WHERE id = $1 AND wallet_id = $3
+            "#,
+        )
+        .bind(id)
+        .bind(c.created_at)
+        .bind(wallet_id)
+        .bind(c.event_db_id)
+        .execute(self.pool)
+        .await?;
+        Ok(())
     }
 }

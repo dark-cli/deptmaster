@@ -138,6 +138,55 @@ pub trait Projection {
         wallet_id: Uuid,
         group_ids: &[Uuid],
     ) -> Result<(), Self::Error>;
+
+    // ---------- Transaction CRUD ----------
+
+    /// True iff the contact exists in this wallet and is NOT soft-deleted.
+    /// Used by [`apply`] before processing `TransactionCreated` — the
+    /// server-side rule is "transactions can only be created against live
+    /// contacts." A `false` here makes `apply` silently skip the event
+    /// (no error; matches existing apply_transaction_event_typed behavior).
+    async fn contact_is_active(
+        &self,
+        contact_id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<bool, Self::Error>;
+
+    /// Insert-or-update the transaction row. Date strings are in
+    /// `%Y-%m-%d` format; impls parse them. `transaction_date = None`
+    /// means "default to the event's created_at date" (impls use
+    /// [`Self::set_event_context`] for the fallback).
+    #[allow(clippy::too_many_arguments)]
+    async fn upsert_transaction_row(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        contact_id: Uuid,
+        amount: i64,
+        direction: &str,
+        transaction_type: Option<&str>,
+        currency: Option<&str>,
+        description: Option<&str>,
+        transaction_date: Option<&str>,
+        due_date: Option<&str>,
+    ) -> Result<(), Self::Error>;
+
+    /// Patch update. `contact_id == Some(Uuid::nil())` is treated as "no
+    /// change" by the impl (server's existing sentinel; preserved here).
+    async fn update_transaction_row(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+        patch: TransactionPatch,
+    ) -> Result<(), Self::Error>;
+
+    /// Mark the transaction as soft-deleted. No cascade.
+    async fn soft_delete_transaction_row(
+        &mut self,
+        id: Uuid,
+        wallet_id: Uuid,
+    ) -> Result<(), Self::Error>;
 }
 
 /// Apply one event to a projection. Exhaustive match over every variant of
@@ -238,17 +287,99 @@ pub async fn apply<P: Projection + Send>(
             Ok(())
         }
 
-        // -------- Transaction / Permission / Wallet --------
+        // -------- Transaction --------
+        E::TransactionCreated {
+            contact_id,
+            amount,
+            direction,
+            transaction_type,
+            currency,
+            description,
+            transaction_date,
+            due_date,
+        } => {
+            // Existing server rule: silently skip the event if the
+            // referenced contact doesn't exist or is soft-deleted. The
+            // event is still in the log; it just never lands in the
+            // transactions projection. Matches apply_transaction_event_typed
+            // behavior verbatim.
+            if !projection
+                .contact_is_active(*contact_id, event.wallet_id)
+                .await?
+            {
+                return Ok(());
+            }
+            projection
+                .upsert_transaction_row(
+                    event.aggregate_id,
+                    event.wallet_id,
+                    event.user_id,
+                    *contact_id,
+                    *amount,
+                    direction,
+                    transaction_type.as_deref(),
+                    currency.as_deref(),
+                    description.as_deref(),
+                    transaction_date.as_deref(),
+                    due_date.as_deref(),
+                )
+                .await?;
+            Ok(())
+        }
+
+        E::TransactionUpdated {
+            contact_id,
+            amount,
+            direction,
+            transaction_type,
+            currency,
+            description,
+            transaction_date,
+            due_date,
+        } => {
+            // The wire format makes contact_id non-optional (it's a Uuid,
+            // not Option<Uuid>) but the server treats Uuid::nil() as the
+            // "don't change contact_id" sentinel. Encode that here so
+            // both impls share the convention.
+            let patch_contact_id = if *contact_id == Uuid::nil() {
+                None
+            } else {
+                Some(*contact_id)
+            };
+            let patch = TransactionPatch {
+                contact_id: patch_contact_id,
+                amount: *amount,
+                direction: direction.clone(),
+                transaction_type: transaction_type.clone(),
+                currency: currency.clone(),
+                description: description.clone(),
+                transaction_date: transaction_date.clone(),
+                due_date: due_date.clone(),
+            };
+            projection
+                .update_transaction_row(event.aggregate_id, event.wallet_id, patch)
+                .await?;
+            Ok(())
+        }
+
+        E::TransactionDeleted { .. } => {
+            projection
+                .soft_delete_transaction_row(event.aggregate_id, event.wallet_id)
+                .await?;
+            Ok(())
+        }
+
+        E::TransactionUndone { .. } => {
+            // UNDO events are filtered before dispatch.
+            Ok(())
+        }
+
+        // -------- Permission / Wallet --------
         //
-        // Not migrated yet — Step 3b (Transaction) and 3c (Permission)
-        // will fill these branches. Today they're no-ops here; callers
-        // still route around to the server's existing apply_*_typed
-        // methods for non-contact aggregates.
-        E::TransactionCreated { .. }
-        | E::TransactionUpdated { .. }
-        | E::TransactionDeleted { .. }
-        | E::TransactionUndone { .. }
-        | E::WalletUserAdded { .. }
+        // Not migrated yet — Step 3c (Permission) fills these branches.
+        // Today they're no-ops here; callers still route around to the
+        // server's existing apply_permission_event_typed for these.
+        E::WalletUserAdded { .. }
         | E::WalletUserRoleChanged { .. }
         | E::WalletUserRemoved { .. }
         | E::UserGroupCreated { .. }

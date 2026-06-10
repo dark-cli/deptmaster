@@ -608,15 +608,26 @@ impl Database {
                     applier::apply(&mut proj, &domain_event).await?;
                 }
                 domain::AggregateType::Transaction => {
-                    self.apply_transaction_event_typed(
-                        &event_data,
+                    // Step 3b: transactions through applier::apply, same as
+                    // contacts above. Server-rule "skip if contact deleted"
+                    // lives in applier::apply (uses Projection::contact_is_active).
+                    let domain_event = domain::DomainEvent {
+                        id: event_id,
                         aggregate_id,
-                        user_id,
                         wallet_id,
+                        user_id,
+                        created_at: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                            created_at, chrono::Utc,
+                        ),
+                        version: 1,
+                        event_data: event_data.clone(),
+                    };
+                    let mut proj = super::server_projection::ServerProjection::new(
+                        &self.pool,
                         event_db_id,
                         created_at,
-                    )
-                    .await?;
+                    );
+                    applier::apply(&mut proj, &domain_event).await?;
                 }
                 domain::AggregateType::Permission => {
                     self.apply_permission_event_typed(
