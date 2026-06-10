@@ -20,6 +20,15 @@ WITH user_matrix AS (
     AND ugm.user_id = $2
     AND (
       cg.name = 'all_contacts'
+      -- Wildcard query: the caller asked "what actions does this user
+      -- have on contacts generally?" with no specific contact in mind
+      -- (e.g. ContactCreated, where the contact-to-be doesn't exist
+      -- yet, or "can I do anything contact-related?" UI lookups).
+      -- Any matrix grant in any contact-group counts for this case —
+      -- having `contact:create` on `Shared` means the user can create
+      -- a contact (which the apply layer will then add to Shared, per
+      -- the wallet's group-scoping rules at create time).
+      OR $3::uuid IS NULL
       OR EXISTS (
         SELECT 1 FROM contact_group_members cgm
         WHERE cgm.contact_group_id = cg.id
