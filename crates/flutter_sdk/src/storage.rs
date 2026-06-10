@@ -48,9 +48,15 @@ pub fn init(path: &str) -> Result<(), String> {
 }
 
 fn create_tables(conn: &Connection) -> Result<(), String> {
+    // FKs off by default in rusqlite; turn on so ON DELETE CASCADE works in the
+    // permission tables below. Per-connection, so set every init.
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .map_err(|e| e.to_string())?;
+
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT);
+
         CREATE TABLE IF NOT EXISTS events (
             id TEXT PRIMARY KEY,
             wallet_id TEXT NOT NULL,
@@ -64,11 +70,75 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         );
         CREATE INDEX IF NOT EXISTS idx_events_wallet ON events(wallet_id);
         CREATE INDEX IF NOT EXISTS idx_events_synced ON events(synced);
+
         CREATE TABLE IF NOT EXISTS state (
             wallet_id TEXT PRIMARY KEY,
             contacts_json TEXT NOT NULL,
             transactions_json TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        );
+
+        -- ============ Permission tables ============
+        --
+        -- Mirror of the server's permission schema (migrations 014 + 020),
+        -- minus the server-only `permission_actions` lookup table — SDK stores
+        -- action names directly as TEXT in the matrix so no join is needed.
+        -- These tables are populated by the applier (Phase 0.2 step 3) as
+        -- permission events arrive. SDK uses them to RESOLVE permissions
+        -- locally for UX feedback ("can the user tap this?"); the server
+        -- remains the authority for actually enforcing them on push.
+
+        CREATE TABLE IF NOT EXISTS user_groups (
+            id TEXT PRIMARY KEY,
+            wallet_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            is_system INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(wallet_id, name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_groups_wallet ON user_groups(wallet_id);
+
+        CREATE TABLE IF NOT EXISTS user_group_members (
+            user_id TEXT NOT NULL,
+            user_group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+            PRIMARY KEY (user_id, user_group_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_group_members_group ON user_group_members(user_group_id);
+
+        CREATE TABLE IF NOT EXISTS contact_groups (
+            id TEXT PRIMARY KEY,
+            wallet_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            is_system INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(wallet_id, name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_contact_groups_wallet ON contact_groups(wallet_id);
+
+        CREATE TABLE IF NOT EXISTS contact_group_members (
+            contact_id TEXT NOT NULL,
+            contact_group_id TEXT NOT NULL REFERENCES contact_groups(id) ON DELETE CASCADE,
+            PRIMARY KEY (contact_id, contact_group_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_contact_group_members_group ON contact_group_members(contact_group_id);
+
+        -- Layered allow/deny matrix (server's migration 020 model). is_deny=0
+        -- is allow, is_deny=1 is deny; deny wins in resolution.
+        CREATE TABLE IF NOT EXISTS group_permission_matrix (
+            user_group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+            contact_group_id TEXT NOT NULL REFERENCES contact_groups(id) ON DELETE CASCADE,
+            action TEXT NOT NULL,
+            is_deny INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_group_id, contact_group_id, action, is_deny)
+        );
+        CREATE INDEX IF NOT EXISTS idx_group_permission_matrix_scope ON group_permission_matrix(contact_group_id);
+
+        -- Wallet membership (who's in the wallet + their role). Not a server
+        -- "permission" table per se but lives in the same logical area; the
+        -- WalletUserAdded/Removed/RoleChanged events update it.
+        CREATE TABLE IF NOT EXISTS wallet_users (
+            wallet_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            PRIMARY KEY (wallet_id, user_id)
         );
         "#,
     )
