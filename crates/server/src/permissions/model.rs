@@ -3,10 +3,10 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use super::action::Action;
-use super::context::PermissionContext;
+use domain::Action;
+use domain::PermissionContext;
 use super::resolver;
-use super::resource::Resource;
+use domain::Resource;
 
 /// Permission Model - Single source of truth for all permission checks
 ///
@@ -111,7 +111,7 @@ impl PermissionModel {
     pub async fn get_readable_event_ids(
         &self,
         ctx: &PermissionContext,
-        events: &[crate::domain::events::DomainEvent],
+        events: &[domain::DomainEvent],
     ) -> Result<Vec<Uuid>, DbError> {
         resolver::filter_readable_events(&self.pool, ctx, events).await
     }
@@ -167,7 +167,7 @@ impl PermissionModel {
     pub async fn get_denied_event_ids(
         &self,
         ctx: &PermissionContext,
-        events: &[crate::domain::DomainEvent],
+        events: &[domain::DomainEvent],
     ) -> Result<Vec<Uuid>, DbError> {
         if events.is_empty() {
             return Ok(Vec::new());

@@ -1,8 +1,9 @@
 use crate::database::error::DbError;
 use crate::database::models::event::{Event, EventRow};
 use crate::database::repository::Database;
-use crate::domain::events::DomainEvent;
-use crate::permissions::{PermissionContext, PermissionModel};
+use domain::DomainEvent;
+use crate::permissions::PermissionModel;
+use domain::PermissionContext;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -156,7 +157,7 @@ impl Database {
         }
 
         let event_data =
-            serde_json::from_value::<crate::domain::events::EventData>(event_data_with_type)
+            serde_json::from_value::<domain::EventData>(event_data_with_type)
                 .map_err(|e| {
                     DbError::SerializationError(format!("Failed to deserialize event data: {}", e))
                 })?;
@@ -366,8 +367,8 @@ impl Database {
         // For each event, check which users can read it and populate cache
         for event in events {
             for (wallet_user_id, role_str) in &wallet_users {
-                let user_role = crate::permissions::WalletRole::from_str(role_str)
-                    .unwrap_or(crate::permissions::WalletRole::Member);
+                let user_role = domain::WalletRole::from_str(role_str)
+                    .unwrap_or(domain::WalletRole::Member);
                 let user_perm_ctx = PermissionContext::new(wallet_id, *wallet_user_id, user_role);
 
                 // Check if user can read this event
@@ -582,7 +583,7 @@ impl Database {
 
             // Type-driven dispatch by aggregate kind
             match event_data.aggregate_type() {
-                crate::domain::events::AggregateType::Contact => {
+                domain::AggregateType::Contact => {
                     self.apply_contact_event_typed(
                         &event_data,
                         aggregate_id,
@@ -593,7 +594,7 @@ impl Database {
                     )
                     .await?;
                 }
-                crate::domain::events::AggregateType::Transaction => {
+                domain::AggregateType::Transaction => {
                     self.apply_transaction_event_typed(
                         &event_data,
                         aggregate_id,
@@ -604,7 +605,7 @@ impl Database {
                     )
                     .await?;
                 }
-                crate::domain::events::AggregateType::Permission => {
+                domain::AggregateType::Permission => {
                     self.apply_permission_event_typed(
                         &event_data,
                         aggregate_id,
@@ -630,7 +631,7 @@ impl Database {
         aggregate_type: &str,
         event_type: &str,
         raw_data: Value,
-    ) -> Result<crate::domain::events::EventData, String> {
+    ) -> Result<domain::EventData, String> {
         let discriminator = EventDiscriminator::from_database(aggregate_type, event_type)?;
 
         let mut data_with_type = if aggregate_type == "permission" && raw_data.get("data").is_none()
@@ -647,7 +648,7 @@ impl Database {
             );
         }
 
-        serde_json::from_value::<crate::domain::events::EventData>(data_with_type)
+        serde_json::from_value::<domain::EventData>(data_with_type)
             .map_err(|e| format!("deserialization failed: {}", e))
     }
 
@@ -655,14 +656,14 @@ impl Database {
     /// Exhaustive on contact EventData variants; non-contact variants are ignored.
     async fn apply_contact_event_typed(
         &self,
-        event_data: &crate::domain::events::EventData,
+        event_data: &domain::EventData,
         aggregate_id: Uuid,
         user_id: Uuid,
         wallet_id: Uuid,
         event_db_id: i64,
         created_at: NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
-        use crate::domain::events::EventData as ED;
+        use domain::EventData as ED;
 
         match event_data {
             ED::ContactCreated {
@@ -853,14 +854,14 @@ impl Database {
     /// Exhaustive on transaction EventData variants.
     async fn apply_transaction_event_typed(
         &self,
-        event_data: &crate::domain::events::EventData,
+        event_data: &domain::EventData,
         aggregate_id: Uuid,
         user_id: Uuid,
         wallet_id: Uuid,
         event_db_id: i64,
         created_at: NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
-        use crate::domain::events::EventData as ED;
+        use domain::EventData as ED;
 
         match event_data {
             ED::TransactionCreated {
@@ -1057,12 +1058,12 @@ impl Database {
     /// Compiler enforces exhaustive matching across all 14+ permission variants.
     async fn apply_permission_event_typed(
         &self,
-        event_data: &crate::domain::events::EventData,
+        event_data: &domain::EventData,
         aggregate_id: Uuid,
         wallet_id: Uuid,
         created_at: NaiveDateTime,
     ) -> Result<(), sqlx::Error> {
-        use crate::domain::events::EventData as ED;
+        use domain::EventData as ED;
 
         // Permission EventData variants carry raw JSON payloads (generic across many shapes).
         // The type-safe match still guarantees we handle every variant.

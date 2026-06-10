@@ -3,7 +3,7 @@
 use chrono::Utc;
 use server::middleware::auth::AuthUser;
 use server::middleware::wallet_context::WalletContext;
-use server::permissions::WalletRole;
+use domain::WalletRole;
 use sqlx::PgPool;
 use std::str::FromStr;
 use uuid::Uuid;

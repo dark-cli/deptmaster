@@ -5,11 +5,11 @@
 use axum::extract::{Extension, Json, State};
 use chrono::Utc;
 use server::database::repository::Database;
-use server::domain::events::{DomainEvent, EventData};
+use domain::{DomainEvent, EventData};
 use server::handlers::sync::post_sync_events;
 use server::middleware::auth::AuthUser;
 use server::middleware::wallet_context::WalletContext;
-use server::permissions::WalletRole;
+use domain::WalletRole;
 use server::websocket;
 use server::Config;
 use std::sync::Arc;

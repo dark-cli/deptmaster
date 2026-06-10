@@ -48,11 +48,12 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::database::repository::Database;
-use crate::domain::events::{DomainEvent, EventData};
+use domain::{DomainEvent, EventData};
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
-use crate::permissions::{PermissionContext, PermissionModel};
+use crate::permissions::PermissionModel;
+use domain::PermissionContext;
 use crate::services::projections::Projections;
 use crate::services::snapshots;
 use crate::websocket;

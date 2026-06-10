@@ -1,5 +1,5 @@
 use crate::middleware::auth::AuthUser;
-use crate::permissions::WalletRole;
+use domain::WalletRole;
 use crate::AppState;
 use axum::extract::FromRequestParts;
 use axum::{

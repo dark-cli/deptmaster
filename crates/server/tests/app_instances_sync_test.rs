@@ -6,13 +6,13 @@
 
 use axum::extract::Query;
 use chrono::Utc;
-use server::domain::events::{DomainEvent, EventData};
+use domain::{DomainEvent, EventData};
 use server::handlers::sync::{
     get_sync_events, get_sync_hash, post_sync_events, SyncEvent, SyncEventsQuery,
 };
 use server::middleware::auth::AuthUser;
 use server::middleware::wallet_context::WalletContext;
-use server::permissions::WalletRole;
+use domain::WalletRole;
 use server::{AppState, Config};
 use std::sync::Arc;
 use uuid::Uuid;

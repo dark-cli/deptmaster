@@ -2,8 +2,9 @@
 //! Verifies that the resolver correctly uses the cached permissions for ContactGroup lookups
 
 use server::database::repository::Database;
-use server::permissions::{
-    Action, PermissionContext, PermissionModel, Resource, WalletRole,
+use server::permissions::PermissionModel;
+use domain::{
+    Action, PermissionContext, Resource, WalletRole,
 };
 use uuid::Uuid;
 

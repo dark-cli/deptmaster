@@ -13,7 +13,6 @@ use tracing::{error, info, Span};
 mod background;
 mod config;
 mod database;
-mod domain;
 mod handlers;
 mod middleware;
 mod models;

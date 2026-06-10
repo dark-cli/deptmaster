@@ -677,7 +677,7 @@ impl Database {
         user_id: Uuid,
     ) -> Result<(), DbError> {
         use crate::permissions::resolver;
-        use crate::permissions::{PermissionContext, WalletRole};
+        use domain::{PermissionContext, WalletRole};
 
         let role_str = sqlx::query_scalar::<_, String>(
             "SELECT role FROM wallet_users WHERE wallet_id = $1 AND user_id = $2",
@@ -705,7 +705,7 @@ impl Database {
         wallet_id: Uuid,
     ) -> Result<(), DbError> {
         use crate::permissions::resolver;
-        use crate::permissions::{PermissionContext, WalletRole};
+        use domain::{PermissionContext, WalletRole};
 
         let users = self.get_wallet_users_impl(wallet_id).await?;
         if users.is_empty() {
@@ -874,9 +874,9 @@ impl Database {
     pub async fn handle_cache_invalidation_for_event(
         &self,
         wallet_id: Uuid,
-        domain_event: &crate::domain::events::DomainEvent,
+        domain_event: &domain::DomainEvent,
     ) {
-        use crate::domain::events::EventData;
+        use domain::EventData;
 
         // Check if this event affects permissions
         let event_data = &domain_event.event_data;

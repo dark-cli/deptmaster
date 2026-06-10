@@ -2,10 +2,10 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use super::action::Action;
-use super::context::PermissionContext;
+use domain::Action;
+use domain::PermissionContext;
 use super::queries;
-use super::resource::Resource;
+use domain::Resource;
 use crate::database::error::DbError;
 
 /// Check if user is a wallet owner (stored in wallet_owners table)
@@ -112,7 +112,7 @@ pub async fn can_perform(
 pub async fn rebuild_readable_events_cache(
     pool: &PgPool,
     ctx: &PermissionContext,
-    all_events: &[crate::domain::events::DomainEvent],
+    all_events: &[domain::DomainEvent],
 ) -> Result<(), DbError> {
     // Delete existing cache
     sqlx::query("DELETE FROM user_readable_events WHERE wallet_id = $1 AND user_id = $2")
@@ -196,7 +196,7 @@ async fn permitted_contacts_for_action(
 pub async fn filter_readable_events(
     pool: &PgPool,
     ctx: &PermissionContext,
-    events: &[crate::domain::events::DomainEvent],
+    events: &[domain::DomainEvent],
 ) -> Result<Vec<Uuid>, DbError> {
     if events.is_empty() {
         return Ok(Vec::new());

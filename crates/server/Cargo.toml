@@ -25,6 +25,10 @@ path = "src/bin/set_admin_password.rs"
 # Commented out - file doesn't exist
 
 [dependencies]
+# Shared domain types (events, permissions) — single source of truth
+# for everything that crosses the wire to the client/sdk.
+domain = { path = "../domain" }
+
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }

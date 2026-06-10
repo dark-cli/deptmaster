@@ -13,7 +13,7 @@ use chrono;
 use server::config::Config;
 use server::handlers::wallets;
 use server::middleware::auth::AuthUser;
-use server::permissions::WalletRole;
+use domain::WalletRole;
 use server::websocket;
 use std::sync::Arc;
 use uuid::Uuid;

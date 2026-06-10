@@ -1,11 +1,12 @@
 use crate::database::error::DbError;
 use crate::database::repository::{Database, DatabaseRepository};
-use crate::domain::DomainEvent;
+use domain::DomainEvent;
 use crate::handlers::responses::insufficient_permission_response;
 use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
-use crate::permissions::{PermissionContext, PermissionModel, Resource, WalletRole};
+use crate::permissions::PermissionModel;
+use domain::{PermissionContext, Resource, WalletRole};
 use crate::websocket;
 use crate::AppState;
 use axum::{
@@ -2182,7 +2183,7 @@ pub async fn add_contact_group_member(
             user_id: auth_user.user_id,
             created_at: chrono::Utc::now(),
             version: 1,
-            event_data: crate::domain::EventData::ContactGroupMemberAdded {
+            event_data: domain::EventData::ContactGroupMemberAdded {
                 data: serde_json::json!({
                     "contact_id": contact_uuid.to_string(),
                     "group_id": group_uuid.to_string(),
@@ -2288,7 +2289,7 @@ pub async fn remove_contact_group_member(
             user_id: auth_user.user_id,
             created_at: chrono::Utc::now(),
             version: 1,
-            event_data: crate::domain::EventData::ContactGroupMemberRemoved {
+            event_data: domain::EventData::ContactGroupMemberRemoved {
                 data: serde_json::json!({
                     "contact_id": contact_uuid.to_string(),
                     "group_id": group_uuid.to_string(),
