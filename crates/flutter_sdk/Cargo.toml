@@ -17,8 +17,15 @@ path = "tests/integration.rs"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 base64 = "0.22"
 domain = { path = "../domain" }
+
+# Shared event-application logic. The SDK uses it to apply permission events to
+# its local SQLite permission tables (added in Phase 0.2 step 2). Contact /
+# Transaction events still flow through state_builder.rs for now; a future
+# step replaces that too.
+applier = { path = "../applier" }
 chrono = { version = "0.4", features = ["serde"] }
 flutter_rust_bridge = "=2.11.1"
 log = "0.4"

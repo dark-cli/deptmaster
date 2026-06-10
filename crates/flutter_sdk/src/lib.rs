@@ -15,6 +15,7 @@ mod frb_generated;
 mod ids;
 mod log_bridge;
 mod models;
+mod sdk_projection;
 mod state_builder;
 mod storage;
 mod sync;

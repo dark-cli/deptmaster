@@ -286,6 +286,32 @@ pub fn pull_and_merge() -> Result<(), String> {
         };
         storage::events_insert(&stored)?;
     }
+    // Feed each newly-stored event through applier::apply so the permission
+    // tables in SQLite stay in sync with the events log. Today applier's
+    // SDK impl is a no-op for contact / transaction events (state_builder
+    // below still owns those); permission events DO write to the SQLite
+    // permission tables. Failures are logged and swallowed so a single
+    // bad event doesn't abort the whole sync — same defensive posture as
+    // the existing event-store code paths.
+    if !server_events.is_empty() {
+        let mut proj = crate::sdk_projection::SdkProjection::new();
+        let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+        for ev_json in &server_events {
+            match parse_server_event_for_applier(ev_json, &wallet_id) {
+                Some(domain_event) => {
+                    if let Err(e) = rt.block_on(applier::apply(&mut proj, &domain_event)) {
+                        rust_log!("[debitum_rs] applier::apply failed for event: {:?}", e);
+                    }
+                }
+                None => {
+                    // Skip events whose shape we can't reconstruct as a
+                    // DomainEvent; they still landed in the events table
+                    // above and will be picked up by state_builder.
+                }
+            }
+        }
+    }
+
     let events = storage::events_get_all(&wallet_id)?;
     let (contacts, transactions) = state_builder::build_state_from_stored(&events)?;
     storage::state_save(&wallet_id, &contacts, &transactions)?;
@@ -330,4 +356,58 @@ pub fn invalidate_perms_cache_and_pull(wallet_id: &str) -> Result<(), String> {
         return Ok(());
     }
     clear_wallet_and_resync(wallet_id)
+}
+
+/// Reshape a server `SyncEvent` JSON value into a typed `domain::DomainEvent`.
+/// The wire format the server returns matches `DomainEvent`'s serde shape
+/// closely; we wrap the inner `event_data` with its `type` discriminator
+/// (server strips it from storage but our typed enum needs it) and let
+/// `DomainEvent`'s custom deserializer do the rest.
+///
+/// Returns `None` for events whose shape can't be reconstructed — they're
+/// still in the events table; they just don't get applied to the
+/// permission projection. The "untyped passthrough" matches the rest of
+/// the SDK's defensive event handling.
+fn parse_server_event_for_applier(
+    ev: &serde_json::Value,
+    fallback_wallet_id: &str,
+) -> Option<domain::DomainEvent> {
+    let aggregate_type = ev.get("aggregate_type").and_then(|v| v.as_str())?;
+    let event_type = ev.get("event_type").and_then(|v| v.as_str())?;
+    let discriminator = event_data_discriminator(aggregate_type, event_type)?;
+    let mut event_data = ev.get("event_data").cloned()?;
+    if let Some(obj) = event_data.as_object_mut() {
+        // Permission events on the server wire have data wrapped one level
+        // deeper. Mirror the server-side normalization (events.rs::parse_event_data_typed).
+        if aggregate_type == "permission" && !obj.contains_key("data") {
+            // Move existing fields under `data`.
+            let payload = serde_json::Value::Object(obj.clone());
+            obj.clear();
+            obj.insert("data".to_string(), payload);
+        }
+        obj.insert(
+            "type".to_string(),
+            serde_json::Value::String(discriminator.to_string()),
+        );
+    }
+
+    let user_id = ev
+        .get("user_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("00000000-0000-0000-0000-000000000000");
+    let wallet_id = ev
+        .get("wallet_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(fallback_wallet_id);
+
+    let dto = serde_json::json!({
+        "id": ev.get("id"),
+        "aggregate_id": ev.get("aggregate_id"),
+        "wallet_id": wallet_id,
+        "user_id": user_id,
+        "created_at": ev.get("timestamp"),
+        "version": ev.get("version").and_then(|v| v.as_i64()).unwrap_or(1),
+        "event_data": event_data,
+    });
+    serde_json::from_value::<domain::DomainEvent>(dto).ok()
 }

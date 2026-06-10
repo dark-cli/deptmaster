@@ -146,7 +146,7 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn with_db<F, T>(f: F) -> Result<T, String>
+pub(crate) fn with_db<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
 {
