@@ -1,0 +1,10 @@
+[package]
+name = "resolver"
+version = "0.1.0"
+edition = "2021"
+description = "Pure-Rust permission-resolution logic shared by server and SDK. The 3-state allow+deny rules, the all_contacts wildcard, the deny-wins resolution — all live here, not in SQL."
+
+[dependencies]
+async-trait = "0.1"
+domain = { path = "../domain" }
+uuid = { version = "1", features = ["v4", "serde"] }
