@@ -13,13 +13,13 @@ tags:
 The client is **two parts in two places**:
 
 1. **Flutter UI** — `mobile/lib/` (Dart screens, widgets, providers)
-2. **Rust core** — `crates/debitum_client_core/` (logic, sync, storage, FRB bridge)
+2. **Rust core** — `crates/flutter_sdk/` (logic, sync, storage, FRB bridge)
 
 All business logic lives in Rust; Flutter is a thin FFI wrapper (`mobile/lib/api.dart` calls into the Rust crate via Flutter Rust Bridge).
 
 ---
 
-## Rust Core Modules (`crates/debitum_client_core/src/`)
+## Rust Core Modules (`crates/flutter_sdk/src/`)
 
 | File | LOC | Responsibility |
 |---|---:|---|
@@ -39,7 +39,7 @@ All business logic lives in Rust; Flutter is a thin FFI wrapper (`mobile/lib/api
 
 ---
 
-## Integration Tests (`crates/debitum_client_core/tests/`)
+## Integration Tests (`crates/flutter_sdk/tests/`)
 
 | File | Focus |
 |---|---|
@@ -54,7 +54,7 @@ All business logic lives in Rust; Flutter is a thin FFI wrapper (`mobile/lib/api
 | `stress.rs` | Many concurrent operations |
 | `integration.rs` | End-to-end flows |
 
-These run against a **live backend** (Docker postgres + rust-api). Many currently fail — see `client-todo.md` and `crates/debitum_client_core/BUGS.md`.
+These run against a **live backend** (Docker postgres + rust-api). Many currently fail — see `client-todo.md` and `crates/flutter_sdk/BUGS.md`.
 
 ---
 
@@ -89,7 +89,7 @@ See `06-client/01-sync-flow.md` (TODO) for details.
 
 ## Known Issues
 
-- 12 active bugs documented in `crates/debitum_client_core/BUGS.md`
+- 12 active bugs documented in `crates/flutter_sdk/BUGS.md`
 - Most are sync/visibility related (multi-app, permission-filtered views, full-resync)
 - Architectural: client sends `event_id` instead of `idempotency_key` (see `client-todo.md` HIGH PRIORITY)
 
@@ -109,4 +109,4 @@ See `06-client/01-sync-flow.md` (TODO) for details.
 
 - [[../client-todo]] — frontend/mobile work backlog
 - [[../backend-todo]] — backend work backlog
-- `crates/debitum_client_core/BUGS.md` — failing integration tests with explanations
+- `crates/flutter_sdk/BUGS.md` — failing integration tests with explanations

@@ -34,7 +34,7 @@ tags:
 
 ### What the client sends
 
-`crates/debitum_client_core/src/sync.rs` lines 100-114:
+`crates/flutter_sdk/src/sync.rs` lines 100-114:
 
 ```json
 {
@@ -50,7 +50,7 @@ tags:
 
 ### What the server expects
 
-`backend/rust-api/src/domain/events.rs:262-301` (custom `Deserialize` for `DomainEvent`):
+`crates/server/src/domain/events.rs:262-301` (custom `Deserialize` for `DomainEvent`):
 
 ```json
 {
@@ -219,7 +219,7 @@ All `/api/wallets/:wallet_id/...` paths in the client's `wallet_management_url()
 
 ## Comparison with `main` (the baseline `BUGS.md` was written against)
 
-On `main`, the server's POST handler accepted the *exact* payload the client sends today. The relevant struct (`backend/rust-api/src/handlers/sync.rs` on `main`):
+On `main`, the server's POST handler accepted the *exact* payload the client sends today. The relevant struct (`crates/server/src/handlers/sync.rs` on `main`):
 
 ```rust
 #[derive(Deserialize, Clone)]
@@ -243,7 +243,7 @@ So **on `main`, the contract was fine**. The 12 entries in `BUGS.md` describe *s
 
 ### What changed in `client/refactor-and-stabilize` (and earlier branches before our work)
 
-Looking at `git log main..HEAD -- backend/rust-api/`:
+Looking at `git log main..HEAD -- crates/server/`:
 
 - `c065add` "Change event deduplication from event_id to idempotency_key"
 - `3a16f89` "Implement proper event deduplication using idempotency_key"
@@ -296,4 +296,4 @@ Step 2: run all client integration tests, regenerate `BUGS.md` against the curre
 - [[02-shared-domain-crate]] — the structural fix that prevents this class of bug
 - [[00-refactoring-plan]] Phase 0 — the shared-crate work that would have caught this at compile time
 - [[../client-todo]] HIGH PRIORITY → idempotency_key task already documents this from the client side
-- `crates/debitum_client_core/BUGS.md` — most entries trace to the push contract mismatch
+- `crates/flutter_sdk/BUGS.md` — most entries trace to the push contract mismatch

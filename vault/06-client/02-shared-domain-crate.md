@@ -19,15 +19,15 @@ Both sides are Rust. Both define essentially the same things twice:
 
 | Concept | Server location | Client location |
 |---|---|---|
-| `EventData` enum (28 variants) | `backend/rust-api/src/domain/events.rs` | duplicated as strings in `state_builder.rs`, `crud.rs`, `sync.rs` |
-| `DomainEvent` struct | `backend/rust-api/src/domain/events.rs` | partly mirrored by `models::Event` + `storage::StoredEvent` |
-| `Action` enum (~16 actions) | `backend/rust-api/src/permissions/action.rs` | hardcoded strings like `"contact:read"` in `sync.rs` (`READ_ACTIONS`) |
-| `Resource` enum | `backend/rust-api/src/permissions/resource.rs` | implicit, by string |
-| `Contact`, `Transaction` projection | `backend/rust-api/src/database/models/` (DB-specific) | `crates/debitum_client_core/src/models.rs` (wire-format) |
+| `EventData` enum (28 variants) | `crates/server/src/domain/events.rs` | duplicated as strings in `state_builder.rs`, `crud.rs`, `sync.rs` |
+| `DomainEvent` struct | `crates/server/src/domain/events.rs` | partly mirrored by `models::Event` + `storage::StoredEvent` |
+| `Action` enum (~16 actions) | `crates/server/src/permissions/action.rs` | hardcoded strings like `"contact:read"` in `sync.rs` (`READ_ACTIONS`) |
+| `Resource` enum | `crates/server/src/permissions/resource.rs` | implicit, by string |
+| `Contact`, `Transaction` projection | `crates/server/src/database/models/` (DB-specific) | `crates/flutter_sdk/src/models.rs` (wire-format) |
 | `Currency`, `TransactionType`, `TransactionDirection` | implicit strings | typed enums in `models.rs` |
-| `WalletRole` (owner/member) | `backend/rust-api/src/permissions/context.rs` | hardcoded strings |
-| Typed IDs (`WalletId`, `ContactId`, …) | `Uuid` everywhere | `crates/debitum_client_core/src/ids.rs` (validated strings) |
-| `AggregateType` enum | `backend/rust-api/src/domain/events.rs` | implicit strings |
+| `WalletRole` (owner/member) | `crates/server/src/permissions/context.rs` | hardcoded strings |
+| Typed IDs (`WalletId`, `ContactId`, …) | `Uuid` everywhere | `crates/flutter_sdk/src/ids.rs` (validated strings) |
+| `AggregateType` enum | `crates/server/src/domain/events.rs` | implicit strings |
 | Event-replay logic | `apply_event_batch` in `events.rs` repository | `state_builder.rs` |
 
 **Cost of duplication today:**
@@ -70,7 +70,7 @@ Both sides are Rust. Both define essentially the same things twice:
 ```
 deptmaster/
 ├── crates/
-│   ├── debitum_domain/          ← NEW. Pure types. No I/O. No async. No DB. No FRB.
+│   ├── domain/          ← NEW. Pure types. No I/O. No async. No DB. No FRB.
 │   │   ├── src/
 │   │   │   ├── lib.rs
 │   │   │   ├── event.rs         (DomainEvent, EventData, AggregateType, EventDiscriminator)
@@ -82,11 +82,11 @@ deptmaster/
 │   │
 │   ├── debitum_event_replay/    ← NEW. Pure event-replay logic.
 │   │   ├── src/lib.rs           (apply_event(state, event) -> state, exhaustive on EventData)
-│   │   └── Cargo.toml           (deps: debitum_domain)
+│   │   └── Cargo.toml           (deps: domain)
 │   │
-│   └── debitum_client_core/     ← MODIFIED. Adds debitum_domain + debitum_event_replay deps.
+│   └── flutter_sdk/     ← MODIFIED. Adds domain + debitum_event_replay deps.
 │
-└── backend/rust-api/            ← MODIFIED. Adds debitum_domain + debitum_event_replay deps.
+└── crates/server/            ← MODIFIED. Adds domain + debitum_event_replay deps.
                                      Removes its own copies of EventData, Action, Resource, etc.
 ```
 
@@ -96,23 +96,23 @@ Optionally add a workspace `Cargo.toml` at the root so the three crates share a 
 
 | Crate | Owns | Depends on |
 |---|---|---|
-| `debitum_domain` | Pure types only | serde, uuid, chrono, thiserror |
-| `debitum_event_replay` | `apply(state, &event) -> state` | `debitum_domain` |
-| `debitum_client_core` | SQLite storage, sync, FRB bridge, HTTP client | both above + rusqlite, reqwest, FRB |
-| `backend/rust-api` | Postgres, axum, HTTP handlers, projection cache | both above + sqlx, axum, tokio |
+| `domain` | Pure types only | serde, uuid, chrono, thiserror |
+| `debitum_event_replay` | `apply(state, &event) -> state` | `domain` |
+| `flutter_sdk` | SQLite storage, sync, FRB bridge, HTTP client | both above + rusqlite, reqwest, FRB |
+| `crates/server` | Postgres, axum, HTTP handlers, projection cache | both above + sqlx, axum, tokio |
 
 ---
 
 ## Constraints check
 
 ### 1. Compile targets
-- `debitum_domain` and `debitum_event_replay` must compile to: x86_64-unknown-linux-gnu (server), aarch64-apple-darwin / aarch64-linux-android (mobile), wasm32-unknown-unknown (frontend).
+- `domain` and `debitum_event_replay` must compile to: x86_64-unknown-linux-gnu (server), aarch64-apple-darwin / aarch64-linux-android (mobile), wasm32-unknown-unknown (frontend).
 - All listed deps (serde, serde_json, uuid, chrono, thiserror) are wasm-clean. ✅
 
 ### 2. Flutter Rust Bridge
 - FRB processes the *client* crate, not the shared crate.
-- FRB-exportable items in `debitum_client_core` can re-export `debitum_domain` types via `pub use` (FRB v2 supports type re-exports).
-- Risk: FRB type emission for tagged-enum (`EventData`) is more complex on the Dart side. May need to keep a flat "DTO" layer in `debitum_client_core` for FRB and convert to/from `debitum_domain::EventData` internally. Acceptable cost.
+- FRB-exportable items in `flutter_sdk` can re-export `domain` types via `pub use` (FRB v2 supports type re-exports).
+- Risk: FRB type emission for tagged-enum (`EventData`) is more complex on the Dart side. May need to keep a flat "DTO" layer in `flutter_sdk` for FRB and convert to/from `domain::EventData` internally. Acceptable cost.
 
 ### 3. Async / runtime
 - Pure types don't need async. ✅
@@ -135,13 +135,13 @@ Optionally add a workspace `Cargo.toml` at the root so the three crates share a 
 
 ## Migration steps (high level — not committing yet)
 
-1. **Create `crates/debitum_domain`** with the pure types. Copy from backend, adapt where backend uses DB-specific decorators.
+1. **Create `crates/domain`** with the pure types. Copy from backend, adapt where backend uses DB-specific decorators.
 2. **Create `crates/debitum_event_replay`** with `apply(&mut Projection, &DomainEvent)`. Extract from server's `apply_event_batch_typed` handlers (we just wrote them in type-driven form — perfect timing).
 3. **Add workspace `Cargo.toml`** at the project root so all three crates share `target/`.
-4. **Backend migration:** swap backend's `domain::events`, `permissions::action`, `permissions::resource`, `permissions::context` for re-exports from `debitum_domain`. Keep the backend-specific glue (`apply_event_batch` becomes a thin wrapper that loads rows → calls `debitum_event_replay::apply` → writes back).
+4. **Backend migration:** swap backend's `domain::events`, `permissions::action`, `permissions::resource`, `permissions::context` for re-exports from `domain`. Keep the backend-specific glue (`apply_event_batch` becomes a thin wrapper that loads rows → calls `debitum_event_replay::apply` → writes back).
 5. **Client migration:** swap client's `models.rs`, `state_builder.rs` for shared types + shared replay. Remove the hardcoded string event types.
 6. **Run all tests both sides.** This should *expose* shape mismatches we've been ignoring (especially BUGS #8, #9).
-7. **Add the `Notification` type to `debitum_domain`** so the notification stack from [[01-design-notes]] decision 2 is type-shared from day one.
+7. **Add the `Notification` type to `domain`** so the notification stack from [[01-design-notes]] decision 2 is type-shared from day one.
 
 ---
 
@@ -149,7 +149,7 @@ Optionally add a workspace `Cargo.toml` at the root so the three crates share a 
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| FRB can't export `#[serde(tag = "type")]` enum cleanly | Medium | Keep DTO layer in `debitum_client_core`, convert internally |
+| FRB can't export `#[serde(tag = "type")]` enum cleanly | Medium | Keep DTO layer in `flutter_sdk`, convert internally |
 | Backend has subtle dependencies on `DomainEvent` having access to `wallet_id`/`user_id` that the client version doesn't need | Low | The fields are already aligned; verify by diffing the struct |
 | Workspace Cargo refactor disrupts build scripts (`build.rs` in `frontend`, `cargo-wrap`) | Medium | Test workspace compile before committing; can also avoid workspace and use path deps |
 | Cyclic git-history pain (huge diff) | Medium | Land in two PRs: (1) introduce shared crates with copies, no callers; (2) switch callers. Easy to bisect. |
@@ -175,5 +175,5 @@ If the user agrees, the order becomes:
 ## Open questions for the user
 
 1. **Workspace yes/no?** Adding a root `Cargo.toml` workspace is conventional and shares `target/`, but it touches every crate. Alternative: keep them independent with path deps.
-2. **Should `frontend/` (Dioxus web) also depend on `debitum_domain`?** It currently has its own (untyped) view of events.
-3. **FRB DTO layer:** are you OK with a thin DTO shell in `debitum_client_core` for the Dart bridge, with conversion to `debitum_domain` types internally? (Avoids FRB issues with serde-tagged enums on the Dart side.)
+2. **Should `frontend/` (Dioxus web) also depend on `domain`?** It currently has its own (untyped) view of events.
+3. **FRB DTO layer:** are you OK with a thin DTO shell in `flutter_sdk` for the Dart bridge, with conversion to `domain` types internally? (Avoids FRB issues with serde-tagged enums on the Dart side.)

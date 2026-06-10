@@ -119,10 +119,10 @@ Full proposal with crate layout, constraint analysis, FRB compatibility, migrati
 
 ```
 crates/
-  debitum_domain/         ← NEW: pure types (serde, uuid, chrono only)
+  domain/         ← NEW: pure types (serde, uuid, chrono only)
   debitum_event_replay/   ← NEW: apply(state, event) — used by both sides
-  debitum_client_core/    ← uses the two above
-backend/rust-api/         ← uses the two above
+  flutter_sdk/    ← uses the two above
+crates/server/         ← uses the two above
 ```
 
 ### Why do it NOW (before more bug fixes)
@@ -141,8 +141,8 @@ backend/rust-api/         ← uses the two above
 ### Open questions for the user
 
 1. **Workspace `Cargo.toml`** at the root, or keep crates independent with path deps?
-2. Should `frontend/` (the Dioxus web crate) also depend on `debitum_domain`?
-3. Are you OK with a thin DTO shell in `debitum_client_core` for FRB ↔ Dart (to avoid FRB issues with serde-tagged enums)?
+2. Should `frontend/` (the Dioxus web crate) also depend on `domain`?
+3. Are you OK with a thin DTO shell in `flutter_sdk` for FRB ↔ Dart (to avoid FRB issues with serde-tagged enums)?
 
 ---
 

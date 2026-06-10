@@ -17,18 +17,18 @@ metadata:
 ## Current State
 
 ### Database Code Locations
-- **Connection Pool**: `backend/rust-api/src/database/pool.rs` ✅
-- **Models**: `backend/rust-api/src/database/models/` ✅ (event, contact, transaction, wallet, permission, user)
-- **Repository Interface**: `backend/rust-api/src/database/repository.rs` ✅ (stub)
+- **Connection Pool**: `crates/server/src/database/pool.rs` ✅
+- **Models**: `crates/server/src/database/models/` ✅ (event, contact, transaction, wallet, permission, user)
+- **Repository Interface**: `crates/server/src/database/repository.rs` ✅ (stub)
 - **Raw Queries**: Still scattered across handlers (sync.rs, wallets.rs, etc.) - 1000+ sqlx calls to move
-- **Migrations**: `backend/rust-api/migrations/` (21 files, untouched)
+- **Migrations**: `crates/server/migrations/` (21 files, untouched)
 
 ---
 
 ## Implemented Structure
 
 ```
-backend/rust-api/src/database/
+crates/server/src/database/
 ├── mod.rs                         ← Module exports + re-exports
 ├── pool.rs                        ← Connection pool (PgPool, DatabasePool type)
 ├── error.rs                       ← DbError enum (NotFound, DuplicateKey, etc.)
@@ -52,7 +52,7 @@ backend/rust-api/src/database/
 ## Implementation Phases (Revised)
 
 ### ✅ Phase 1: Module Structure & Models (COMPLETE)
-- [x] Create `backend/rust-api/src/database/` module organization
+- [x] Create `crates/server/src/database/` module organization
 - [x] Create `pool.rs` with connection pool setup
 - [x] Create `error.rs` with DbError enum
 - [x] Create `models/` submodule with all entity types
@@ -120,7 +120,7 @@ For each handler file (in order): auth.rs → users.rs → wallets.rs → contac
 
 ## Migration Plan
 
-The migrations directory in `backend/rust-api/migrations/` is NOT moved. SqlX will continue to discover migrations from there automatically.
+The migrations directory in `crates/server/migrations/` is NOT moved. SqlX will continue to discover migrations from there automatically.
 
 If in the future the database module becomes its own crate, migrations can be moved at that time with sqlx.toml configuration.
 

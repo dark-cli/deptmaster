@@ -29,7 +29,7 @@ This mirrors the backend process: **read → document → divide & conquer → f
 After the discovery review surfaced how much the client and server duplicate (events, permissions, projections, replay logic), the decision was made to extract shared types **first**, before applying any bug fixes. See [[02-shared-domain-crate]] for the full proposal and [[01-design-notes]] Decision 4 for the summary.
 
 **Order:**
-1. Create `crates/debitum_domain` (pure types) with backend's `EventData`, `Action`, `Resource`, `WalletRole`, projection structs copied in. No callers touched yet.
+1. Create `crates/domain` (pure types) with backend's `EventData`, `Action`, `Resource`, `WalletRole`, projection structs copied in. No callers touched yet.
 2. Create `crates/debitum_event_replay` (`apply(state, &event) -> state`) factored from the server's type-driven handlers.
 3. Migrate backend to use the shared crates. All 59 backend tests must still pass.
 4. Migrate client to use the shared crates. This alone should kill some of the BUGS (#8, #9 likely).
@@ -37,8 +37,8 @@ After the discovery review surfaced how much the client and server duplicate (ev
 
 **Open questions blocking start** (need user input):
 1. Workspace `Cargo.toml` at the root, or keep crates independent with path deps?
-2. Should `frontend/` (Dioxus web) also depend on `debitum_domain`?
-3. OK with a thin DTO shell in `debitum_client_core` for FRB ↔ Dart?
+2. Should `frontend/` (Dioxus web) also depend on `domain`?
+3. OK with a thin DTO shell in `flutter_sdk` for FRB ↔ Dart?
 
 ---
 
@@ -156,4 +156,4 @@ The Rust core is ~3000 LOC across 8 handwritten modules. Tackle in dependency or
 - [[00-overview]] — module map
 - [[../client-todo]] — full client backlog
 - [[../backend-todo]] — backend backlog (for cross-reference)
-- `crates/debitum_client_core/BUGS.md` — failing test catalog
+- `crates/flutter_sdk/BUGS.md` — failing test catalog

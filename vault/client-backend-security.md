@@ -12,7 +12,7 @@ The connection between the mobile/web client and backend is **unencrypted by def
 
 ### Backend Configuration
 
-**File**: `backend/rust-api/src/config.rs`
+**File**: `crates/server/src/config.rs`
 
 ```rust
 enable_tls: env::var("ENABLE_TLS")
@@ -154,8 +154,8 @@ Unencrypted JWT in Authorization header
 ## File Locations
 
 ### Backend
-- Configuration: `backend/rust-api/src/config.rs` (lines 42-45)
-- Server startup: `backend/rust-api/src/main.rs` (lines 164-230)
+- Configuration: `crates/server/src/config.rs` (lines 42-45)
+- Server startup: `crates/server/src/main.rs` (lines 164-230)
 - Environment: `backend/.env.example` (no ENABLE_TLS documented)
 
 ### Client

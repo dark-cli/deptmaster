@@ -19,7 +19,7 @@ tags:
 
 ### Client-Core Integration (NEW ARCHITECTURE)
 - ✅ Flutter Rust Bridge setup (done)
-- ✅ Debitum client-core library (done - crates/debitum_client_core)
+- ✅ Debitum client-core library (done - crates/flutter_sdk)
 - ✅ Permissions module in client-core (done with full tests)
 - ✅ Wallet-scoped providers (done - wallet_data_providers.dart)
 - ✅ Migrate all mobile screens to use client-core (DONE - all screens use Api FFI wrapper)
@@ -43,8 +43,8 @@ tags:
   - Impact: Prevents duplicates from network retries, UI glitches, or button re-enabling
   - Effort: 2-3 hours (update payload structure, local storage schema)
   - Files: 
-    - crates/debitum_client_core/src/crud.rs (remove event_id generation)
-    - crates/debitum_client_core/src/sync.rs (add idempotency_key to payload)
+    - crates/flutter_sdk/src/crud.rs (remove event_id generation)
+    - crates/flutter_sdk/src/sync.rs (add idempotency_key to payload)
     - mobile/lib/ (update StoredEvent schema if using local SQLite)
 
 ### Sync Hash Optimization (PERFORMANCE)
@@ -54,14 +54,14 @@ tags:
   - **Solution**: Use get_sync_hash endpoint to detect changes before pulling events
   - **Implementation**:
     1. Store last_hash + last_sync_timestamp in local storage
-    2. Call `GET /api/sync/hash` (backend/rust-api/src/handlers/sync.rs:193)
+    2. Call `GET /api/sync/hash` (crates/server/src/handlers/sync.rs:193)
     3. If returned hash == cached hash → skip get_sync_events (save network)
     4. If hash differs → call get_sync_events to pull changes
     5. Update cached hash + timestamp
   - **Server Endpoint**: GET /api/sync/hash returns { hash: String, event_count: i32, last_event_timestamp: String }
   - **Effort**: 1-2 hours
   - **Impact**: Eliminates network round trip when no changes (especially for frequent sync polling)
-  - **Files**: crates/debitum_client_core/src/sync.rs (pull_and_merge function), mobile/lib/providers/sync_provider.dart
+  - **Files**: crates/flutter_sdk/src/sync.rs (pull_and_merge function), mobile/lib/providers/sync_provider.dart
 
 ### Sync Permission Failure Recovery (CLIENT - Dependent on Backend)
 - [ ] Client-side sync failure recovery system (DEPENDS ON: backend returning detailed error per event)
@@ -75,7 +75,7 @@ tags:
     5. Retry sync with cleaned batch
     6. User unblocked
   - **Prerequisite**: Backend must return detailed error response (see backend-todos.md)
-  - **Files**: crates/debitum_client_core/src/sync.rs (push_unsynced)
+  - **Files**: crates/flutter_sdk/src/sync.rs (push_unsynced)
   - **Effort**: 2-3 hours (after backend work)
 
 ---

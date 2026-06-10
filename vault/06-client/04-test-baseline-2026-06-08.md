@@ -8,7 +8,7 @@ tags:
 # Client Integration Tests — Baseline 2026-06-08
 
 Series of fixes that landed today against the integration tests in
-`crates/debitum_client_core/tests/`. All run against a live backend via the
+`crates/flutter_sdk/tests/`. All run against a live backend via the
 single `integration` test binary; per-file binaries are disabled
 (`autotests = false`) since they're just modules of `integration.rs`.
 
@@ -37,7 +37,7 @@ cargo install cargo-nextest --locked
 # 2. Run the suite
 ./scripts/manage.sh test-integration
 # or directly:
-cd crates/debitum_client_core && cargo nextest run --run-ignored all --no-fail-fast
+cd crates/flutter_sdk && cargo nextest run --run-ignored all --no-fail-fast
 ```
 
 The dev server defaults `RATE_LIMIT_REQUESTS=100000`. The production default

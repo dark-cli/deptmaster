@@ -107,7 +107,7 @@ Default credentials after reset:
 ./scripts/manage.sh logs
 
 # Terminal 4: Run tests
-cd backend/rust-api && cargo test
+cd crates/server && cargo test
 ```
 
 ### Scenario 4: Live Reloading Development
