@@ -1,5 +1,5 @@
 [package]
-name = "debitum_domain"
+name = "domain"
 version = "0.1.0"
 edition = "2021"
 description = "Shared domain types (events, permissions) used by both the backend and the client. Pure types, no I/O, no async, no DB, no FRB."
