@@ -1,270 +1,134 @@
 # Snapshot Tables Schema
 
-**Main question this file answers:** How is snapshot data stored in the database?
+**Main question this file answers:** How is snapshot data stored, and how does the same shape end up in two different databases?
 
 ---
 
-## The Snapshots Table
+## Where snapshots live
 
-Snapshots are stored in a simple table:
+Both server and client keep a per-wallet stack of projection snapshots. Same logical shape, two storage engines.
 
-```sql
-CREATE TABLE snapshots (
-  wallet_id UUID NOT NULL,
-  aggregate_type TEXT NOT NULL,
-  last_event_id BIGINT NOT NULL,
-  state JSONB NOT NULL,
-  created_at TIMESTAMP NOT NULL,
-  
-  PRIMARY KEY (wallet_id, aggregate_type),
-  FOREIGN KEY (wallet_id) REFERENCES wallets(id)
-);
-```
-
-**Fields:**
-- `wallet_id`: Which wallet this snapshot is for
-- `aggregate_type`: "contact", "transaction", or "permission"
-- `last_event_id`: Last event ID included in this snapshot
-- `state`: JSON data of the entire projection at this point
-- `created_at`: When the snapshot was created
-
-## Example Snapshots
-
-### Contact Snapshot
-
-```json
-{
-  "wallet_id": "wallet-123",
-  "aggregate_type": "contact",
-  "last_event_id": 50000,
-  "state": {
-    "contacts": [
-      {
-        "id": "contact-1",
-        "name": "Alice",
-        "email": "alice@example.com",
-        "phone": "555-1234"
-      },
-      {
-        "id": "contact-2",
-        "name": "Bob",
-        "email": "bob@example.com",
-        "phone": null
-      }
-    ]
-  },
-  "created_at": "2024-06-01T10:00:00Z"
-}
-```
-
-### Transaction Snapshot
-
-```json
-{
-  "wallet_id": "wallet-123",
-  "aggregate_type": "transaction",
-  "last_event_id": 50000,
-  "state": {
-    "transactions": [
-      {
-        "id": "tx-100",
-        "contact_id": "contact-1",
-        "amount": 5000,
-        "direction": "owed",
-        "description": "Dinner"
-      },
-      {
-        "id": "tx-101",
-        "contact_id": "contact-2",
-        "amount": 3000,
-        "direction": "lent",
-        "description": "Gas"
-      }
-    ]
-  },
-  "created_at": "2024-06-01T10:00:00Z"
-}
-```
-
-### Permission Snapshot
-
-```json
-{
-  "wallet_id": "wallet-123",
-  "aggregate_type": "permission",
-  "last_event_id": 50000,
-  "state": {
-    "wallet_users": [
-      {
-        "wallet_id": "wallet-123",
-        "user_id": "user-1",
-        "role": "owner"
-      },
-      {
-        "wallet_id": "wallet-123",
-        "user_id": "user-2",
-        "role": "admin"
-      }
-    ],
-    "user_groups": [
-      {
-        "id": "group-1",
-        "name": "Managers",
-        "system": false
-      }
-    ],
-    "contact_groups": [...]
-  },
-  "created_at": "2024-06-01T10:00:00Z"
-}
-```
-
-## Snapshot Lifecycle
-
-### Creating Snapshots
-
-Snapshots are created **every 1,000 events** (configurable):
-
-```rust
-const SNAPSHOT_FREQUENCY = 1000;  // events between snapshots
-
-if events_processed % SNAPSHOT_FREQUENCY == 0 {
-    create_snapshot(wallet_id, aggregate_type, last_event_id, current_state).await?;
-}
-```
-
-### Snapshot Storage Size
-
-**Per wallet:**
-```
-Contacts projection: ~100 KB (100 contacts × 1 KB each)
-Transactions projection: ~200 KB (1000 transactions × 200 bytes each)
-Permissions: ~50 KB (users, groups, memberships)
-Total per snapshot: ~350 KB
-Total per wallet (3 aggregate types): ~1 MB
-```
-
-**Scaling:**
-```
-10 wallets: 10 MB
-100 wallets: 100 MB
-1000 wallets: 1 GB
-```
-
-Acceptable for the memory savings (10x reduction).
-
-### Loading Snapshots
-
-When rebuilding, find the latest snapshot:
-
-```sql
-SELECT * FROM snapshots
-WHERE wallet_id = $1
-AND aggregate_type = $2
-ORDER BY created_at DESC
-LIMIT 1
-```
-
-### Updating Snapshots
-
-After each batch of events:
-
-```sql
-INSERT INTO snapshots (wallet_id, aggregate_type, last_event_id, state, created_at)
-VALUES ($1, $2, $3, $4, NOW())
-ON CONFLICT (wallet_id, aggregate_type) DO UPDATE
-SET last_event_id = $3, state = $4, created_at = NOW()
-```
-
-## Snapshot vs. Projection Tables
-
-| Aspect | Projection Table | Snapshot |
+| Side | Table | Engine |
 |---|---|---|
-| **Purpose** | Current state (for queries) | Checkpoint (for rebuilds) |
-| **Updated** | Every event sync | Every 1,000 events |
-| **Used by** | Application queries | Rebuild process |
-| **Size** | Small (10-100 MB) | Large (hundreds of MB, growing) |
-| **Required** | Yes (always) | Optional (optimization) |
-| **Consistency** | Must match events after rebuild | Doesn't need to match (can be rebuilt) |
+| Server | `projection_snapshots` | Postgres (sqlx) |
+| Client | `projection_snapshots` | SQLite (rusqlite) |
 
-## Schema for Historical Snapshots (Optional)
-
-You might keep a history of old snapshots for auditing:
-
-```sql
-CREATE TABLE snapshot_history (
-  id BIGSERIAL PRIMARY KEY,
-  wallet_id UUID NOT NULL,
-  aggregate_type TEXT NOT NULL,
-  last_event_id BIGINT NOT NULL,
-  state JSONB NOT NULL,
-  created_at TIMESTAMP NOT NULL,
-  
-  FOREIGN KEY (wallet_id) REFERENCES wallets(id)
-);
-```
-
-But the main `snapshots` table (with PRIMARY KEY on wallet_id, aggregate_type) is sufficient for normal operation.
-
-## Snapshot Compression (Optional)
-
-For very large snapshots, you could compress the JSON:
-
-```sql
-CREATE TABLE snapshots (
-  wallet_id UUID NOT NULL,
-  aggregate_type TEXT NOT NULL,
-  last_event_id BIGINT NOT NULL,
-  state BYTEA NOT NULL,  -- Compressed JSON
-  compression_type TEXT DEFAULT 'gzip',
-  created_at TIMESTAMP NOT NULL,
-  
-  PRIMARY KEY (wallet_id, aggregate_type)
-);
-```
-
-Then:
-```rust
-let compressed_state = compress_gzip(state_json)?;
-db.save_snapshot(wallet_id, agg_type, last_event_id, compressed_state).await?;
-
-// On load:
-let state_json = decompress_gzip(snapshot.state)?;
-```
-
-This reduces snapshot size by ~5-10x but adds CPU overhead. Trade-off depends on your needs.
-
-## Snapshot Cleanup (Optional)
-
-Over time, snapshots accumulate. You might delete old ones:
-
-```sql
-DELETE FROM snapshots
-WHERE wallet_id = $1
-AND created_at < NOW() - INTERVAL '30 days'
-AND aggregate_type = $2
-```
-
-But keep recent ones (last 1-2 weeks) for fast rebuilds.
-
-## Performance Indexes
-
-For efficient snapshot queries:
-
-```sql
-CREATE INDEX idx_snapshots_wallet_agg 
-  ON snapshots(wallet_id, aggregate_type, created_at DESC);
-```
-
-This allows quick lookup of latest snapshots:
-
-```sql
-SELECT * FROM snapshots
-WHERE wallet_id = $1 AND aggregate_type = $2
-ORDER BY created_at DESC
-LIMIT 1  -- Uses index
-```
+The shared `crates/core/snapshots` crate defines the rules (when to snapshot, rotation, UNDO-aware rebuild). Each side implements the `SnapshotStore` trait against its own table.
 
 ---
 
-Next: [05-when-optimizations-apply.md](05-when-optimizations-apply.md) — See the complete picture: when Phase 1, Phase 2, and snapshots all apply
+## Server schema (Postgres)
+
+```sql
+CREATE TABLE projection_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    wallet_id UUID NOT NULL,
+    snapshot_index BIGINT NOT NULL,
+    last_event_id BIGINT NOT NULL REFERENCES events(id),
+    event_count BIGINT NOT NULL,
+    contacts_snapshot JSONB NOT NULL,
+    transactions_snapshot JSONB NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE(wallet_id, snapshot_index)
+);
+
+CREATE INDEX idx_projection_snapshots_wallet_index
+    ON projection_snapshots(wallet_id, snapshot_index DESC);
+```
+
+## Client schema (SQLite)
+
+```sql
+CREATE TABLE projection_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    wallet_id TEXT NOT NULL,
+    snapshot_index INTEGER NOT NULL,
+    last_event_id TEXT NOT NULL,        -- ← only legitimate per-side diff
+    event_count INTEGER NOT NULL,
+    contacts_snapshot TEXT NOT NULL,    -- JSON as TEXT (SQLite has no JSONB)
+    transactions_snapshot TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(wallet_id, snapshot_index)
+);
+```
+
+**Per-side differences and why:**
+- `last_event_id` is `BIGINT` on server (refs `events.id` BIGSERIAL) vs `TEXT` on client (UUID string — client has no serial event id).
+- `contacts_snapshot` / `transactions_snapshot` are `JSONB` vs `TEXT` (SQLite has no JSONB; JSON travels as a serialized string).
+
+Everything else matches: same column names, same `UNIQUE(wallet_id, snapshot_index)` constraint, same per-wallet sequential indexing.
+
+---
+
+## What's in each snapshot
+
+`contacts_snapshot` and `transactions_snapshot` are JSON arrays of the projection rows that were live (not soft-deleted) at the moment of the snapshot.
+
+```json
+// contacts_snapshot
+[
+  { "id": "abc-...", "name": "Alice", "username": null, "phone": null,
+    "email": null, "notes": null, "created_at": "...", "updated_at": "..." },
+  ...
+]
+
+// transactions_snapshot
+[
+  { "id": "def-...", "contact_id": "abc-...", "type": "money",
+    "direction": "lent", "amount": 5000, "currency": "IQD",
+    "transaction_date": "2026-06-12", "created_at": "...", "updated_at": "..." },
+  ...
+]
+```
+
+The shapes match the wire types in `crates/core/domain` (Contact / Transaction). Either side can deserialize the other's snapshot if needed.
+
+---
+
+## The `SnapshotStore` trait
+
+Defined in `crates/core/snapshots/src/lib.rs`. Six methods, mapped to one SQL statement each:
+
+| Method | What it does |
+|---|---|
+| `next_snapshot_index(wallet_id)` | `COALESCE(MAX(snapshot_index), -1) + 1` |
+| `save(...)` | One INSERT |
+| `count(wallet_id)` | `SELECT COUNT(*)` |
+| `delete_oldest_n(wallet_id, n)` | DELETE the n smallest snapshot_indices |
+| `get_latest(wallet_id)` | Highest snapshot_index |
+| `get_before_event_count(wallet_id, target)` | Highest snapshot with `event_count < target` |
+
+Two implementations:
+- `crates/server/src/services/server_snapshot_store.rs` — `ServerSnapshotStore` over `&PgPool`
+- `crates/client/src/sdk_snapshot_store.rs` — `SdkSnapshotStore` over the global SQLite connection
+
+---
+
+## Shared rules
+
+These constants and predicates live in `crates/core/snapshots` and both sides import them:
+
+```rust
+pub const DEFAULT_MAX_SNAPSHOTS: i64 = 5;     // per wallet
+pub const DEFAULT_SNAPSHOT_INTERVAL: i64 = 10; // every N events
+
+pub fn should_create_snapshot(event_count: i64) -> bool;
+pub fn should_create_snapshot_with_interval(event_count: i64, interval: i64) -> bool;
+
+pub async fn save_snapshot<S: SnapshotStore + Sync>(...);
+pub async fn save_snapshot_with_limit<S: SnapshotStore + Sync>(..., max: i64);
+```
+
+`save_snapshot` orchestrates: `next_snapshot_index` → `save` → `cleanup_old_snapshots_with_limit`. The trait + the rules together mean each side just has to handle SQL; the policy is shared.
+
+---
+
+## Reading the stack
+
+The newest snapshot has the largest `snapshot_index` for its wallet. For UNDO rollback:
+
+1. `get_before_event_count(wallet_id, undone_event_position)` finds the snapshot to restore.
+2. Restore: deserialize `contacts_snapshot` + `transactions_snapshot`, bulk-insert into projection tables.
+3. Replay events after the snapshot's `last_event_id`, skipping UNDO and undone events.
+
+Step 2 (restore) is not yet shared between server and client — restoring from JSON into the projection tables is per-side. See [[../06-client/01-design-notes]] Decision 4 for status.

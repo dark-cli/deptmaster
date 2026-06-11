@@ -246,6 +246,42 @@ The moment a full rebuild starts (usually because UNDO events are present).
 
 All projections are cleared and reprocessed.
 
+---
+
+## Crate-Specific Terms (post-Phase 0)
+
+### applier
+The `crates/core/applier` crate. Defines the `Projection` trait (~30 low-level mutation methods) and the pure-Rust `apply()` function that exhaustively dispatches on `EventData` variants. Both server and client run the same `apply()` — only the trait impl differs.
+
+### can_perform
+Client-side FFI export (`crates/client/src/lib.rs`) that answers "is the user allowed to do X on resource Y?" by calling `resolver::resolve_actions` against the local SQLite permission tables. Used by the Flutter UI to grey out buttons. **Not a security boundary** — the server still enforces on every write.
+
+### client (crate)
+`crates/client`. The Rust client library; renamed from `flutter_sdk` during the reorg. Compiles to `libclient.so` / `libclient.dylib` / `client.dll` consumed by Flutter via FRB.
+
+### core (folder)
+`crates/core/`. Holds the four pure-Rust rule crates: `domain`, `applier`, `resolver`, `snapshots`. No storage engine, no HTTP, no FFI. Used by both server and client.
+
+### PermissionStore
+Trait in `crates/core/resolver`. Six methods that abstract permission-table reads (is_wallet_owner, user_group_ids_for_user, matrix_rows_for_user_groups, contact_group_ids_for_contact, all_contact_ids_in_wallet, contact_ids_in_group). `ServerPermissionStore` and `SdkPermissionStore` implement it.
+
+### Projection (trait)
+Trait in `crates/core/applier`. ~30 methods representing the low-level mutations the applier needs (`upsert_contact_row`, `soft_delete_transaction_row`, `add_user_to_system_group`, etc.). `ServerPermissionProjection` and `SdkProjection` implement it against their respective databases.
+
+### resolver
+The `crates/core/resolver` crate. Defines `PermissionStore` + `resolve_actions(store, ctx, resource) -> Set<Action>` + `permitted_contacts_for_action(store, ctx, action) -> Set<ContactId>`. Pure 3-state matrix rules (allow/deny/unset, deny wins, owner short-circuits).
+
+### SnapshotStore
+Trait in `crates/core/snapshots`. Six CRUD methods on the `projection_snapshots` table. `ServerSnapshotStore` (sqlx + Postgres) and `SdkSnapshotStore` (rusqlite + SQLite) implement it.
+
+### snapshots (crate)
+`crates/core/snapshots`. Hosts `SnapshotStore` trait + `save_snapshot[_with_limit]` + rotation + `should_create_snapshot[_with_interval]` + UNDO predicates (`batch_has_undo`, `collect_undone_event_ids`, `UNDO_EVENT_TYPE`).
+
+### wallet_owners
+Explicit owner-tracking table on both server (Postgres) and client (SQLite). Mirrors of each other; server is authoritative. Replaced the older "wallet_users.role = 'owner'" convention so `is_wallet_owner` issues structurally identical SQL on both sides.
+
+---
+
 ## Tags
 `#reference` `#glossary` `#definitions` `#terms` `#terminology`
 

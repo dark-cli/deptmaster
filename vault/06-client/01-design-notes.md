@@ -7,147 +7,111 @@ tags:
 
 # Client Design Notes
 
-Running notes captured during the client refactoring discussions. Decisions made here feed into the implementation work in [[00-refactoring-plan]].
+Architectural decisions captured during the client refactor and their status. Sections in chronological order; the most recent decisions sit at the end.
 
 ---
 
 ## Decision 1: Permissions on the client — what stays, what goes
 
-**Context:** `sync.rs::check_read_revoked_and_resync` polls `get_my_permissions_api` on every full_sync, diffs against a cached set in `perms_cache_{wallet_id}`, and decides on its own whether to clear local data and re-pull. This is duplicating server work and is likely the root cause of BUGS #4–#7 (members not seeing data they're allowed to see).
+**Status:** ✅ Implemented
 
-**Decision:** Keep client permissions only for UI guards (e.g. don't render a Delete button for a read-only user). **Drop** the read-revoke / read-grant diff logic entirely. The server is authoritative — it owns the `user_readable_events` cache and the permission matrix; it returns exactly the events the user can see.
+**Context:** Old code (`sync.rs::check_read_revoked_and_resync`) polled `get_my_permissions_api` on every full_sync, diffed against a cached set, and decided on its own whether to clear local data and re-pull. This duplicated server work and was the root cause of multi-app visibility bugs.
 
-**Action items:**
-- Remove `READ_ACTIONS`, `perms_cache_key`, `check_read_revoked_and_resync`, `clear_wallet_and_resync`, `invalidate_perms_cache_and_pull` from `sync.rs`
-- Keep `get_my_permissions_api` (UI still needs it for affordances)
-- Keep `get_permission_matrix_api` / `put_permission_matrix_api` (admin matrix editor)
-- The existing "if pull batch contains permission events, force full pull" path in `pull_and_merge` (line 184) is the correct trigger and is sufficient
+**Decision:** Keep client permissions only for UI affordances. **Drop** the read-revoke / read-grant diff logic. The server is authoritative — it owns the `user_readable_events` cache and the permission matrix; it returns exactly the events the user can see.
 
-**Risk:** the backend `user_readable_events` cache must be populated before the client's next pull. If it isn't, the bug surfaces server-side where it belongs — not papered over on the client.
+**What landed:**
+- `READ_ACTIONS`, `perms_cache_key`, `check_read_revoked_and_resync`, `clear_wallet_and_resync`, `invalidate_perms_cache_and_pull` removed from `sync.rs`
+- Server's `/api/sync/hash` is now the divergence-detection mechanism (one byte to compare instead of a perms diff)
+- Client kept: `get_my_permissions_api` (still used for affordances), permission matrix admin endpoints
 
-**Why this is safe:** the server enforces permissions on every request; the client's local check was never a security boundary, only an optimization (and a buggy one).
+**Why this is safe:** the server enforces permissions on every request; the client's local check was never a security boundary, only an optimization.
 
 ---
 
 ## Decision 2: Server-side notification stack for offline clients
 
-**Problem we want to solve:** Today the client only knows to resync when:
-1. It calls `full_sync` and pulls some events, or
-2. The WebSocket is connected and a `events_synced` broadcast arrives
+**Status:** 🟡 Proposed — not implemented
 
-If a client is **offline** when something happens (permission change, contact deleted by another app, etc.), it has no way to find out *what* changed once it comes back online — it can only do a blind incremental pull and hope the events are visible.
+**Problem we want to solve:** Today the client only knows to resync when it calls `full_sync` and pulls events, or the WebSocket pushes an `events_synced` broadcast. An offline client coming back online has to do a blind incremental pull and hope the events are visible.
 
-**Proposed design: a notification stack on the server**
-
-A per-user queue of typed notifications that:
-- Survives the user being offline (rows in a `user_notifications` table)
-- Is drained when the client polls `/api/notifications` (or on next sync)
-- Carries enough payload for the client to know *what to do*, not just *that something happened*
+**Proposed design:** A per-user `user_notifications` queue on the server. Survives offline (rows in a table), drained on poll/WS reconnect, carries typed payloads so the client knows *what to do* — not just *that something changed*.
 
 **Notification types (initial set):**
 
 | Type | Payload | Client should... |
 |---|---|---|
 | `permission_changed` | `{wallet_id}` | clear & full re-pull that wallet |
-| `wallet_membership_changed` | `{wallet_id, change: "added"\|"removed"}` | refresh wallet list; clear if removed |
-| `contact_group_membership_changed` | `{wallet_id}` | full re-pull (visible contact set may have changed) |
+| `wallet_membership_changed` | `{wallet_id, change}` | refresh wallet list; clear if removed |
+| `contact_group_membership_changed` | `{wallet_id}` | full re-pull |
 | `wallet_deleted` | `{wallet_id}` | drop local copy |
 
-**Delivery:**
-- WebSocket pushes notifications in real-time when connected
-- HTTP `GET /api/notifications?since=<id>` drains on reconnect / app launch
-- Server marks notifications as delivered when the client ACKs (or auto-expires after N days)
+Backend additions needed: migration for `user_notifications`, helper to emit on relevant events, `GET /api/notifications` endpoint, WebSocket message type. Client side becomes a notification handler instead of polling.
 
-**Why this beats the current "client polls permission diff" approach:**
-- Server knows *exactly* what changed and *for whom* (it processed the event)
-- Client gets a specific instruction (`clear wallet X and re-pull`) instead of having to figure it out
-- Works equally well online and offline
-- Generalizes to other future changes (e.g. user account flags, billing state)
-
-**Status:** proposal — not implemented. Would be a backend addition (new table, new endpoint, new WebSocket message); client side becomes a notification handler instead of the current polling/diff code.
-
-**Action items:**
-- Backend: new migration for `user_notifications` table (`id`, `user_id`, `kind`, `payload`, `created_at`, `delivered_at`)
-- Backend: helper to emit notifications when relevant events are processed (hook into permission event handlers in [[../04-permissions-and-undo/04-permission-matrix-cache]])
-- Backend: `GET /api/notifications` endpoint, WebSocket message type
-- Client: notification consumer that maps `kind` to action (clear+pull, drop wallet, etc.)
-- Both: add to [[../backend-todo]] and [[../client-todo]]
+Tracked in [[../backend-todo]].
 
 ---
 
 ## Decision 3: Cache-conflict full-flush
 
-If the client and server disagree about what data exists in a wallet (e.g. hash mismatch on `/api/sync/hash`, or after-push counts don't reconcile), the right resolution is **push-then-flush-then-rebuild**:
+**Status:** ✅ Implemented (via hash-divergence path)
 
-1. **Push first.** The client may have unsynced events from when it was offline; those must reach the server before we throw away local state. (`storage::events_get_unsynced` → `push_unsynced`.)
-2. **Flush local data.** Drop the projection and events for this wallet (`storage::events_delete_all_for_wallet`, projection clear).
-3. **Full re-pull and rebuild.** `pull_and_merge` with `since=None` so the server returns the full visible-to-this-user event set; replay them locally to rebuild the projection.
+If the client and server disagree about what data exists in a wallet, the resolution is **push-then-flush-then-rebuild**:
+
+1. **Push first.** The client may have unsynced events; those must reach the server before we throw away local state.
+2. **Flush local data.** Drop the projection and events for this wallet (`storage::events_delete_all_for_wallet`).
+3. **Full re-pull and rebuild.** `pull_and_merge` with `since=None`; replay locally.
 
 This preserves offline work (step 1) while still treating the server as source of truth (steps 2–3).
 
-**Why not just merge?** Partial merges have to reason about ordering, idempotency, and what to do with events the client has but the server doesn't. After a push, the server is definitively up to date with the user's intent; a full pull then gives exactly the right state. Cheaper to throw away local state and rebuild than to write merge logic that handles every divergence case.
+**Trigger:** server hash mismatch on next pull. Client stashes the server's hash after every successful sync (in `config: server_hash_<wallet_id>`); the next pull compares.
 
-**What already exists:**
-- `pull_and_merge` does a full pull when `local_count == 0` or when a permission event arrives in the batch — these paths skip step 1 because there's nothing to push or because permission changes warrant a clean slate.
+---
 
-**What to add:**
-- After push completes, compare server's wallet hash to local hash via `/api/sync/hash`. On mismatch → run the flush + re-pull path.
-- Same trigger on app startup if last sync was long ago or the device was offline.
+## Decision 4: Share `DomainEvent`, permission model, and projection types between client and server
+
+**Status:** ✅ Implemented (Phase 0 + convergence steps 1-5)
+
+**Original short answer:** yes — and we should do it before any more bug fixes, because most of the bugs were down to client and server not compiling against the same shape.
+
+**What landed (`crates/core/`):**
+
+| Crate | Owns |
+|---|---|
+| `domain` | `DomainEvent`, `EventData` (28 variants), `Action`, `Resource`, typed IDs, `PermissionContext` |
+| `applier` | `Projection` trait + `apply()` dispatch — exhaustive match over all 28 `EventData` variants |
+| `resolver` | `PermissionStore` trait + pure-Rust `resolve_actions` / `permitted_contacts_for_action` |
+| `snapshots` | `SnapshotStore` trait + rotation + `should_create_snapshot` + UNDO predicates |
+
+Each side implements the three storage traits against its own engine (Postgres + sqlx server-side, SQLite + rusqlite client-side). The rules layer doesn't know the engine exists.
+
+**Architectural payoffs:**
+- Multi-app visibility bugs traced to client/server divergence are now structurally impossible: same enum, same dispatch
+- `can_perform` works locally on the client because the resolver crate is the resolver crate, period
+- UNDO predicate is a constant in one crate; both sides import it
+
+**What's still per-side and legitimately so:**
+- Storage engine (sqlx/Postgres ↔ rusqlite/SQLite)
+- Authority (server enforces; client advises)
+- Server's deep rollback path (`projections.rs` Phase-1/3 event-window dance + `event_id_to_position` map) — not refactored to share with the client's simpler `rebuild_projection_tables`. Worth its own dedicated commit.
+
+---
+
+## Decision 5: SDK soft-delete + wallet_owners + snapshots table parity
+
+**Status:** ✅ Implemented (convergence steps 1-3)
+
+The SDK schema was drifting from the server. We brought it back in line:
+
+- **Soft delete:** `contacts.is_deleted` and `transactions.is_deleted` columns; `soft_delete_*` projection methods UPDATE the flag instead of DELETEing. Server semantics.
+- **`wallet_owners` table:** explicit ownership. `SdkProjection::upsert_wallet_user` dual-writes when role='owner'. `is_wallet_owner` reads from `wallet_owners` (same SQL shape as server).
+- **`projection_snapshots` table:** mirrors server's schema; one legitimate diff (TEXT `last_event_id` for UUIDs vs server's BIGINT for BIGSERIAL).
+
+After this, the only schema divergences left are the unavoidable SQLite ↔ Postgres ones (column types, JSON storage as TEXT, etc.).
 
 ---
 
 ## Cross-references
-## Decision 4: Share `DomainEvent`, permission model, and projection types between client and server
 
-**Short answer: yes — and we should do it before any more bug fixes, because most of the bugs in `BUGS.md` exist precisely because client and server can't compile against the same shape.**
-
-Full proposal with crate layout, constraint analysis, FRB compatibility, migration steps, and risk table: [[02-shared-domain-crate]].
-
-### What can be shared
-- `EventData` enum (28 variants), `DomainEvent`, `AggregateType`, `EventDiscriminator`
-- `Action`, `Resource`, `WalletRole`, `PermissionContext` (pure data, no DB)
-- Projection types: `Contact`, `Transaction`, `Wallet`, `Currency`, `TransactionType`, `TransactionDirection`
-- Typed IDs (`WalletId`, `ContactId`, …)
-- Event-replay *logic* (`apply(state, event) -> state`) — server-side `apply_event_batch_typed` and client-side `state_builder` are doing the same job twice
-
-### What can't (and shouldn't try to)
-- `sqlx::PgRow` parsing / `rusqlite` storage — different DBs, but the conversion target (the projection struct) is shared
-- `axum` handlers / `reqwest` client / `flutter_rust_bridge` exports — platform glue
-- DB connection pools, tokio runtime choice
-
-### Proposed structure
-
-```
-crates/
-  domain/         ← NEW: pure types (serde, uuid, chrono only)
-  debitum_event_replay/   ← NEW: apply(state, event) — used by both sides
-  flutter_sdk/    ← uses the two above
-crates/server/         ← uses the two above
-```
-
-### Why do it NOW (before more bug fixes)
-
-- We just refactored the server to use type-driven dispatch (`apply_event_batch_typed`). That logic is *exactly* what the client needs. If we share it, the client and server can't disagree.
-- BUGS #8 and #9 (UPDATED events not visible) would likely disappear — currently the client emits an event the server doesn't recognise as UPDATED. Shared `EventData` enum makes that impossible.
-- Every fix we apply now risks drifting from the other side. Sharing first means fixes apply once.
-
-### Order of execution
-
-1. Create the two shared crates with backend types copied in (no callers touched yet)
-2. Migrate backend to use them — tests must still pass
-3. Migrate client to use them — this alone should kill some bugs
-4. Then proceed with the rest of [[00-refactoring-plan]] Phase 3 (multi-app sync, permission visibility)
-
-### Open questions for the user
-
-1. **Workspace `Cargo.toml`** at the root, or keep crates independent with path deps?
-2. Should `frontend/` (the Dioxus web crate) also depend on `domain`?
-3. Are you OK with a thin DTO shell in `flutter_sdk` for FRB ↔ Dart (to avoid FRB issues with serde-tagged enums)?
-
----
-
-
-- [[00-overview]] — client architecture map
-- [[00-refactoring-plan]] — what we're doing about all of this
-- [[02-shared-domain-crate]] — the bigger structural question (share types with server)
+- [[00-overview]] — current client architecture
+- [[../00-getting-started/04-main-architecture]] — system-level event-sourcing flow
 - [[../client-todo]] · [[../backend-todo]]

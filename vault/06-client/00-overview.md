@@ -7,39 +7,108 @@ tags:
 
 # Client Architecture Overview
 
-**Last Updated**: 2026-06-08
-**Status**: Active refactoring (branch `client/refactor-and-stabilize`)
+**Last Updated**: 2026-06-12
+**Status**: Stable — 47/47 integration tests pass
 
 The client is **two parts in two places**:
 
 1. **Flutter UI** — `mobile/lib/` (Dart screens, widgets, providers)
-2. **Rust core** — `crates/flutter_sdk/` (logic, sync, storage, FRB bridge)
+2. **Rust client lib** — `crates/client/` (logic, sync, storage, FRB bridge)
 
-All business logic lives in Rust; Flutter is a thin FFI wrapper (`mobile/lib/api.dart` calls into the Rust crate via Flutter Rust Bridge).
-
----
-
-## Rust Core Modules (`crates/flutter_sdk/src/`)
-
-| File | LOC | Responsibility |
-|---|---:|---|
-| `lib.rs` | 790 | FRB bridge entry; backoff/in-flight gates; thread-local config; init |
-| `api.rs` | 500 | HTTP client to backend (auth, sync, wallets, permissions) |
-| `crud.rs` | 400 | Create/update/delete event append; triggers rebuild + push |
-| `sync.rs` | 261 | Push unsynced → server, pull server events → merge → rebuild |
-| `state_builder.rs` | 333 | Replay events → Contact/Transaction projection |
-| `storage.rs` | 343 | Local SQLite: events, projections, config (per-wallet) |
-| `models.rs` | 167 | Typed domain: Contact, Transaction, Currency |
-| `ids.rs` | 109 | Typed IDs: WalletId, ContactId, TransactionId (parse validation) |
-| `backoff.rs` | 49 | Exponential backoff for sync retries |
-| `log_bridge.rs` | 57 | Forward Rust logs to Flutter |
-| `frb_generated.rs` | 7368 | Auto-generated FRB bindings (do not edit) |
-
-**Total handwritten code:** ~3000 LOC
+All business logic lives in Rust; Flutter is a thin FFI wrapper over the Rust crate via Flutter Rust Bridge.
 
 ---
 
-## Integration Tests (`crates/flutter_sdk/tests/`)
+## What's shared vs per-side
+
+The Rust client lib **depends on the same rule crates as the server**. Identical event-application, identical permission resolution, identical snapshot rotation — written once, executed on both sides:
+
+| Concern | Crate | Owns |
+|---|---|---|
+| Event types | `crates/core/domain` | `DomainEvent`, `EventData` (28 variants), typed IDs |
+| Event application | `crates/core/applier` | `Projection` trait + `apply()` dispatch |
+| Permission resolution | `crates/core/resolver` | `PermissionStore` trait + 3-state matrix rules |
+| Snapshot rotation | `crates/core/snapshots` | `SnapshotStore` trait + UNDO predicates |
+
+Each side implements the three storage adapter traits against its own engine:
+
+| Trait | Server (`crates/server`) | Client (`crates/client`) |
+|---|---|---|
+| `applier::Projection` | `ServerPermissionProjection` (sqlx + Postgres) | `SdkProjection` (rusqlite + SQLite) |
+| `resolver::PermissionStore` | `ServerPermissionStore` | `SdkPermissionStore` |
+| `snapshots::SnapshotStore` | `ServerSnapshotStore` | `SdkSnapshotStore` |
+
+Authority stays one-sided: **server enforces, client advises.** The client's local `resolver::resolve_actions` is for UX only — greying buttons the user can't tap, predicting the server's decision. Every write still goes through the server, which is the only place that can reject it.
+
+---
+
+## Rust client lib (`crates/client/src/`)
+
+| File | Responsibility |
+|---|---|
+| `lib.rs` | FRB bridge entry; thread-local config; init; `can_perform` FFI export |
+| `api.rs` | HTTP client to backend (auth, sync, wallets, permissions) |
+| `crud.rs` | Append events; runs them through `applier::apply` so projection tables stay current |
+| `sync.rs` | Push unsynced → pull and merge → optional snapshot write |
+| `storage.rs` | SQLite schema + low-level helpers |
+| `models.rs` | Wire types: Contact, Transaction, Currency |
+| `ids.rs` | Typed IDs: WalletId, ContactId, TransactionId |
+| `sdk_projection.rs` | `applier::Projection` impl |
+| `sdk_store.rs` | `resolver::PermissionStore` impl |
+| `sdk_snapshot_store.rs` | `snapshots::SnapshotStore` impl |
+| `backoff.rs`, `log_bridge.rs` | infra |
+| `frb_generated.rs` | Auto-generated FRB bindings (do not edit) |
+
+---
+
+## Client SQLite schema
+
+Mirrors the server's projection schema as closely as possible — every per-side divergence is intentional and called out:
+
+| Table | Notes |
+|---|---|
+| `events` | Local event log (synced + unsynced) |
+| `contacts` | Projection. Mirrors `contacts_projection` on server, with `is_deleted INTEGER` |
+| `transactions` | Projection. Mirrors `transactions_projection`, with `is_deleted INTEGER` |
+| `wallet_users` | Membership + role |
+| `wallet_owners` | Owner tracking (NEW). Dual-written by `SdkProjection` when role='owner'. Lets `is_wallet_owner` issue the same SQL as the server |
+| `user_groups`, `contact_groups`, `user_group_members`, `contact_group_members`, `group_permission_matrix` | Permission tables mirroring the server |
+| `projection_snapshots` | Snapshot stack (NEW). Same shape as server, `last_event_id` is TEXT (UUID) instead of BIGINT — the only legitimate per-side schema diff |
+| `config` | Key-value (current wallet, last-sync timestamp, server hash for divergence detection) |
+
+---
+
+## Sync flow
+
+```
+UI action
+  → crud::append_event
+    → storage::events_insert         (mark unsynced)
+    → applier::apply (via SdkProjection)  (update projection tables)
+    → if event_type == "UNDO":
+        sync::rebuild_projection_tables    (full UNDO-aware rebuild)
+    → sync::push_unsynced              (POST to server)
+
+server WebSocket / poll
+  → sync::pull_and_merge
+    → fetch new events from server
+    → applier::apply each one        (update projection tables)
+    → if batch contains UNDO:
+        rebuild_projection_tables
+    → maybe_save_snapshot            (every N events or after UNDO)
+```
+
+UNDO triggers a full rebuild because `applier::apply` is a no-op for UNDO variants — the undone event's effect is still in the projection tables. Future work (see [[../03-snapshots/]]) will restore from the latest snapshot before replaying instead of starting from scratch.
+
+---
+
+## Integration tests (`crates/client/tests/`)
+
+Each file is a submodule of `tests/integration.rs`. They run against a live backend (Docker postgres + server crate). Run via:
+
+```
+./scripts/manage.sh test-integration
+```
 
 | File | Focus |
 |---|---|
@@ -50,63 +119,42 @@ All business logic lives in Rust; Flutter is a thin FFI wrapper (`mobile/lib/api
 | `permissions.rs` | Read/write permission grants and revokes |
 | `conflict.rs` | Concurrent event conflict handling |
 | `connection.rs` | Network reachability behavior |
-| `comprehensive_events.rs` | All event types appear in event log |
+| `comprehensive_events.rs` | Every event type appears in the log |
 | `stress.rs` | Many concurrent operations |
-| `integration.rs` | End-to-end flows |
 
-These run against a **live backend** (Docker postgres + rust-api). Many currently fail — see `client-todo.md` and `crates/flutter_sdk/BUGS.md`.
+**All 47 tests pass.**
 
 ---
 
-## Flutter Layer (`mobile/lib/`)
+## Flutter layer (`mobile/lib/`)
+
+Flutter is a mechanical shell. The Rust client lib does the work; Dart renders the result.
 
 | Path | Role |
 |---|---|
-| `api.dart` (1310 LOC) | Thin FFI wrapper around Rust core |
-| `screens/` | 17 screens, largest: `events_log_screen.dart` (2189), `manage_wallet_screen.dart` (1833) |
-| `models/` | Dart mirrors of Rust domain types (with json codegen) |
+| `api.dart` | Thin FFI wrapper around Rust client |
+| `screens/` | UI screens |
+| `models/` | Dart mirrors of Rust domain types |
 | `providers/` | Riverpod state |
 | `widgets/` | Reusable UI |
 
-Flutter never hits the network directly — every call goes through Rust core which handles auth, sync, storage.
+Flutter never hits the network directly. Every call goes through Rust client which handles auth, sync, storage.
 
 ---
 
-## Sync Architecture (one-liner)
+## Reading order
 
-```
-UI action → Rust crud.append_event → SQLite (unsynced)
-                                  → rebuild projection
-                                  → push_unsynced → backend
-backend → notify (websocket) → Rust pull_and_merge → SQLite
-                                                  → rebuild projection
-                                                  → emit to Flutter
-```
-
-See `06-client/01-sync-flow.md` (TODO) for details.
-
----
-
-## Known Issues
-
-- 12 active bugs documented in `crates/flutter_sdk/BUGS.md`
-- Most are sync/visibility related (multi-app, permission-filtered views, full-resync)
-- Architectural: client sends `event_id` instead of `idempotency_key` (see `client-todo.md` HIGH PRIORITY)
-
----
-
-## Reading Order
-
-1. This file (overview)
-2. `[[01-sync-flow]]` — push/pull/merge mechanics (TODO)
-3. `[[02-storage-schema]]` — local SQLite tables (TODO)
-4. `[[03-event-flow]]` — event creation lifecycle (TODO)
-5. `[[00-refactoring-plan]]` — the plan we're executing now
+1. This file
+2. [[01-design-notes]] — architectural decisions and their status
+3. [[../00-getting-started/04-main-architecture]] — system-level event-sourcing architecture
+4. [[../02-projections/]] — projection mechanics
+5. [[../03-snapshots/]] — snapshot rotation
+6. [[../04-permissions-and-undo/]] — permission model + UNDO semantics
 
 ---
 
 ## Related
 
-- [[../client-todo]] — frontend/mobile work backlog
-- [[../backend-todo]] — backend work backlog
-- `crates/flutter_sdk/BUGS.md` — failing integration tests with explanations
+- [[../client-todo]] — client work backlog
+- [[../backend-todo]] — server work backlog
+- [[../99-reference/01-glossary]] — terms

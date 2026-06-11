@@ -69,49 +69,46 @@ If the projection table schema changes, rebuild to repopulate with new columns.
 
 ### Step 1: Detect UNDO Events
 
-When syncing, check if any UNDO events are present:
+Both server and client use the shared helper from `crates/core/snapshots`:
 
 ```rust
-let has_undo_events = events.iter()
-    .any(|e| e.event_type == "UNDO");
+use snapshots::{batch_has_undo, collect_undone_event_ids, UNDO_EVENT_TYPE};
+
+let has_undo = batch_has_undo(events.iter().map(|e| e.event_type.as_str()));
 ```
 
-### Step 2: Clear All Projections (if needed)
+### Step 2: Collect undone event ids
 
-If UNDO is present, delete all projection data:
+Same helper:
 
 ```rust
-if has_undo_events {
-    DomainEvent::clear_aggregate_type(pool, AggregateType::Contact, wallet_id).await?;
-    DomainEvent::clear_aggregate_type(pool, AggregateType::Transaction, wallet_id).await?;
-    DomainEvent::clear_aggregate_type(pool, AggregateType::Permission, wallet_id).await?;
-}
+let undone_ids = collect_undone_event_ids(
+    events.iter().map(|e| (e.event_type.as_str(), &e.event_data))
+);
 ```
 
-This clears:
-- `contacts_projection`
-- `transactions_projection`
-- `wallet_users` (keeping owner)
-- `user_groups`, `contact_groups`
+### Step 3: Clear projection tables (on the relevant side)
 
-### Step 3: Process All Events
+**Server** (`crates/server`): wipes `contacts_projection`, `transactions_projection`,
+`wallet_users`, permission tables for the wallet.
 
-Reprocess ALL events from the beginning:
+**Client** (`crates/client::sync::rebuild_projection_tables`): wipes `contacts`,
+`transactions`, `wallet_users`, `wallet_owners`, `user_groups`, `contact_groups`,
+`projection_snapshots` for the wallet.
+
+### Step 4: Replay events through applier::apply, skipping UNDOs and undone ones
 
 ```rust
-// Load all events (or from latest snapshot if available)
-let all_events = db.get_all_events(wallet_id).await?;
-
 for event in all_events {
-    // Skip undone events
-    if should_skip_event(&event) {
-        continue;
-    }
-    
-    // Apply event to projections
-    event.apply_self(pool, wallet_id).await?;
+    if event.event_type == UNDO_EVENT_TYPE { continue; }
+    if undone_ids.contains(&event.event_id) { continue; }
+    applier::apply(&mut projection, &event).await?;
 }
 ```
+
+`applier::apply` dispatches on `EventData` and calls into the `Projection` trait.
+The trait impl (server-side `ServerPermissionProjection` over sqlx,
+client-side `SdkProjection` over rusqlite) runs the appropriate SQL.
 
 ### Step 4: Verify State
 

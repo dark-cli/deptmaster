@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "06-client/00-refactoring-plan.md",
+                "file": "06-client/00-overview.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "00-refactoring-plan"
+              "title": "00-overview"
             }
           }
         ]
@@ -185,22 +185,26 @@
   },
   "active": "1b21b235138f2619",
   "lastOpenFiles": [
+    "client-todo.md.tmp.212282.a7922c707ff9",
+    "99-reference/01-glossary.md.tmp.212282.da24266e7253",
+    "03-snapshots/04-snapshot-tables-schema.md.tmp.212282.dcd542d4cb8b",
+    "02-projections/03-projection-rebuilds.md.tmp.212282.486c7991b9e5",
+    "05-implementation-patterns/02-code-organization.md.tmp.212282.9dd8bf1d6ab3",
+    "00-getting-started/04-main-architecture.md.tmp.212282.24f554a00dbc",
+    "00-getting-started/04-main-architecture.md.tmp.212282.e451533a0f3a",
+    "00-getting-started/04-main-architecture.md.tmp.212282.9aeafb748091",
+    "00-getting-started/04-main-architecture.md.tmp.212282.f7fdabbee37b",
+    "06-client/01-design-notes.md.tmp.212282.3c5632dab7a8",
+    "06-client/00-refactoring-plan.md",
     "09-design/02-animation-guidelines.md.tmp.212282.a126fc502adf",
-    "09-design/02-animation-guidelines.md.tmp.212282.4d8d4c349d2d",
     "09-design/02-animation-guidelines.md",
-    "09-design/02-animation-guidelines.md.tmp.212282.01059beebb17",
     "09-design/01-theme-catalog.md",
-    "09-design/01-theme-catalog.md.tmp.212282.e881faa7b7f5",
-    "09-design",
-    "06-client/04-test-baseline-2026-06-08.md.tmp.212282.b6fca2ab2485",
     "06-client/04-test-baseline-2026-06-08.md",
     "06-client/03-api-contract-audit.md",
     "06-client/00-overview.md",
     "06-client/01-design-notes.md",
-    "06-client/00-refactoring-plan.md",
     "06-client/02-shared-domain-crate.md",
     "database-crate-separation.md",
-    "06-client",
     "migration-guidelines.md",
     "migration-guide.md",
     "database-setup.md",
@@ -209,17 +213,13 @@
     "backend-todo.md",
     "MEMORY.md",
     "99-reference/01-glossary.md",
-    "99-reference",
     "08-wallet-refactoring/README.md",
     "08-wallet-refactoring/01-wallets-2-0-refactoring-plan.md",
-    "08-wallet-refactoring",
     "07-advanced-topics/03-performance-benchmarks.md",
     "07-advanced-topics/02-consistency-verification.md",
     "07-advanced-topics/01-memory-bounds-analysis.md",
-    "07-advanced-topics",
     "06-advanced-extensions/03-expense-events-walkthrough.md",
     "06-advanced-extensions/02-team-events-walkthrough.md",
-    "06-advanced-extensions/01-user-events-walkthrough.md",
-    "06-advanced-extensions"
+    "06-advanced-extensions/01-user-events-walkthrough.md"
   ]
 }

@@ -8,144 +8,131 @@ tags:
 
 # Client TODOs (Flutter/Dart & Rust Bridge)
 
+Last updated 2026-06-12. Reflects the post-reorg layout (`crates/client`, `crates/core/{domain,applier,resolver,snapshots}`).
+
 **Quick Navigation**:
-- 🔴 [HIGH PRIORITY](#high-priority-items) (Critical features, blocking issues)
-- 🟡 [MEDIUM PRIORITY](#medium-priority-items) (Important features, UX improvements)
-- 🟢 [LOW PRIORITY](#low-priority-items) (Nice-to-have, polish)
+- 🔴 [HIGH PRIORITY](#-high-priority-items)
+- 🟡 [MEDIUM PRIORITY](#-medium-priority-items)
+- 🟢 [LOW PRIORITY](#-low-priority-items)
 
 ---
 
-## ✅ COMPLETED
+## ✅ Completed (this branch)
 
-### Client-Core Integration (NEW ARCHITECTURE)
-- ✅ Flutter Rust Bridge setup (done)
-- ✅ Debitum client-core library (done - crates/flutter_sdk)
-- ✅ Permissions module in client-core (done with full tests)
-- ✅ Wallet-scoped providers (done - wallet_data_providers.dart)
-- ✅ Migrate all mobile screens to use client-core (DONE - all screens use Api FFI wrapper)
-- ✅ Remove old service files (DONE - no old services found in codebase)
-- ✅ Use client-core for sync, CRUD, permissions (DONE - api.dart is thin FFI wrapper)
+### Architecture
+- ✅ Renamed crate `flutter_sdk` → `client`; lib is now `libclient.so`
+- ✅ Shared rules extracted to `crates/core/{domain,applier,resolver,snapshots}`
+- ✅ `SdkProjection` implements `applier::Projection` (event-application rules shared with server)
+- ✅ `SdkPermissionStore` implements `resolver::PermissionStore` (permission rules shared with server)
+- ✅ `SdkSnapshotStore` implements `snapshots::SnapshotStore` (snapshot rotation shared with server)
+- ✅ `can_perform` FFI export — Flutter can ask the local resolver "is X allowed?" for UX
 
----
+### Schema convergence with server
+- ✅ Soft-delete on contacts/transactions (`is_deleted` flag)
+- ✅ Explicit `wallet_owners` table — `is_wallet_owner` issues same SQL as server
+- ✅ `projection_snapshots` table mirroring server's schema
+- ✅ Snapshot writes wired into `sync::pull_and_merge` (every N events / after UNDO)
 
-## 🔴 HIGH PRIORITY ITEMS
+### Sync / UNDO
+- ✅ Retired in-memory `state_builder` + `state` JSON blob; SQLite projection tables are source of truth
+- ✅ UNDO rebuilds via `sync::rebuild_projection_tables`, using shared `snapshots::collect_undone_event_ids`
+- ✅ Hash-divergence path (server's `/api/sync/hash`) replaces the old permissions-diff polling
 
-### Idempotency Keys (CRITICAL - Prevents Duplicates)
-- [ ] **Implement proper idempotency keys on client**
-  - BACKEND CHANGE: Client should generate `idempotency_key` (not `event_id`)
-  - Server generates `event_id` at insertion, uses `idempotency_key` for deduplication
-  - Current (WRONG): Client sends `event_id` as `"id"` field
-  - Required (CORRECT): Client sends `idempotency_key` in sync payload, NO event_id
-  - Generate UUID when event is created (use as idempotency_key)
-  - Store idempotency_key in local StoredEvent structure
-  - Send same idempotency_key for all retry attempts
-  - Currently: Sending event_id instead of idempotency_key
-  - Impact: Prevents duplicates from network retries, UI glitches, or button re-enabling
-  - Effort: 2-3 hours (update payload structure, local storage schema)
-  - Files: 
-    - crates/flutter_sdk/src/crud.rs (remove event_id generation)
-    - crates/flutter_sdk/src/sync.rs (add idempotency_key to payload)
-    - mobile/lib/ (update StoredEvent schema if using local SQLite)
-
-### Sync Hash Optimization (PERFORMANCE)
-- [ ] Implement client-side hash caching with get_sync_hash endpoint
-  - **Current State**: Client calls `GET /api/sync/events?since=<timestamp>` which returns ALL events since timestamp
-  - **Problem**: Fetches full event list even when nothing changed (wasteful network round trip)
-  - **Solution**: Use get_sync_hash endpoint to detect changes before pulling events
-  - **Implementation**:
-    1. Store last_hash + last_sync_timestamp in local storage
-    2. Call `GET /api/sync/hash` (crates/server/src/handlers/sync.rs:193)
-    3. If returned hash == cached hash → skip get_sync_events (save network)
-    4. If hash differs → call get_sync_events to pull changes
-    5. Update cached hash + timestamp
-  - **Server Endpoint**: GET /api/sync/hash returns { hash: String, event_count: i32, last_event_timestamp: String }
-  - **Effort**: 1-2 hours
-  - **Impact**: Eliminates network round trip when no changes (especially for frequent sync polling)
-  - **Files**: crates/flutter_sdk/src/sync.rs (pull_and_merge function), mobile/lib/providers/sync_provider.dart
-
-### Sync Permission Failure Recovery (CLIENT - Dependent on Backend)
-- [ ] Client-side sync failure recovery system (DEPENDS ON: backend returning detailed error per event)
-  - **What**: Detect permission failures, remove unpermitted events, retry sync
-  - **Why**: When batch rejected due to permission, user needs way to recover
-  - **Flow**:
-    1. Sync batch rejected (backend returns detailed error per event)
-    2. Client parses failed_events list
-    3. Option A: Auto-remove unpermitted events, retry
-    4. Option B: Show "X operations blocked" dialog, let user confirm removal
-    5. Retry sync with cleaned batch
-    6. User unblocked
-  - **Prerequisite**: Backend must return detailed error response (see backend-todos.md)
-  - **Files**: crates/flutter_sdk/src/sync.rs (push_unsynced)
-  - **Effort**: 2-3 hours (after backend work)
+### Tests
+- ✅ 47/47 integration tests pass
 
 ---
 
-## 🟡 MEDIUM PRIORITY ITEMS
+## 🔴 High Priority Items
 
-### Permissions & Groups (New Functionality)
-- [ ] Display user permissions for current wallet
-- [ ] Show which actions are available based on permissions
+### Dart-side wiring of `can_perform`
+- [ ] Regenerate FRB bindings (one-time after the crate rename)
+- [ ] Expose `can_perform(action, resource_type, resource_id)` through a Dart helper
+- [ ] Wire into screen-level guards (button visibility/enable)
+- **Files**: `mobile/lib/api.dart`, `mobile/lib/providers/`, screens that mutate data
+- **Effort**: 2-3 hours
+
+### UI button greying via the new can_perform
+- [ ] Hide Delete/Edit buttons when `can_perform` returns false
+- [ ] Show a tooltip explaining the missing permission
+- [ ] Permission denied error mapping (server's error → human-readable message)
+- **Files**: `mobile/lib/screens/*`, `mobile/lib/widgets/`
+- **Effort**: 4-6 hours
+
+### Idempotency keys (still open from before the reorg)
+- [ ] Switch sync payload from `id` (event_id) to `idempotency_key`
+- [ ] Local `StoredEvent` carries `idempotency_key` separately
+- [ ] Server uses idempotency_key for dedup; generates its own event_id at insertion
+- **Files**: `crates/client/src/crud.rs`, `crates/client/src/sync.rs`, `crates/server/src/database/repository/events.rs`
+- **Effort**: 2-3 hours
+
+---
+
+## 🟡 Medium Priority Items
+
+### Permissions & Groups UI
+- [ ] Display user permissions for current wallet (use `get_my_permissions_api`)
 - [ ] Group management UI for admins (create/edit user groups, contact groups)
 - [ ] Permission matrix viewer for admins
 - [ ] Default group selection in settings screen
-- [ ] Show/hide create/edit/delete buttons based on permissions
-- [ ] Permission denied error messages (show which action user lacks permission for)
 
-### Sync & Conflict Resolution
-- ✅ Offline-first architecture (done in client-core)
-- ✅ Retry backoff logic (done in client-core)
-- [ ] Implement merge strategy for conflicts (client-core conflict.rs module exists)
-- [ ] Handle conflict resolution UI
-- [ ] Display sync status and conflicts to user
+### Sync / conflict resolution
+- ✅ Offline-first architecture
+- ✅ Retry backoff logic
+- [ ] Per-event error response from server (PREREQ for granular failure recovery on client)
+- [ ] Client-side recovery: drop unpermitted events, retry sync
+- [ ] Conflict resolution UI
 
 ### Features
-- [ ] Biometric authentication (library added, not integrated)
+- [ ] Biometric authentication
 - [ ] Offline notifications (background sync status)
 - [ ] Data export/import UI
 - [ ] Transaction filtering and search
 - [ ] Contact search by name/phone
-- [ ] Wallet switching notifications
 
 ### Testing
-- ✅ Comprehensive test suite in client-core (permissions, sync, conflict, integration, stress)
-- [ ] Widget tests for new permission-aware screens
-- [ ] Integration tests with mock wallet setup
+- ✅ 47/47 integration tests in `crates/client/tests/`
+- [ ] Widget tests for permission-aware screens
 
-### UI Polish
+### UI polish
+- [ ] Loading states during sync
+- [ ] Better error messages: network failure vs permission failure
 - [ ] Theme consistency across screens
-- [ ] Loading states for network requests (show sync in progress)
-- [ ] Error handling UI improvements
-- [ ] Better error messages for network failures vs permission failures
 
 ---
 
-## 🟢 LOW PRIORITY ITEMS
+## 🟢 Low Priority Items
 
-### Security (Mobile-Specific)
-- [ ] Enforce HTTPS for client-to-backend connection
-  - Make `useHttps()=true` default for mobile client
-  - Update documentation to require WSS connection
-- [ ] Add certificate pinning for client-to-backend
-  - Implement public key pinning in mobile app
-  - Detect fraudulent certificates
+### Security (mobile)
+- [ ] Default `useHttps() = true` for mobile builds
+- [ ] Certificate pinning
 
-### Performance & Optimization
-- [ ] Mobile local storage optimization
-  - Compress local event storage
-  - Implement lazy loading for large event lists
-  - Pagination for contact/transaction lists
+### Performance
+- [ ] Lazy loading for very large event lists
+- [ ] Pagination for contact/transaction lists
 
-### Data Management
-- [ ] Implement data backup/restore UI
-- [ ] Clear local cache with confirmation dialog
-- [ ] Export wallet data (CSV, JSON)
+### Data management
+- [ ] Backup/restore UI
+- [ ] Clear local cache with confirmation
+- [ ] CSV/JSON export of wallet data
 
 ---
 
-## Related Backend TODOs
+## Future / structural
 
-These client features depend on backend work:
-- Sync Permission Failure Recovery (CLIENT) ← requires "Enhanced error response for sync permission failures (BACKEND)"
-- Permissions & Groups UI ← requires permission matrix APIs (mostly done)
+### Snapshot-aware UNDO rollback on the client
+The client currently does a full wipe + replay on UNDO (`rebuild_projection_tables`). Server uses snapshots to start from the latest checkpoint instead. To share the algorithm fully:
+- [ ] Add `restore_from_snapshot` method to `applier::Projection`
+- [ ] Build shared `rollback_to_event(snapshot, events) → projection` in `crates/core/snapshots`
+- [ ] Client + server both consume; SDK gets snapshot-aware rollback for free
 
-See **backend-todos.md** for complementary server-side work.
+### Server-side notification stack for offline clients
+See [[06-client/01-design-notes]] Decision 2. Backend work tracked in [[backend-todo]].
+
+---
+
+## Related
+
+- [[06-client/00-overview]] — current client architecture
+- [[06-client/01-design-notes]] — decisions + statuses
+- [[backend-todo]] — server-side work this client work depends on

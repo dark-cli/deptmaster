@@ -1,31 +1,51 @@
 # Main Architecture
 
-**Main question this file answers:** How do events, projections, and snapshots work together?
+**Main question this file answers:** How do events, projections, and snapshots work together — and how is the same logic running on both server and client?
+
+---
+
+## Crate layout
+
+```
+crates/
+├── core/                ← shared rules, no storage engine
+│   ├── domain           DomainEvent, EventData (28 variants), typed IDs
+│   ├── applier          Projection trait + apply() dispatch
+│   ├── resolver         PermissionStore trait + permission rules
+│   └── snapshots        SnapshotStore trait + rotation + UNDO predicates
+├── server/              ← Postgres backend (sqlx adapters)
+└── client/              ← Rust client lib for Flutter/mobile (rusqlite adapters)
+```
+
+The `core/*` crates are **pure Rust** — no Postgres, no SQLite, no axum, no FRB. They define the rules. The server and client each implement three storage adapter traits (`Projection`, `PermissionStore`, `SnapshotStore`) against their own engines. Same rules, two engines.
 
 ---
 
 ## The Complete Flow
 
-Here's how a sync request flows through the entire system:
+A sync request:
 
 ```
-1. User syncs new events
+1. Event arrives (push from client, or applied internally on the server)
    ↓
-2. Events table stores them
-   { id, aggregate_type, event_type, event_data, timestamp, version }
+2. Events table stores it
+   { id, aggregate_type, event_type, event_data, timestamp, version, idempotency_key }
    ↓
-3. For each event:
-   a. Deserialize into DomainEvent enum
-   b. Call event.apply_self() 
-   c. Type-driven handler processes it
-   d. Update projection tables
+3. applier::apply(projection, event) dispatches on EventData
    ↓
-4. Every 1000 events:
-   a. Check if snapshot needed
-   b. If yes: create snapshot
-   c. Snapshot stores aggregate type + state + event_id
+   Per-variant rules call into the Projection trait:
+     - upsert_contact_row, soft_delete_contact_row, ...
+     - upsert_transaction_row, ...
+     - upsert_wallet_user, add_user_to_system_group, ...
    ↓
-5. Return current state to user
+   The trait impl runs the SQL appropriate for its engine
+   (Postgres on server, SQLite on client).
+   ↓
+4. Every N events (default 10), or after an UNDO:
+   snapshots::save_snapshot writes a checkpoint via SnapshotStore.
+   Older snapshots beyond DEFAULT_MAX_SNAPSHOTS are pruned.
+   ↓
+5. Return current state to caller (server: HTTP response; client: FFI return)
 ```
 
 ## Tables and Their Relationships
@@ -141,50 +161,69 @@ Wallet has 100,000 events. Need to rebuild from event 50,000 onward.
 5. RAM usage: ~50 MB ✅
 ```
 
-## Type-Driven Handler System
+## Shared rule dispatch
 
-Events don't decide themselves how to be applied. Instead, the system has **type-driven handlers**:
+Events don't decide how to be applied — the shared `applier::apply()` function does:
 
 ```
 Event arrives: DomainEvent::ContactCreated { name: "Alice" }
        ↓
-Call: event.apply_self()
+applier::apply(projection, &event)
        ↓
-Match on: aggregate_type_enum()
+match on EventData variant (exhaustive — all 28 variants covered)
        ↓
-Route to: apply_contact_event()
+Call projection.upsert_contact_row(...)
        ↓
-Handler: INSERT into contacts_projection
+Per-side impl writes to its own table:
+       - Server: INSERT INTO contacts_projection (sqlx + Postgres)
+       - Client: INSERT INTO contacts (rusqlite + SQLite)
 ```
 
-**Key insight:** Each aggregate type (Contact, Transaction, Permission) has its own handler function. The type system ensures:
-- No string matching (compiler catches typos)
-- No invalid event types (enum prevents them)
-- Easy to add new types (just add variant + handler)
+**Key invariant:** the match arms in `applier::apply` are the same on both sides because both sides import the same crate. A new event variant requires:
+1. Adding it to `EventData` in `crates/core/domain`
+2. Adding a match arm in `crates/core/applier::apply`
+3. Adding a Projection trait method (if a new shape of write is needed)
+4. Implementing the trait method on BOTH `ServerPermissionProjection` and `SdkProjection`
 
-## Permission Events (Different Pattern)
+The Rust compiler enforces step 4 — exhaustive trait impls means a missing method is a compile error.
 
-Permission events don't have their own projection table. Instead, they update **operational tables**:
+## Permission Events (Same Pattern, Different Tables)
+
+Permission events flow through the same `applier::apply` dispatch as data events. They land in operational tables, not projections:
 
 ```
-Event: WalletUserAdded { user_id: "alice", role: "admin" }
+Event: WalletUserAdded { user_id: "alice", role: "owner" }
        ↓
-Apply to: wallet_users table (not a projection)
+applier::apply
        ↓
-Result: INSERT INTO wallet_users (wallet_id, user_id, role) ...
+projection.upsert_wallet_user(wallet_id, alice, "owner")
+projection.add_user_to_system_group(wallet_id, alice, "all_users")
+       ↓
+Tables touched:
+       - wallet_users (membership + role)
+       - wallet_owners (when role='owner', client mirrors server's behavior)
+       - user_group_members (added to all_users)
 ```
 
-Permission events still:
-- Get stored in events table
-- Get type-driven handlers
-- Can be undone with UNDO events
-- Trigger rebuilds when UNDO events present
-
-But they update operational tables instead of projections.
+The rules layer is the same; only the SQL each side runs differs. **Permission resolution** is then handled by `resolver::resolve_actions` / `permitted_contacts_for_action`, which read these tables via the `PermissionStore` trait. Same crate runs on both sides — the client's local `can_perform()` answers via the same rules the server enforces.
 
 ## UNDO and Rebuilds
 
-When an UNDO event is present, the system **rebuilds from scratch**:
+`applier::apply` treats UNDO variants as **no-ops** — the undone event's effect is still in the projection tables after dispatch. The caller has to recognize UNDO and rebuild.
+
+Shared utilities in `crates/core/snapshots` make this uniform:
+
+```
+snapshots::batch_has_undo(event_types)         → bool: any UNDO in batch?
+snapshots::collect_undone_event_ids(events)    → HashSet<String>: which event ids are undone
+snapshots::UNDO_EVENT_TYPE                     → "UNDO" constant
+```
+
+Both sides use these:
+
+- **Client (`sync.rs::pull_and_merge`)**: if `batch_has_undo`, call `rebuild_projection_tables` — wipe the projection tables and replay all events except UNDO + undone ones. The `collect_undone_event_ids` helper builds the skip set.
+
+- **Server (`projections.rs`)**: same idea, plus a snapshot path — finds the snapshot at/before the earliest undone event, restores from it, replays forward skipping UNDO + undone. (Snapshot-aware rollback on the client is future work.)
 
 ```
 Event 1: ContactCreated { name: "Alice" }
@@ -192,13 +231,15 @@ Event 2: ContactCreated { name: "Bob" }
 Event 3: UNDO { undone_event_id: 2 }
        ↓
 Rebuild triggered:
-   1. Delete all contacts_projection rows
-   2. Reprocess ALL events (1-3)
-   3. Skip event 2 (because UNDO marks it as deleted)
-   4. Result: Only Alice exists
+   undone_ids = {2}
+   For each event in [1, 2, 3]:
+     - Event 1: apply         → Alice exists
+     - Event 2: skip (undone)
+     - Event 3: skip (UNDO itself)
+   Result: only Alice exists
 ```
 
-**Why full rebuild?** Because event 2 being undone affects event 3's "current state". If we didn't rebuild, event 3's effects would linger.
+**Why this is necessary:** `applier::apply` would happily run Event 1 (create Alice) then Event 2 (create Bob), and Event 3's no-op leaves Bob in the table. The wipe-and-replay is the simplest correct response.
 
 ---
 
