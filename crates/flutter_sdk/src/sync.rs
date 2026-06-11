@@ -459,6 +459,7 @@ pub(crate) fn rebuild_projection_tables(
         conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM wallet_users WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM wallet_owners WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
         Ok(())

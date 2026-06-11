@@ -387,6 +387,7 @@ impl Projection for SdkProjection {
         let wid = wallet_id.to_string();
         let uid = user_id.to_string();
         let role = role.to_string();
+        let is_owner = role == "owner";
         with_db(|conn| {
             conn.execute(
                 r#"
@@ -396,6 +397,20 @@ impl Projection for SdkProjection {
                 "#,
                 params![wid, uid, role],
             )?;
+            // Mirror role='owner' into wallet_owners. Server tracks
+            // ownership in a dedicated table; SDK mirrors so
+            // is_wallet_owner can issue the same SQL on both sides.
+            if is_owner {
+                conn.execute(
+                    "INSERT OR IGNORE INTO wallet_owners (wallet_id, user_id) VALUES (?1, ?2)",
+                    params![wid, uid],
+                )?;
+            } else {
+                conn.execute(
+                    "DELETE FROM wallet_owners WHERE wallet_id = ?1 AND user_id = ?2",
+                    params![wid, uid],
+                )?;
+            }
             Ok(())
         })
     }
@@ -409,11 +424,23 @@ impl Projection for SdkProjection {
         let wid = wallet_id.to_string();
         let uid = user_id.to_string();
         let role = role.to_string();
+        let is_owner = role == "owner";
         with_db(|conn| {
             conn.execute(
                 "UPDATE wallet_users SET role = ?1 WHERE wallet_id = ?2 AND user_id = ?3",
                 params![role, wid, uid],
             )?;
+            if is_owner {
+                conn.execute(
+                    "INSERT OR IGNORE INTO wallet_owners (wallet_id, user_id) VALUES (?1, ?2)",
+                    params![wid, uid],
+                )?;
+            } else {
+                conn.execute(
+                    "DELETE FROM wallet_owners WHERE wallet_id = ?1 AND user_id = ?2",
+                    params![wid, uid],
+                )?;
+            }
             Ok(())
         })
     }
@@ -428,6 +455,10 @@ impl Projection for SdkProjection {
         with_db(|conn| {
             conn.execute(
                 "DELETE FROM wallet_users WHERE wallet_id = ?1 AND user_id = ?2",
+                params![wid, uid],
+            )?;
+            conn.execute(
+                "DELETE FROM wallet_owners WHERE wallet_id = ?1 AND user_id = ?2",
                 params![wid, uid],
             )?;
             Ok(())

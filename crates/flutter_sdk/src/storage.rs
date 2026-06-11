@@ -134,6 +134,18 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
             PRIMARY KEY (wallet_id, user_id)
         );
 
+        -- Explicit owner tracking, mirrors server's wallet_owners table.
+        -- SdkProjection dual-writes this whenever it sees a wallet_users
+        -- row with role='owner'. SdkPermissionStore::is_wallet_owner
+        -- queries this table (same shape as server) instead of the
+        -- legacy role-string check.
+        CREATE TABLE IF NOT EXISTS wallet_owners (
+            wallet_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            PRIMARY KEY (wallet_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_wallet_owners_user ON wallet_owners(user_id);
+
         -- ============ Contact / Transaction projection tables ============
         --
         -- Populated by SdkProjection (applier::apply) as contact / transaction
@@ -225,6 +237,7 @@ pub fn clear_all() -> Result<(), String> {
             DELETE FROM contacts;
             DELETE FROM transactions;
             DELETE FROM wallet_users;
+            DELETE FROM wallet_owners;
             DELETE FROM user_groups;
             DELETE FROM contact_groups;
             DELETE FROM config;
@@ -251,6 +264,7 @@ pub fn clear_wallet(wallet_id: &str) -> Result<(), String> {
         // contact_groups for this wallet takes their members with them.
         // wallet_users is its own row.
         conn.execute("DELETE FROM wallet_users WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM wallet_owners WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM config WHERE key = ?1", params![key])?;
@@ -388,6 +402,7 @@ pub fn events_delete_all_for_wallet(wallet_id: &str) -> Result<(), String> {
         conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM wallet_users WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM wallet_owners WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
         Ok(())

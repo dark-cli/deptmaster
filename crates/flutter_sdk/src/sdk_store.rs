@@ -39,19 +39,18 @@ impl PermissionStore for SdkPermissionStore {
         wallet_id: Uuid,
         user_id: Uuid,
     ) -> Result<bool, Self::Error> {
-        // SDK doesn't have a wallet_owners table — ownership is carried in
-        // wallet_users.role. "owner" role on this row is the signal.
+        // Mirrors server's query verbatim (modulo placeholder syntax).
         let wid = wallet_id.to_string();
         let uid = user_id.to_string();
         with_db(|conn| {
-            let role: Option<String> = conn
+            let exists: bool = conn
                 .query_row(
-                    "SELECT role FROM wallet_users WHERE wallet_id = ?1 AND user_id = ?2",
+                    "SELECT EXISTS(SELECT 1 FROM wallet_owners WHERE wallet_id = ?1 AND user_id = ?2)",
                     params![wid, uid],
-                    |r| r.get(0),
+                    |r| r.get::<_, i64>(0).map(|n| n != 0),
                 )
-                .ok();
-            Ok(role.as_deref() == Some("owner"))
+                .unwrap_or(false);
+            Ok(exists)
         })
     }
 
