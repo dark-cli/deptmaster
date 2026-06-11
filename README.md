@@ -10,29 +10,14 @@
 
 Debitum is an app for tracking debts between people. The classic use cases:
 
-- 🏠 **Roommates** splitting rent, groceries, utilities
-- 🍽️ **Friends** keeping a running tab on who paid for dinners and trips
-- 👪 **Families** managing shared expenses
-- 💼 **Small businesses** tracking invoices and IOUs
+- **Roommates** splitting rent, groceries, utilities
+- **Friends** keeping a running tab on who paid for dinners and trips
+- **Families** managing shared expenses
+- **Small businesses** tracking invoices and IOUs
 
 You add people, log who owes what, and the app keeps the running balances. Standard stuff.
 
 What makes Debitum different: **you host it yourself**, on your own server. Your data lives in your database. The mobile app talks directly to your server — no middleman, no analytics, no ads, no "free tier with usage limits."
-
----
-
-## Why self-host?
-
-| | Other apps | Debitum |
-|---|---|---|
-| Where your data lives | Some company's servers | Your server |
-| Reads your contacts? | Often, yes | No |
-| Shows ads? | Often, yes | No |
-| Costs money? | Subscription | Free (open source) |
-| Works without internet? | Some | Yes |
-| Can be audited? | No | Yes (open source) |
-
-If you trust no one with your financial life, this is for you.
 
 ---
 
@@ -108,11 +93,11 @@ For a deeper dive, see the [documentation](#documentation) below.
 
 **Not 1.0 yet.** Core functionality works:
 
-- ✅ Server (Rust + Postgres) — stable, 63/63 tests pass
-- ✅ Mobile sync engine (Rust under Flutter) — stable, 47/47 integration tests pass
-- ✅ Permission system, multi-wallet, real-time sync, undo, offline-first
-- 🚧 Mobile UI — Flutter app works on Android + Linux desktop; iOS not tested yet
-- 🚧 Web frontend — planned
+- Server (Rust + Postgres) — stable, 63/63 tests pass
+- Mobile sync engine (Rust under Flutter) — stable, 47/47 integration tests pass
+- Permission system, multi-wallet, real-time sync, undo, offline-first — all working
+- Mobile UI — Flutter app works on Android + Linux desktop; iOS not tested yet
+- Web frontend — planned
 
 If you find a bug, please open an issue.
 
