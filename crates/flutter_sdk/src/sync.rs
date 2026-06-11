@@ -462,6 +462,7 @@ pub(crate) fn rebuild_projection_tables(
         conn.execute("DELETE FROM wallet_owners WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM projection_snapshots WHERE wallet_id = ?1", params![wallet_id])?;
         Ok(())
     })?;
     let mut proj = SdkProjection::new();

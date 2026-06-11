@@ -185,6 +185,29 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
         );
         CREATE INDEX IF NOT EXISTS idx_transactions_wallet ON transactions(wallet_id) WHERE is_deleted = 0;
         CREATE INDEX IF NOT EXISTS idx_transactions_contact ON transactions(contact_id) WHERE is_deleted = 0;
+
+        -- Projection snapshots, mirroring server's projection_snapshots
+        -- table. Per-wallet snapshot stack: snapshot_index increases by 1
+        -- per snapshot taken. last_event_id is the SDK's UUID event id of
+        -- the last event included in the snapshot (server uses BIGINT,
+        -- SDK uses UUID — only legitimate per-side schema diff).
+        -- Snapshots speed up UNDO rollback: find the snapshot at/before
+        -- the undone event, restore it, then replay newer events.
+        CREATE TABLE IF NOT EXISTS projection_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wallet_id TEXT NOT NULL,
+            snapshot_index INTEGER NOT NULL,
+            last_event_id TEXT NOT NULL,
+            event_count INTEGER NOT NULL,
+            contacts_snapshot TEXT NOT NULL,
+            transactions_snapshot TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(wallet_id, snapshot_index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_projection_snapshots_wallet_index
+            ON projection_snapshots(wallet_id, snapshot_index DESC);
+        CREATE INDEX IF NOT EXISTS idx_projection_snapshots_event_id
+            ON projection_snapshots(last_event_id);
         "#,
     )
     .map_err(|e| e.to_string())?;
@@ -240,6 +263,7 @@ pub fn clear_all() -> Result<(), String> {
             DELETE FROM wallet_owners;
             DELETE FROM user_groups;
             DELETE FROM contact_groups;
+            DELETE FROM projection_snapshots;
             DELETE FROM config;
             "#,
         )?;
@@ -267,6 +291,7 @@ pub fn clear_wallet(wallet_id: &str) -> Result<(), String> {
         conn.execute("DELETE FROM wallet_owners WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM projection_snapshots WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM config WHERE key = ?1", params![key])?;
         Ok(())
     })
@@ -405,6 +430,7 @@ pub fn events_delete_all_for_wallet(wallet_id: &str) -> Result<(), String> {
         conn.execute("DELETE FROM wallet_owners WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
+        conn.execute("DELETE FROM projection_snapshots WHERE wallet_id = ?1", params![wallet_id])?;
         Ok(())
     })
 }
