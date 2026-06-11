@@ -16,6 +16,7 @@ mod ids;
 mod log_bridge;
 mod models;
 mod sdk_projection;
+mod sdk_snapshot_store;
 mod sdk_store;
 mod storage;
 mod sync;

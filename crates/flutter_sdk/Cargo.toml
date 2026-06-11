@@ -31,6 +31,10 @@ applier = { path = "../applier" }
 # locally for UX (greying out buttons, etc.) — exact same rules the server
 # enforces on push.
 resolver = { path = "../resolver" }
+
+# Shared snapshot logic. SDK has its own SQLite-backed adapter so the
+# UNDO rollback algorithm (step 5) can be the same on both sides.
+snapshots = { path = "../snapshots" }
 chrono = { version = "0.4", features = ["serde"] }
 flutter_rust_bridge = "=2.11.1"
 log = "0.4"

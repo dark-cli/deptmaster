@@ -55,6 +55,7 @@ use crate::middleware::wallet_context::WalletContext;
 use crate::permissions::PermissionModel;
 use domain::PermissionContext;
 use crate::services::projections::Projections;
+use crate::services::server_snapshot_store::ServerSnapshotStore;
 use crate::services::snapshots;
 use crate::websocket;
 use crate::AppState;
@@ -381,20 +382,21 @@ async fn create_snapshot_if_needed(
     domain_event: &DomainEvent,
 ) {
     let event_count = db.get_event_count_for_wallet(wallet_id).await;
-    let should_snapshot = snapshots::should_create_snapshot_with_interval(
+    let should_snapshot = ::snapshots::should_create_snapshot_with_interval(
         event_count,
         state.config.snapshot_interval,
     ) || is_undo_event(&domain_event.event_data);
 
     if should_snapshot {
         if let Ok(snapshot_json) = snapshots::create_snapshot_json(db.pool(), wallet_id).await {
-            let _ = snapshots::save_snapshot_with_limit(
-                db.pool(),
+            let store = ServerSnapshotStore::new(db.pool());
+            let _ = ::snapshots::save_snapshot_with_limit(
+                &store,
+                wallet_id,
                 1,
                 event_count,
                 snapshot_json.0,
                 snapshot_json.1,
-                wallet_id,
                 state.config.max_snapshots_per_wallet,
             )
             .await;

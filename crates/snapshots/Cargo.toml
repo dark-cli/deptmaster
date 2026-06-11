@@ -1,0 +1,10 @@
+[package]
+name = "snapshots"
+version = "0.1.0"
+edition = "2021"
+description = "Pure-Rust projection-snapshot logic shared by server and SDK. The when-to-snapshot rule, the rotate-old-snapshots policy, and (in step 5) the UNDO rollback algorithm live here. Each side implements the SnapshotStore trait against its own database."
+
+[dependencies]
+async-trait = "0.1"
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }

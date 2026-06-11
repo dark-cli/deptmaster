@@ -37,79 +37,11 @@ impl<'r> FromRow<'r, PgRow> for ProjectionSnapshot {
     }
 }
 
-/// Snapshot configuration - defaults, can be overridden by MAX_SNAPSHOTS_PER_WALLET and SNAPSHOT_INTERVAL env vars
-pub const DEFAULT_MAX_SNAPSHOTS: i64 = 5;
-pub const DEFAULT_SNAPSHOT_INTERVAL: i64 = 10;
-
-/// Save a projection snapshot (uses default max snapshots)
-pub async fn save_snapshot(
-    pool: &PgPool,
-    last_event_id: i64,
-    event_count: i64,
-    contacts_snapshot: serde_json::Value,
-    transactions_snapshot: serde_json::Value,
-    wallet_id: uuid::Uuid,
-) -> Result<(), sqlx::Error> {
-    save_snapshot_with_limit(
-        pool,
-        last_event_id,
-        event_count,
-        contacts_snapshot,
-        transactions_snapshot,
-        wallet_id,
-        DEFAULT_MAX_SNAPSHOTS,
-    )
-    .await
-}
-
-/// Save a projection snapshot with custom max snapshots limit
-pub async fn save_snapshot_with_limit(
-    pool: &PgPool,
-    last_event_id: i64,
-    event_count: i64,
-    contacts_snapshot: serde_json::Value,
-    transactions_snapshot: serde_json::Value,
-    wallet_id: uuid::Uuid,
-    max_snapshots: i64,
-) -> Result<(), sqlx::Error> {
-    // Get next snapshot index for this wallet
-    let next_index = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT COALESCE(MAX(snapshot_index), -1) + 1 FROM projection_snapshots WHERE wallet_id = $1"
-    )
-    .bind(wallet_id)
-    .fetch_one(pool)
-    .await?;
-
-    let next_index = next_index.unwrap_or(0);
-
-    // Insert snapshot
-    sqlx::query(
-        r#"
-        INSERT INTO projection_snapshots
-        (snapshot_index, last_event_id, event_count, contacts_snapshot, transactions_snapshot, wallet_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        "#
-    )
-    .bind(next_index)
-    .bind(last_event_id)
-    .bind(event_count)
-    .bind(contacts_snapshot)
-    .bind(transactions_snapshot)
-    .bind(wallet_id)
-    .execute(pool)
-    .await?;
-
-    tracing::info!(
-        "Saved projection snapshot #{} (event count: {})",
-        next_index,
-        event_count
-    );
-
-    // Cleanup old snapshots for this wallet
-    cleanup_old_snapshots_with_limit(pool, wallet_id, max_snapshots).await?;
-
-    Ok(())
-}
+// Snapshot rotation rules + defaults moved to the shared `snapshots`
+// crate. Callers that used to reach for `DEFAULT_MAX_SNAPSHOTS` /
+// `DEFAULT_SNAPSHOT_INTERVAL` / `save_snapshot[_with_limit]` /
+// `should_create_snapshot[_with_interval]` now go through that crate
+// directly, paired with `ServerSnapshotStore` as the storage adapter.
 
 /// Get snapshot before a specific event ID
 /// Returns the most recent snapshot where last_event_id < event_id
@@ -157,69 +89,6 @@ pub async fn get_latest_snapshot(
     .await?;
 
     Ok(snapshot)
-}
-
-/// Cleanup old snapshots, keeping only the last max_snapshots for a wallet
-pub async fn cleanup_old_snapshots(
-    pool: &PgPool,
-    wallet_id: uuid::Uuid,
-) -> Result<(), sqlx::Error> {
-    cleanup_old_snapshots_with_limit(pool, wallet_id, DEFAULT_MAX_SNAPSHOTS).await
-}
-
-/// Cleanup old snapshots with custom max_snapshots limit
-pub async fn cleanup_old_snapshots_with_limit(
-    pool: &PgPool,
-    wallet_id: uuid::Uuid,
-    max_snapshots: i64,
-) -> Result<(), sqlx::Error> {
-    // Get count of snapshots for this wallet
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM projection_snapshots WHERE wallet_id = $1")
-            .bind(wallet_id)
-            .fetch_one(pool)
-            .await?;
-
-    if count <= max_snapshots {
-        return Ok(());
-    }
-
-    // Delete oldest snapshots, keeping only the last max_snapshots for this wallet
-    let to_delete = count - max_snapshots;
-    sqlx::query(
-        r#"
-        DELETE FROM projection_snapshots
-        WHERE wallet_id = $1 AND snapshot_index IN (
-            SELECT snapshot_index
-            FROM projection_snapshots
-            WHERE wallet_id = $1
-            ORDER BY snapshot_index ASC
-            LIMIT $2
-        )
-        "#,
-    )
-    .bind(wallet_id)
-    .bind(to_delete)
-    .execute(pool)
-    .await?;
-
-    tracing::info!(
-        "Cleaned up {} old snapshots, kept {}",
-        to_delete,
-        max_snapshots
-    );
-
-    Ok(())
-}
-
-/// Check if we should create a snapshot based on event count (uses default interval)
-pub fn should_create_snapshot(event_count: i64) -> bool {
-    should_create_snapshot_with_interval(event_count, DEFAULT_SNAPSHOT_INTERVAL)
-}
-
-/// Check if we should create a snapshot based on event count with custom interval
-pub fn should_create_snapshot_with_interval(event_count: i64, snapshot_interval: i64) -> bool {
-    event_count % snapshot_interval == 0
 }
 
 /// Get event ID from events table by event_id UUID

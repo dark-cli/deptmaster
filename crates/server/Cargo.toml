@@ -39,6 +39,10 @@ applier = { path = "../applier" }
 # resolve_actions / permitted_contacts_for_action.
 resolver = { path = "../resolver" }
 
+# Shared snapshot logic. SnapshotStore trait + the should-snapshot
+# rule + save-with-limit rotation. Server has its own SQL adapter.
+snapshots = { path = "../snapshots" }
+
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
