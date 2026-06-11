@@ -44,9 +44,9 @@ pub use patches::{ContactPatch, TransactionPatch};
 ///   (event_db_id, wallet_id, user_id, created_at) set via
 ///   [`Projection::set_event_context`]. Each mutation emits one or more
 ///   sqlx queries.
-/// - **SDK** (`crates/flutter_sdk`): wraps `&mut rusqlite::Connection`.
+/// - **Client** (`crates/client`): wraps a rusqlite connection.
 ///   Each mutation runs an equivalent SQLite statement. The per-event
-///   context default no-op fits — SDK doesn't track `last_event_id`.
+///   context default no-op fits — client doesn't track `last_event_id`.
 #[async_trait]
 pub trait Projection {
     type Error: std::fmt::Debug + Send;

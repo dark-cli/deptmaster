@@ -2,10 +2,9 @@
 resolver = "2"
 members = [
     "crates/server",
-    "crates/flutter_sdk",
-    "crates/domain",
-    "crates/applier",
-    "crates/resolver",
-    "crates/snapshots",
-    "crates/web",
+    "crates/client",
+    "crates/core/domain",
+    "crates/core/applier",
+    "crates/core/resolver",
+    "crates/core/snapshots",
 ]

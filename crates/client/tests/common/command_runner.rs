@@ -6,7 +6,7 @@
 //!
 //! Full vocabulary: see project docs at `docs/INTEGRATION_TEST_COMMANDS.md`.
 
-use flutter_sdk::{
+use client::{
     create_contact, create_transaction, delete_contact, delete_transaction, get_transaction,
     list_wallet_contact_groups, list_wallet_user_groups, manual_sync,
     put_wallet_permission_matrix, update_contact, update_transaction,
@@ -124,7 +124,7 @@ impl CommandRunner {
         if args.is_empty() {
             return Err(format!("Permission command requires action: {}", original));
         }
-        let wallet_id = flutter_sdk::get_current_wallet_id()
+        let wallet_id = client::get_current_wallet_id()
             .ok_or_else(|| "No wallet selected".to_string())?;
         let ug_all_users = find_group_id(&list_wallet_user_groups(wallet_id.clone())?, "all_users")?;
         let cg_all_contacts =

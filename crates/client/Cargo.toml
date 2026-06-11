@@ -1,5 +1,5 @@
 [package]
-name = "flutter_sdk"
+name = "client"
 version = "0.1.0"
 edition = "2021"
 # Disable autodiscovery of integration tests: tests/single_app.rs etc. are NOT
@@ -19,22 +19,20 @@ path = "tests/integration.rs"
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
-domain = { path = "../domain" }
+domain = { path = "../core/domain" }
 
-# Shared event-application logic. The SDK uses it to apply permission events to
-# its local SQLite permission tables (added in Phase 0.2 step 2). Contact /
-# Transaction events still flow through state_builder.rs for now; a future
-# step replaces that too.
-applier = { path = "../applier" }
+# Shared event-application logic. Used to apply permission events to
+# the client's local SQLite permission tables.
+applier = { path = "../core/applier" }
 
-# Shared permission resolution. SDK uses it to answer "can the user do X?"
-# locally for UX (greying out buttons, etc.) — exact same rules the server
-# enforces on push.
-resolver = { path = "../resolver" }
+# Shared permission resolution. Used to answer "can the user do X?"
+# locally for UX (greying out buttons, etc.) — exact same rules the
+# server enforces on push.
+resolver = { path = "../core/resolver" }
 
-# Shared snapshot logic. SDK has its own SQLite-backed adapter so the
-# UNDO rollback algorithm (step 5) can be the same on both sides.
-snapshots = { path = "../snapshots" }
+# Shared snapshot logic. Client has its own SQLite-backed adapter so the
+# UNDO rollback algorithm can be the same on both sides.
+snapshots = { path = "../core/snapshots" }
 chrono = { version = "0.4", features = ["serde"] }
 flutter_rust_bridge = "=2.11.1"
 log = "0.4"
