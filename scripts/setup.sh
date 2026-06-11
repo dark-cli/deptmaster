@@ -60,9 +60,9 @@ print_success "All prerequisites met"
 echo ""
 
 # Create .env file if it doesn't exist
-if [ ! -f backend/.env ]; then
+if [ ! -f .env ]; then
     print_step "Creating .env file..."
-    cat > backend/.env <<EOF
+    cat > .env <<EOF
 # Database
 DB_PASSWORD=dev_password
 
@@ -75,10 +75,10 @@ EVENTSTORE_URL=http://localhost:2113
 EVENTSTORE_USERNAME=admin
 EVENTSTORE_PASSWORD=changeit
 EOF
-    print_success ".env file created in backend/"
-    print_info "Please edit backend/.env file with your configuration if needed"
+    print_success ".env file created at repo root"
+    print_info "Please edit .env file with your configuration if needed"
 else
-    print_info ".env file already exists in backend/"
+    print_info ".env file already exists at repo root"
 fi
 echo ""
 
@@ -89,9 +89,7 @@ if ! docker ps > /dev/null 2>&1; then
     exit 1
 fi
 
-cd backend
-docker-compose up -d postgres eventstore 2>/dev/null || docker-compose up -d postgres eventstore
-cd ..
+docker-compose up -d postgres 2>/dev/null || docker-compose up -d postgres
 
 print_info "Waiting for services to be ready..."
 sleep 5
@@ -99,8 +97,8 @@ sleep 5
 print_success "Docker services started"
 echo ""
 
-# Setup backend
-print_step "Setting up backend..."
+# Setup server
+print_step "Setting up server..."
 cd crates/server
 
 print_info "Installing Rust dependencies..."

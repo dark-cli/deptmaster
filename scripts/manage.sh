@@ -386,7 +386,7 @@ cmd_reset_database_only() {
     # Ensure PostgreSQL is running
     if ! docker ps | grep -q "debt_tracker_postgres"; then
         print_warning "PostgreSQL not running. Starting..."
-        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
+        (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1)
         sleep 5
     fi
     
@@ -624,13 +624,13 @@ cmd_start_docker_services() {
     
     if [ "$1" = "postgres" ] || [ -z "$1" ]; then
         print_info "Starting PostgreSQL..."
-        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
+        (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1)
         sleep 5
     fi
 
     if [ -z "$1" ]; then
         print_info "Starting all services..."
-        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
+        (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1)
     fi
     if [ "$VERBOSE" = true ]; then
         print_success "Services started"
@@ -645,9 +645,9 @@ cmd_stop_docker_services() {
     check_docker
 
     if [ "$1" = "postgres" ]; then
-        (cd "$ROOT_DIR/backend" && docker-compose stop postgres)
+        (cd "$ROOT_DIR" && docker-compose stop postgres)
     else
-        (cd "$ROOT_DIR/backend" && docker-compose stop)
+        (cd "$ROOT_DIR" && docker-compose stop)
     fi
     print_success "Services stopped"
 }
@@ -727,7 +727,7 @@ cmd_stop_server() {
     print_info "Stopping API server..."
     
     # Stop Docker container if running
-    (cd "$ROOT_DIR/backend" && docker-compose stop api 2>/dev/null) || true
+    (cd "$ROOT_DIR" && docker-compose stop api 2>/dev/null) || true
     
     # Also stop any direct process
     pkill -f "api" || true
@@ -758,7 +758,7 @@ cmd_start_all_docker_production() {
     
     # Start all services including API in Docker
     print_info "Starting all Docker services (postgres, api)..."
-    (cd "$ROOT_DIR/backend" && docker-compose up -d)
+    (cd "$ROOT_DIR" && docker-compose up -d)
     
     # Wait for services to be healthy
     print_info "Waiting for services to be ready..."
@@ -766,7 +766,7 @@ cmd_start_all_docker_production() {
     print_success "Production server started (all in Docker)"
     print_info "Server running at: http://localhost:8000"
     print_info "View logs: $0 logs"
-    print_info "Stop with: docker-compose -f backend/docker-compose.yml stop api"
+    print_info "Stop with: docker-compose -f docker-compose.yml stop api"
 }
 
 cmd_start_server_direct() {
@@ -786,7 +786,7 @@ cmd_start_server_direct() {
     # Stop Docker API container if running (to free port 8000)
     if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_api$'; then
         print_info "Stopping Docker API container to free port 8000..."
-        (cd "$ROOT_DIR/backend" && docker-compose stop api 2>/dev/null) || true
+        (cd "$ROOT_DIR" && docker-compose stop api 2>/dev/null) || true
     fi
     
     # Check if port is available and try to stop what's using it
@@ -796,7 +796,7 @@ cmd_start_server_direct() {
         # Try to stop Docker API container
         if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_api$'; then
             print_info "Stopping Docker API container..."
-            (cd "$ROOT_DIR/backend" && docker-compose stop api 2>/dev/null) || true
+            (cd "$ROOT_DIR" && docker-compose stop api 2>/dev/null) || true
             sleep 2
         fi
         
@@ -810,7 +810,7 @@ cmd_start_server_direct() {
         # Check again
         if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
             print_error "Port 8000 is still in use. Please manually stop the service:"
-            print_info "  docker-compose -f backend/docker-compose.yml stop api"
+            print_info "  docker-compose -f docker-compose.yml stop api"
             print_info "  pkill -f api"
             print_info "  Or use: $0 stop-server"
             exit 1
@@ -2331,7 +2331,7 @@ cmd_set_admin_password() {
     # Ensure PostgreSQL is running
     if ! docker ps | grep -q "debt_tracker_postgres"; then
         print_warning "PostgreSQL not running. Starting..."
-        (cd "$ROOT_DIR/backend" && docker-compose up -d postgres > /dev/null 2>&1)
+        (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1)
         sleep 5
     fi
     

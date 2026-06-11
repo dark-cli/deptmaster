@@ -185,6 +185,8 @@
   },
   "active": "1b21b235138f2619",
   "lastOpenFiles": [
+    "client-backend-security.md.tmp.212282.7dbba2178f91",
+    "database-setup.md.tmp.212282.48dc3cd0d125",
     "client-todo.md.tmp.212282.a7922c707ff9",
     "99-reference/01-glossary.md.tmp.212282.da24266e7253",
     "03-snapshots/04-snapshot-tables-schema.md.tmp.212282.dcd542d4cb8b",
@@ -194,9 +196,7 @@
     "00-getting-started/04-main-architecture.md.tmp.212282.e451533a0f3a",
     "00-getting-started/04-main-architecture.md.tmp.212282.9aeafb748091",
     "00-getting-started/04-main-architecture.md.tmp.212282.f7fdabbee37b",
-    "06-client/01-design-notes.md.tmp.212282.3c5632dab7a8",
     "06-client/00-refactoring-plan.md",
-    "09-design/02-animation-guidelines.md.tmp.212282.a126fc502adf",
     "09-design/02-animation-guidelines.md",
     "09-design/01-theme-catalog.md",
     "06-client/04-test-baseline-2026-06-08.md",

@@ -156,7 +156,7 @@ Unencrypted JWT in Authorization header
 ### Backend
 - Configuration: `crates/server/src/config.rs` (lines 42-45)
 - Server startup: `crates/server/src/main.rs` (lines 164-230)
-- Environment: `backend/.env.example` (no ENABLE_TLS documented)
+- Environment: `.env.example` (no ENABLE_TLS documented)
 
 ### Client
 - HTTP Client: `mobile/lib/services/api_service.dart` (uses dart http package)

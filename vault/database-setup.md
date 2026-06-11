@@ -230,7 +230,7 @@ docker-compose down -v
 
 **File:** `./scripts/manage.sh` (2500+ lines, handles all infrastructure)
 
-**Docker config:** `./backend/docker-compose.yml`
+**Docker config:** `./docker-compose.yml`
 
 ---
 
