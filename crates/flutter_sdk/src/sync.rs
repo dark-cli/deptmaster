@@ -316,12 +316,24 @@ pub fn pull_and_merge() -> Result<(), String> {
     // no-op for UNDO variants, so the projection would otherwise still
     // contain the undone event's effects. Rebuilds are rare (UNDOs are rare),
     // so the cost is acceptable.
-    let batch_has_undo = server_events.iter().any(|ev| {
-        ev.get("event_type").and_then(|v| v.as_str()) == Some("UNDO")
-    });
-    if batch_has_undo {
+    let has_undo = snapshots::batch_has_undo(server_events.iter().filter_map(|ev| {
+        ev.get("event_type").and_then(|v| v.as_str())
+    }));
+    if has_undo {
         let all_events = storage::events_get_all(&wallet_id)?;
         rebuild_projection_tables(&wallet_id, &all_events)?;
+    }
+
+    // Snapshot the current projection if we crossed an interval boundary
+    // or just processed an UNDO. The shared `snapshots` crate owns the
+    // when-to-snapshot rule and rotation; this side just supplies the
+    // data + the SQLite-backed `SdkSnapshotStore`. Failures are logged
+    // and swallowed — a missing snapshot only costs replay time, never
+    // correctness.
+    if !server_events.is_empty() {
+        if let Err(e) = maybe_save_snapshot(&wallet_id, has_undo) {
+            rust_log!("[debitum_rs] save_snapshot skipped: {}", e);
+        }
     }
 
     // Always advance last_sync_timestamp — using the newest server event's timestamp if any,
@@ -438,22 +450,23 @@ pub(crate) fn rebuild_projection_tables(
 ) -> Result<(), String> {
     use crate::sdk_projection::SdkProjection;
     use rusqlite::params;
-    use std::collections::HashSet;
 
     // Collect ids referenced by UNDO events — these events are filtered
     // out of the apply pass below. (UNDO events themselves are also
-    // skipped because applier::apply is a no-op for them.)
-    let undone_ids: HashSet<String> = events
+    // skipped because applier::apply is a no-op for them.) The
+    // shared helper takes (event_type, parsed_event_data) pairs;
+    // pre-parse the JSON once here.
+    let parsed: Vec<(String, serde_json::Value)> = events
         .iter()
-        .filter(|e| e.event_type == "UNDO")
-        .filter_map(|e| {
-            serde_json::from_str::<serde_json::Value>(&e.event_data)
-                .ok()?
-                .get("undone_event_id")?
-                .as_str()
-                .map(String::from)
+        .map(|e| {
+            let data = serde_json::from_str::<serde_json::Value>(&e.event_data)
+                .unwrap_or(serde_json::Value::Null);
+            (e.event_type.clone(), data)
         })
         .collect();
+    let undone_ids = snapshots::collect_undone_event_ids(
+        parsed.iter().map(|(t, d)| (t.as_str(), d)),
+    );
 
     crate::storage::with_db(|conn| {
         conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
@@ -495,4 +508,37 @@ pub(crate) fn rebuild_projection_tables(
         }
     }
     Ok(())
+}
+
+/// Save a projection snapshot iff the event count crossed
+/// [`snapshots::DEFAULT_SNAPSHOT_INTERVAL`] OR an UNDO landed in
+/// this batch. Snapshots speed up the next UNDO rollback and are
+/// dropped to [`snapshots::DEFAULT_MAX_SNAPSHOTS`] per wallet.
+fn maybe_save_snapshot(wallet_id: &str, has_undo: bool) -> Result<(), String> {
+    let event_count = storage::events_count(wallet_id)?;
+    if !has_undo && !snapshots::should_create_snapshot(event_count) {
+        return Ok(());
+    }
+    let wallet_uuid = uuid::Uuid::parse_str(wallet_id).map_err(|e| e.to_string())?;
+    let contacts = storage::load_contacts_from_tables(wallet_id)?;
+    let transactions = storage::load_transactions_from_tables(wallet_id)?;
+    let contacts_json = serde_json::to_value(&contacts).map_err(|e| e.to_string())?;
+    let transactions_json = serde_json::to_value(&transactions).map_err(|e| e.to_string())?;
+    let last_event_id = storage::events_get_all(wallet_id)?
+        .last()
+        .map(|e| e.id.clone())
+        .unwrap_or_default();
+    let store = crate::sdk_snapshot_store::SdkSnapshotStore::new();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(snapshots::save_snapshot(
+        &store,
+        wallet_uuid,
+        last_event_id,
+        event_count,
+        contacts_json,
+        transactions_json,
+    ))
 }

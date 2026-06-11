@@ -12,8 +12,43 @@
 //! many to keep, what data goes in — is identical and lives here.
 
 use async_trait::async_trait;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use uuid::Uuid;
+
+/// Event-type string for UNDO events. Shared so the predicates below
+/// and per-side dispatchers stay in lockstep.
+pub const UNDO_EVENT_TYPE: &str = "UNDO";
+
+/// `true` if any event in the iterator has type [`UNDO_EVENT_TYPE`].
+/// Lets each side keep its own row/struct representation and pass
+/// just the type slice in.
+pub fn batch_has_undo<'a, I>(event_types: I) -> bool
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    event_types.into_iter().any(|t| t == UNDO_EVENT_TYPE)
+}
+
+/// Collect `undone_event_id` values referenced by UNDO events in the
+/// iterator. The caller passes `(event_type, event_data)` pairs in
+/// whatever shape is convenient; this function pulls the field by
+/// name and returns the string ids as a set, ready for "skip these
+/// events when replaying" use.
+pub fn collect_undone_event_ids<'a, I>(events: I) -> HashSet<String>
+where
+    I: IntoIterator<Item = (&'a str, &'a serde_json::Value)>,
+{
+    events
+        .into_iter()
+        .filter(|(t, _)| *t == UNDO_EVENT_TYPE)
+        .filter_map(|(_, data)| {
+            data.get("undone_event_id")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect()
+}
 
 /// Default ceiling on snapshots-per-wallet. Older snapshots are pruned
 /// once this count is exceeded. Tuned for "long enough to roll back a
@@ -183,5 +218,33 @@ mod tests {
     fn should_create_snapshot_zero_or_negative_interval_disables() {
         assert!(!should_create_snapshot_with_interval(10, 0));
         assert!(!should_create_snapshot_with_interval(10, -1));
+    }
+
+    #[test]
+    fn batch_has_undo_detects_an_undo_anywhere_in_the_batch() {
+        assert!(!batch_has_undo(["CREATED", "UPDATED"].iter().copied()));
+        assert!(batch_has_undo(["CREATED", "UNDO", "UPDATED"].iter().copied()));
+        assert!(batch_has_undo(["UNDO"].iter().copied()));
+        let empty: [&str; 0] = [];
+        assert!(!batch_has_undo(empty.iter().copied()));
+    }
+
+    #[test]
+    fn collect_undone_event_ids_only_picks_up_undo_rows() {
+        let created = serde_json::json!({});
+        let undo_a = serde_json::json!({ "undone_event_id": "abc" });
+        let undo_b = serde_json::json!({ "undone_event_id": "def" });
+        let undo_no_field = serde_json::json!({});
+        let pairs = [
+            ("CREATED", &created),
+            ("UNDO", &undo_a),
+            ("UPDATED", &created),
+            ("UNDO", &undo_b),
+            ("UNDO", &undo_no_field),
+        ];
+        let ids = collect_undone_event_ids(pairs.iter().map(|(t, d)| (*t, *d)));
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("abc"));
+        assert!(ids.contains("def"));
     }
 }
