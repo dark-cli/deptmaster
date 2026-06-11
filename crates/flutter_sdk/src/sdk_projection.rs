@@ -42,8 +42,8 @@ impl Projection for SdkProjection {
 
     // ---------- Contact / Transaction CRUD ----------
     //
-    // Writes to the `contacts` / `transactions` SQLite tables. The SDK
-    // has no soft-delete column — `soft_delete_*` here is a hard DELETE.
+    // Writes to the `contacts` / `transactions` SQLite tables. Mirrors
+    // the server: soft delete via `is_deleted` flag, not row removal.
 
     async fn upsert_contact_row(
         &mut self,
@@ -129,10 +129,11 @@ impl Projection for SdkProjection {
     ) -> Result<(), Self::Error> {
         let id_s = id.to_string();
         let wallet_s = wallet_id.to_string();
+        let now = chrono::Utc::now().to_rfc3339();
         with_db(|conn| {
             conn.execute(
-                "DELETE FROM contacts WHERE id = ?1 AND wallet_id = ?2",
-                params![id_s, wallet_s],
+                "UPDATE contacts SET is_deleted = 1, updated_at = ?3 WHERE id = ?1 AND wallet_id = ?2",
+                params![id_s, wallet_s, now],
             )?;
             Ok(())
         })
@@ -145,10 +146,11 @@ impl Projection for SdkProjection {
     ) -> Result<(), Self::Error> {
         let cid = contact_id.to_string();
         let wallet_s = wallet_id.to_string();
+        let now = chrono::Utc::now().to_rfc3339();
         with_db(|conn| {
             conn.execute(
-                "DELETE FROM transactions WHERE contact_id = ?1 AND wallet_id = ?2",
-                params![cid, wallet_s],
+                "UPDATE transactions SET is_deleted = 1, updated_at = ?3 WHERE contact_id = ?1 AND wallet_id = ?2 AND is_deleted = 0",
+                params![cid, wallet_s, now],
             )?;
             Ok(())
         })
@@ -245,15 +247,12 @@ impl Projection for SdkProjection {
         contact_id: Uuid,
         wallet_id: Uuid,
     ) -> Result<bool, Self::Error> {
-        // Real query now that contacts have a SQLite table. Mirrors
-        // server's "is_deleted = false" check, but since SDK hard-deletes
-        // rather than tombstoning, "exists" is "active."
         let cid = contact_id.to_string();
         let wallet_s = wallet_id.to_string();
         with_db(|conn| {
             let exists: bool = conn
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM contacts WHERE id = ?1 AND wallet_id = ?2)",
+                    "SELECT EXISTS(SELECT 1 FROM contacts WHERE id = ?1 AND wallet_id = ?2 AND is_deleted = 0)",
                     params![cid, wallet_s],
                     |r| r.get::<_, i64>(0).map(|n| n != 0),
                 )
@@ -367,10 +366,11 @@ impl Projection for SdkProjection {
     ) -> Result<(), Self::Error> {
         let id_s = id.to_string();
         let wallet_s = wallet_id.to_string();
+        let now = chrono::Utc::now().to_rfc3339();
         with_db(|conn| {
             conn.execute(
-                "DELETE FROM transactions WHERE id = ?1 AND wallet_id = ?2",
-                params![id_s, wallet_s],
+                "UPDATE transactions SET is_deleted = 1, updated_at = ?3 WHERE id = ?1 AND wallet_id = ?2",
+                params![id_s, wallet_s, now],
             )?;
             Ok(())
         })

@@ -171,7 +171,9 @@ impl PermissionStore for SdkPermissionStore {
     ) -> Result<HashSet<Uuid>, Self::Error> {
         let wid = wallet_id.to_string();
         with_db(|conn| {
-            let mut stmt = conn.prepare("SELECT id FROM contacts WHERE wallet_id = ?1")?;
+            let mut stmt = conn.prepare(
+                "SELECT id FROM contacts WHERE wallet_id = ?1 AND is_deleted = 0",
+            )?;
             let rows = stmt.query_map(params![wid], |r| r.get::<_, String>(0))?;
             let mut set = HashSet::new();
             for row in rows {

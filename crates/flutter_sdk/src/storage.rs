@@ -150,9 +150,10 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
             notes TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            is_synced INTEGER NOT NULL DEFAULT 1
+            is_synced INTEGER NOT NULL DEFAULT 1,
+            is_deleted INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_contacts_wallet ON contacts(wallet_id);
+        CREATE INDEX IF NOT EXISTS idx_contacts_wallet ON contacts(wallet_id) WHERE is_deleted = 0;
 
         CREATE TABLE IF NOT EXISTS transactions (
             id TEXT PRIMARY KEY,
@@ -167,10 +168,11 @@ fn create_tables(conn: &Connection) -> Result<(), String> {
             due_date TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            is_synced INTEGER NOT NULL DEFAULT 1
+            is_synced INTEGER NOT NULL DEFAULT 1,
+            is_deleted INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_transactions_wallet ON transactions(wallet_id);
-        CREATE INDEX IF NOT EXISTS idx_transactions_contact ON transactions(contact_id);
+        CREATE INDEX IF NOT EXISTS idx_transactions_wallet ON transactions(wallet_id) WHERE is_deleted = 0;
+        CREATE INDEX IF NOT EXISTS idx_transactions_contact ON transactions(contact_id) WHERE is_deleted = 0;
         "#,
     )
     .map_err(|e| e.to_string())?;
@@ -439,9 +441,12 @@ pub fn load_contacts_from_tables(wallet_id: &str) -> Result<Vec<Contact>, String
             r#"
             SELECT c.id, c.name, c.username, c.phone, c.email, c.notes,
                    c.created_at, c.updated_at, c.is_synced, c.wallet_id,
-                   COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.contact_id = c.id), 0) AS balance
+                   COALESCE(
+                     (SELECT SUM(t.amount) FROM transactions t
+                       WHERE t.contact_id = c.id AND t.is_deleted = 0), 0
+                   ) AS balance
               FROM contacts c
-             WHERE c.wallet_id = ?1
+             WHERE c.wallet_id = ?1 AND c.is_deleted = 0
              ORDER BY c.name COLLATE NOCASE
             "#,
         )?;
@@ -475,7 +480,7 @@ pub fn load_transactions_from_tables(wallet_id: &str) -> Result<Vec<Transaction>
             SELECT id, contact_id, type, direction, amount, currency, description,
                    transaction_date, due_date, created_at, updated_at, is_synced, wallet_id
               FROM transactions
-             WHERE wallet_id = ?1
+             WHERE wallet_id = ?1 AND is_deleted = 0
              ORDER BY transaction_date DESC, created_at DESC
             "#,
         )?;

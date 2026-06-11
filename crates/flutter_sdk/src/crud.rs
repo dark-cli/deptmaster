@@ -80,18 +80,17 @@ fn rebuild_projection_for_wallet(wallet_id: &str) -> Result<(), String> {
     sync::rebuild_projection_tables(wallet_id, &events)
 }
 
-/// Sum the balance column on the projection table to compute the
-/// wallet's total debt (used to stamp events for the chart).
+/// Sum transaction amounts (filtered to live rows) to compute the
+/// wallet's total debt. Used to stamp events for the chart so the
+/// client value matches what the server records.
 fn wallet_total_debt(wallet_id: &str) -> Result<i64, String> {
     let wid = wallet_id.to_string();
     storage::with_db(|conn| {
-        let total: i64 = conn
-            .query_row(
-                "SELECT COALESCE(SUM(balance), 0) FROM contacts WHERE wallet_id = ?1",
-                params![wid],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let total: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE wallet_id = ?1 AND is_deleted = 0",
+            params![wid],
+            |r| r.get(0),
+        )?;
         Ok(total)
     })
 }
