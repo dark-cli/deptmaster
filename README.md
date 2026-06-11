@@ -1,161 +1,155 @@
 # Debitum
 
-Self-hostable debt tracker. Built end-to-end in Rust — server and client share the same event-application code, the same permission resolver, the same snapshot logic. One rulebook, two engines.
+**A debt tracker you run yourself.** Keep track of who owes whom — without handing your friends, your contacts, or your spending history to a cloud service.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 ---
 
-## Why Debitum
+## What is it?
 
-**Most debt trackers are a hosted SaaS reading your contacts and spending habits.** Debitum is the opposite: you run the server, you own the database, the mobile app talks directly to it. No analytics SDK, no third-party data brokers, no upsells. GPL-licensed.
+Debitum is an app for tracking debts between people. The classic use cases:
 
-**Most apps drift between client and server.** When the server says you can edit a contact but the client thinks you can't, that's a class of bug we structurally can't have — both sides import the same `applier`, `resolver`, and `snapshots` Rust crates and call the same functions. Identical rules, two storage engines.
+- 🏠 **Roommates** splitting rent, groceries, utilities
+- 🍽️ **Friends** keeping a running tab on who paid for dinners and trips
+- 👪 **Families** managing shared expenses
+- 💼 **Small businesses** tracking invoices and IOUs
 
-**Most apps lose your edits when the network blinks.** Debitum is offline-first: every change is an immutable event, queued in local SQLite, pushed to the server when reachable. The server is the source of truth; the client is a fast local cache. Undo is built in.
+You add people, log who owes what, and the app keeps the running balances. Standard stuff.
 
----
-
-## What it does
-
-- **Track debts** between people and groups, multi-currency built in
-- **Multi-wallet** — separate debt books with separate members and permissions (housemates, business, family — each isolated)
-- **Multi-user wallets** with a 3-state permission matrix (allow / deny / unset, deny wins). Owners, admins, members — admins can't escalate themselves, owners are explicit
-- **Real-time sync** — WebSocket push when someone else on the wallet makes a change
-- **5-second UNDO** — for create / update / delete on contacts and transactions
-- **Full audit trail** — every state change is an event in the log, queryable forever
-- **Snapshot rotation** — efficient state rebuilds even with large event histories
+What makes Debitum different: **you host it yourself**, on your own server. Your data lives in your database. The mobile app talks directly to your server — no middleman, no analytics, no ads, no "free tier with usage limits."
 
 ---
 
-## Architecture, briefly
+## Why self-host?
 
-```
-                    ┌────────────────────────────────┐
-                    │   crates/core/  (shared rules) │
-                    │ ┌──────────┬─────────────────┐ │
-                    │ │ domain   │ DomainEvent     │ │ ← 28 typed event variants
-                    │ │ applier  │ Projection      │ │ ← event-application dispatch
-                    │ │ resolver │ PermissionStore │ │ ← 3-state permission matrix
-                    │ │ snapshots│ SnapshotStore   │ │ ← rotation + UNDO predicates
-                    │ └──────────┴─────────────────┘ │
-                    └───────────────┬────────────────┘
-                                    │
-                  ┌─────────────────┴─────────────────┐
-                  │                                   │
-        ┌─────────▼─────────┐               ┌─────────▼─────────┐
-        │   crates/server   │               │   crates/client   │
-        │  axum + sqlx + PG │ ◄── sync ──►  │  rusqlite + FRB   │
-        │   (authoritative) │               │   (offline-first) │
-        └─────────┬─────────┘               └─────────┬─────────┘
-                  │                                   │
-            Postgres DB                       SQLite (local)
-                                                      │
-                                                      ▼
-                                              ┌──────────────┐
-                                              │   mobile/    │
-                                              │   Flutter UI │
-                                              └──────────────┘
-```
+| | Other apps | Debitum |
+|---|---|---|
+| Where your data lives | Some company's servers | Your server |
+| Reads your contacts? | Often, yes | No |
+| Shows ads? | Often, yes | No |
+| Costs money? | Subscription | Free (open source) |
+| Works without internet? | Some | Yes |
+| Can be audited? | No | Yes (open source) |
 
-The four `core/*` crates have **zero storage-engine dependencies**. They define traits — `Projection`, `PermissionStore`, `SnapshotStore` — and the rules that operate over them. Server implements those traits against sqlx + Postgres. Client implements them against rusqlite + SQLite. The rules are written once and run on both sides.
-
-**Authority is one-sided by design.** The server is the only place permissions are enforced. The client's local `can_perform` answers via the same resolver code, but only as a UX hint — every write still goes through the server, which can reject it.
+If you trust no one with your financial life, this is for you.
 
 ---
 
-## Self-host
+## Features
 
-### Prerequisites
+### For users
 
-- Rust 1.75+ (`rustup install stable`)
-- Postgres 14+ (docker-compose provided)
-- Flutter 3.5+ — only if you want to build the mobile app
-- `cargo-nextest` for fast test runs (`cargo install cargo-nextest --locked`)
+- **Multi-currency** — track debts in any currency, no conversion gymnastics
+- **Shared books with multiple people** — give a roommate access to the apartment book, keep your business book separate. Each book has its own members and permissions.
+- **Granular permissions** — owners can do everything. Members can be granted view-only, edit-only, or full access to specific groups of contacts. Permissions can also be denied (e.g. "everyone can see contacts, except this group").
+- **5-second undo** — accidentally deleted a transaction? Tap undo within 5 seconds.
+- **Real-time updates** — when someone else makes a change, your app sees it within seconds (without polling).
+- **Works offline** — the app keeps working when you have no signal. Changes sync back when you're online again.
+- **Full history** — every change is logged forever. You can always see what happened, when, and who did it.
 
-### Run it
+### For self-hosters
+
+- **One Rust binary + one Postgres database.** Backups are `pg_dump`. Logs are stdout. No Redis, no message queue, no Kubernetes cluster.
+- **Tiny resource footprint.** Idle memory in single-digit MBs.
+- **Open source under GPLv3.** Fork it, audit it, change it.
+
+### For developers
+
+The whole stack is in Rust — both the server and the logic powering the mobile app. The mobile app's UI is Flutter, but everything underneath (data storage, sync, permission checks, business rules) is Rust code shared with the server. Same code, same behavior. The mobile app can't "drift" from what the server expects, because they're literally running the same functions.
+
+---
+
+## Try it
+
+You need [Docker](https://docs.docker.com/get-docker/) and [Rust](https://rustup.rs/) installed. Optionally [Flutter](https://docs.flutter.dev/get-started/install) if you want to run the mobile app.
 
 ```bash
+# 1. Get the code
 git clone https://github.com/<your-fork>/deptmaster.git
 cd deptmaster
 
-# 1. Bring up Postgres + run migrations
+# 2. Start Postgres + run migrations (one-time setup)
 ./scripts/manage.sh setup-db
 
-# 2. Start the server (http://localhost:8000 by default)
+# 3. Start the server
 ./scripts/manage.sh start-server
+# server now listening on http://localhost:8000
 
-# 3. (optional) Build + install the mobile app
+# 4. (Optional) Build and run the mobile app
 ./scripts/manage.sh run-flutter-app linux   # or: android
 ```
 
-That's it. The server is a single static binary. Backup is `pg_dump`. Logs are stdout. There is no "cloud service" anywhere — point your devices at your server, done.
+That's it. Open the mobile app, sign up, you're in.
 
-### Production deploy
-
-Single Rust binary + Postgres. Reverse-proxy with whatever you already use (Caddy, nginx, Traefik). Enable TLS at the proxy. The server speaks HTTP/1.1 and WebSocket over the same port.
+For production: put the server binary behind nginx / Caddy / Traefik, enable TLS at your proxy, point your phone at it. The server speaks HTTP and WebSocket over the same port.
 
 ---
 
-## Repository layout
+## How it works (the short version)
+
+Debitum uses an approach called **event sourcing**. Instead of storing "Alice currently owes Bob $30," the app stores the history of how we got there:
 
 ```
-deptmaster/
-├── crates/
-│   ├── core/              ← shared rules (Rust, no storage engine)
-│   │   ├── domain/        DomainEvent, EventData, typed IDs
-│   │   ├── applier/       Projection trait + apply() dispatch
-│   │   ├── resolver/      PermissionStore + permission rules
-│   │   └── snapshots/     SnapshotStore + rotation + UNDO predicates
-│   ├── server/            ← Postgres backend (sqlx + axum)
-│   └── client/            ← Rust client lib for Flutter (FRB + rusqlite)
-├── mobile/                ← Flutter app (Dart)
-├── scripts/               ← manage.sh, codegen-rust-bridge.sh, setup
-├── vault/                 ← documentation (Obsidian-flavored markdown)
-└── LICENSE                GPLv3
+Day 1: Alice borrowed $50 from Bob       ← stored as an event
+Day 2: Alice paid Bob $20                ← stored as an event
+Today: balance is Alice owes Bob $30     ← computed from events
 ```
+
+The events never change. The current balances are computed from the events whenever you ask. This is what gives Debitum its undo button, its complete audit trail, and its ability to sync cleanly across multiple devices without ever losing or duplicating a change.
+
+**Behavior is consistent between the server and the mobile app** because they both use the exact same code to interpret events, check permissions, and compute balances. The server (Postgres) is the source of truth; the mobile app (local SQLite) is a fast cache. When you make a change, the app applies it locally first (so the UI is instant), then pushes it to the server. The server may reject it — for example if you don't have permission — and the app reflects that back to you.
+
+For a deeper dive, see the [documentation](#documentation) below.
 
 ---
 
-## Testing
+## Status
 
-```bash
-# Server unit + repository tests
-cargo nextest run -p server
+**Not 1.0 yet.** Core functionality works:
 
-# Core rules (domain, applier, resolver, snapshots)
-cargo nextest run -p domain -p applier -p resolver -p snapshots
+- ✅ Server (Rust + Postgres) — stable, 63/63 tests pass
+- ✅ Mobile sync engine (Rust under Flutter) — stable, 47/47 integration tests pass
+- ✅ Permission system, multi-wallet, real-time sync, undo, offline-first
+- 🚧 Mobile UI — Flutter app works on Android + Linux desktop; iOS not tested yet
+- 🚧 Web frontend — planned
 
-# Client integration tests (runs against a live server)
-./scripts/manage.sh test-integration
-```
-
-Current status: **47/47 client integration tests + 63/63 server tests pass.**
+If you find a bug, please open an issue.
 
 ---
 
 ## Documentation
 
-The `vault/` directory is the documentation home — written in Obsidian-flavored markdown but readable on plain GitHub.
+The `vault/` directory holds the full documentation. It's written for both newcomers and contributors.
 
-Start here:
+Recommended reading order:
 
-- [vault/00-getting-started/](vault/00-getting-started/) — system overview, core concepts, architecture
-- [vault/01-events/](vault/01-events/) — what events are, the type-driven dispatch
-- [vault/02-projections/](vault/02-projections/) — how state is computed from events
-- [vault/03-snapshots/](vault/03-snapshots/) — snapshot rotation + UNDO
-- [vault/04-permissions-and-undo/](vault/04-permissions-and-undo/) — the permission matrix
-- [vault/06-client/](vault/06-client/) — client architecture + design decisions
-- [vault/99-reference/01-glossary.md](vault/99-reference/01-glossary.md) — terms
+1. [vault/00-getting-started/](vault/00-getting-started/) — what the system does and how it's structured
+2. [vault/01-events/](vault/01-events/) — events, the core concept
+3. [vault/02-projections/](vault/02-projections/) — how the current state is computed
+4. [vault/04-permissions-and-undo/](vault/04-permissions-and-undo/) — the permission model
+5. [vault/06-client/](vault/06-client/) — how the mobile app works
+6. [vault/99-reference/01-glossary.md](vault/99-reference/01-glossary.md) — terms
 
 ---
 
 ## Contributing
 
-This is a self-hostable open-source project under GPLv3. PRs welcome — see the vault docs for architectural context before sending big changes. Tests must pass (`cargo nextest run --workspace`).
+Bug reports, feature ideas, and pull requests welcome. Before sending a substantial PR, please open an issue first so we can discuss approach.
+
+Running the test suite:
+
+```bash
+cargo nextest run --workspace                # everything
+./scripts/manage.sh test-integration         # client integration tests (needs a running server)
+```
+
+Code style is enforced by `cargo fmt` and `cargo clippy`. Both must be clean before a PR is merged.
 
 ---
 
 ## License
 
-[GPLv3](LICENSE). Self-host freely. If you fork it commercially, your fork is GPL too.
+[GPLv3](LICENSE).
+
+You can run, fork, and modify Debitum freely, including commercially. If you distribute a modified version, you must release your modifications under GPLv3 too. (This is to keep the project — and any fork of it — free for everyone.)
