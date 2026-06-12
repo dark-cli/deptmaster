@@ -24,6 +24,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _usernameController = TextEditingController(text: kDebugMode ? 'max' : '');
   final _passwordController = TextEditingController(text: kDebugMode ? '12345678' : '');
   bool _loading = false;
+  bool _signInPressed = false;
   String? _error;
 
   @override
@@ -34,7 +35,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _handleSubmit() async {
-    if (!_formKey.currentState!.validate()) return;
+    debugPrint('[login] _handleSubmit fired');
+    if (!_formKey.currentState!.validate()) {
+      debugPrint('[login] form validation failed — aborting');
+      return;
+    }
+    debugPrint('[login] validation passed, username="${_usernameController.text.trim()}"');
 
     setState(() {
       _loading = true;
@@ -42,10 +48,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     try {
+      debugPrint('[login] calling Api.login...');
       await Api.login(
         _usernameController.text.trim(),
         _passwordController.text,
       );
+      debugPrint('[login] Api.login returned successfully');
       if (!mounted) return;
       try {
         await Api.ensureCurrentWallet();
@@ -79,6 +87,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e, stackTrace) {
+      debugPrint('[login] FAILED: $e');
+      debugPrint('[login] stack: $stackTrace');
       if (mounted) {
         setState(() {
           _error = e.toString();
@@ -207,31 +217,80 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      ElevatedButton(
-                        onPressed: _loading ? null : _handleSubmit,
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          backgroundColor: Theme.of(context).colorScheme.primary,
-                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                        ),
-                        child: _loading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      // Press-feedback wrapper around the ElevatedButton. Material
+                      // ripple is still there; the scale + color shift make the
+                      // press visually unmistakable, even on first tap.
+                      Listener(
+                        onPointerDown: (_) {
+                          if (!_loading) setState(() => _signInPressed = true);
+                        },
+                        onPointerUp: (_) {
+                          if (mounted) setState(() => _signInPressed = false);
+                        },
+                        onPointerCancel: (_) {
+                          if (mounted) setState(() => _signInPressed = false);
+                        },
+                        child: AnimatedScale(
+                          scale: _signInPressed ? 0.96 : 1.0,
+                          duration: const Duration(milliseconds: 90),
+                          curve: Curves.easeOut,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 120),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: _signInPressed
+                                  ? [
+                                      BoxShadow(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary
+                                            .withOpacity(0.45),
+                                        blurRadius: 14,
+                                        spreadRadius: 1,
+                                      ),
+                                    ]
+                                  : [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.15),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                            ),
+                            child: ElevatedButton(
+                              onPressed: _loading ? null : _handleSubmit,
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
-                              )
-                            : const Text(
-                                'Sign in',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                backgroundColor: _signInPressed
+                                    ? Color.alphaBlend(
+                                        Colors.black.withOpacity(0.18),
+                                        Theme.of(context).colorScheme.primary,
+                                      )
+                                    : Theme.of(context).colorScheme.primary,
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onPrimary,
+                                elevation: 0, // outer BoxShadow owns the elevation
                               ),
+                              child: _loading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                            Colors.white),
+                                      ),
+                                    )
+                                  : const Text(
+                                      'Sign in',
+                                      style: TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                            ),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 12),
                       OutlinedButton(
