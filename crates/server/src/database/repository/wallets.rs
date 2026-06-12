@@ -56,7 +56,7 @@ impl Database {
             FROM wallets w
             INNER JOIN wallet_users wu ON w.id = wu.wallet_id
             WHERE wu.user_id = $1 AND w.is_active = true
-            ORDER BY COALESCE(wu.subscribed_at, wu.created_at) DESC
+            ORDER BY wu.subscribed_at DESC
             "#
         )
         .bind(user_id)
@@ -240,11 +240,11 @@ impl Database {
     ) -> Result<Vec<WalletUserWithUsername>, DbError> {
         let rows = sqlx::query(
             r#"
-            SELECT wu.id, wu.wallet_id, wu.user_id, u.username, wu.role, wu.created_at
+            SELECT wu.id, wu.wallet_id, wu.user_id, u.username, wu.role, wu.subscribed_at
             FROM wallet_users wu
             LEFT JOIN users_projection u ON u.id = wu.user_id
             WHERE wu.wallet_id = $1
-            ORDER BY wu.created_at DESC
+            ORDER BY wu.subscribed_at DESC
             "#,
         )
         .bind(wallet_id)
@@ -259,7 +259,7 @@ impl Database {
                 user_id: row.get("user_id"),
                 username: row.try_get("username").ok(),
                 role: row.get("role"),
-                created_at: row.get("created_at"),
+                created_at: row.get("subscribed_at"),
             })
             .collect();
 
