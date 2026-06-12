@@ -244,7 +244,13 @@ pub fn get_token() -> Result<String, String> {
 pub fn set_current_wallet_id(wallet_id: String) -> Result<(), String> {
     rust_log!("[debitum_rs] set_current_wallet_id wallet_id={}", wallet_id);
     let _ = ids::WalletId::parse(&wallet_id).map_err(|e| e)?;
-    storage::config_set("current_wallet_id", &wallet_id)
+    storage::config_set("current_wallet_id", &wallet_id)?;
+    // Tell Dart-side providers the active wallet changed so anything
+    // scoped to currentWalletIdProvider re-fetches. Without this the
+    // home screen stays stuck on its first read (often "no wallet
+    // selected") even after we wrote the new value to config.
+    data_bus::emit(data_bus::DataChangeKind::Wallets, Some(wallet_id));
+    Ok(())
 }
 
 pub fn get_current_wallet_id() -> Result<String, String> {
@@ -259,6 +265,10 @@ pub fn get_wallets() -> Result<String, String> {
 
 pub fn create_wallet(name: String, description: String) -> Result<String, String> {
     let w = api::create_wallet_api(name, description)?;
+    // New wallet exists on the server — tell Dart-side providers so the
+    // wallet list refreshes (no DataChangeKind.Wallets event would
+    // otherwise reach the client until the next push/pull cycle).
+    data_bus::emit(data_bus::DataChangeKind::Wallets, None);
     serde_json::to_string(&w).map_err(|e| e.to_string())
 }
 
@@ -404,7 +414,14 @@ pub fn create_wallet_invite_code(wallet_id: String) -> Result<String, String> {
 
 /// Join a wallet by invite code. Returns the wallet_id of the joined wallet.
 pub fn join_wallet_by_code(code: String) -> Result<String, String> {
-    api::join_wallet_by_code_api(&code)
+    let id = api::join_wallet_by_code_api(&code)?;
+    // New wallet membership — refresh wallet list + membership views.
+    data_bus::emit(data_bus::DataChangeKind::Wallets, None);
+    data_bus::emit(
+        data_bus::DataChangeKind::WalletMembership,
+        Some(id.clone()),
+    );
+    Ok(id)
 }
 
 pub fn update_wallet_user_role(wallet_id: String, user_id: String, role: String) -> Result<(), String> {
