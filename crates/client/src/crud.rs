@@ -136,6 +136,13 @@ fn append_event(
     if event_type == "UNDO" {
         rebuild_projection_for_wallet(wallet_id)?;
     }
+    // Notify Dart-side providers that the relevant projection changed.
+    // Emit before push so the UI updates instantly; the push happens
+    // in the background and any server rejection produces its own
+    // emission via the resync path.
+    if let Some(kind) = crate::data_bus::kind_from_aggregate_type(aggregate_type) {
+        crate::data_bus::emit(kind, Some(wallet_id.to_string()));
+    }
     sync::push_unsynced()?;
     // Stamp the new event with total_debt so the chart can plot it
     // (matches the server's denormalized total_debt column).

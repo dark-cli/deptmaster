@@ -336,6 +336,24 @@ pub fn pull_and_merge() -> Result<(), String> {
         }
     }
 
+    // Notify Dart-side providers about the projection kinds touched in
+    // this batch. We collect the unique aggregate_types from the
+    // server's events and emit one DataChangeEvent per kind, so a
+    // batch with 100 contact UPDATED events fires Contacts once, not
+    // 100 times.
+    let mut kinds_touched: std::collections::HashSet<crate::DataChangeKind> =
+        std::collections::HashSet::new();
+    for ev in &server_events {
+        if let Some(agg) = ev.get("aggregate_type").and_then(|v| v.as_str()) {
+            if let Some(k) = crate::data_bus::kind_from_aggregate_type(agg) {
+                kinds_touched.insert(k);
+            }
+        }
+    }
+    for k in kinds_touched {
+        crate::data_bus::emit(k, Some(wallet_id.clone()));
+    }
+
     // Always advance last_sync_timestamp — using the newest server event's timestamp if any,
     // else "now". Without the fallback, repeated empty-response syncs would all re-trigger the
     // full-pull path, which is destructive when local has data.

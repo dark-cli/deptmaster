@@ -8,6 +8,7 @@ import 'crud.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+import 'data_bus.dart';
 import 'frb_generated.dart';
 import 'ids.dart';
 import 'lib.dart';
@@ -45,6 +46,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_ValuePtr => wire
       ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValuePtr;
+
+  @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
   Event
@@ -107,6 +111,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
           dynamic raw);
 
   @protected
+  RustStreamSink<DataChangeEvent> dco_decode_StreamSink_data_change_event_Sse(
+      dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
@@ -141,6 +149,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Currency dco_decode_currency(dynamic raw);
+
+  @protected
+  DataChangeEvent dco_decode_data_change_event(dynamic raw);
+
+  @protected
+  DataChangeKind dco_decode_data_change_kind(dynamic raw);
 
   @protected
   EventId dco_decode_event_id(dynamic raw);
@@ -218,6 +232,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WalletId dco_decode_wallet_id(dynamic raw);
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
   Event
       sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent(
           SseDeserializer deserializer);
@@ -278,6 +295,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
           SseDeserializer deserializer);
 
   @protected
+  RustStreamSink<DataChangeEvent> sse_decode_StreamSink_data_change_event_Sse(
+      SseDeserializer deserializer);
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
@@ -313,6 +334,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Currency sse_decode_currency(SseDeserializer deserializer);
+
+  @protected
+  DataChangeEvent sse_decode_data_change_event(SseDeserializer deserializer);
+
+  @protected
+  DataChangeKind sse_decode_data_change_kind(SseDeserializer deserializer);
 
   @protected
   EventId sse_decode_event_id(SseDeserializer deserializer);
@@ -391,6 +418,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WalletId sse_decode_wallet_id(SseDeserializer deserializer);
 
   @protected
+  void sse_encode_AnyhowException(
+      AnyhowException self, SseSerializer serializer);
+
+  @protected
   void
       sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent(
           Event self, SseSerializer serializer);
@@ -451,6 +482,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
           Value self, SseSerializer serializer);
 
   @protected
+  void sse_encode_StreamSink_data_change_event_Sse(
+      RustStreamSink<DataChangeEvent> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
@@ -489,6 +524,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_currency(Currency self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_data_change_event(
+      DataChangeEvent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_data_change_kind(
+      DataChangeKind self, SseSerializer serializer);
 
   @protected
   void sse_encode_event_id(EventId self, SseSerializer serializer);

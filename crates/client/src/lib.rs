@@ -11,6 +11,7 @@ pub use serde_json::Value;
 
 mod api;
 mod crud;
+mod data_bus;
 mod frb_generated;
 mod ids;
 mod log_bridge;
@@ -21,6 +22,8 @@ mod sdk_store;
 mod storage;
 mod sync;
 mod backoff;
+
+pub use data_bus::{data_change_stream, DataChangeEvent, DataChangeKind};
 
 struct BackendConfig {
     base_url: String,
