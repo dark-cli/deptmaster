@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `append_event`, `ensure_wallet`, `is_within_undo_window`, `last_event_for_aggregate`, `rebuild_and_save`
+// These functions are ignored because they are not marked as `pub`: `append_event`, `apply_event_locally`, `ensure_wallet`, `is_within_undo_window`, `last_event_for_aggregate`, `rebuild_projection_for_wallet`, `wallet_total_debt`
 
 Future<Contact> createContact(
         {required String name,
@@ -29,10 +29,10 @@ Future<String> getContacts() => RustLib.instance.api.crateCrudGetContacts();
 Future<String> getTransactions() =>
     RustLib.instance.api.crateCrudGetTransactions();
 
-Future<String?> getContact({required String id}) =>
+Future<String> getContact({required String id}) =>
     RustLib.instance.api.crateCrudGetContact(id: id);
 
-Future<String?> getTransaction({required String id}) =>
+Future<String> getTransaction({required String id}) =>
     RustLib.instance.api.crateCrudGetTransaction(id: id);
 
 Future<Transaction> createTransaction(

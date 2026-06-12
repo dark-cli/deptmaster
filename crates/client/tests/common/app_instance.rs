@@ -85,7 +85,7 @@ impl AppInstance {
     /// Switch global (thread-local) client state to this app (storage + backend). Used by EventGenerator so labels persist across apps.
     /// Sets log context to this instance's id so rust_log lines show [timestamp][app1] etc.
     pub fn activate(&self) -> Result<(), String> {
-        set_log_context(Some(self._id.clone()));
+        set_log_context(self._id.clone());
         init_storage(self.storage_path.to_string_lossy().to_string())?;
         set_backend_config(self.server_url.clone(), self.ws_url.clone());
         Ok(())

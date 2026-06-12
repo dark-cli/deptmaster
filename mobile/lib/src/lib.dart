@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `is_network_error`, `is_rate_limited`, `jwt_payload`, `manual_sync_with_source`, `should_log_skip`, `start_sync_loop_if_ready`, `try_acquire`
+// These functions are ignored because they are not marked as `pub`: `current_user_id_or_nil`, `current_user_id`, `is_network_error`, `is_rate_limited`, `jwt_payload`, `manual_sync_with_source`, `parse_resource`, `should_log_skip`, `start_sync_loop_if_ready`, `try_acquire`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BackendConfig`, `SyncGuard`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
@@ -19,9 +19,9 @@ Future<void> setBackendConfig(
         {required String baseUrl, required String wsUrl}) =>
     RustLib.instance.api.crateSetBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
 
-Future<String?> getBaseUrl() => RustLib.instance.api.crateGetBaseUrl();
+Future<String> getBaseUrl() => RustLib.instance.api.crateGetBaseUrl();
 
-Future<String?> getWsUrl() => RustLib.instance.api.crateGetWsUrl();
+Future<String> getWsUrl() => RustLib.instance.api.crateGetWsUrl();
 
 /// Set whether the client is in "offline" mode. When true, all API requests return an error without hitting the network.
 /// The app reconnects WS when going online; WS connection triggers sync (app logic, not here).
@@ -31,6 +31,18 @@ Future<void> setNetworkOffline({required bool offline}) =>
 
 /// True if the client is in offline mode (network requests will fail).
 Future<bool> isNetworkOffline() => RustLib.instance.api.crateIsNetworkOffline();
+
+/// Set or clear a per-thread log tag. When set, the multi-app log viewer can
+/// distinguish which simulated app produced each log line. Stub today — the
+/// log_bridge doesn't yet prepend it — but exposing the API unblocks the
+/// integration test setup (`AppInstance::activate`) that calls it on every
+/// app switch. If/when we want per-app prefixes, log_bridge::push can read
+/// LOG_CONTEXT and prepend it.
+Future<void> setLogContext({required String ctx}) =>
+    RustLib.instance.api.crateSetLogContext(ctx: ctx);
+
+/// Read the current per-thread log tag. Empty string if not set.
+Future<String> logContext() => RustLib.instance.api.crateLogContext();
 
 Future<void> login({required String username, required String password}) =>
     RustLib.instance.api.crateLogin(username: username, password: password);
@@ -42,14 +54,14 @@ Future<void> logout() => RustLib.instance.api.crateLogout();
 
 Future<bool> isLoggedIn() => RustLib.instance.api.crateIsLoggedIn();
 
-Future<String?> getUserId() => RustLib.instance.api.crateGetUserId();
+Future<String> getUserId() => RustLib.instance.api.crateGetUserId();
 
-Future<String?> getToken() => RustLib.instance.api.crateGetToken();
+Future<String> getToken() => RustLib.instance.api.crateGetToken();
 
 Future<void> setCurrentWalletId({required String walletId}) =>
     RustLib.instance.api.crateSetCurrentWalletId(walletId: walletId);
 
-Future<String?> getCurrentWalletId() =>
+Future<String> getCurrentWalletId() =>
     RustLib.instance.api.crateGetCurrentWalletId();
 
 Future<String> getWallets() => RustLib.instance.api.crateGetWallets();
@@ -66,7 +78,7 @@ Future<String> getContacts() => RustLib.instance.api.crateGetContacts();
 
 Future<String> getTransactions() => RustLib.instance.api.crateGetTransactions();
 
-Future<String?> getContact({required String id}) =>
+Future<String> getContact({required String id}) =>
     RustLib.instance.api.crateGetContact(id: id);
 
 Future<String> createContact(
@@ -103,7 +115,7 @@ Future<String> createTransaction(
         transactionDate: transactionDate,
         dueDate: dueDate);
 
-Future<String?> getTransaction({required String id}) =>
+Future<String> getTransaction({required String id}) =>
     RustLib.instance.api.crateGetTransaction(id: id);
 
 Future<void> updateContact(
@@ -307,16 +319,40 @@ Future<void> manualSync() => RustLib.instance.api.crateManualSync();
 Future<List<String>> drainRustLogs() =>
     RustLib.instance.api.crateDrainRustLogs();
 
-Future<String?> getPreference({required String key}) =>
+Future<String> getPreference({required String key}) =>
     RustLib.instance.api.crateGetPreference(key: key);
 
 Future<void> setPreference({required String key, required String value}) =>
     RustLib.instance.api.crateSetPreference(key: key, value: value);
 
-Future<String?> getUsername() => RustLib.instance.api.crateGetUsername();
+Future<String> getUsername() => RustLib.instance.api.crateGetUsername();
 
 /// True if JWT is expired or invalid. Used to avoid WebSocket 401 spam.
 Future<bool> isTokenExpired() => RustLib.instance.api.crateIsTokenExpired();
+
+/// Can the current user (taken from the stored JWT) perform `action_name`
+/// (e.g. `"contact:create"`, `"transaction:read"`) on the resource named
+/// by `(resource_type, resource_id)`?
+///
+/// `resource_type` is one of:
+///   - `"contact"`, `"transaction"`, `"wallet"`,
+///     `"contact_group"`, `"user_group"` — `resource_id` is the entity UUID.
+///   - `"all_contacts"`, `"all_transactions"`, `"all_user_groups"` —
+///     wildcard; `resource_id` is ignored.
+///
+/// Resolves entirely from the SDK's local SQLite permission tables —
+/// no network call. The same rules the server enforces (3-state matrix,
+/// deny wins, all_contacts wildcard) via the shared `resolver` crate.
+/// Returns `Ok(false)` if no JWT / no current wallet (rather than an
+/// error) so UI callers can use this from anywhere.
+Future<bool> canPerform(
+        {required String actionName,
+        required String resourceType,
+        String? resourceId}) =>
+    RustLib.instance.api.crateCanPerform(
+        actionName: actionName,
+        resourceType: resourceType,
+        resourceId: resourceId);
 
 Future<String> greet({required String name}) =>
     RustLib.instance.api.crateGreet(name: name);

@@ -16,7 +16,9 @@ import 'lib.dart';
 import 'log_bridge.dart';
 import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
-import 'state_builder.dart';
+import 'sdk_projection.dart';
+import 'sdk_snapshot_store.dart';
+import 'sdk_store.dart';
 import 'storage.dart';
 import 'sync.dart';
 
@@ -31,12 +33,39 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_EventPtr => wire
       .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent;
 
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_SdkPermissionStorePtr => wire
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore;
+
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_SdkProjectionPtr => wire
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection;
+
+  CrossPlatformFinalizerArg
+      get rust_arc_decrement_strong_count_SdkSnapshotStorePtr => wire
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore;
+
   CrossPlatformFinalizerArg get rust_arc_decrement_strong_count_ValuePtr => wire
       .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue;
 
   @protected
   Event
       dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent(
+          dynamic raw);
+
+  @protected
+  SdkPermissionStore
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          dynamic raw);
+
+  @protected
+  SdkProjection
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          dynamic raw);
+
+  @protected
+  SdkSnapshotStore
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
           dynamic raw);
 
   @protected
@@ -60,6 +89,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
           dynamic raw);
 
   @protected
+  SdkPermissionStore
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          dynamic raw);
+
+  @protected
+  SdkProjection
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          dynamic raw);
+
+  @protected
+  SdkSnapshotStore
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+          dynamic raw);
+
+  @protected
   Value
       dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
           dynamic raw);
@@ -78,10 +122,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   EventId dco_decode_box_autoadd_event_id(dynamic raw);
-
-  @protected
-  (List<Contact>, List<Transaction>)
-      dco_decode_box_autoadd_record_list_contact_list_transaction(dynamic raw);
 
   @protected
   StoredEvent dco_decode_box_autoadd_stored_event(dynamic raw);
@@ -141,16 +181,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Currency? dco_decode_opt_box_autoadd_currency(dynamic raw);
 
   @protected
-  (List<Contact>, List<Transaction>)?
-      dco_decode_opt_box_autoadd_record_list_contact_list_transaction(
-          dynamic raw);
-
-  @protected
   List<String>? dco_decode_opt_list_String(dynamic raw);
-
-  @protected
-  (List<Contact>, List<Transaction>)
-      dco_decode_record_list_contact_list_transaction(dynamic raw);
 
   @protected
   StoredEvent dco_decode_stored_event(dynamic raw);
@@ -194,6 +225,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
           SseDeserializer deserializer);
 
   @protected
+  SdkPermissionStore
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          SseDeserializer deserializer);
+
+  @protected
+  SdkProjection
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          SseDeserializer deserializer);
+
+  @protected
+  SdkSnapshotStore
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+          SseDeserializer deserializer);
+
+  @protected
   Value
       sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
           SseDeserializer deserializer);
@@ -211,6 +257,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   Event
       sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent(
+          SseDeserializer deserializer);
+
+  @protected
+  SdkPermissionStore
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          SseDeserializer deserializer);
+
+  @protected
+  SdkProjection
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          SseDeserializer deserializer);
+
+  @protected
+  SdkSnapshotStore
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
           SseDeserializer deserializer);
 
   @protected
@@ -232,11 +293,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   EventId sse_decode_box_autoadd_event_id(SseDeserializer deserializer);
-
-  @protected
-  (List<Contact>, List<Transaction>)
-      sse_decode_box_autoadd_record_list_contact_list_transaction(
-          SseDeserializer deserializer);
 
   @protected
   StoredEvent sse_decode_box_autoadd_stored_event(SseDeserializer deserializer);
@@ -297,17 +353,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Currency? sse_decode_opt_box_autoadd_currency(SseDeserializer deserializer);
 
   @protected
-  (List<Contact>, List<Transaction>)?
-      sse_decode_opt_box_autoadd_record_list_contact_list_transaction(
-          SseDeserializer deserializer);
-
-  @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
-
-  @protected
-  (List<Contact>, List<Transaction>)
-      sse_decode_record_list_contact_list_transaction(
-          SseDeserializer deserializer);
 
   @protected
   StoredEvent sse_decode_stored_event(SseDeserializer deserializer);
@@ -353,6 +399,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          SdkPermissionStore self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          SdkProjection self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+          SdkSnapshotStore self, SseSerializer serializer);
+
+  @protected
+  void
       sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
           Value self, SseSerializer serializer);
 
@@ -370,6 +431,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
       sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent(
           Event self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          SdkPermissionStore self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          SdkProjection self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+          SdkSnapshotStore self, SseSerializer serializer);
 
   @protected
   void
@@ -391,10 +467,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_event_id(EventId self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_box_autoadd_record_list_contact_list_transaction(
-      (List<Contact>, List<Transaction>) self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_stored_event(
@@ -461,15 +533,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       Currency? self, SseSerializer serializer);
 
   @protected
-  void sse_encode_opt_box_autoadd_record_list_contact_list_transaction(
-      (List<Contact>, List<Transaction>)? self, SseSerializer serializer);
-
-  @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_record_list_contact_list_transaction(
-      (List<Contact>, List<Transaction>) self, SseSerializer serializer);
 
   @protected
   void sse_encode_stored_event(StoredEvent self, SseSerializer serializer);
@@ -527,6 +591,42 @@ class RustLibWire implements BaseWire {
           .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent(
               ptr);
 
+  void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          int ptr) =>
+      wasmModule
+          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+              ptr);
+
+  void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          int ptr) =>
+      wasmModule
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+              ptr);
+
+  void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          int ptr) =>
+      wasmModule
+          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+              ptr);
+
+  void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          int ptr) =>
+      wasmModule
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+              ptr);
+
+  void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+          int ptr) =>
+      wasmModule
+          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+              ptr);
+
+  void rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+          int ptr) =>
+      wasmModule
+          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+              ptr);
+
   void rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
           int ptr) =>
       wasmModule
@@ -552,6 +652,30 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
 
   external void
       rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerEvent(
+          int ptr);
+
+  external void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          int ptr);
+
+  external void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkPermissionStore(
+          int ptr);
+
+  external void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          int ptr);
+
+  external void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkProjection(
+          int ptr);
+
+  external void
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
+          int ptr);
+
+  external void
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSdkSnapshotStore(
           int ptr);
 
   external void

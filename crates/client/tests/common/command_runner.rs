@@ -124,8 +124,7 @@ impl CommandRunner {
         if args.is_empty() {
             return Err(format!("Permission command requires action: {}", original));
         }
-        let wallet_id = client::get_current_wallet_id()
-            .ok_or_else(|| "No wallet selected".to_string())?;
+        let wallet_id = client::get_current_wallet_id()?;
         let ug_all_users = find_group_id(&list_wallet_user_groups(wallet_id.clone())?, "all_users")?;
         let cg_all_contacts =
             find_group_id(&list_wallet_contact_groups(wallet_id.clone())?, "all_contacts")?;
@@ -280,8 +279,7 @@ impl CommandRunner {
                     .ok_or_else(|| format!("Transaction label not found: {}", args[1]))?;
                 let field = args[2].to_lowercase();
                 let value = args[3];
-                let tx_json = get_transaction(trans_id.clone())?
-                    .ok_or_else(|| "Transaction not found".to_string())?;
+                let tx_json = get_transaction(trans_id.clone())?;
                 let tx: serde_json::Value = serde_json::from_str(&tx_json).map_err(|e| e.to_string())?;
                 let contact_id = tx["contact_id"].as_str().ok_or("No contact_id")?.to_string();
                 let type_s = tx["type"].as_str().unwrap_or("money").to_string();

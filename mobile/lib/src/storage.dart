@@ -28,8 +28,12 @@ Future<void> configRemove({required String key}) =>
 
 Future<void> clearAll() => RustLib.instance.api.crateStorageClearAll();
 
-/// Clear all local data for a specific wallet (events, state, last_sync_timestamp).
-/// Use when read permissions are revoked so client can resync from server.
+/// Drop everything wallet-scoped from local storage. Used when the
+/// permission view diverges and the SDK needs a clean slate before
+/// repulling, or when read access is revoked. All tables that hold
+/// per-wallet projection state must be cleared together — leaving any
+/// of them populated risks the SDK showing stale data the user has
+/// lost access to.
 Future<void> clearWallet({required String walletId}) =>
     RustLib.instance.api.crateStorageClearWallet(walletId: walletId);
 
@@ -56,6 +60,10 @@ Future<BigInt> eventsDeleteUnsynced({required String walletId}) =>
     RustLib.instance.api.crateStorageEventsDeleteUnsynced(walletId: walletId);
 
 /// Delete all events for a wallet. Used on full pull so local state is replaced by server response (permission-filtered).
+/// Drop only the events + their derived projection tables for a wallet.
+/// Used by the hash-divergence path in pull_and_merge before refetching
+/// from the server. Same wipe scope as `clear_wallet` minus the
+/// last_sync_timestamp config row (which the caller manages).
 Future<void> eventsDeleteAllForWallet({required String walletId}) =>
     RustLib.instance.api
         .crateStorageEventsDeleteAllForWallet(walletId: walletId);
@@ -73,16 +81,16 @@ Future<List<StoredEvent>> eventsGetForAggregate(
         aggregateType: aggregateType,
         aggregateId: aggregateId);
 
-Future<void> stateSave(
-        {required String walletId,
-        required List<Contact> contacts,
-        required List<Transaction> transactions}) =>
-    RustLib.instance.api.crateStorageStateSave(
-        walletId: walletId, contacts: contacts, transactions: transactions);
+/// Load contacts for a wallet straight from the projection table. The
+/// computed `balance` field per contact is SUM of that contact's
+/// transaction amounts, computed in SQL.
+Future<List<Contact>> loadContactsFromTables({required String walletId}) =>
+    RustLib.instance.api.crateStorageLoadContactsFromTables(walletId: walletId);
 
-Future<(List<Contact>, List<Transaction>)?> stateLoad(
+Future<List<Transaction>> loadTransactionsFromTables(
         {required String walletId}) =>
-    RustLib.instance.api.crateStorageStateLoad(walletId: walletId);
+    RustLib.instance.api
+        .crateStorageLoadTransactionsFromTables(walletId: walletId);
 
 class StoredEvent {
   final String id;

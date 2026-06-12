@@ -12,6 +12,7 @@ import 'storage.dart';
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BuildContact`, `BuildEvent`, `BuildTransaction`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`
 
-Future<(List<Contact>, List<Transaction>)> buildStateFromStored(
-        {required List<StoredEvent> events}) =>
+Future<(List<Contact>, List<Transaction>)> buildStateFromStored({
+  required List<StoredEvent> events,
+}) =>
     RustLib.instance.api.crateStateBuilderBuildStateFromStored(events: events);

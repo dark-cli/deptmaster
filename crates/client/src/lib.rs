@@ -62,6 +62,7 @@ static LAST_BACKOFF_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex:
 static LAST_INFLIGHT_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static LAST_NO_WALLET_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 
+#[flutter_rust_bridge::frb(opaque)]
 struct SyncGuard;
 
 impl SyncGuard {
@@ -149,8 +150,8 @@ pub fn init_storage(storage_path: String) -> Result<(), String> {
 }
 
 pub fn set_backend_config(base_url: String, ws_url: String) {
-    let already_same = get_base_url().as_deref() == Some(base_url.as_str())
-        && get_ws_url().as_deref() == Some(ws_url.as_str());
+    let already_same = get_base_url().as_deref() == Ok(base_url.as_str())
+        && get_ws_url().as_deref() == Ok(ws_url.as_str());
     if already_same {
         return;
     }
@@ -161,16 +162,18 @@ pub fn set_backend_config(base_url: String, ws_url: String) {
     start_sync_loop_if_ready();
 }
 
-pub fn get_base_url() -> Option<String> {
+pub fn get_base_url() -> Result<String, String> {
     BACKEND_CONFIG
         .with(|cell| cell.borrow().as_ref().map(|c| c.base_url.clone()))
         .or_else(|| BACKEND_CONFIG_GLOBAL.lock().unwrap().as_ref().map(|c| c.base_url.clone()))
+        .ok_or_else(|| "Backend not configured".to_string())
 }
 
-pub fn get_ws_url() -> Option<String> {
+pub fn get_ws_url() -> Result<String, String> {
     BACKEND_CONFIG
         .with(|cell| cell.borrow().as_ref().map(|c| c.ws_url.clone()))
         .or_else(|| BACKEND_CONFIG_GLOBAL.lock().unwrap().as_ref().map(|c| c.ws_url.clone()))
+        .ok_or_else(|| "Backend not configured".to_string())
 }
 
 /// Set whether the client is in "offline" mode. When true, all API requests return an error without hitting the network.
@@ -196,13 +199,15 @@ thread_local! {
 /// integration test setup (`AppInstance::activate`) that calls it on every
 /// app switch. If/when we want per-app prefixes, log_bridge::push can read
 /// LOG_CONTEXT and prepend it.
-pub fn set_log_context(ctx: Option<String>) {
-    LOG_CONTEXT.with(|cell| *cell.borrow_mut() = ctx);
+pub fn set_log_context(ctx: String) {
+    LOG_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = if ctx.is_empty() { None } else { Some(ctx) };
+    });
 }
 
-/// Read the current per-thread log tag (None if not set).
-pub fn log_context() -> Option<String> {
-    LOG_CONTEXT.with(|cell| cell.borrow().clone())
+/// Read the current per-thread log tag. Empty string if not set.
+pub fn log_context() -> String {
+    LOG_CONTEXT.with(|cell| cell.borrow().clone().unwrap_or_default())
 }
 
 // --- Auth ---
@@ -222,12 +227,14 @@ pub fn is_logged_in() -> bool {
     storage::config_get("token").ok().and_then(|o| o).is_some()
 }
 
-pub fn get_user_id() -> Option<String> {
-    storage::config_get("user_id").ok().and_then(|o| o)
+pub fn get_user_id() -> Result<String, String> {
+    storage::config_get("user_id")?
+        .ok_or_else(|| "Not logged in".to_string())
 }
 
-pub fn get_token() -> Option<String> {
-    storage::config_get("token").ok().and_then(|o| o)
+pub fn get_token() -> Result<String, String> {
+    storage::config_get("token")?
+        .ok_or_else(|| "Not logged in".to_string())
 }
 
 // --- Wallet ---
@@ -237,8 +244,9 @@ pub fn set_current_wallet_id(wallet_id: String) -> Result<(), String> {
     storage::config_set("current_wallet_id", &wallet_id)
 }
 
-pub fn get_current_wallet_id() -> Option<String> {
-    storage::config_get("current_wallet_id").ok().and_then(|o| o)
+pub fn get_current_wallet_id() -> Result<String, String> {
+    storage::config_get("current_wallet_id")?
+        .ok_or_else(|| "No wallet selected".to_string())
 }
 
 pub fn get_wallets() -> Result<String, String> {
@@ -252,7 +260,7 @@ pub fn create_wallet(name: String, description: String) -> Result<String, String
 }
 
 pub fn ensure_current_wallet() -> Result<(), String> {
-    if get_current_wallet_id().is_some() {
+    if get_current_wallet_id().is_ok() {
         return Ok(());
     }
     let list = api::get_wallets_api()?;
@@ -270,7 +278,7 @@ pub fn get_transactions() -> Result<String, String> {
     crud::get_transactions()
 }
 
-pub fn get_contact(id: String) -> Result<Option<String>, String> {
+pub fn get_contact(id: String) -> Result<String, String> {
     crud::get_contact(id)
 }
 
@@ -309,7 +317,7 @@ pub fn create_transaction(
     serde_json::to_string(&t).map_err(|e| e.to_string())
 }
 
-pub fn get_transaction(id: String) -> Result<Option<String>, String> {
+pub fn get_transaction(id: String) -> Result<String, String> {
     crud::get_transaction(id)
 }
 
@@ -578,7 +586,7 @@ fn manual_sync_with_source(source: &str) -> Result<(), String> {
             return Ok(());
         }
     }
-    if get_current_wallet_id().is_none() {
+    if get_current_wallet_id().is_err() {
         if should_log_skip(&LAST_NO_WALLET_SKIP_LOG, 5000) {
             rust_log!(
                 "[debitum_rs] manual_sync skipped (no wallet selected, source={})",
@@ -646,9 +654,10 @@ pub fn drain_rust_logs() -> Vec<String> {
 // --- UI preferences (stored in Rust config; Dart only reads/writes via these) ---
 const PREF_PREFIX: &str = "pref_";
 
-pub fn get_preference(key: String) -> Option<String> {
+pub fn get_preference(key: String) -> Result<String, String> {
     let storage_key = format!("{}{}", PREF_PREFIX, key);
-    storage::config_get(&storage_key).ok().and_then(|o| o)
+    storage::config_get(&storage_key)?
+        .ok_or_else(|| format!("Preference '{}' not set", key))
 }
 
 pub fn set_preference(key: String, value: String) -> Result<(), String> {
@@ -657,12 +666,15 @@ pub fn set_preference(key: String, value: String) -> Result<(), String> {
 }
 
 // --- JWT (single place for token parsing; Dart no longer decodes) ---
-pub fn get_username() -> Option<String> {
-    let token = storage::config_get("token").ok().and_then(|o| o)?;
+pub fn get_username() -> Result<String, String> {
+    let token = storage::config_get("token")?
+        .ok_or_else(|| "Not logged in".to_string())?;
     if token.is_empty() {
-        return None;
+        return Err("Not logged in".to_string());
     }
-    jwt_payload(&token).and_then(|p| p.username)
+    jwt_payload(&token)
+        .and_then(|p| p.username)
+        .ok_or_else(|| "No username in token".to_string())
 }
 
 /// True if JWT is expired or invalid. Used to avoid WebSocket 401 spam.
@@ -900,7 +912,7 @@ mod tests {
         let wallet_id = "f27978af-e56a-4b45-aede-fb450557699a";
         set_current_wallet_id(wallet_id.to_string()).expect("set_current_wallet_id");
         let got = get_current_wallet_id();
-        assert_eq!(got.as_deref(), Some(wallet_id));
+        assert_eq!(got.as_deref(), Ok(wallet_id));
     }
 
     #[test]

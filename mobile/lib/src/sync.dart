@@ -6,19 +6,38 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `check_read_revoked_and_resync`, `last_sync_key`, `perms_cache_key`
+// These functions are ignored because they are not marked as `pub`: `build_server_event_payload`, `chain_hash`, `event_data_discriminator`, `fold_event_id`, `last_sync_key`, `maybe_save_snapshot`, `parse_server_event_for_applier`, `rebuild_projection_tables`, `server_hash_key`
 
 /// Push unsynced events to server, mark accepted as synced.
+///
+/// Wire contract (matches backend `DomainEvent` deserializer in
+/// `backend/rust-api/src/domain/events.rs`):
+/// - Client owns `id` (event_id, a UUID v4). Uniqueness is scoped per-wallet on the
+///   server, so collisions are essentially impossible.
+/// - Server echoes back `accepted: [<event_id>]` so we can mark local rows synced
+///   (the client's local event id == the wire id == the server's event_id).
 Future<void> pushUnsynced() => RustLib.instance.api.crateSyncPushUnsynced();
 
-/// Pull server events (since last sync for this wallet), merge into local, rebuild state.
-/// When we have zero local events for this wallet, do a full pull (no since) so server data loads.
-/// On full pull (since=None), we replace local events with the server response so that permission
-/// filtering takes effect: the client ends up with exactly the events the server allows.
+/// Pull server events for this wallet, merge into local, rebuild state.
+///
+/// Sync semantics:
+/// - `since = last_sync_timestamp` (per-wallet) when present → incremental pull (only newer events).
+/// - `since = None` → server returns the full visible-to-this-user event set.
+///
+/// We only DESTRUCTIVELY replace local events when one of two things is true:
+///   1. Local has zero events (nothing to lose), AND it's a full pull (first sync).
+///   2. An incremental pull returned permission events — the user's visible set may
+///      have shrunk, so we full-reset to match the server's filter.
+///
+/// Otherwise we just upsert (`INSERT OR IGNORE`); the server-issued ids don't collide
+/// with our client-issued ones, and dedup happens on (id) plus replay tolerates duplicates.
+/// `last_sync_timestamp` is updated at the end of every successful pull (even when the
+/// server returned 0 events) so the next sync is incremental — without this, every sync
+/// would re-trigger the full-pull path and destroy local-only state.
 Future<void> pullAndMerge() => RustLib.instance.api.crateSyncPullAndMerge();
 
-/// Full sync: push then pull. After pull, if read permission was revoked (contact:read or
-/// transaction:read removed), clear wallet data and full resync so local state matches server.
+/// Full sync: push, then pull. The pull handles visibility-change detection
+/// itself via the hash comparison — no separate "check permissions" pass.
 Future<void> fullSync() => RustLib.instance.api.crateSyncFullSync();
 
 /// Clear local wallet data and full pull so the client sees the server's permission-filtered view.

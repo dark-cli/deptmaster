@@ -199,20 +199,26 @@ pub fn get_transactions() -> Result<String, String> {
     Ok(serde_json::to_string(&transactions).map_err(|e| e.to_string())?)
 }
 
-pub fn get_contact(id: String) -> Result<Option<String>, String> {
+pub fn get_contact(id: String) -> Result<String, String> {
     let _ = ContactId::parse(&id).map_err(|e| e)?;
     let json = get_contacts()?;
     let contacts: Vec<Contact> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    let c = contacts.into_iter().find(|c| c.id == id);
-    Ok(c.map(|c| serde_json::to_string(&c).unwrap()))
+    let c = contacts
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| format!("Contact {} not found", id))?;
+    serde_json::to_string(&c).map_err(|e| e.to_string())
 }
 
-pub fn get_transaction(id: String) -> Result<Option<String>, String> {
+pub fn get_transaction(id: String) -> Result<String, String> {
     let _ = TransactionId::parse(&id).map_err(|e| e)?;
     let json = get_transactions()?;
     let transactions: Vec<Transaction> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    let t = transactions.into_iter().find(|t| t.id == id);
-    Ok(t.map(|t| serde_json::to_string(&t).unwrap()))
+    let t = transactions
+        .into_iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| format!("Transaction {} not found", id))?;
+    serde_json::to_string(&t).map_err(|e| e.to_string())
 }
 
 pub fn create_transaction(

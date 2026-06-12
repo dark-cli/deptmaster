@@ -16,6 +16,7 @@ use resolver::{MatrixRow, PermissionStore};
 
 use crate::storage::with_db;
 
+#[flutter_rust_bridge::frb(opaque)]
 pub struct SdkPermissionStore;
 
 impl SdkPermissionStore {
