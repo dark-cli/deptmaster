@@ -43,6 +43,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.36", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
+# WebSocket client for the realtime worker (replaces the Dart-side WS).
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 
@@ -50,6 +53,5 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = "0.4"
 tempfile = "3.14"
 uuid = { version = "1", features = ["v4"] }
-# WS client for the events_synced broadcast regression tests.
-tokio-tungstenite = "0.21"
-futures-util = "0.3"
+# (tokio-tungstenite + futures-util are runtime deps; tests use them
+# via the same crate.)

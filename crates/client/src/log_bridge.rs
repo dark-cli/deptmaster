@@ -24,6 +24,8 @@ fn should_log(s: &str) -> bool {
         || lower.contains("push_unsynced")
         || lower.contains("pull_and_merge")
         || lower.contains("sync loop")
+        || lower.contains("ws ")
+        || lower.contains("connect_realtime")
 }
 
 /// Push a log line (also prints to stderr). Called by rust_log! macro.

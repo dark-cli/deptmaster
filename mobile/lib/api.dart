@@ -13,12 +13,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint, ValueNotifier;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:local_auth/local_auth.dart';
 
 import 'src/frb_generated.dart';
 import 'src/lib.dart' as rust;
 import 'src/data_bus.dart' as rust_bus;
+import 'src/ws.dart' as rust_ws;
 import 'utils/toast_service.dart';
 
 // Re-export so the new Riverpod providers can `import 'package:.../api.dart'`
@@ -50,11 +50,12 @@ class Api {
   static bool _hasSyncError = false;
   static bool _hasAuthIssue = false;
   static String? _cachedWalletId;
-  static WebSocketChannel? _wsChannel;
-  static StreamSubscription? _wsSubscription;
+  // Optimistic "we asked Rust to connect" flag. The Rust ws worker
+  // owns the real socket + reconnect logic; this only powers the
+  // sync-status icon in the UI.
   static bool _wsConnected = false;
-  static bool _wsConnecting = false;
-  static final List<void Function(Map<String, dynamic>)> _realtimeListeners = [];
+  // Legacy hook still used by other code paths; the realtime error
+  // callback path is dead now that Rust owns the connection.
   static void Function(String)? _realtimeErrorCallback;
 
   /// When offline, we try to reconnect the WebSocket every this interval.
@@ -1042,111 +1043,43 @@ class Api {
     _realtimeErrorCallback = cb;
   }
 
-  static void addRealtimeListener(void Function(Map<String, dynamic>) listener) {
-    _realtimeListeners.add(listener);
-  }
-
-  static void removeRealtimeListener(void Function(Map<String, dynamic>) listener) {
-    _realtimeListeners.remove(listener);
-  }
-
+  // ---------- Realtime ----------
+  //
+  // The WebSocket connection + reconnection + events_synced handler all
+  // live in Rust now (crates/client/src/ws.rs). Dart's job here is
+  // exactly two FFI calls. Per the dart-is-ui-only rule, Dart must not
+  // open sockets, parse server messages, or run reconnect timers.
+  //
+  // `_wsConnected` is kept as an optimistic UI flag — true after we
+  // ask Rust to connect, false after we ask Rust to disconnect. The
+  // Rust worker handles all the real connection state. A future change
+  // can have Rust push real connection state back through a stream.
   static Future<void> connectRealtime() async {
-    if (_wsConnected && _wsChannel != null) return;
-    if (_wsConnecting) return;
-    final token = await getToken();
-    if (token == null || token.isEmpty) return;
-    if (await isTokenExpired()) return;
-    final walletId = await getCurrentWalletId();
-    if (walletId == null || walletId.isEmpty) return;
-    final subscribedWalletId = walletId;
-
-    _wsConnecting = true;
     try {
-      final wsUrl = await getWebSocketUrl();
-      final uri = Uri.parse(wsUrl).replace(
-        queryParameters: {'token': token, 'wallet_id': subscribedWalletId},
-      );
-      final channel = WebSocketChannel.connect(uri);
-
-      _wsSubscription = channel.stream.listen(
-        (message) {
-          try {
-            final data = json.decode(message as String) as Map<String, dynamic>;
-            // Stage 2 safety: ignore messages for other wallets (shouldn't happen if server filters correctly).
-            final msgWalletId = data['wallet_id'];
-            if (msgWalletId is String && msgWalletId.isNotEmpty && msgWalletId != subscribedWalletId) {
-              return;
-            }
-            for (final fn in _realtimeListeners) fn(data);
-            manualSync().catchError((_) {});
-          } catch (_) {}
-        },
-        onError: (_) {
-          _wsConnected = false;
-          _wsChannel = null;
-          _wsSubscription = null;
-          _notifyConnectionStateChanged();
-          _reconnectWs();
-        },
-        onDone: () {
-          _wsConnected = false;
-          _wsConnecting = false;
-          _wsChannel = null;
-          _wsSubscription = null;
-          _notifyConnectionStateChanged();
-          _reconnectWs();
-        },
-        cancelOnError: false,
-      );
-      _wsChannel = channel;
-      // Consider connected as soon as the socket is opened (don't wait for first message, or we show offline until server sends).
-      _wsConnecting = false;
+      await rust_ws.connectRealtime();
       _wsConnected = true;
       _notifyConnectionStateChanged();
-      // Check login when we get online: if server declines (401), validateAuth logs out and cleans up. It also runs manualSync.
-      validateAuth().catchError((_) => false);
     } catch (_) {
-      _wsConnecting = false;
-      _reconnectWs();
+      _wsConnected = false;
+      _notifyConnectionStateChanged();
+      rethrow;
     }
   }
 
-  static void _reconnectWs() {
-    getToken().then((token) {
-      if (token == null || token.isEmpty) return;
-      isTokenExpired().then((expired) {
-        if (expired) return;
-        Future.delayed(reconnectInterval, () {
-          if (!_wsConnected) connectRealtime().catchError((_) {
-            _reconnectWs();
-          });
-        });
-      });
-    });
-  }
-
-  static Future<void> _wsDisconnect() async {
-    try {
-      await _wsSubscription?.cancel();
-    } catch (_) {}
-    try {
-      await _wsChannel?.sink.close();
-    } catch (_) {}
-    _wsChannel = null;
-    _wsSubscription = null;
-    _wsConnected = false;
-    _notifyConnectionStateChanged();
-  }
-
   static Future<void> disconnectRealtime() async {
-    await _wsDisconnect();
+    try {
+      await rust_ws.disconnectRealtime();
+    } finally {
+      _wsConnected = false;
+      _notifyConnectionStateChanged();
+    }
   }
 
-  static Future<void> syncWhenOnline() async {
-    if (!_wsConnected) return;
-    try {
-      await manualSync();
-    } catch (_) {}
+  // Internal helper used by setCurrentWalletId to force a reconnect on
+  // wallet switch — the Rust worker captures the wallet_id at connect
+  // time so a wallet change means disconnect + reconnect.
+  static Future<void> _wsDisconnect() async {
+    await disconnectRealtime();
   }
 
   // ---------- Settings (Rust-stored preferences; Dart only reads/writes via FFI) ----------

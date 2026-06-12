@@ -21,9 +21,11 @@ mod sdk_snapshot_store;
 mod sdk_store;
 mod storage;
 mod sync;
+mod ws;
 mod backoff;
 
 pub use data_bus::{data_change_stream, DataChangeEvent, DataChangeKind};
+pub use ws::{connect_realtime, disconnect_realtime};
 
 struct BackendConfig {
     base_url: String,

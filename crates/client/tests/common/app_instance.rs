@@ -143,6 +143,20 @@ impl AppInstance {
         client::manual_sync()
     }
 
+    /// Start the Rust-side WebSocket worker. Listens for
+    /// `events_synced` server pushes and triggers `manual_sync`
+    /// automatically. Idempotent.
+    pub fn connect_realtime(&self) -> Result<(), String> {
+        self.activate()?;
+        client::connect_realtime()
+    }
+
+    /// Stop the WebSocket worker started by [`connect_realtime`].
+    pub fn disconnect_realtime(&self) -> Result<(), String> {
+        self.activate()?;
+        client::disconnect_realtime()
+    }
+
     /// Run assertion commands (same style as run_commands). E.g. "contacts count 1", "contact name \"Alice\"", "events count 12". All counts are exact.
     pub fn assert_commands(&self, commands: &[&str]) -> Result<(), String> {
         self.activate()?;

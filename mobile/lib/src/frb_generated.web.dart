@@ -22,6 +22,7 @@ import 'sdk_snapshot_store.dart';
 import 'sdk_store.dart';
 import 'storage.dart';
 import 'sync.dart';
+import 'ws.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RustLibApiImplPlatform({

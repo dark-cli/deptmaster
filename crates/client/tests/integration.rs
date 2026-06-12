@@ -15,3 +15,4 @@ mod permissions;
 mod balance;
 mod multi_app_realtime;
 mod ws_notifications;
+mod ws_auto_sync;
