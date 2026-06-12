@@ -18,8 +18,13 @@ import 'package:local_auth/local_auth.dart';
 
 import 'src/frb_generated.dart';
 import 'src/lib.dart' as rust;
+import 'src/data_bus.dart' as rust_bus;
 import 'providers/data_bus.dart';
 import 'utils/toast_service.dart';
+
+// Re-export so the new Riverpod providers can `import 'package:.../api.dart'`
+// and use these types without also reaching into src/data_bus.dart.
+export 'src/data_bus.dart' show DataChangeEvent, DataChangeKind;
 
 /// Connection state provided by the API (Flutter WebSocket only; Rust is not involved).
 /// Use [Api.connectionState] to read; listen to [Api.connectionStateRevision] to react to changes.
@@ -70,8 +75,30 @@ class Api {
   /// Notifier for connection/sync state changes. Incremented when [connectionState] changes.
   /// Widgets (e.g. [SyncStatusIcon]) should listen and rebuild so the UI updates immediately.
   static final ValueNotifier<int> connectionStateRevision = ValueNotifier(0);
+
+  /// Broadcast Stream of [ConnectionState] changes. Backs the new
+  /// Riverpod-based providers; existing widgets that watch
+  /// [connectionStateRevision] keep working unchanged.
+  static final StreamController<ConnectionState> _connectionStateController =
+      StreamController<ConnectionState>.broadcast();
+  static Stream<ConnectionState> get connectionStateStream =>
+      _connectionStateController.stream;
+
   static void _notifyConnectionStateChanged() {
     connectionStateRevision.value = connectionStateRevision.value + 1;
+    _connectionStateController.add(connectionState);
+  }
+
+  /// Broadcast Stream of data-change events from Rust. Riverpod
+  /// providers subscribe to this and invalidate themselves when a
+  /// relevant [DataChangeKind] arrives. The underlying Rust stream
+  /// is single-listener (the sink is replaced on each subscribe), so
+  /// we wrap in a broadcast stream and cache it — call this getter
+  /// freely from anywhere.
+  static Stream<rust_bus.DataChangeEvent>? _dataChangeStreamCached;
+  static Stream<rust_bus.DataChangeEvent> get dataChangeStream {
+    return _dataChangeStreamCached ??=
+        rust_bus.dataChangeStream().asBroadcastStream();
   }
 
   /// Connection state from the Flutter WebSocket only (Rust does not provide this).
