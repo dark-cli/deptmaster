@@ -157,9 +157,20 @@ impl Database {
     }
 
     pub async fn calculate_total_debt_impl(&self, wallet_id: Uuid) -> Result<i64, DbError> {
+        // Signed sum by direction: 'owed' (contact owes the user) is +,
+        // 'lent' (user owes the contact) is -. A wallet with one
+        // give-1000 and one receive-1000 nets to 0. Same convention is
+        // used in the SDK's per-contact balance + total_debt (see
+        // client/src/storage.rs and client/src/crud.rs).
         let debt = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT COALESCE(SUM(amount), 0)
+            SELECT COALESCE(SUM(
+                CASE direction
+                    WHEN 'owed' THEN  amount
+                    WHEN 'lent' THEN -amount
+                    ELSE              amount
+                END
+            ), 0)
             FROM transactions_projection
             WHERE wallet_id = $1 AND is_deleted = false
             "#,

@@ -483,7 +483,14 @@ pub fn load_contacts_from_tables(wallet_id: &str) -> Result<Vec<Contact>, String
             SELECT c.id, c.name, c.username, c.phone, c.email, c.notes,
                    c.created_at, c.updated_at, c.is_synced, c.wallet_id,
                    COALESCE(
-                     (SELECT SUM(t.amount) FROM transactions t
+                     (SELECT SUM(
+                                CASE t.direction
+                                    WHEN 'owed' THEN  t.amount
+                                    WHEN 'lent' THEN -t.amount
+                                    ELSE              t.amount
+                                END
+                            )
+                        FROM transactions t
                        WHERE t.contact_id = c.id AND t.is_deleted = 0), 0
                    ) AS balance
               FROM contacts c

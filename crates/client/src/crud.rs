@@ -87,7 +87,15 @@ fn wallet_total_debt(wallet_id: &str) -> Result<i64, String> {
     let wid = wallet_id.to_string();
     storage::with_db(|conn| {
         let total: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE wallet_id = ?1 AND is_deleted = 0",
+            "SELECT COALESCE(SUM(
+                CASE direction
+                    WHEN 'owed' THEN  amount
+                    WHEN 'lent' THEN -amount
+                    ELSE              amount
+                END
+             ), 0)
+             FROM transactions
+             WHERE wallet_id = ?1 AND is_deleted = 0",
             params![wid],
             |r| r.get(0),
         )?;
