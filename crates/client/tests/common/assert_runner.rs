@@ -140,6 +140,38 @@ fn run_one(
             }
             return Ok(());
         }
+        // contact "<name>" balance <signed-int>     — assert that contact's balance equals N.
+        // The sign convention here is the same one used by the wallet
+        // total_debt chart on the client: positive = the other party
+        // owes the wallet user, negative = the user owes the other party.
+        if args.len() >= 4 && args[2].to_lowercase() == "balance" {
+            let name = unquote(args[1]);
+            let expected: i64 = args[3]
+                .parse()
+                .map_err(|_| format!("contact balance: need integer, got {:?}", args[3]))?;
+            let c = contacts
+                .iter()
+                .find(|c| c["name"].as_str() == Some(name.as_str()))
+                .ok_or_else(|| {
+                    format!(
+                        "contact \"{}\" not found when asserting balance; got {:?}",
+                        name, contacts
+                    )
+                })?;
+            let actual = c["balance"].as_i64().ok_or_else(|| {
+                format!(
+                    "contact \"{}\" has no numeric balance field; got {:?}",
+                    name, c
+                )
+            })?;
+            if actual != expected {
+                return Err(format!(
+                    "contact \"{}\" balance {}; got {}",
+                    name, expected, actual
+                ));
+            }
+            return Ok(());
+        }
     }
 
     // transaction description "Foo"  — at least one transaction has this description.

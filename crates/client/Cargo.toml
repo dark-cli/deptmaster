@@ -50,3 +50,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = "0.4"
 tempfile = "3.14"
 uuid = { version = "1", features = ["v4"] }
+# WS client for the events_synced broadcast regression tests.
+tokio-tungstenite = "0.21"
+futures-util = "0.3"

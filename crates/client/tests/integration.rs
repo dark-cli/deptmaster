@@ -12,3 +12,6 @@ mod offline_online_multi_app;
 mod conflict;
 mod resync;
 mod permissions;
+mod balance;
+mod multi_app_realtime;
+mod ws_notifications;
