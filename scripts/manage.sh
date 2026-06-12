@@ -1040,9 +1040,11 @@ prepare_rust_bridge_for_flutter() {
             :
         else
             (cd "$crate_dir" && cargo build 2>&1) || exit 1
-            if [ -f "$crate_dir/target/debug/libclient.so" ]; then
-                mkdir -p "$crate_dir/target/release"
-                cp -f "$crate_dir/target/debug/libclient.so" "$crate_dir/target/release/" 2>/dev/null || true
+            # Workspace build writes to $ROOT_DIR/target — fall back to that
+            # if the release build didn't produce the .so directly.
+            if [ -f "$ROOT_DIR/target/debug/libclient.so" ]; then
+                mkdir -p "$ROOT_DIR/target/release"
+                cp -f "$ROOT_DIR/target/debug/libclient.so" "$ROOT_DIR/target/release/" 2>/dev/null || true
             fi
         fi
         print_success "Rust Linux lib ready"
@@ -1168,12 +1170,17 @@ cmd_run_flutter_app() {
             print_error "--instances N (N>=2) requires --separate-instance on Linux."
             exit 1
         fi
-        # Rust FFI: loader looks for libclient.so in target/release
-        local rust_lib_dir="$ROOT_DIR/crates/client/target/release"
+        # Rust FFI: loader looks for libclient.so. Workspace Cargo writes
+        # to $ROOT_DIR/target/release/ (the workspace target dir), not the
+        # per-crate target dir. Fall back to debug if release isn't built.
+        local rust_lib_dir="$ROOT_DIR/target/release"
+        if [ ! -f "$rust_lib_dir/libclient.so" ] && [ -f "$ROOT_DIR/target/debug/libclient.so" ]; then
+            rust_lib_dir="$ROOT_DIR/target/debug"
+        fi
         if [ -f "$rust_lib_dir/libclient.so" ]; then
             export LD_LIBRARY_PATH="$rust_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         else
-            echo -e "${YELLOW}⚠ Rust lib not found at $rust_lib_dir - run: cd crates/client && cargo build --release (or: cp target/debug/libclient.so target/release/)${NC}" >&2
+            echo -e "${YELLOW}⚠ Rust lib not found at $ROOT_DIR/target/{release,debug} - run: cargo build --release -p client${NC}" >&2
         fi
         # Clean app data if --clear-app-data flag is set
         if [ "$CLEAR_APP_DATA" = true ]; then
