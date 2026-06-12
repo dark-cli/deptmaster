@@ -5,7 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../models/contact.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../providers/wallet_data_providers.dart';
+import '../providers/wallets_provider.dart';
+import '../providers/contacts_provider.dart';
+import '../providers/transactions_provider.dart';
+import '../providers/events_provider.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
 

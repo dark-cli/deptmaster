@@ -35,6 +35,19 @@ final currentWalletIdProvider = FutureProvider<String>((ref) async {
   return await rust.getCurrentWalletId();
 });
 
+/// Same as [currentWalletIdProvider] but returns `null` instead of
+/// throwing when no wallet is selected. Kept for screens that already
+/// handle the "no wallet yet" case via null-check; new code should
+/// prefer [currentWalletIdProvider] and let the AsyncValue.error path
+/// route to the wallet picker.
+final activeWalletIdProvider = FutureProvider<String?>((ref) async {
+  try {
+    return await ref.watch(currentWalletIdProvider.future);
+  } catch (_) {
+    return null;
+  }
+});
+
 /// Convenience: the [Wallet] object for the currently-selected wallet,
 /// looked up from the list. Throws if no wallet is selected or if the
 /// selected id no longer matches any wallet in the list.

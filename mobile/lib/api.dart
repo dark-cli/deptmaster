@@ -19,7 +19,6 @@ import 'package:local_auth/local_auth.dart';
 import 'src/frb_generated.dart';
 import 'src/lib.dart' as rust;
 import 'src/data_bus.dart' as rust_bus;
-import 'providers/data_bus.dart';
 import 'utils/toast_service.dart';
 
 // Re-export so the new Riverpod providers can `import 'package:.../api.dart'`
@@ -56,7 +55,6 @@ class Api {
   static bool _wsConnected = false;
   static bool _wsConnecting = false;
   static final List<void Function(Map<String, dynamic>)> _realtimeListeners = [];
-  static final List<void Function()> _dataChangedListeners = [];
   static void Function(String)? _realtimeErrorCallback;
 
   /// When offline, we try to reconnect the WebSocket every this interval.
@@ -347,7 +345,6 @@ class Api {
       await prefs.clear();
     } catch (_) {}
     _notifyConnectionStateChanged();
-    DataBus.instance.emit(DataChangeType.all);
     onLogout?.call();
   }
 
@@ -449,7 +446,6 @@ class Api {
       await _ensureRustReady();
       await rust.setCurrentWalletId(walletId: walletId);
       _cachedWalletId = walletId;
-      DataBus.instance.emit(DataChangeType.wallet, walletId: _cachedWalletId);
       // Stage 2 realtime: reconnect websocket to subscribe to the active wallet only.
       await _wsDisconnect();
       connectRealtime().catchError((_) {});
@@ -499,7 +495,6 @@ class Api {
       if (id != null && id.isNotEmpty) {
         if (_cachedWalletId != id) {
           _cachedWalletId = id;
-          DataBus.instance.emit(DataChangeType.wallet, walletId: id);
           
           // Ensure realtime is connected for this wallet
           await _wsDisconnect();
@@ -777,13 +772,11 @@ class Api {
         notes: notes,
         groupIds: groupIds,
       );
-      _notifyDataChanged(DataChangeType.contacts);
       return result;
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.contacts); // reflect rollback
       }
       rethrow;
     }
@@ -810,12 +803,10 @@ class Api {
         notes: notes,
         groupIds: groupIds,
       );
-      _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.contacts);
       }
       rethrow;
     }
@@ -826,12 +817,10 @@ class Api {
     try {
       await _ensureRustReady();
       await rust.deleteContact(contactId: contactId);
-      _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.contacts);
       }
       rethrow;
     }
@@ -860,13 +849,11 @@ class Api {
         transactionDate: transactionDate,
         dueDate: dueDate,
       );
-      _notifyDataChanged(DataChangeType.transactions);
       return result;
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -897,12 +884,10 @@ class Api {
         transactionDate: transactionDate,
         dueDate: dueDate,
       );
-      _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -913,12 +898,10 @@ class Api {
     try {
       await _ensureRustReady();
       await rust.deleteTransaction(transactionId: transactionId);
-      _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -929,12 +912,10 @@ class Api {
     try {
       await _ensureRustReady();
       await rust.undoContactAction(contactId: contactId);
-      _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.contacts);
       }
       rethrow;
     }
@@ -945,12 +926,10 @@ class Api {
     try {
       await _ensureRustReady();
       await rust.undoTransactionAction(transactionId: transactionId);
-      _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Your pending local change was discarded.');
-        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -961,12 +940,10 @@ class Api {
     try {
       await _ensureRustReady();
       await rust.bulkDeleteContacts(contactIds: ids);
-      _notifyDataChanged(DataChangeType.contacts);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
-        _notifyDataChanged(DataChangeType.contacts);
       }
       rethrow;
     }
@@ -977,12 +954,10 @@ class Api {
     try {
       await _ensureRustReady();
       await rust.bulkDeleteTransactions(transactionIds: ids);
-      _notifyDataChanged(DataChangeType.transactions);
     } catch (e) {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode)) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
-        _notifyDataChanged(DataChangeType.transactions);
       }
       rethrow;
     }
@@ -1014,24 +989,6 @@ class Api {
     }
   }
 
-  // ---------- Data changed (notify UI to refresh) ----------
-  static void addDataChangedListener(void Function() listener) {
-    _dataChangedListeners.add(listener);
-  }
-
-  static void removeDataChangedListener(void Function() listener) {
-    _dataChangedListeners.remove(listener);
-  }
-
-  static void _notifyDataChanged([DataChangeType type = DataChangeType.all]) {
-    DataBus.instance.emit(type, walletId: _cachedWalletId);
-    for (final fn in List<void Function()>.from(_dataChangedListeners)) {
-      try {
-        fn();
-      } catch (_) {}
-    }
-  }
-
   // ---------- Sync (Rust) ----------
   static Future<void> manualSync() async {
     if (kIsWeb) return;
@@ -1041,7 +998,6 @@ class Api {
       _hasSyncError = false;
       _hasAuthIssue = false;
       _notifyConnectionStateChanged();
-      _notifyDataChanged();
     } catch (e) {
       _hasSyncError = true;
       _notifyConnectionStateChanged();
@@ -1049,7 +1005,6 @@ class Api {
       final s = e.toString().toLowerCase();
       if (s.contains(_permissionDeniedCode.toLowerCase())) {
         ToastService.showError('You don’t have permission to make changes in this wallet. Pending local changes were discarded.');
-        _notifyDataChanged(); // reflect rollback done in Rust
       }
       if (_isAuthDeclinedError(e)) {
         await _handleAuthDeclined();

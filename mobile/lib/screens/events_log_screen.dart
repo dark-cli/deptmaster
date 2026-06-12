@@ -9,10 +9,12 @@ import '../api.dart';
 import '../models/contact.dart';
 import '../models/event.dart';
 import '../models/wallet.dart';
-import '../providers/wallet_data_providers.dart';
+import '../providers/wallets_provider.dart';
+import '../providers/contacts_provider.dart';
+import '../providers/transactions_provider.dart';
+import '../providers/events_provider.dart';
 import '../utils/theme_colors.dart';
 import '../utils/event_formatter.dart';
-import '../utils/state_builder.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/gradient_background.dart';
 
@@ -1334,17 +1336,9 @@ class _EventTableRowState extends State<EventTableRow> {
     
     // Load total debt
     final totalDebtFromEvent = eventData['total_debt'];
-    int? totalDebt;
-    if (totalDebtFromEvent != null) {
-      totalDebt = (totalDebtFromEvent as num?)?.toInt();
-    } else {
-      try {
-        totalDebt = StateBuilder.calculateTotalDebtFromEvents(widget.allEvents, widget.event.timestamp);
-      } catch (e) {
-        print('Error calculating total debt: $e');
-        totalDebt = 0;
-      }
-    }
+    // total_debt is stamped onto every event by Rust crud::append_event.
+    // Default to 0 if missing (older events from before that landed).
+    final int totalDebt = (totalDebtFromEvent as num?)?.toInt() ?? 0;
     
         if (mounted) {
           setState(() {

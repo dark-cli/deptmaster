@@ -3,8 +3,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/api_provider.dart';
-import '../providers/wallet_data_providers.dart';
+import '../api.dart';
+import '../providers/wallets_provider.dart';
+import '../providers/contacts_provider.dart';
+import '../providers/transactions_provider.dart';
+import '../providers/events_provider.dart';
 import 'backend_setup_screen.dart';
 import 'sign_up_screen.dart';
 import '../widgets/gradient_background.dart';
@@ -38,35 +41,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
 
-    final api = ref.read(apiProvider);
     try {
-      await api.login(
+      await Api.login(
         _usernameController.text.trim(),
         _passwordController.text,
       );
       if (!mounted) return;
       try {
-        await api.ensureCurrentWallet();
+        await Api.ensureCurrentWallet();
       } catch (_) {}
 
-      if (await api.getCurrentWalletId() == null) {
+      if (await Api.getCurrentWalletId() == null) {
         try {
-          final list = await api.getWallets();
+          final list = await Api.getWallets();
           if (list.isNotEmpty && list.first['id'] != null) {
-            await api.setCurrentWalletId(list.first['id'] as String);
+            await Api.setCurrentWalletId(list.first['id'] as String);
           }
         } catch (_) {}
       }
 
       try {
-        if (await api.getCurrentWalletId() != null) {
-          await api.manualSync();
+        if (await Api.getCurrentWalletId() != null) {
+          await Api.manualSync();
         }
       } catch (e) {
         debugPrint('Login sync failed: $e');
       }
 
-      api.connectRealtime().catchError((_) {});
+      Api.connectRealtime().catchError((_) {});
       if (!mounted) return;
       // Force data providers to refetch so home screen shows synced data (e.g. after permission change).
       ref.invalidate(activeWalletIdProvider);

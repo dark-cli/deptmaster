@@ -17,7 +17,10 @@ import 'contact_transactions_screen.dart';
 import 'add_transaction_screen.dart';
 import '../utils/bottom_sheet_helper.dart';
 import '../providers/settings_provider.dart';
-import '../providers/wallet_data_providers.dart';
+import '../providers/wallets_provider.dart';
+import '../providers/contacts_provider.dart';
+import '../providers/transactions_provider.dart';
+import '../providers/events_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/toast_service.dart';
 

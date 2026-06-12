@@ -10,7 +10,10 @@ import '../models/contact.dart';
 import '../models/event.dart';
 import '../api.dart';
 import '../providers/settings_provider.dart';
-import '../providers/wallet_data_providers.dart';
+import '../providers/wallets_provider.dart';
+import '../providers/contacts_provider.dart';
+import '../providers/transactions_provider.dart';
+import '../providers/events_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
 // ignore: unused_import

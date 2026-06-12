@@ -79,7 +79,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ],
               onChanged: (value) async {
                 if (value != null) {
-                  await SettingsService.setDefaultDirection(value);
+                  await Api.setDefaultDirection(value);
                   setState(() {
                     _defaultDirection = value;
                   });
@@ -160,7 +160,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             subtitle: const Text('Show due dates on dashboard'),
             value: _dueDateEnabled,
             onChanged: (value) async {
-              await SettingsService.setDueDateEnabled(value);
+              await Api.setDueDateEnabled(value);
               setState(() {
                 _dueDateEnabled = value;
               });
@@ -172,7 +172,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               subtitle: const Text('Due date switch default state in transaction form'),
               value: _defaultDueDateSwitch,
               onChanged: (value) async {
-                await SettingsService.setDefaultDueDateSwitch(value);
+                await Api.setDefaultDueDateSwitch(value);
                 setState(() {
                   _defaultDueDateSwitch = value;
                 });
@@ -192,7 +192,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   controller: TextEditingController(text: _defaultDueDateDays.toString()),
                   onSubmitted: (value) async {
                     final days = int.tryParse(value) ?? 30;
-                    await SettingsService.setDefaultDueDateDays(days);
+                    await Api.setDefaultDueDateDays(days);
                     setState(() {
                       _defaultDueDateDays = days;
                     });
@@ -218,14 +218,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
           FutureBuilder<String>(
-            future: SettingsService.getDashboardDefaultPeriod(),
+            future: Api.getDashboardDefaultPeriod(),
             builder: (context, snapshot) {
               final period = snapshot.data ?? 'month';
               // If period is 'day', reset to 'month'
               final safePeriod = period == 'day' ? 'month' : period;
               if (period == 'day') {
                 // Reset to month if day was selected
-                SettingsService.setDashboardDefaultPeriod('month');
+                Api.setDashboardDefaultPeriod('month');
               }
               return ListTile(
                 title: const Text('Dashboard Default Period'),
@@ -249,14 +249,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
           FutureBuilder<String>(
-            future: SettingsService.getGraphDefaultPeriod(),
+            future: Api.getGraphDefaultPeriod(),
             builder: (context, snapshot) {
               final period = snapshot.data ?? 'month';
               // If period is 'day', reset to 'month'
               final safePeriod = period == 'day' ? 'month' : period;
               if (period == 'day') {
                 // Reset to month if day was selected
-                SettingsService.setGraphDefaultPeriod('month');
+                Api.setGraphDefaultPeriod('month');
               }
               return ListTile(
                 title: const Text('Graph Page Default Period'),
@@ -270,7 +270,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ],
                   onChanged: (value) async {
                     if (value != null) {
-                      await SettingsService.setGraphDefaultPeriod(value);
+                      await Api.setGraphDefaultPeriod(value);
                       setState(() {});
                     }
                   },
