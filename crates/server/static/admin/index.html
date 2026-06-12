@@ -580,6 +580,35 @@
             background: #B69DF8; /* Material 3 dark primary dark */
         }
 
+        /* Universal press feedback for all .refresh-btn buttons.
+           Active state (mouse-down / touch-down): shrink slightly,
+           lock the dark primary color, drop the focus ring inward
+           so it stays inside the scale transform. */
+        .refresh-btn {
+            transition: background-color 0.18s, transform 0.08s ease-out,
+                        box-shadow 0.18s;
+            user-select: none;
+        }
+        .refresh-btn:active:not(:disabled) {
+            transform: scale(0.97);
+            background: #4F378B;
+            box-shadow: 0 0 0 3px rgba(103, 80, 164, 0.35),
+                        0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+        .refresh-btn:focus-visible {
+            outline: 2px solid #B69DF8;
+            outline-offset: 2px;
+        }
+        .refresh-btn:disabled {
+            opacity: 0.55;
+            cursor: progress;
+        }
+        body.dark-mode .refresh-btn:active:not(:disabled) {
+            background: #7C66B0;
+            box-shadow: 0 0 0 3px rgba(182, 157, 248, 0.45),
+                        0 2px 6px rgba(0, 0, 0, 0.4);
+        }
+
         .loading {
             text-align: center;
             padding: 2rem;
@@ -1065,7 +1094,7 @@
                     <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Password:</label>
                     <input type="password" id="loginPassword" style="width: 100%; padding: 0.5rem; border: 1px solid #E7E0EC; border-radius: 4px;" value="admin123" placeholder="admin123">
                 </div>
-                <button onclick="performLogin()" class="refresh-btn" style="width: 100%; margin: 0;">Login</button>
+                <button id="loginButton" onclick="performLogin()" class="refresh-btn" style="width: 100%; margin: 0;">Login</button>
                 <div id="loginError" style="color: #f44336; margin-top: 0.5rem; display: none;"></div>
             </div>
         </div>
@@ -1495,6 +1524,9 @@
             const username = document.getElementById('loginUsername').value;
             const password = document.getElementById('loginPassword').value;
             const errorDiv = document.getElementById('loginError');
+            const btn = document.getElementById('loginButton');
+
+            console.log('[admin-login] click; username:', username);
 
             if (!username || !password) {
                 errorDiv.textContent = 'Please enter username and password';
@@ -1502,7 +1534,14 @@
                 return;
             }
 
+            // Disable + visual loading state so the click is unmistakable.
+            const originalLabel = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Logging in…';
+            errorDiv.style.display = 'none';
+
             try {
+                console.log('[admin-login] POST', `${API_URL}/auth/admin/login`);
                 const response = await fetch(`${API_URL}/auth/admin/login`, {
                     method: 'POST',
                     headers: {
@@ -1511,23 +1550,29 @@
                     body: JSON.stringify({ username: username.trim(), password })
                 });
 
+                console.log('[admin-login] response status:', response.status);
+
                 if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Login failed');
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.error || `Login failed (HTTP ${response.status})`);
                 }
 
                 const data = await response.json();
                 localStorage.setItem('auth_token', data.token);
                 localStorage.setItem('user_id', data.admin_id || data.user_id); // Support both field names
                 localStorage.setItem('username', data.username);
-                
+
                 document.getElementById('loginModal').style.display = 'none';
                 // Start WebSocket connection after successful login
                 startSmartUpdates();
                 loadData();
             } catch (error) {
+                console.error('[admin-login] failed:', error);
                 errorDiv.textContent = error.message;
                 errorDiv.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalLabel;
             }
         }
 
