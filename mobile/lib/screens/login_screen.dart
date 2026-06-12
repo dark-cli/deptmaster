@@ -57,26 +57,46 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       try {
         await Api.ensureCurrentWallet();
-      } catch (_) {}
+        debugPrint('[login] ensureCurrentWallet OK');
+      } catch (e) {
+        debugPrint('[login] ensureCurrentWallet skipped: $e');
+      }
 
-      if (await Api.getCurrentWalletId() == null) {
+      var currentWallet = await Api.getCurrentWalletId();
+      debugPrint('[login] currentWalletId after login: $currentWallet');
+      if (currentWallet == null) {
         try {
           final list = await Api.getWallets();
+          debugPrint('[login] getWallets returned ${list.length} wallets');
           if (list.isNotEmpty && list.first['id'] != null) {
-            await Api.setCurrentWalletId(list.first['id'] as String);
+            final pick = list.first['id'] as String;
+            debugPrint('[login] selecting wallet: $pick');
+            await Api.setCurrentWalletId(pick);
+            currentWallet = pick;
+            debugPrint('[login] setCurrentWalletId OK');
+          } else {
+            debugPrint('[login] user has no wallets yet — will need to create one');
           }
-        } catch (_) {}
+        } catch (e, st) {
+          debugPrint('[login] wallet selection FAILED: $e');
+          debugPrint('[login] $st');
+        }
       }
 
       try {
-        if (await Api.getCurrentWalletId() != null) {
+        if (currentWallet != null) {
           await Api.manualSync();
+          debugPrint('[login] manualSync OK');
+        } else {
+          debugPrint('[login] skipping manualSync (no wallet)');
         }
       } catch (e) {
-        debugPrint('Login sync failed: $e');
+        debugPrint('[login] manualSync failed: $e');
       }
 
-      Api.connectRealtime().catchError((_) {});
+      Api.connectRealtime().catchError((Object e) {
+        debugPrint('[login] connectRealtime failed: $e');
+      });
       if (!mounted) return;
       // Force data providers to refetch so home screen shows synced data (e.g. after permission change).
       ref.invalidate(activeWalletIdProvider);
