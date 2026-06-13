@@ -57,6 +57,12 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
   bool _isSearching = false;
   String? _lastMissingContactsHash; // Track missing contacts to avoid repeated warnings
   List<Transaction> _lastValidTransactions = []; // Cache to prevent flash on refresh
+  // Same idea for contacts: ref.invalidate(contactsProvider) (called after
+  // any txn CRUD or fired by the data bus) drops the cached AsyncValue, so
+  // contactsAsync.valueOrNull briefly returns null on rebuild. Without this
+  // cache, contactsById falls back to {} and every row in the list renders
+  // "Unknown Contact" until the rebuild resolves.
+  List<Contact> _lastValidContacts = [];
 
   @override
   void initState() {
@@ -368,7 +374,10 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final contacts = contactsAsync.valueOrNull ?? const <Contact>[];
+          if (contactsAsync.hasValue) {
+            _lastValidContacts = contactsAsync.value!;
+          }
+          final contacts = contactsAsync.valueOrNull ?? _lastValidContacts;
           final contactsById = {for (final c in contacts) c.id: c};
           final contactNameMap = {for (final c in contacts) c.id: c.name};
 

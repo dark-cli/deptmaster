@@ -9,14 +9,20 @@ import 'data_change_provider.dart';
 import 'wallets_provider.dart';
 
 /// Contacts for the currently-selected wallet, sorted by name. Reactive:
-/// rebuilds when a [DataChangeKind.contacts] event arrives for that
-/// wallet (local CRUD, sync pull, undo). Throws if no wallet is
-/// selected (mirrors `currentWalletIdProvider`).
+/// rebuilds when a [DataChangeKind.contacts] OR
+/// [DataChangeKind.transactions] event arrives for that wallet (local
+/// CRUD, sync pull, undo). Throws if no wallet is selected (mirrors
+/// `currentWalletIdProvider`).
 final contactsProvider = FutureProvider<List<Contact>>((ref) async {
   final walletId = await ref.watch(currentWalletIdProvider.future);
   invalidateOnDataChange(
     ref,
-    kinds: [DataChangeKind.contacts],
+    // Contact rows include a `balance` field derived from the
+    // transactions table (SUM CASE in storage.rs::load_contacts_from_tables).
+    // A transaction CRUD therefore changes what getContacts() returns even
+    // though the contacts table itself wasn't touched — so we MUST refresh
+    // on Transactions events too, not just Contacts events.
+    kinds: [DataChangeKind.contacts, DataChangeKind.transactions],
     walletId: walletId,
   );
   final jsonStr = await rust.getContacts();
@@ -31,12 +37,18 @@ final contactsProvider = FutureProvider<List<Contact>>((ref) async {
 });
 
 /// Single contact by id. Throws if the contact doesn't exist or has
-/// been deleted. Reactive: rebuilds on [DataChangeKind.contacts].
+/// been deleted. Reactive: rebuilds on [DataChangeKind.contacts] OR
+/// [DataChangeKind.transactions] (balance is derived from transactions).
 final contactByIdProvider = FutureProvider.family<Contact, String>((ref, id) async {
   final walletId = await ref.watch(currentWalletIdProvider.future);
   invalidateOnDataChange(
     ref,
-    kinds: [DataChangeKind.contacts],
+    // Contact rows include a `balance` field derived from the
+    // transactions table (SUM CASE in storage.rs::load_contacts_from_tables).
+    // A transaction CRUD therefore changes what getContacts() returns even
+    // though the contacts table itself wasn't touched — so we MUST refresh
+    // on Transactions events too, not just Contacts events.
+    kinds: [DataChangeKind.contacts, DataChangeKind.transactions],
     walletId: walletId,
   );
   final jsonStr = await rust.getContact(id: id);
