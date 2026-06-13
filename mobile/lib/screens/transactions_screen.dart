@@ -619,13 +619,13 @@ class TransactionListItem extends StatelessWidget {
       builder: (context, ref, child) {
         final flipColors = ref.watch(flipColorsProvider);
         final dateFormat = DateFormat('MMM d, y');
-        final isReceived = transaction.direction == TransactionDirection.owed; // owed = Received (negative, red)
-        final isGave = transaction.direction == TransactionDirection.lent; // lent = Gave (positive, green)
+        // Rust convention: 'owed' = +amount (Gave, green), 'lent' = -amount (Received, red).
+        final isReceived = transaction.direction == TransactionDirection.lent;
+        final isGave = transaction.direction == TransactionDirection.owed;
         final isDark = Theme.of(context).brightness == Brightness.dark;
-        // Standardized: Received (owed) = red (negative), Gave (lent) = green (positive) (respects flipColors)
-        final color = isReceived 
-            ? AppColors.getReceivedColor(flipColors, isDark) // Received = red (negative)
-            : AppColors.getGiveColor(flipColors, isDark); // Gave = green (positive)
+        final color = isGave
+            ? AppColors.getGiveColor(flipColors, isDark)
+            : AppColors.getReceivedColor(flipColors, isDark);
         
         return _buildTransactionItem(context, dateFormat, color);
       },
@@ -641,11 +641,11 @@ class TransactionListItem extends StatelessWidget {
   }
 
   String _getStatus(TransactionDirection direction) {
-    // Standardized: owed = Received (negative), lent = Gave (positive)
+    // Rust convention: 'owed' = +amount (Gave), 'lent' = -amount (Received).
     if (direction == TransactionDirection.owed) {
-      return 'RECEIVED'; // Received = negative
+      return 'GAVE';
     } else {
-      return 'GAVE'; // Gave = positive
+      return 'RECEIVED';
     }
   }
 

@@ -343,7 +343,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                           Text('Gave', style: TextStyle(color: gaveColor)),
                         ],
                       ),
-                      value: TransactionDirection.lent,
+                      value: TransactionDirection.owed,
                       groupValue: _direction,
                       onChanged: (TransactionDirection? value) {
                         if (value != null) {
@@ -361,7 +361,7 @@ class _EditTransactionScreenState extends ConsumerState<EditTransactionScreen> {
                           Text('Received', style: TextStyle(color: receivedColor)),
                         ],
                       ),
-                      value: TransactionDirection.owed,
+                      value: TransactionDirection.lent,
                       groupValue: _direction,
                       onChanged: (TransactionDirection? value) {
                         if (value != null) {

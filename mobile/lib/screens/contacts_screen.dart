@@ -548,9 +548,10 @@ class _ContactsScreenState extends ConsumerState<ContactsScreen> {
                           confirmDismiss: (direction) async {
                             // Open new transaction screen with this contact (swipe right) using default direction
                             final defaultDir = await Api.getDefaultDirection();
-                            final defaultDirection = defaultDir == 'received' 
-                                ? TransactionDirection.owed 
-                                : TransactionDirection.lent;
+                            // Rust convention: 'owed' = +amount (Gave), 'lent' = -amount (Received).
+                            final defaultDirection = defaultDir == 'received'
+                                ? TransactionDirection.lent
+                                : TransactionDirection.owed;
                             final result = await showScreenAsBottomSheet(
                               context: context,
                               screen: AddTransactionScreenWithData(

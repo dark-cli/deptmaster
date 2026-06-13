@@ -143,26 +143,26 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
             return;
           }
           if (_manualSyncInFlight) return;
+          // Capture the messenger before the await so we don't reach through
+          // `context` after the suspend (which the analyzer flags as an
+          // async-gap context use).
+          final messenger = ScaffoldMessenger.maybeOf(context);
           setState(() => _manualSyncInFlight = true);
           try {
             await Api.refreshConnectionAndSync();
-            if (mounted) {
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                const SnackBar(
-                  content: Text('Synced'),
-                  duration: Duration(milliseconds: 900),
-                ),
-              );
-            }
+            messenger?.showSnackBar(
+              const SnackBar(
+                content: Text('Synced'),
+                duration: Duration(milliseconds: 900),
+              ),
+            );
           } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                SnackBar(
-                  content: Text('Sync failed: $e'),
-                  duration: const Duration(seconds: 3),
-                ),
-              );
-            }
+            messenger?.showSnackBar(
+              SnackBar(
+                content: Text('Sync failed: $e'),
+                duration: const Duration(seconds: 3),
+              ),
+            );
           } finally {
             if (mounted) setState(() => _manualSyncInFlight = false);
           }

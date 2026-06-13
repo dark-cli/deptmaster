@@ -409,7 +409,7 @@ class EventFormatter {
                 if (netImpact != 0) {
                   return AmountDisplay(
                     amount: netImpact.abs(),
-                    direction: netImpact > 0 ? 'lent' : 'owed',
+                    direction: netImpact > 0 ? 'owed' : 'lent',
                     isNetImpact: true,
                   );
                 }
@@ -420,7 +420,7 @@ class EventFormatter {
       }
       return null;
     }
-    
+
     // Handle DELETE contact events
     if ((eventType.contains('DELETE') || eventType.contains('DELETED')) && 
         event.aggregateType == 'contact') {
@@ -436,7 +436,7 @@ class EventFormatter {
           if (netImpact != 0) {
             return AmountDisplay(
               amount: netImpact.abs(),
-              direction: netImpact > 0 ? 'lent' : 'owed',
+              direction: netImpact > 0 ? 'owed' : 'lent',
               isNetImpact: true,
             );
           }
@@ -511,6 +511,10 @@ class AmountDisplay {
     required this.isNetImpact,
   });
   
-  String get sign => direction == 'lent' ? '+' : '-';
-  bool get isPositive => direction == 'lent';
+  // Canonical convention (matches Rust SQL in storage.rs, crud.rs, server transactions.rs):
+  //   direction == 'owed'  →  +amount  (contact owes me; positive impact on my balance)
+  //   direction == 'lent'  →  -amount  (I owe contact; negative impact on my balance)
+  // UI label mapping: 'owed' → "Gave" (green), 'lent' → "Received" (red).
+  String get sign => direction == 'owed' ? '+' : '-';
+  bool get isPositive => direction == 'owed';
 }

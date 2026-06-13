@@ -61,7 +61,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   bool _amountHasText = false;
   
   Contact? _selectedContact;
-  TransactionDirection _direction = TransactionDirection.owed;
+  // Default pref is 'received' (api.dart) which now maps to .lent under the Rust convention.
+  TransactionDirection _direction = TransactionDirection.lent;
   DateTime _selectedDate = DateTime.now();
   DateTime? _dueDate;
   bool _dueDateSwitchEnabled = false; // Switch state for due date
@@ -223,13 +224,14 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
     
     if (mounted) {
       setState(() {
-        // Only set default direction if not pre-filled
-        // Default: 'received' maps to TransactionDirection.owed, 'give' maps to TransactionDirection.lent
-        if (widget is! AddTransactionScreenWithData || 
+        // Only set default direction if not pre-filled.
+        // Rust convention: 'owed' = +amount (positive), 'lent' = -amount (negative).
+        // UI label mapping: "Gave" = .owed (positive), "Received" = .lent (negative).
+        if (widget is! AddTransactionScreenWithData ||
             (widget as AddTransactionScreenWithData).direction == null) {
-          _direction = defaultDir == 'received' 
-              ? TransactionDirection.owed 
-              : TransactionDirection.lent;
+          _direction = defaultDir == 'received'
+              ? TransactionDirection.lent
+              : TransactionDirection.owed;
         }
         _dueDateSwitchEnabled = defaultDueDateSwitch;
         if (defaultDueDateSwitch) {
@@ -532,7 +534,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
               builder: (context, ref, child) {
                 final flipColors = ref.watch(flipColorsProvider);
                 final isDark = Theme.of(context).brightness == Brightness.dark;
-                // Standardized: Received (owed) = red, Gave (lent) = green
+                // Canonical (matches Rust SQL): 'owed' = +amount → "Gave" (green);
+                // 'lent' = -amount → "Received" (red).
                 final gaveColor = AppColors.getGiveColor(flipColors, isDark);
                 final receivedColor = AppColors.getReceivedColor(flipColors, isDark);
                 
@@ -547,7 +550,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                           Text('Gave', style: TextStyle(color: gaveColor)),
                         ],
                       ),
-                      value: TransactionDirection.lent,
+                      value: TransactionDirection.owed,
                       groupValue: _direction,
                       onChanged: (TransactionDirection? value) {
                         if (value != null) {
@@ -565,7 +568,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                           Text('Received', style: TextStyle(color: receivedColor)),
                         ],
                       ),
-                      value: TransactionDirection.owed,
+                      value: TransactionDirection.lent,
                       groupValue: _direction,
                       onChanged: (TransactionDirection? value) {
                         if (value != null) {
