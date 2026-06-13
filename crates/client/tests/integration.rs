@@ -16,3 +16,4 @@ mod balance;
 mod multi_app_realtime;
 mod ws_notifications;
 mod ws_auto_sync;
+mod transaction_crud_keeps_other_state;

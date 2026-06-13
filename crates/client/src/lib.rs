@@ -59,9 +59,13 @@ thread_local! {
         Duration::from_secs(3),
     ]));
 }
-thread_local! {
-    static SYNC_IN_FLIGHT: RefCell<bool> = RefCell::new(false);
-}
+// PROCESS-WIDE (not thread-local) — the WS worker spawns a fresh
+// std::thread per events_synced message, so each spawn would get a
+// fresh thread-local "not in flight" and bypass the guard entirely.
+// pull_and_merge then runs in parallel, racing on storage writes
+// (last_sync_timestamp + server_hash) and producing stale state for
+// the next sync to mis-diagnose as hash-divergence → wipe.
+static SYNC_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static SYNC_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
 static LAST_BACKOFF_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static LAST_INFLIGHT_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
@@ -72,19 +76,23 @@ struct SyncGuard;
 
 impl SyncGuard {
     fn try_acquire() -> Option<Self> {
-        SYNC_IN_FLIGHT.with(|c| {
-            if *c.borrow() {
-                return None;
-            }
-            *c.borrow_mut() = true;
-            Some(Self)
-        })
+        // compare_exchange: only the first caller wins; subsequent
+        // calls see `true` and return None until the holder drops.
+        match SYNC_IN_FLIGHT.compare_exchange(
+            false,
+            true,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => Some(Self),
+            Err(_) => None,
+        }
     }
 }
 
 impl Drop for SyncGuard {
     fn drop(&mut self) {
-        SYNC_IN_FLIGHT.with(|c| *c.borrow_mut() = false);
+        SYNC_IN_FLIGHT.store(false, Ordering::Release);
     }
 }
 
