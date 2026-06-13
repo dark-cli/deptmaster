@@ -15,6 +15,7 @@ class SyncStatusIcon extends StatefulWidget {
 
 class _SyncStatusIconState extends State<SyncStatusIcon> {
   Timer? _periodicTimer;
+  bool _manualSyncInFlight = false;
 
   @override
   void initState() {
@@ -80,7 +81,10 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
 
     IconData icon;
     Color color;
-    if (hasAuthIssue) {
+    if (_manualSyncInFlight) {
+      icon = Icons.sync;
+      color = theme.colorScheme.primary;
+    } else if (hasAuthIssue) {
       icon = Icons.warning_amber_rounded;
       color = ThemeColors.warning(context);
     } else if (isOffline) {
@@ -138,17 +142,45 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
             );
             return;
           }
-          await Api.refreshConnectionAndSync();
+          if (_manualSyncInFlight) return;
+          setState(() => _manualSyncInFlight = true);
+          try {
+            await Api.refreshConnectionAndSync();
+            if (mounted) {
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                const SnackBar(
+                  content: Text('Synced'),
+                  duration: Duration(milliseconds: 900),
+                ),
+              );
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                SnackBar(
+                  content: Text('Sync failed: $e'),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
+          } finally {
+            if (mounted) setState(() => _manualSyncInFlight = false);
+          }
           _refresh();
         },
         borderRadius: BorderRadius.circular(20),
         child: Padding(
           padding: const EdgeInsets.all(4),
-          child: Icon(
-            icon,
-            size: 20,
-            color: color,
-          ),
+          child: _manualSyncInFlight
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                  ),
+                )
+              : Icon(icon, size: 20, color: color),
         ),
       ),
     );

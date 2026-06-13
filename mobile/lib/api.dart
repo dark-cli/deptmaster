@@ -63,12 +63,21 @@ class Api {
 
   /// Connection check + sync. Call this on pull-to-refresh or when tapping the sync icon.
   /// Ensures WebSocket is connected then runs sync; updates connection state and notifies data.
+  /// connectRealtime and manualSync run independently — a failure in one does NOT skip the
+  /// other (used to silently swallow connect errors and never sync).
   static Future<void> refreshConnectionAndSync() async {
     if (kIsWeb) return;
     try {
       await connectRealtime();
+    } catch (e) {
+      debugPrint('[sync-icon] connectRealtime failed: $e');
+    }
+    try {
       await manualSync();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[sync-icon] manualSync failed: $e');
+      rethrow; // surfacing this lets the icon's tap handler show a snackbar
+    }
   }
 
   /// Notifier for connection/sync state changes. Incremented when [connectionState] changes.
