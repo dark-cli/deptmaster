@@ -478,13 +478,40 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                                       ),
                                     );
                                     if (result != null && result is Contact && mounted) {
-                                      setState(() {
-                                        _selectedContact = result;
-                                        _contactSearchController.text = result.name;
-                                        _filteredContacts = [];
-                                        _showContactSuggestions = false;
-                                      });
-                                      _requestContactsRefresh();
+                                      // Force-await a fresh contacts read instead of waiting
+                                      // for the data bus / listener to catch up. Without this,
+                                      // the brand-new contact often isn't in _contacts yet by
+                                      // the time the user types again — searching by name
+                                      // returns no match, even though Rust already has it.
+                                      try {
+                                        final fresh = await ref.refresh(contactsProvider.future);
+                                        if (mounted) {
+                                          setState(() {
+                                            _contacts = fresh;
+                                            _selectedContact = result;
+                                            _contactSearchController.text = result.name;
+                                            _filteredContacts = [];
+                                            _showContactSuggestions = false;
+                                          });
+                                        }
+                                      } catch (_) {
+                                        // If the refresh fails, still let the user see the
+                                        // contact they just created — fall back to the
+                                        // returned-from-pop instance.
+                                        if (mounted) {
+                                          setState(() {
+                                            _contacts = [
+                                              ..._contacts.where((c) => c.id != result.id),
+                                              result,
+                                            ]..sort((a, b) => a.name.toLowerCase()
+                                                .compareTo(b.name.toLowerCase()));
+                                            _selectedContact = result;
+                                            _contactSearchController.text = result.name;
+                                            _filteredContacts = [];
+                                            _showContactSuggestions = false;
+                                          });
+                                        }
+                                      }
                                     }
                                   },
                                 );

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../models/contact.dart';
 import '../models/wallet.dart';
+import '../providers/contacts_provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
@@ -106,6 +107,13 @@ class _AddContactScreenState extends ConsumerState<AddContactScreen> {
         groupIds: groupIds,
       );
       final createdContact = Contact.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
+      // Force the next read of contactsProvider to hit Rust and pick up
+      // the newly inserted row. The data bus also fires DataChangeKind
+      // .contacts from crud.rs, but it's async; the explicit invalidate
+      // guarantees any caller that does ref.read after we pop sees the
+      // new contact synchronously (matches the pattern in every other
+      // CRUD screen — this one was the odd one out).
+      ref.invalidate(contactsProvider);
       if (mounted) {
         Navigator.of(context).pop(createdContact);
         ToastService.showSuccessFromContext(context, '✅ Contact created!');
