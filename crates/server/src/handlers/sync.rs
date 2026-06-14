@@ -86,22 +86,35 @@ pub struct SyncEventsResponse {
     pub conflicts: Vec<String>,
 }
 
-/// Response shape of `GET /sync/events`. `server_hash` is the incremental
-/// MD5 of this user's `user_readable_events` set (see migration 027 +
-/// `UserEventHash::calculate_and_store`). Client stores it after each pull
-/// and compares against the next pull's hash — mismatch means the user's
-/// visible set changed (permission revoke, group membership flip, etc.)
-/// and the client must wipe + repull.
+/// Response shape of `GET /sync/events` under the per-row chain-hash
+/// protocol (migration 033).
+///
+/// - `events`: the list of events the client should apply, in id order.
+/// - `latest_hash`: the hash to store and send back on the next pull.
+///   Represents "as of this hash" the client is in sync.
+/// - `flush`: if true, the client must wipe its local events before
+///   applying the returned set. Fired when the client's last_hash isn't
+///   found in user_readable_events (permission flip removed events from
+///   view, first-ever sync, or corruption).
 #[derive(Serialize)]
 pub struct GetSyncEventsResponse {
     pub events: Vec<SyncEvent>,
-    pub server_hash: String,
+    pub latest_hash: String,
+    pub flush: bool,
 }
 
 // ============ QUERY TYPES ============
 
 #[derive(Deserialize)]
 pub struct SyncEventsQuery {
+    /// Client's last_hash from previous sync. Empty/missing on first sync.
+    /// Server looks it up in user_readable_events.hash; found → return
+    /// events with greater id (incremental). Not found → full pull + flush.
+    pub last_hash: Option<String>,
+
+    /// Legacy timestamp-based watermark from the pre-033 protocol. Ignored
+    /// by the new hash-lookup path but kept in the schema so older clients
+    /// don't get a 400 during the transition.
     pub since: Option<String>,
 }
 
@@ -148,25 +161,131 @@ pub async fn get_sync_events(
     let user_id = auth_user.user_id;
     let db = Database::new((*state.db_pool).clone());
 
-    // Parse timestamp if provided
-    let since = match &params.since {
-        Some(since_str) => Some(parse_timestamp(since_str)?),
-        None => None,
-    };
+    // Per-row chain-hash protocol (see migration 033).
+    //
+    // 1. If client sent last_hash and we find it in user_readable_events:
+    //    return events with greater id. Incremental, no flush.
+    // 2. Otherwise (no last_hash, empty last_hash, or hash not found):
+    //    return all readable events + flush=true. The client wipes local
+    //    state and starts from scratch.
+    //
+    // The events query and the latest_hash query run in the same
+    // REPEATABLE READ transaction so they observe the same snapshot —
+    // otherwise a concurrent push between the two reads would let the
+    // client receive events whose hash isn't yet the row's "latest_hash",
+    // forcing a needless flush on the next pull.
+    let client_last_hash = params.last_hash.as_deref().unwrap_or("");
 
-    // Get readable events from denormalized table
-    let events = db
-        .get_readable_events_impl(wallet_id, user_id, since)
+    let mut tx = state.db_pool.begin().await.map_err(|e| {
+        tracing::error!("Error opening sync read tx: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to open sync transaction"})),
+        )
+    })?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
-            tracing::error!("Error fetching readable events: {:?}", e);
+            tracing::error!("Error setting REPEATABLE READ: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to fetch events"})),
+                Json(serde_json::json!({"error": "Failed to set isolation level"})),
             )
         })?;
 
-    // Convert to response
+    // Step 1: read the server's current latest_hash for this user (the
+    // hash of the highest-id row, or "" if user has no readable events).
+    // We read this first so we can short-circuit the "we're both at the
+    // same state" case below.
+    let latest_hash: String = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(
+            (SELECT hash FROM user_readable_events
+             WHERE wallet_id = $1 AND user_id = $2
+             ORDER BY id DESC
+             LIMIT 1),
+            ''
+        )
+        "#,
+    )
+    .bind(wallet_id)
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching latest hash: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch latest hash"})),
+        )
+    })?;
+
+    // Step 2: resolve the lower bound.
+    //   - Client and server agree on the same hash (including "both empty"):
+    //     no flush, no events, fast exit.
+    //   - Client's hash matches some row → incremental from that row.
+    //   - Client's hash doesn't match anything → flush + full pull.
+    let (start_id, flush) = if client_last_hash == latest_hash {
+        // Already in sync (covers both "both at H" and "both empty"
+        // cases). Return zero events and no flush — there's nothing to
+        // do on either side.
+        (i64::MAX, false)
+    } else if client_last_hash.is_empty() {
+        // Client has no anchor; server has events to send. Full pull.
+        (-1, true)
+    } else {
+        // Client claims a specific hash. Look it up in the chain.
+        let row: Option<(i64,)> = sqlx::query_as::<_, (i64,)>(
+            r#"
+            SELECT id FROM user_readable_events
+            WHERE wallet_id = $1 AND user_id = $2 AND hash = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .bind(client_last_hash)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error looking up client hash: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to look up client hash"})),
+            )
+        })?;
+        match row {
+            Some((id,)) => (id, false),
+            None => (-1, true),
+        }
+    };
+
+    // Step 3: fetch events to return, in user_readable_events.id order.
+    // start_id = i64::MAX from the short-circuit above means "no rows" —
+    // skip the query entirely.
+    let events = if start_id == i64::MAX {
+        Vec::new()
+    } else {
+        db.get_readable_events_after_in_tx(&mut tx, wallet_id, user_id, start_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error fetching readable events: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Failed to fetch events"})),
+                )
+            })?
+    };
+
+    tx.commit().await.map_err(|e| {
+        tracing::error!("Error committing sync read tx: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to commit sync transaction"})),
+        )
+    })?;
+
     let sync_events: Vec<SyncEvent> = events
         .into_iter()
         .map(|event| SyncEvent {
@@ -180,17 +299,10 @@ pub async fn get_sync_events(
         })
         .collect();
 
-    // Incremental hash over this user's readable set. Empty string for users
-    // with no readable events yet (first sync against an empty wallet).
-    let server_hash = crate::database::repository::hash::UserEventHash::get_hash(
-        &state.db_pool, wallet_id, user_id,
-    )
-    .await
-    .unwrap_or_default();
-
     Ok(Json(GetSyncEventsResponse {
         events: sync_events,
-        server_hash,
+        latest_hash,
+        flush,
     }))
 }
 

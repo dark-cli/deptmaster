@@ -18,3 +18,4 @@ mod ws_notifications;
 mod ws_auto_sync;
 mod transaction_crud_keeps_other_state;
 mod hash_divergence;
+mod sync_chain_hash_stress;

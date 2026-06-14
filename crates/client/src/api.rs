@@ -98,13 +98,21 @@ pub fn register(username: String, password: String) -> Result<(), String> {
 /// wallet_id is path-only — backend's wallet_context middleware doesn't read header/query.
 /// GET `/api/wallets/<wallet_id>/sync/events`.
 ///
-/// Returns `(events, server_hash)`. `server_hash` is the server's incremental
-/// MD5 of this user's readable-events set — store it after applying so the
-/// next pull can detect visibility changes (permission revoke, group flip)
-/// by hash mismatch instead of polling `/me/permissions`.
+/// GET /api/wallets/<wallet_id>/sync/events under the per-row chain-hash
+/// protocol (server migration 033).
+///
+/// Sends the client's last_hash from the previous successful pull. Server
+/// looks it up in user_readable_events; found → returns events with greater
+/// id (incremental). Not found / empty / first sync → returns all events
+/// plus `flush=true` so the client wipes local before applying.
+///
+/// Returns `(events, latest_hash, flush)`. `latest_hash` is what the client
+/// must store for the next pull. `flush` tells the client to wipe local
+/// state before applying the returned events. The client never validates
+/// the hash itself — the server is authoritative.
 pub(crate) fn get_sync_events(
-    since: Option<String>,
-) -> Result<(Vec<serde_json::Value>, String), String> {
+    last_hash: Option<String>,
+) -> Result<(Vec<serde_json::Value>, String, bool), String> {
     let base = base_url()?;
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
@@ -114,17 +122,19 @@ pub(crate) fn get_sync_events(
         base.trim_end_matches('/'),
         wallet_id
     );
-    let since_ref = since.as_deref();
+    let last_hash_ref = last_hash.as_deref();
     RUNTIME.block_on(async {
         let mut req = CLIENT.get(&url).headers(headers);
-        if let Some(s) = since_ref {
-            req = req.query(&[("since", s)]);
+        if let Some(h) = last_hash_ref {
+            if !h.is_empty() {
+                req = req.query(&[("last_hash", h)]);
+            }
         }
         let resp = req.send().await.map_err(|e| e.to_string())?;
         let status = resp.status();
         let text = resp.text().await.map_err(|e| e.to_string())?;
         if status.as_u16() == 401 && text.contains("DEBITUM_AUTH_DECLINED") {
-            return Err::<(Vec<serde_json::Value>, String), String>(
+            return Err::<(Vec<serde_json::Value>, String, bool), String>(
                 "DEBITUM_AUTH_DECLINED".to_string(),
             );
         }
@@ -137,12 +147,13 @@ pub(crate) fn get_sync_events(
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        let server_hash = body
-            .get("server_hash")
+        let latest_hash = body
+            .get("latest_hash")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        Ok((events, server_hash))
+        let flush = body.get("flush").and_then(|v| v.as_bool()).unwrap_or(false);
+        Ok((events, latest_hash, flush))
     })
 }
 

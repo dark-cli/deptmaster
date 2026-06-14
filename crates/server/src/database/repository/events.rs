@@ -300,6 +300,47 @@ impl Database {
         Ok(events)
     }
 
+    /// Return readable events whose `user_readable_events.id` is strictly
+    /// greater than `start_id`, ordered by that id ASC. Used by the pull
+    /// endpoint after resolving the client's last_hash to its row id.
+    /// Pass start_id = -1 for "return everything readable".
+    ///
+    /// Runs inside a caller-supplied transaction so the lookup of the
+    /// client's hash, the events query, and the latest_hash query all
+    /// observe the same REPEATABLE READ snapshot.
+    pub async fn get_readable_events_after_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        wallet_id: Uuid,
+        user_id: Uuid,
+        start_id: i64,
+    ) -> Result<Vec<DomainEvent>, DbError> {
+        let rows = sqlx::query_as::<_, EventRowDb>(
+            r#"
+            SELECT e.id, e.event_id, e.aggregate_type, e.aggregate_id, e.event_type,
+                   e.event_data, e.wallet_id, e.user_id, e.created_at, e.event_version
+            FROM events e
+            INNER JOIN user_readable_events ure
+                ON e.event_id = ure.event_id AND ure.wallet_id = e.wallet_id
+            WHERE e.wallet_id = $1 AND ure.user_id = $2 AND ure.id > $3
+            ORDER BY ure.id ASC
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .bind(start_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        let mut events = Vec::with_capacity(rows.len());
+        for db in rows {
+            let event_row: EventRow = db.into();
+            let event: Event = event_row.into();
+            let domain_event = Self::event_to_domain(&event)?;
+            events.push(domain_event);
+        }
+        Ok(events)
+    }
+
     /// Insert an event. Dedup on `(wallet_id, event_id)` — a duplicate is silently
     /// dropped and returns 0; a new insert returns the BIGSERIAL row id.
     /// Callers use `result > 0` to distinguish new vs duplicate without exception flow.

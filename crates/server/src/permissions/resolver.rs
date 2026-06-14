@@ -121,14 +121,28 @@ pub async fn rebuild_readable_events_cache(
         return Ok(());
     }
 
-    // filter_readable_events returns canonical-ordered events.id ASC. Insert
-    // and fold each into the hash in the same order an incremental sync would.
+    // filter_readable_events returns canonical-ordered events.id ASC.
+    // Per-row hash chaining (migration 033): each row's hash is
+    // md5(prior_latest_hash || event_id::text), computed inside the
+    // INSERT itself. The legacy user_event_hashes table is still reset
+    // above for back-compat but no longer load-bearing for sync.
     let readable_ids = filter_readable_events(pool, ctx, all_events).await?;
     for event_id in readable_ids {
-        let inserted = sqlx::query(
+        sqlx::query(
             r#"
-            INSERT INTO user_readable_events (wallet_id, user_id, event_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO user_readable_events (wallet_id, user_id, event_id, hash)
+            VALUES (
+                $1, $2, $3,
+                md5(
+                    COALESCE(
+                        (SELECT hash FROM user_readable_events
+                         WHERE wallet_id = $1 AND user_id = $2
+                         ORDER BY id DESC
+                         LIMIT 1),
+                        ''
+                    ) || $3::text
+                )
+            )
             ON CONFLICT (wallet_id, user_id, event_id) DO NOTHING
             "#,
         )
@@ -136,15 +150,7 @@ pub async fn rebuild_readable_events_cache(
         .bind(ctx.user_id)
         .bind(event_id)
         .execute(pool)
-        .await?
-        .rows_affected();
-
-        if inserted > 0 {
-            crate::database::repository::hash::UserEventHash::calculate_and_store(
-                pool, ctx.wallet_id, ctx.user_id, event_id,
-            )
-            .await?;
-        }
+        .await?;
     }
 
     Ok(())

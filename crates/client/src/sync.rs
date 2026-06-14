@@ -3,51 +3,15 @@
 use crate::api;
 use crate::rust_log;
 use crate::storage;
-use md5::{Digest, Md5};
 
-fn last_sync_key(wallet_id: &str) -> String {
-    format!("last_sync_timestamp_{}", wallet_id)
-}
-
+/// Storage key for the per-wallet last_hash from the most recent pull.
+/// The name is historical; under the migration-033 protocol the value
+/// is the server's `latest_hash` (the hash of the last row in
+/// user_readable_events for this user at the moment of that pull),
+/// which the client echoes back on the next pull so the server can
+/// resolve "what came after" via a single SQL lookup.
 fn server_hash_key(wallet_id: &str) -> String {
     format!("server_hash_{}", wallet_id)
-}
-
-/// Mirror of the server's per-user event hash (see migration 027 +
-/// `crates/server/src/database/repository/hash.rs::UserEventHash::calculate_and_store`).
-///
-/// Algorithm: XOR of MD5(event_id) over every event_id in the user's
-/// user_readable_events set. XOR is commutative — order doesn't matter
-/// — so the client and server can fold events in any order and still
-/// agree on the final hash. The previous MD5-chain
-/// `MD5(prev_hash || event_id)` was order-sensitive: server folds in
-/// the order populate_event_cache calls reached the row lock, while
-/// the client folds in created_at ASC pull order. Concurrent pushes
-/// to the same user produced a permanent server↔client divergence
-/// loop ("hash diverged → wipe → diverged again").
-///
-/// Each event contributes the same 16-byte MD5 digest of its
-/// event_id::text (lowercase UUID with dashes — matches Postgres
-/// `decode(md5(uuid::text), 'hex')`). The empty starting hash is
-/// 16 zero bytes (hex "0000…"); MD5 ⊕ 0 = MD5, so the first fold
-/// equals md5(event_id), which matches the server's INSERT path.
-fn fold_event_ids_xor<'a, I: IntoIterator<Item = &'a str>>(
-    starting_hash: &str,
-    event_ids: I,
-) -> String {
-    let mut acc = match hex::decode(starting_hash) {
-        Ok(b) if b.len() == 16 => b,
-        // Empty string (no row yet) or malformed hash → start from
-        // 16 zero bytes, the XOR identity.
-        _ => vec![0u8; 16],
-    };
-    for id in event_ids {
-        let digest = Md5::digest(id.as_bytes());
-        for (a, d) in acc.iter_mut().zip(digest.iter()) {
-            *a ^= *d;
-        }
-    }
-    hex::encode(acc)
 }
 
 /// Build the snake_case discriminator the server's `EventData` (serde `#[tag = "type"]`)
@@ -199,107 +163,57 @@ pub fn push_unsynced() -> Result<(), String> {
     }
 }
 
-/// Pull server events for this wallet, merge into local, rebuild state.
+/// Pull server events for this wallet, merge into local.
 ///
-/// Sync semantics:
-/// - `since = last_sync_timestamp` (per-wallet) when present → incremental pull (only newer events).
-/// - `since = None` → server returns the full visible-to-this-user event set.
-///
-/// We only DESTRUCTIVELY replace local events when one of two things is true:
-///   1. Local has zero events (nothing to lose), AND it's a full pull (first sync).
-///   2. An incremental pull returned permission events — the user's visible set may
-///      have shrunk, so we full-reset to match the server's filter.
-///
-/// Otherwise we just upsert (`INSERT OR IGNORE`); the server-issued ids don't collide
-/// with our client-issued ones, and dedup happens on (id) plus replay tolerates duplicates.
-/// `last_sync_timestamp` is updated at the end of every successful pull (even when the
-/// server returned 0 events) so the next sync is incremental — without this, every sync
-/// would re-trigger the full-pull path and destroy local-only state.
+/// Per-row chain-hash protocol (server migration 033):
+///   - Client sends its `last_hash` (the `latest_hash` returned by the
+///     previous pull). Server does `WHERE hash = ?` on
+///     `user_readable_events`; found → returns events with greater id
+///     (incremental). Not found / first sync → returns all events plus
+///     `flush=true`.
+///   - Client never validates the hash. The server is authoritative.
+///   - If `flush` is set, client wipes local events for the wallet
+///     before applying the returned batch.
 pub fn pull_and_merge() -> Result<(), String> {
     let wallet_id = storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
-    let local_count = storage::events_count(&wallet_id).unwrap_or(0);
-    let since = storage::config_get(&last_sync_key(&wallet_id))?;
-    let is_full_pull = since.is_none();
-    if let Some(ref s) = since {
-        rust_log!("[debitum_rs] pull_and_merge: incremental pull since={}", s);
-    } else if local_count == 0 {
-        rust_log!("[debitum_rs] pull_and_merge: 0 local events for wallet {}, full pull (no since)", wallet_id);
+    let last_hash = storage::config_get(&server_hash_key(&wallet_id))?.unwrap_or_default();
+    let last_hash_for_log = if last_hash.is_empty() {
+        "<none>".to_string()
     } else {
-        rust_log!(
-            "[debitum_rs] pull_and_merge: no last_sync_timestamp but {} local events for wallet {} — full pull WITHOUT clearing local",
-            local_count, wallet_id
-        );
-    }
-    rust_log!("[debitum_rs] pull_and_merge: requesting server events");
-    let (mut server_events, mut server_hash) = api::get_sync_events(since.clone())?;
-    rust_log!("[debitum_rs] pull_and_merge: server returned {} events for wallet {}", server_events.len(), wallet_id);
+        last_hash.clone()
+    };
+    rust_log!(
+        "[debitum_rs] pull_and_merge: pulling wallet={} last_hash={}",
+        wallet_id, last_hash_for_log
+    );
 
-    // Hash-based divergence check: did the user's readable set change in a way
-    // that an incremental pull would miss? Fold the returned events onto our
-    // last-known server hash and compare to the server's current hash.
-    //
-    //   - For an incremental pull, the starting point is the hash we stashed
-    //     last time. If the server only APPENDED events since then, our
-    //     fold reproduces the server's current hash exactly. If events were
-    //     REMOVED from our view (permission revoke, group membership flip),
-    //     the fold diverges → we wipe and full-pull to converge.
-    //
-    //   - For a full pull (first sync OR a prior wipe), the starting point is
-    //     empty; the server returns the complete readable set and our fold
-    //     should equal the server hash. If it doesn't, something is off
-    //     (clock skew, hash impl drift) — we log but don't loop.
-    let previous_hash = storage::config_get(&server_hash_key(&wallet_id))?.unwrap_or_default();
-    let starting_hash = if is_full_pull { String::new() } else { previous_hash.clone() };
-    let folded_event_ids: Vec<String> = server_events
-        .iter()
-        .filter_map(|ev| ev.get("id").and_then(|v| v.as_str()).map(String::from))
-        .collect();
-    let computed_hash = fold_event_ids_xor(&starting_hash, folded_event_ids.iter().map(|s| s.as_str()));
-    let hash_diverged = !is_full_pull && computed_hash != server_hash;
-    if hash_diverged {
+    let last_hash_arg = if last_hash.is_empty() {
+        None
+    } else {
+        Some(last_hash.clone())
+    };
+    let (server_events, latest_hash, flush) = api::get_sync_events(last_hash_arg)?;
+    rust_log!(
+        "[debitum_rs] pull_and_merge: server returned {} events, latest_hash={}, flush={}",
+        server_events.len(), latest_hash, flush
+    );
+
+    // If the server says "your last_hash isn't in my chain anymore",
+    // wipe the wallet's local events + projection and absorb the
+    // returned set from scratch. This fires on:
+    //   - first sync (no last_hash sent)
+    //   - permission flip removed events from view (server's chain
+    //     diverged from what client has)
+    //   - client storage corruption (last_hash points to nothing
+    //     server knows about)
+    // The decision is made by the server — client never second-guesses.
+    if flush {
         rust_log!(
-            "[debitum_rs] pull_and_merge: hash diverged (server={}, computed={}) starting_hash={} folded {} ids: {:?}",
-            server_hash, computed_hash, starting_hash, folded_event_ids.len(), folded_event_ids
-        );
-        // Also surface what we have in local storage so we can spot a chain
-        // drift between the locally-folded view and the server's view.
-        let local_event_ids: Vec<String> = storage::events_get_all(&wallet_id)?
-            .into_iter()
-            .map(|e| e.id)
-            .collect();
-        rust_log!(
-            "[debitum_rs] pull_and_merge: local has {} events (newest 5: {:?})",
-            local_event_ids.len(),
-            local_event_ids.iter().rev().take(5).collect::<Vec<_>>()
+            "[debitum_rs] pull_and_merge: server requested flush — wiping wallet and absorbing {} events",
+            server_events.len()
         );
         storage::events_delete_all_for_wallet(&wallet_id)?;
-        let refetched = api::get_sync_events(None)?;
-        server_events = refetched.0;
-        server_hash = refetched.1;
-        rust_log!(
-            "[debitum_rs] pull_and_merge: refetch returned {} events, server_hash={}",
-            server_events.len(), server_hash
-        );
-        // Don't re-verify after the full pull: trust the server's hash blob and
-        // store it as-is. A second mismatch would mean our local md5 chain is
-        // diverging from the server's, which is a bug to fix, not a state to
-        // recover from.
-    } else if is_full_pull && local_count == 0 {
-        // First sync, nothing local to lose. (No-op — there's nothing to delete.)
-        rust_log!("[debitum_rs] pull_and_merge: full pull on empty wallet — just absorbing server events");
-    }
-
-    // Always log the post-fold comparison, even for full-pulls (where we
-    // don't act on a mismatch). A mismatch here means the server's
-    // user_event_hashes row drifted from its user_readable_events content
-    // — every subsequent incremental pull will then diverge until that
-    // server-side row is rebuilt, no matter what the client does.
-    if is_full_pull && !server_events.is_empty() && computed_hash != server_hash {
-        rust_log!(
-            "[debitum_rs] pull_and_merge: FULL-PULL HASH MISMATCH (server={}, fold-of-{}-events={}) — server's user_event_hashes is out of sync with its user_readable_events; subsequent incrementals will diverge",
-            server_hash, folded_event_ids.len(), computed_hash
-        );
     }
 
     for ev in &server_events {
@@ -326,35 +240,21 @@ pub fn pull_and_merge() -> Result<(), String> {
         };
         storage::events_insert(&stored)?;
     }
-    // Feed each newly-stored event through applier::apply so the
-    // contacts / transactions / permission tables in SQLite stay in
-    // sync with the events log. Failures are logged and swallowed so a
-    // single bad event doesn't abort the whole sync — same defensive
-    // posture as the existing event-store code paths.
+
     if !server_events.is_empty() {
         let mut proj = crate::sdk_projection::SdkProjection::new();
         let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
         for ev_json in &server_events {
-            match parse_server_event_for_applier(ev_json, &wallet_id) {
-                Some(domain_event) => {
-                    if let Err(e) = rt.block_on(applier::apply(&mut proj, &domain_event)) {
-                        rust_log!("[debitum_rs] applier::apply failed for event: {:?}", e);
-                    }
-                }
-                None => {
-                    // Skip events whose shape we can't reconstruct as a
-                    // DomainEvent; they still landed in the events table
-                    // above and will be processed on next rebuild.
+            if let Some(domain_event) = parse_server_event_for_applier(ev_json, &wallet_id) {
+                if let Err(e) = rt.block_on(applier::apply(&mut proj, &domain_event)) {
+                    rust_log!("[debitum_rs] applier::apply failed for event: {:?}", e);
                 }
             }
         }
     }
 
-    // If this batch contained any UNDO events, rebuild the projection tables
-    // from scratch (UNDO-aware). The per-event applier::apply pass above is a
-    // no-op for UNDO variants, so the projection would otherwise still
-    // contain the undone event's effects. Rebuilds are rare (UNDOs are rare),
-    // so the cost is acceptable.
+    // UNDO events make applier::apply a no-op for the undone event; rebuild
+    // the projection from the full local events log so undone effects drop.
     let has_undo = snapshots::batch_has_undo(server_events.iter().filter_map(|ev| {
         ev.get("event_type").and_then(|v| v.as_str())
     }));
@@ -363,23 +263,13 @@ pub fn pull_and_merge() -> Result<(), String> {
         rebuild_projection_tables(&wallet_id, &all_events)?;
     }
 
-    // Snapshot the current projection if we crossed an interval boundary
-    // or just processed an UNDO. The shared `snapshots` crate owns the
-    // when-to-snapshot rule and rotation; this side just supplies the
-    // data + the SQLite-backed `SdkSnapshotStore`. Failures are logged
-    // and swallowed — a missing snapshot only costs replay time, never
-    // correctness.
     if !server_events.is_empty() {
         if let Err(e) = maybe_save_snapshot(&wallet_id, has_undo) {
             rust_log!("[debitum_rs] save_snapshot skipped: {}", e);
         }
     }
 
-    // Notify Dart-side providers about the projection kinds touched in
-    // this batch. We collect the unique aggregate_types from the
-    // server's events and emit one DataChangeEvent per kind, so a
-    // batch with 100 contact UPDATED events fires Contacts once, not
-    // 100 times.
+    // Fire one DataChangeEvent per aggregate kind touched in this batch.
     let mut kinds_touched: std::collections::HashSet<crate::DataChangeKind> =
         std::collections::HashSet::new();
     for ev in &server_events {
@@ -393,20 +283,12 @@ pub fn pull_and_merge() -> Result<(), String> {
         crate::data_bus::emit(k, Some(wallet_id.clone()));
     }
 
-    // Always advance last_sync_timestamp — using the newest server event's timestamp if any,
-    // else "now". Without the fallback, repeated empty-response syncs would all re-trigger the
-    // full-pull path, which is destructive when local has data.
-    let ts_to_save = server_events
-        .last()
-        .and_then(|e| e.get("timestamp").and_then(|v| v.as_str()))
-        .map(String::from)
-        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
-    storage::config_set(&last_sync_key(&wallet_id), &ts_to_save)?;
-    // Stash the server's hash for the NEXT pull's divergence check (above).
-    storage::config_set(&server_hash_key(&wallet_id), &server_hash)?;
+    // Store the server's latest_hash for the next pull. Server-driven; no
+    // client computation needed.
+    storage::config_set(&server_hash_key(&wallet_id), &latest_hash)?;
     rust_log!(
-        "[debitum_rs] pull_and_merge: stored server_hash={} last_ts={} (returned {} events, full_pull={}, diverged={})",
-        server_hash, ts_to_save, server_events.len(), is_full_pull, hash_diverged
+        "[debitum_rs] pull_and_merge: stored last_hash={} (applied {} events, flush={})",
+        latest_hash, server_events.len(), flush
     );
     Ok(())
 }

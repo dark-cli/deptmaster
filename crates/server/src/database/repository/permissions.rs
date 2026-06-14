@@ -558,23 +558,41 @@ impl Database {
         Ok(result)
     }
 
-    // User readable events - denormalized cache for efficient sync hash/events queries.
-    // Atomically:
-    //   1. INSERT the event into user_readable_events (ON CONFLICT DO NOTHING).
-    //   2. If a row was actually inserted (not a duplicate), update the user's
-    //      incremental hash via UserEventHash::calculate_and_store. Duplicates
-    //      must NOT touch the hash — re-hashing the same event would diverge
-    //      from the client's incremental view of the same sequence.
+    // Add an event to a user's readable set and chain its hash into the
+    // user_readable_events.hash column in a single atomic statement.
+    //
+    // The new row's `hash` is computed inside the INSERT itself:
+    //   md5( COALESCE(latest_hash_for_user, '') || event_id::text )
+    // where `latest_hash_for_user` is the hash of the highest-id existing
+    // row for this (wallet, user) at the moment the INSERT runs. ON
+    // CONFLICT DO NOTHING means a duplicate add is a no-op — neither the
+    // row nor any hash is added a second time.
+    //
+    // No separate user_event_hashes update — that table is no longer used
+    // by the sync protocol. The client's pull endpoint resolves
+    // "what events come after my last sync" by looking up the hash
+    // directly in user_readable_events (`WHERE hash = client_last_hash`).
     pub async fn add_readable_event_impl(
         &self,
         wallet_id: Uuid,
         user_id: Uuid,
         event_id: Uuid,
     ) -> Result<(), DbError> {
-        let result = sqlx::query(
+        sqlx::query(
             r#"
-            INSERT INTO user_readable_events (wallet_id, user_id, event_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO user_readable_events (wallet_id, user_id, event_id, hash)
+            VALUES (
+                $1, $2, $3,
+                md5(
+                    COALESCE(
+                        (SELECT hash FROM user_readable_events
+                         WHERE wallet_id = $1 AND user_id = $2
+                         ORDER BY id DESC
+                         LIMIT 1),
+                        ''
+                    ) || $3::text
+                )
+            )
             ON CONFLICT (wallet_id, user_id, event_id) DO NOTHING
             "#,
         )
@@ -583,14 +601,6 @@ impl Database {
         .bind(event_id)
         .execute(&self.pool)
         .await?;
-
-        // Only fold this event into the hash if we actually added it. A duplicate
-        // (ON CONFLICT) is a no-op on the readable set, so it must be a no-op on
-        // the hash too — otherwise the client (which sees each event once) and
-        // the server (which would re-hash on duplicate writes) would diverge.
-        if result.rows_affected() > 0 {
-            UserEventHash::calculate_and_store(&self.pool, wallet_id, user_id, event_id).await?;
-        }
 
         Ok(())
     }
