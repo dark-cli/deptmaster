@@ -1,31 +1,24 @@
-//! Regression test for the lost-update race in
-//! `UserEventHash::calculate_and_store`.
+//! Regression tests for `UserEventHash::calculate_and_store`.
 //!
-//! Before the fix, the function did:
-//!   SELECT current_hash
-//!   md5(current_hash || event_id)
-//!   UPSERT user_event_hashes
-//! as THREE separate statements. Two concurrent calls folding
-//! different event_ids into the same (wallet, user) row would both
-//! observe the pre-write hash, both compute new hashes off that
-//! pre-write value, and the second UPSERT would clobber the first.
-//! One event's fold was permanently lost — but the event itself was
-//! still in `user_readable_events`, so the next client pull diverged
-//! (server's hash != fold-of-events-returned). Clients then went
-//! into a `hash diverged → events_delete_all_for_wallet → full-pull`
-//! loop on every action.
-//!
-//! After the fix, calculate_and_store is a single
-//! `INSERT ... ON CONFLICT DO UPDATE SET hash = md5(... || $3::text)`
-//! statement. Postgres takes a row lock on the conflicting row so
-//! concurrent statements serialize: each fold sees the prior fold's
-//! result.
+//! The history of this code in one paragraph: the original version was
+//! a chain-MD5 done in three separate SQL statements, which lost
+//! updates under concurrent folds. The first fix collapsed it into one
+//! atomic UPSERT with `hash = md5(user_event_hashes.hash || $3::text)`,
+//! eliminating the lost-update race. But a deeper issue remained:
+//! chain-MD5 is order-sensitive, and the order in which two concurrent
+//! folds acquire the row lock is non-deterministic, while the client
+//! always folds events in `created_at ASC` (the pull's natural order).
+//! Server fold-order and client fold-order can disagree, producing a
+//! permanent server↔client hash divergence loop. The fix is to use
+//! an ORDER-INDEPENDENT hash: XOR-of-MD5(event_id). Commutative, so
+//! any fold order produces the same final hash. Migration 032
+//! recomputes existing rows in-place using XOR over user_readable_events.
 //!
 //! These tests call `UserEventHash::calculate_and_store` directly so
 //! we exercise the exact race window without the FK plumbing of
-//! `add_readable_event_impl`. The (wallet, user) keys are random UUIDs
-//! — `user_event_hashes` has no FK on those columns, so no fixture
-//! setup is needed.
+//! `add_readable_event_impl`. The (wallet, user) keys come from
+//! create_test_user / create_test_wallet because user_event_hashes
+//! has FKs into those tables.
 
 mod test_helpers;
 
@@ -64,16 +57,6 @@ async fn concurrent_calculate_and_store_does_not_lose_updates() {
         returned_hashes.push(h.await.expect("task join").expect("calculate_and_store"));
     }
 
-    // Pre-fix bug signature: with three separate SQL statements, all
-    // concurrent callers read current_hash = "" (no row yet), each
-    // computes md5("" || X_i), each UPSERTs with its own computed
-    // hash via `hash = EXCLUDED.hash`. The LAST writer wins; the
-    // stored hash represents ONE fold step, not 50.
-    //
-    // So: with the buggy code, the stored hash equals md5("" || X_i)
-    // for some single i. With the fixed code, the stored hash equals
-    // a full N-step chain — vanishingly unlikely to equal any single
-    // md5("" || X_i) by coincidence (2^-128 collision).
     let stored_hash: String = sqlx::query_scalar(
         "SELECT hash FROM user_event_hashes WHERE wallet_id = $1 AND user_id = $2",
     )
@@ -83,23 +66,24 @@ async fn concurrent_calculate_and_store_does_not_lose_updates() {
     .await
     .expect("read stored hash");
 
-    let mut single_step_hashes = Vec::with_capacity(event_ids.len());
-    for eid in &event_ids {
-        let input = format!("{}", eid);
-        let h: String = sqlx::query_scalar("SELECT md5($1::text)")
-            .bind(&input)
-            .fetch_one(&pool)
-            .await
-            .expect("md5");
-        single_step_hashes.push(h);
-    }
-    assert!(
-        !single_step_hashes.contains(&stored_hash),
-        "stored_hash {} equals md5(\"\" || some single event_id), which means N-1 \
-         folds were lost: the concurrent UPSERTs all read the empty pre-write \
-         hash, each computed their own single-step md5, and the last writer's \
-         single-step value won. This is the lost-update race the fix targets.",
-        stored_hash,
+    // Under XOR-of-MD5, the stored hash must equal the bytewise XOR of
+    // md5(event_id::text) over every event_id we folded — regardless
+    // of the order Postgres processed the concurrent UPSERTs. If
+    // anything was lost or counted twice, the XOR won't match the
+    // reference.
+    //
+    // Reference: ask Postgres to compute the same XOR aggregate over
+    // user_readable_events the migration would compute on a fresh
+    // recomputation. We didn't insert anything into
+    // user_readable_events here (we call calculate_and_store directly),
+    // so we compute the reference straight from event_ids.
+    let reference_hash = xor_md5_reference(&event_ids);
+    assert_eq!(
+        stored_hash, reference_hash,
+        "stored hash {} doesn't match the XOR-of-MD5(event_id) reference {}. \
+         Either a fold was lost (race) or the calculate_and_store SQL is \
+         computing something other than XOR.",
+        stored_hash, reference_hash,
     );
 
     // Cleanup.
@@ -111,14 +95,14 @@ async fn concurrent_calculate_and_store_does_not_lose_updates() {
         .expect("cleanup");
 }
 
-/// Serial baseline: prove that single-threaded folds match a
-/// hand-computed md5 chain. If THIS fails, the SQL inside
-/// calculate_and_store is wrong regardless of concurrency.
+/// Serial baseline: single-threaded folds in a fixed order should
+/// match a hand-computed XOR-of-MD5(event_id). If THIS fails, the SQL
+/// inside calculate_and_store isn't actually computing XOR.
 #[tokio::test]
-async fn serial_calculate_and_store_matches_handfolded_chain() {
+async fn serial_calculate_and_store_matches_xor_reference() {
     let pool = test_helpers::setup_test_db().await;
     let user_id = test_helpers::create_test_user(&pool).await;
-    let wallet_id = test_helpers::create_test_wallet(&pool, "hash-divergence-test").await;
+    let wallet_id = test_helpers::create_test_wallet(&pool, "hash-xor-serial-test").await;
 
     sqlx::query("DELETE FROM user_event_hashes WHERE wallet_id = $1 AND user_id = $2")
         .bind(wallet_id)
@@ -128,7 +112,6 @@ async fn serial_calculate_and_store_matches_handfolded_chain() {
         .expect("pre-cleanup");
 
     let event_ids: Vec<Uuid> = (0..10).map(|_| Uuid::new_v4()).collect();
-
     for eid in &event_ids {
         UserEventHash::calculate_and_store(&pool, wallet_id, user_id, *eid)
             .await
@@ -144,22 +127,28 @@ async fn serial_calculate_and_store_matches_handfolded_chain() {
     .await
     .expect("read");
 
-    // Hand-fold the same chain through Postgres's md5 to remove any
-    // ambiguity about which md5 implementation produces the truth.
-    let mut acc = String::new();
-    for eid in &event_ids {
-        let input = format!("{}{}", acc, eid);
-        let computed: String = sqlx::query_scalar("SELECT md5($1::text)")
-            .bind(&input)
-            .fetch_one(&pool)
-            .await
-            .expect("md5");
-        acc = computed;
-    }
+    let reference = xor_md5_reference(&event_ids);
+    assert_eq!(stored, reference, "serial folds don't match XOR-of-MD5 reference");
 
+    // XOR is its own inverse: re-folding the same events cancels them.
+    // This is the property that lets the server safely re-process
+    // duplicate events without producing a wrong hash.
+    for eid in &event_ids {
+        UserEventHash::calculate_and_store(&pool, wallet_id, user_id, *eid)
+            .await
+            .expect("re-fold");
+    }
+    let after_double_fold: String = sqlx::query_scalar(
+        "SELECT hash FROM user_event_hashes WHERE wallet_id = $1 AND user_id = $2",
+    )
+    .bind(wallet_id)
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("read");
     assert_eq!(
-        stored, acc,
-        "serial folds via calculate_and_store don't match hand-computed md5 chain",
+        after_double_fold, "00000000000000000000000000000000",
+        "XOR is its own inverse — folding the same event twice should cancel it",
     );
 
     sqlx::query("DELETE FROM user_event_hashes WHERE wallet_id = $1 AND user_id = $2")
@@ -168,4 +157,18 @@ async fn serial_calculate_and_store_matches_handfolded_chain() {
         .execute(&pool)
         .await
         .expect("cleanup");
+}
+
+/// Pure-Rust reference: XOR-of-MD5(event_id) over a set of event_ids.
+/// The order of event_ids in the slice doesn't matter for the result.
+fn xor_md5_reference(event_ids: &[Uuid]) -> String {
+    use md5::{Digest, Md5}; // from md-5 crate
+    let mut acc = [0u8; 16];
+    for eid in event_ids {
+        let digest = Md5::digest(eid.to_string().as_bytes());
+        for (a, d) in acc.iter_mut().zip(digest.iter()) {
+            *a ^= *d;
+        }
+    }
+    acc.iter().map(|b| format!("{:02x}", b)).collect()
 }

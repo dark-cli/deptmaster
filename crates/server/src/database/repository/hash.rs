@@ -52,10 +52,33 @@ impl UserEventHash {
     /// conflicting row, so concurrent statements serialize cleanly:
     /// each fold sees the prior fold's result. The returned hash is
     /// the post-fold value, RETURNING-ed atomically.
+    // Fold one event into the user's hash. The hash is XOR-of-MD5
+    // over every event_id in the user's user_readable_events set.
+    //
+    // Why XOR rather than the original MD5-chain (current || event_id):
+    // chain hashing is order-sensitive, but the order events get folded
+    // into the chain is non-deterministic (concurrent push handlers
+    // serialize on this row's lock in whatever order they reach it),
+    // while the order the CLIENT folds events when verifying is
+    // strictly created_at ASC (the order the pull returns them). The
+    // two orders can disagree, producing a permanent divergence loop
+    // exactly like the production "hash diverged → wipe → divergence
+    // again" trace.
+    //
+    // XOR is commutative: any order produces the same final hash. The
+    // single UPSERT below stays atomic so concurrent folds from
+    // populate_event_cache calls can't get lost; combined with XOR
+    // commutativity, the resulting hash is provably independent of the
+    // race outcome.
+    //
+    // The math: each event contributes XOR(md5(event_id::text)). The
+    // bytea `#` operator XORs the 16-byte MD5 digests. encode/decode
+    // round-trip between hex (text storage) and bytea (XOR-able).
+    //
     // pub (not pub(crate)) so the concurrency regression test in
     // crates/server/tests/hash_calculate_and_store_concurrent_test.rs
-    // can call it directly without setting up the surrounding FK
-    // plumbing (events row, user_readable_events row, etc.).
+    // can call it directly without the FK plumbing of
+    // add_readable_event_impl.
     pub async fn calculate_and_store(
         pool: &PgPool,
         wallet_id: Uuid,
@@ -67,7 +90,13 @@ impl UserEventHash {
             INSERT INTO user_event_hashes (wallet_id, user_id, last_event_id, hash, updated_at)
             VALUES ($1, $2, $3, md5($3::text), NOW())
             ON CONFLICT (wallet_id, user_id) DO UPDATE SET
-                hash          = md5(user_event_hashes.hash || $3::text),
+                hash          = encode(
+                    bytea_xor(
+                        decode(user_event_hashes.hash, 'hex'),
+                        decode(md5($3::text), 'hex')
+                    ),
+                    'hex'
+                ),
                 last_event_id = EXCLUDED.last_event_id,
                 updated_at    = NOW()
             RETURNING hash

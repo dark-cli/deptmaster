@@ -13,30 +13,41 @@ fn server_hash_key(wallet_id: &str) -> String {
     format!("server_hash_{}", wallet_id)
 }
 
-/// Mirror of the server's incremental hash (see migration 027 +
+/// Mirror of the server's per-user event hash (see migration 027 +
 /// `crates/server/src/database/repository/hash.rs::UserEventHash::calculate_and_store`).
 ///
-/// The server folds each new event into the user's running hash via
-/// `MD5(prev_hash + event_id)` where `event_id` is the canonical UUID
-/// string. We compute the same chain locally so a post-pull comparison can
-/// detect when the server's readable set diverges from "previous state +
-/// the events you just gave me" — i.e., when events were REMOVED from our
-/// view (a permission revoke or group-membership change), which the
-/// `since`-based incremental pull would otherwise miss silently.
-fn fold_event_id(prev_hash: &str, event_id: &str) -> String {
-    let mut hasher = Md5::new();
-    hasher.update(prev_hash.as_bytes());
-    hasher.update(event_id.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-/// Apply `fold_event_id` over each event in order, starting from `starting_hash`.
-fn chain_hash<'a, I: IntoIterator<Item = &'a str>>(starting_hash: &str, event_ids: I) -> String {
-    let mut acc = starting_hash.to_string();
+/// Algorithm: XOR of MD5(event_id) over every event_id in the user's
+/// user_readable_events set. XOR is commutative — order doesn't matter
+/// — so the client and server can fold events in any order and still
+/// agree on the final hash. The previous MD5-chain
+/// `MD5(prev_hash || event_id)` was order-sensitive: server folds in
+/// the order populate_event_cache calls reached the row lock, while
+/// the client folds in created_at ASC pull order. Concurrent pushes
+/// to the same user produced a permanent server↔client divergence
+/// loop ("hash diverged → wipe → diverged again").
+///
+/// Each event contributes the same 16-byte MD5 digest of its
+/// event_id::text (lowercase UUID with dashes — matches Postgres
+/// `decode(md5(uuid::text), 'hex')`). The empty starting hash is
+/// 16 zero bytes (hex "0000…"); MD5 ⊕ 0 = MD5, so the first fold
+/// equals md5(event_id), which matches the server's INSERT path.
+fn fold_event_ids_xor<'a, I: IntoIterator<Item = &'a str>>(
+    starting_hash: &str,
+    event_ids: I,
+) -> String {
+    let mut acc = match hex::decode(starting_hash) {
+        Ok(b) if b.len() == 16 => b,
+        // Empty string (no row yet) or malformed hash → start from
+        // 16 zero bytes, the XOR identity.
+        _ => vec![0u8; 16],
+    };
     for id in event_ids {
-        acc = fold_event_id(&acc, id);
+        let digest = Md5::digest(id.as_bytes());
+        for (a, d) in acc.iter_mut().zip(digest.iter()) {
+            *a ^= *d;
+        }
     }
-    acc
+    hex::encode(acc)
 }
 
 /// Build the snake_case discriminator the server's `EventData` (serde `#[tag = "type"]`)
@@ -244,7 +255,7 @@ pub fn pull_and_merge() -> Result<(), String> {
         .iter()
         .filter_map(|ev| ev.get("id").and_then(|v| v.as_str()).map(String::from))
         .collect();
-    let computed_hash = chain_hash(&starting_hash, folded_event_ids.iter().map(|s| s.as_str()));
+    let computed_hash = fold_event_ids_xor(&starting_hash, folded_event_ids.iter().map(|s| s.as_str()));
     let hash_diverged = !is_full_pull && computed_hash != server_hash;
     if hash_diverged {
         rust_log!(

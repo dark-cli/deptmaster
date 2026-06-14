@@ -48,6 +48,7 @@ tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
+hex = "0.4.3"
 
 [dev-dependencies]
 chrono = "0.4"
