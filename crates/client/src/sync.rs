@@ -239,21 +239,37 @@ pub fn pull_and_merge() -> Result<(), String> {
     //     should equal the server hash. If it doesn't, something is off
     //     (clock skew, hash impl drift) — we log but don't loop.
     let previous_hash = storage::config_get(&server_hash_key(&wallet_id))?.unwrap_or_default();
-    let starting_hash = if is_full_pull { String::new() } else { previous_hash };
-    let event_ids_iter = server_events
+    let starting_hash = if is_full_pull { String::new() } else { previous_hash.clone() };
+    let folded_event_ids: Vec<String> = server_events
         .iter()
-        .filter_map(|ev| ev.get("id").and_then(|v| v.as_str()));
-    let computed_hash = chain_hash(&starting_hash, event_ids_iter);
+        .filter_map(|ev| ev.get("id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let computed_hash = chain_hash(&starting_hash, folded_event_ids.iter().map(|s| s.as_str()));
     let hash_diverged = !is_full_pull && computed_hash != server_hash;
     if hash_diverged {
         rust_log!(
-            "[debitum_rs] pull_and_merge: hash diverged (server={}, computed={}) — events removed from view; clearing and full pull",
-            server_hash, computed_hash
+            "[debitum_rs] pull_and_merge: hash diverged (server={}, computed={}) starting_hash={} folded {} ids: {:?}",
+            server_hash, computed_hash, starting_hash, folded_event_ids.len(), folded_event_ids
+        );
+        // Also surface what we have in local storage so we can spot a chain
+        // drift between the locally-folded view and the server's view.
+        let local_event_ids: Vec<String> = storage::events_get_all(&wallet_id)?
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        rust_log!(
+            "[debitum_rs] pull_and_merge: local has {} events (newest 5: {:?})",
+            local_event_ids.len(),
+            local_event_ids.iter().rev().take(5).collect::<Vec<_>>()
         );
         storage::events_delete_all_for_wallet(&wallet_id)?;
         let refetched = api::get_sync_events(None)?;
         server_events = refetched.0;
         server_hash = refetched.1;
+        rust_log!(
+            "[debitum_rs] pull_and_merge: refetch returned {} events, server_hash={}",
+            server_events.len(), server_hash
+        );
         // Don't re-verify after the full pull: trust the server's hash blob and
         // store it as-is. A second mismatch would mean our local md5 chain is
         // diverging from the server's, which is a bug to fix, not a state to
@@ -261,6 +277,18 @@ pub fn pull_and_merge() -> Result<(), String> {
     } else if is_full_pull && local_count == 0 {
         // First sync, nothing local to lose. (No-op — there's nothing to delete.)
         rust_log!("[debitum_rs] pull_and_merge: full pull on empty wallet — just absorbing server events");
+    }
+
+    // Always log the post-fold comparison, even for full-pulls (where we
+    // don't act on a mismatch). A mismatch here means the server's
+    // user_event_hashes row drifted from its user_readable_events content
+    // — every subsequent incremental pull will then diverge until that
+    // server-side row is rebuilt, no matter what the client does.
+    if is_full_pull && !server_events.is_empty() && computed_hash != server_hash {
+        rust_log!(
+            "[debitum_rs] pull_and_merge: FULL-PULL HASH MISMATCH (server={}, fold-of-{}-events={}) — server's user_event_hashes is out of sync with its user_readable_events; subsequent incrementals will diverge",
+            server_hash, folded_event_ids.len(), computed_hash
+        );
     }
 
     for ev in &server_events {
@@ -365,6 +393,10 @@ pub fn pull_and_merge() -> Result<(), String> {
     storage::config_set(&last_sync_key(&wallet_id), &ts_to_save)?;
     // Stash the server's hash for the NEXT pull's divergence check (above).
     storage::config_set(&server_hash_key(&wallet_id), &server_hash)?;
+    rust_log!(
+        "[debitum_rs] pull_and_merge: stored server_hash={} last_ts={} (returned {} events, full_pull={}, diverged={})",
+        server_hash, ts_to_save, server_events.len(), is_full_pull, hash_diverged
+    );
     Ok(())
 }
 
