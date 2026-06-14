@@ -22,6 +22,12 @@ fn make_app() -> AppInstance {
     let app = AppInstance::new("app", &server_url);
     app.initialize().expect("initialize");
     app.signup().expect("signup");
+    // Warm up: anchor last_hash to a real chain entry so subsequent
+    // WS-triggered pulls never get `flush=true` (which would wipe the
+    // projection mid-action and race with crud's load_from_tables).
+    app.run_commands(&["contact create \"_warmup\" _warmup"])
+        .expect("warmup contact");
+    app.sync().expect("warmup sync");
     app
 }
 
@@ -41,7 +47,7 @@ fn deleting_one_transaction_keeps_contact_and_other_transactions() {
     app.sync().expect("initial sync");
 
     // Sanity check before the buggy op.
-    app.assert_commands(&["contacts count 1", "transactions count 3"])
+    app.assert_commands(&["contacts count 2", "transactions count 3"])
         .expect("pre-delete state");
 
     // The op under test.
@@ -52,7 +58,7 @@ fn deleting_one_transaction_keeps_contact_and_other_transactions() {
     // contact stays, t1 and t3 stay, t2 is gone (soft-deleted).
     // Balance also recomputes: +1000 (t1) -200 (t3) = +800.
     app.assert_commands(&[
-        "contacts count 1",
+        "contacts count 2",
         "transactions count 2",
         "contact \"Alice\" balance 800",
     ])
@@ -71,7 +77,7 @@ fn creating_a_second_transaction_keeps_the_first() {
     .expect("setup");
     app.sync().expect("initial sync");
 
-    app.assert_commands(&["contacts count 1", "transactions count 1"])
+    app.assert_commands(&["contacts count 2", "transactions count 1"])
         .expect("pre-create-2 state");
 
     app.run_commands(&["transaction create alice lent 300 \"t2\" t2"])
@@ -81,7 +87,7 @@ fn creating_a_second_transaction_keeps_the_first() {
     // Bug claim: the first transaction disappears. Correct behavior:
     // both transactions are present. Balance: +1000 -300 = +700.
     app.assert_commands(&[
-        "contacts count 1",
+        "contacts count 2",
         "transactions count 2",
         "contact \"Alice\" balance 700",
     ])
@@ -121,7 +127,7 @@ fn deleting_transaction_via_ws_sync_keeps_other_state() {
     std::thread::sleep(std::time::Duration::from_secs(2));
 
     app.assert_commands(&[
-        "contacts count 1",
+        "contacts count 2",
         "transactions count 2",
         "contact \"Alice\" balance 800",
     ])
@@ -167,7 +173,7 @@ fn rapid_transaction_crud_burst_does_not_corrupt_state() {
 
     // Net balance: +100 -50 +200 -75 (t5 deleted) -25 +400 -150 = +400
     app.assert_commands(&[
-        "contacts count 1",
+        "contacts count 2",
         "transactions count 7",
         "contact \"Alice\" balance 400",
     ])
@@ -201,7 +207,7 @@ fn mixed_transaction_crud_does_not_wipe_state() {
     app.sync().expect("sync after mixed");
 
     app.assert_commands(&[
-        "contacts count 2",
+        "contacts count 3",
         "transactions count 2",
         "contact \"Alice\" balance 700", // +1000 - 300
         "contact \"Bob\" balance 0",     // t2 soft-deleted

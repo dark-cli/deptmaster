@@ -30,6 +30,14 @@ fn make_app() -> AppInstance {
     let app = AppInstance::new("actor", &server_url);
     app.initialize().expect("initialize");
     app.signup().expect("signup");
+    // Warm up: anchor last_hash to a real chain entry so subsequent
+    // WS-triggered pulls never see flush=true. Without this, the first
+    // sync after signup wipes the projection — and if it races with
+    // crud's load-after-create, the create returns "Transaction not
+    // found after create".
+    app.run_commands(&["contact create \"_warmup\" _warmup"])
+        .expect("warmup contact");
+    app.sync().expect("warmup sync");
     app
 }
 
