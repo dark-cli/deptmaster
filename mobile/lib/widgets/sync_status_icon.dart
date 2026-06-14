@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../api.dart';
+import '../main.dart' show scaffoldMessengerKey;
 import '../utils/theme_colors.dart';
 
 /// Sync/connection status icon. Updates immediately when connection or sync error state changes.
@@ -143,10 +144,14 @@ class _SyncStatusIconState extends State<SyncStatusIcon> {
             return;
           }
           if (_manualSyncInFlight) return;
-          // Capture the messenger before the await so we don't reach through
-          // `context` after the suspend (which the analyzer flags as an
-          // async-gap context use).
-          final messenger = ScaffoldMessenger.maybeOf(context);
+          // Use the root scaffoldMessengerKey from main.dart instead of
+          // ScaffoldMessenger.maybeOf(context). The icon may be torn down
+          // by a navigation before the snackbar's animation finishes; the
+          // per-context messenger then tries to walk a deactivated tree
+          // ("Looking up a deactivated widget's ancestor is unsafe") when
+          // the SnackBar status changes. The root messenger lives at the
+          // MaterialApp level and stays mounted for the app's lifetime.
+          final messenger = scaffoldMessengerKey.currentState;
           setState(() => _manualSyncInFlight = true);
           try {
             await Api.refreshConnectionAndSync();
