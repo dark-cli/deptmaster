@@ -20,3 +20,4 @@ mod transaction_crud_keeps_other_state;
 mod hash_divergence;
 mod sync_chain_hash_stress;
 mod clear_wallet_anchor_regression;
+mod permission_enforcement;
