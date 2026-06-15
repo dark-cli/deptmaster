@@ -623,14 +623,30 @@ cmd_start_docker_services() {
     check_docker
     
     if [ "$1" = "postgres" ] || [ -z "$1" ]; then
-        print_info "Starting PostgreSQL..."
-        (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1)
-        sleep 5
+        # Idempotency: if the postgres container is already running and
+        # healthy, skip `docker-compose up -d`. The compose command can
+        # exit non-zero when the existing container's config drifts from
+        # the current compose file (different network name, etc.), and
+        # `set -e` at the top of this script would then kill the parent
+        # command (start-server-direct) before it ever reaches cargo run.
+        if docker ps --format '{{.Names}}' | grep -q '^debt_tracker_postgres$'; then
+            print_info "PostgreSQL already running, skipping start"
+        else
+            print_info "Starting PostgreSQL..."
+            (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1) || {
+                print_warning "docker-compose up failed; container may already exist with a stale config. Continuing."
+            }
+            sleep 5
+        fi
     fi
 
     if [ -z "$1" ]; then
-        print_info "Starting all services..."
-        (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1)
+        # Same idempotency guard as above; redundant fall-through for the
+        # "no service specified" case which historically also brought up postgres.
+        if ! docker ps --format '{{.Names}}' | grep -q '^debt_tracker_postgres$'; then
+            print_info "Starting all services..."
+            (cd "$ROOT_DIR" && docker-compose up -d postgres > /dev/null 2>&1) || true
+        fi
     fi
     if [ "$VERBOSE" = true ]; then
         print_success "Services started"
