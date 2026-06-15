@@ -278,7 +278,19 @@ pub fn clear_all() -> Result<(), String> {
 /// of them populated risks the SDK showing stale data the user has
 /// lost access to.
 pub fn clear_wallet(wallet_id: &str) -> Result<(), String> {
-    let key = format!("last_sync_timestamp_{}", wallet_id);
+    let last_sync_key = format!("last_sync_timestamp_{}", wallet_id);
+    // server_hash_key from sync.rs::server_hash_key — the per-wallet
+    // last_hash anchor sent on the next pull. MUST be cleared together
+    // with the events/projection wipe: otherwise the next pull sends a
+    // stale last_hash, the server finds it in the chain, and returns
+    // only events AFTER that point — but we just wiped everything BEFORE
+    // that point, so those events are gone forever and the projection
+    // is permanently missing them. (Reproduced by the
+    // permission_limits_union_of_groups test: owner's
+    // set_permission_matrix call triggered clear_wallet but left
+    // last_hash; the contact CREATE event never came back into owner's
+    // local projection.)
+    let server_hash_key = format!("server_hash_{}", wallet_id);
     with_db(|conn| {
         conn.execute("DELETE FROM events WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
@@ -292,7 +304,8 @@ pub fn clear_wallet(wallet_id: &str) -> Result<(), String> {
         conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
         conn.execute("DELETE FROM projection_snapshots WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM config WHERE key = ?1", params![key])?;
+        conn.execute("DELETE FROM config WHERE key = ?1", params![last_sync_key])?;
+        conn.execute("DELETE FROM config WHERE key = ?1", params![server_hash_key])?;
         Ok(())
     })
 }
