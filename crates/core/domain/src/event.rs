@@ -323,33 +323,173 @@ impl EventData {
         }
     }
 
-    /// String form of the event type for legacy code paths and DB rows.
-    pub fn event_type(&self) -> &'static str {
+    /// Serde tag for this variant (the `"type"` field on the JSON wire
+    /// format, after `rename_all = "snake_case"`). Exhaustive — adding a
+    /// variant to `EventData` fails compile until an arm exists here.
+    /// This is the only place tag strings are spelled out.
+    pub fn serde_tag(&self) -> &'static str {
         match self {
-            EventData::ContactCreated { .. } => "CREATED",
-            EventData::ContactUpdated { .. } => "UPDATED",
-            EventData::ContactDeleted { .. } => "DELETED",
-            EventData::ContactUndone { .. } => "UNDO",
-            EventData::TransactionCreated { .. } => "CREATED",
-            EventData::TransactionUpdated { .. } => "UPDATED",
-            EventData::TransactionDeleted { .. } => "DELETED",
-            EventData::TransactionUndone { .. } => "UNDO",
-            EventData::WalletUserAdded { .. } => "WALLET_USER_ADDED",
-            EventData::WalletUserRoleChanged { .. } => "WALLET_USER_ROLE_CHANGED",
-            EventData::WalletUserRemoved { .. } => "WALLET_USER_REMOVED",
-            EventData::UserGroupCreated { .. } => "USER_GROUP_CREATED",
-            EventData::UserGroupUpdated { .. } => "USER_GROUP_UPDATED",
-            EventData::UserGroupDeleted { .. } => "USER_GROUP_DELETED",
-            EventData::UserGroupMemberAdded { .. } => "USER_GROUP_MEMBER_ADDED",
-            EventData::UserGroupMemberRemoved { .. } => "USER_GROUP_MEMBER_REMOVED",
-            EventData::ContactGroupCreated { .. } => "CONTACT_GROUP_CREATED",
-            EventData::ContactGroupUpdated { .. } => "CONTACT_GROUP_UPDATED",
-            EventData::ContactGroupDeleted { .. } => "CONTACT_GROUP_DELETED",
-            EventData::ContactGroupMemberAdded { .. } => "CONTACT_GROUP_MEMBER_ADDED",
-            EventData::ContactGroupMemberRemoved { .. } => "CONTACT_GROUP_MEMBER_REMOVED",
-            EventData::PermissionMatrixSet { .. } => "PERMISSION_MATRIX_SET",
-            EventData::WalletDeleted { .. } => "WALLET_DELETED",
-            EventData::OwnershipTransferred { .. } => "OWNERSHIP_TRANSFERRED",
+            EventData::ContactCreated { .. } => "contact_created",
+            EventData::ContactUpdated { .. } => "contact_updated",
+            EventData::ContactDeleted { .. } => "contact_deleted",
+            EventData::ContactUndone { .. } => "contact_undone",
+            EventData::TransactionCreated { .. } => "transaction_created",
+            EventData::TransactionUpdated { .. } => "transaction_updated",
+            EventData::TransactionDeleted { .. } => "transaction_deleted",
+            EventData::TransactionUndone { .. } => "transaction_undone",
+            EventData::WalletUserAdded { .. } => "wallet_user_added",
+            EventData::WalletUserRoleChanged { .. } => "wallet_user_role_changed",
+            EventData::WalletUserRemoved { .. } => "wallet_user_removed",
+            EventData::UserGroupCreated { .. } => "user_group_created",
+            EventData::UserGroupUpdated { .. } => "user_group_updated",
+            EventData::UserGroupDeleted { .. } => "user_group_deleted",
+            EventData::UserGroupMemberAdded { .. } => "user_group_member_added",
+            EventData::UserGroupMemberRemoved { .. } => "user_group_member_removed",
+            EventData::ContactGroupCreated { .. } => "contact_group_created",
+            EventData::ContactGroupUpdated { .. } => "contact_group_updated",
+            EventData::ContactGroupDeleted { .. } => "contact_group_deleted",
+            EventData::ContactGroupMemberAdded { .. } => "contact_group_member_added",
+            EventData::ContactGroupMemberRemoved { .. } => "contact_group_member_removed",
+            EventData::PermissionMatrixSet { .. } => "permission_matrix_set",
+            EventData::WalletDeleted { .. } => "wallet_deleted",
+            EventData::OwnershipTransferred { .. } => "ownership_transferred",
+        }
+    }
+
+    /// For a DB row's `(aggregate_type, event_type)` pair, look up the
+    /// serde tag of the corresponding `EventData` variant. Returns
+    /// `None` for combinations that don't correspond to any variant
+    /// (e.g. a contact aggregate with a `WALLET_USER_ADDED` event_type).
+    ///
+    /// Exhaustive over both `EventType` AND `AggregateType` — adding a
+    /// variant to either enum is a compile error here. This is the
+    /// reverse of [`serde_tag`] and the only path from DB-string-pair
+    /// back to a tag used by `parse_event_data_typed`.
+    pub fn serde_tag_for(
+        aggregate: AggregateType,
+        event_type: EventType,
+    ) -> Option<&'static str> {
+        use AggregateType as A;
+        use EventType as E;
+        match event_type {
+            E::Created => match aggregate {
+                A::Contact => Some("contact_created"),
+                A::Transaction => Some("transaction_created"),
+                A::Permission => None,
+            },
+            E::Updated => match aggregate {
+                A::Contact => Some("contact_updated"),
+                A::Transaction => Some("transaction_updated"),
+                A::Permission => None,
+            },
+            E::Deleted => match aggregate {
+                A::Contact => Some("contact_deleted"),
+                A::Transaction => Some("transaction_deleted"),
+                A::Permission => None,
+            },
+            E::Undo => match aggregate {
+                A::Contact => Some("contact_undone"),
+                A::Transaction => Some("transaction_undone"),
+                A::Permission => None,
+            },
+            E::WalletUserAdded => match aggregate {
+                A::Permission => Some("wallet_user_added"),
+                A::Contact | A::Transaction => None,
+            },
+            E::WalletUserRoleChanged => match aggregate {
+                A::Permission => Some("wallet_user_role_changed"),
+                A::Contact | A::Transaction => None,
+            },
+            E::WalletUserRemoved => match aggregate {
+                A::Permission => Some("wallet_user_removed"),
+                A::Contact | A::Transaction => None,
+            },
+            E::UserGroupCreated => match aggregate {
+                A::Permission => Some("user_group_created"),
+                A::Contact | A::Transaction => None,
+            },
+            E::UserGroupUpdated => match aggregate {
+                A::Permission => Some("user_group_updated"),
+                A::Contact | A::Transaction => None,
+            },
+            E::UserGroupDeleted => match aggregate {
+                A::Permission => Some("user_group_deleted"),
+                A::Contact | A::Transaction => None,
+            },
+            E::UserGroupMemberAdded => match aggregate {
+                A::Permission => Some("user_group_member_added"),
+                A::Contact | A::Transaction => None,
+            },
+            E::UserGroupMemberRemoved => match aggregate {
+                A::Permission => Some("user_group_member_removed"),
+                A::Contact | A::Transaction => None,
+            },
+            E::ContactGroupCreated => match aggregate {
+                A::Permission => Some("contact_group_created"),
+                A::Contact | A::Transaction => None,
+            },
+            E::ContactGroupUpdated => match aggregate {
+                A::Permission => Some("contact_group_updated"),
+                A::Contact | A::Transaction => None,
+            },
+            E::ContactGroupDeleted => match aggregate {
+                A::Permission => Some("contact_group_deleted"),
+                A::Contact | A::Transaction => None,
+            },
+            E::ContactGroupMemberAdded => match aggregate {
+                A::Permission => Some("contact_group_member_added"),
+                A::Contact | A::Transaction => None,
+            },
+            E::ContactGroupMemberRemoved => match aggregate {
+                A::Permission => Some("contact_group_member_removed"),
+                A::Contact | A::Transaction => None,
+            },
+            E::PermissionMatrixSet => match aggregate {
+                A::Permission => Some("permission_matrix_set"),
+                A::Contact | A::Transaction => None,
+            },
+            E::WalletDeleted => match aggregate {
+                A::Permission => Some("wallet_deleted"),
+                A::Contact | A::Transaction => None,
+            },
+            E::OwnershipTransferred => match aggregate {
+                A::Permission => Some("ownership_transferred"),
+                A::Contact | A::Transaction => None,
+            },
+        }
+    }
+
+    /// Typed event-type discriminant. SINGLE SOURCE OF TRUTH — every
+    /// other "what kind of event is this?" path goes through here. Adding
+    /// a variant to `EventData` fails this match until an arm is added,
+    /// which is exactly the compiler-driven guarantee we want.
+    /// The wire-format string is `self.kind().as_str()`.
+    pub fn kind(&self) -> EventType {
+        match self {
+            EventData::ContactCreated { .. } => EventType::Created,
+            EventData::ContactUpdated { .. } => EventType::Updated,
+            EventData::ContactDeleted { .. } => EventType::Deleted,
+            EventData::ContactUndone { .. } => EventType::Undo,
+            EventData::TransactionCreated { .. } => EventType::Created,
+            EventData::TransactionUpdated { .. } => EventType::Updated,
+            EventData::TransactionDeleted { .. } => EventType::Deleted,
+            EventData::TransactionUndone { .. } => EventType::Undo,
+            EventData::WalletUserAdded { .. } => EventType::WalletUserAdded,
+            EventData::WalletUserRoleChanged { .. } => EventType::WalletUserRoleChanged,
+            EventData::WalletUserRemoved { .. } => EventType::WalletUserRemoved,
+            EventData::UserGroupCreated { .. } => EventType::UserGroupCreated,
+            EventData::UserGroupUpdated { .. } => EventType::UserGroupUpdated,
+            EventData::UserGroupDeleted { .. } => EventType::UserGroupDeleted,
+            EventData::UserGroupMemberAdded { .. } => EventType::UserGroupMemberAdded,
+            EventData::UserGroupMemberRemoved { .. } => EventType::UserGroupMemberRemoved,
+            EventData::ContactGroupCreated { .. } => EventType::ContactGroupCreated,
+            EventData::ContactGroupUpdated { .. } => EventType::ContactGroupUpdated,
+            EventData::ContactGroupDeleted { .. } => EventType::ContactGroupDeleted,
+            EventData::ContactGroupMemberAdded { .. } => EventType::ContactGroupMemberAdded,
+            EventData::ContactGroupMemberRemoved { .. } => EventType::ContactGroupMemberRemoved,
+            EventData::PermissionMatrixSet { .. } => EventType::PermissionMatrixSet,
+            EventData::WalletDeleted { .. } => EventType::WalletDeleted,
+            EventData::OwnershipTransferred { .. } => EventType::OwnershipTransferred,
         }
     }
 }
@@ -408,8 +548,8 @@ impl DomainEvent {
         self.event_data.aggregate_type()
     }
 
-    pub fn event_type(&self) -> &'static str {
-        self.event_data.event_type()
+    pub fn kind(&self) -> EventType {
+        self.event_data.kind()
     }
 
     /// The (action, resource) pairs that must all be permitted for this

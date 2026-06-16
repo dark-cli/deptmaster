@@ -28,35 +28,71 @@ where
     })
 }
 
-/// Validate permission dependencies (e.g., Write implies Read)
-fn validate_permission_dependencies(actions: &[String]) -> Result<(), String> {
-    let has_action = |name: &str| actions.iter().any(|a| a == name);
+/// Validate permission dependencies (Write implies Read on same resource,
+/// transaction:* implies contact:read). Exhaustive over `Action` — adding
+/// a variant fails compile here until you state its read-prerequisite (or
+/// declare it has none).
+fn validate_permission_dependencies(actions: &[domain::Action]) -> Result<(), String> {
+    use domain::Action as A;
+    let has = |needed: A| actions.iter().any(|a| *a == needed);
 
-    // Rule 1: Write implies Read for same resource
+    let require = |present: A, prereq: A| -> Result<(), String> {
+        if has(present) && !has(prereq) {
+            Err(format!(
+                "Permission '{}' requires '{}'",
+                present.as_str(),
+                prereq.as_str()
+            ))
+        } else {
+            Ok(())
+        }
+    };
+
+    // Rule 1: each Write/Delete/Close action requires Read on the same
+    // resource. Walking the enum keeps every variant in scope; new ones
+    // surface as a missing match arm.
     for action in actions {
-        if let Some((resource, verb)) = action.split_once(':') {
-            // For wallet resource, 'manage_members' is a special verb
-            if resource == "wallet"
-                && (verb == "update" || verb == "delete" || verb == "manage_members")
-            {
-                if !has_action("wallet:read") {
-                    return Err(format!("Permission '{}' requires 'wallet:read'", action));
-                }
-            } else if ["create", "update", "delete", "close"].contains(&verb) {
-                let read_action = format!("{}:read", resource);
-                if !has_action(&read_action) {
-                    return Err(format!(
-                        "Permission '{}' requires '{}'",
-                        action, read_action
-                    ));
-                }
+        match action {
+            A::ContactUpdate | A::ContactDelete => require(*action, A::ContactRead)?,
+            A::TransactionUpdate | A::TransactionDelete | A::TransactionClose => {
+                require(*action, A::TransactionRead)?
             }
+            A::UserGroupUpdate => require(*action, A::UserGroupRead)?,
+            A::ContactGroupUpdate => require(*action, A::ContactGroupRead)?,
+            A::WalletUpdate | A::WalletDelete | A::WalletManageMembers => {
+                require(*action, A::WalletRead)?
+            }
+            // Read-only actions have no prerequisite; Create has no read
+            // prerequisite (you're making a new thing); SuperPermission
+            // implies everything by definition and is never granted via
+            // this UI.
+            A::ContactCreate
+            | A::ContactRead
+            | A::TransactionCreate
+            | A::TransactionRead
+            | A::UserGroupCreate
+            | A::UserGroupRead
+            | A::ContactGroupCreate
+            | A::ContactGroupRead
+            | A::WalletRead
+            | A::WalletSuperPermission
+            | A::EventsRead => {}
         }
     }
 
-    // Rule 2: Transaction permissions imply Contact Read
-    // (Because you need to see the contact to see its transactions)
-    if actions.iter().any(|a| a.starts_with("transaction:")) && !has_action("contact:read") {
+    // Rule 2: any transaction permission requires contact:read (need to
+    // see the contact to see its transactions).
+    let has_transaction_perm = actions.iter().any(|a| {
+        matches!(
+            a,
+            A::TransactionCreate
+                | A::TransactionRead
+                | A::TransactionUpdate
+                | A::TransactionDelete
+                | A::TransactionClose
+        )
+    });
+    if has_transaction_perm && !has(A::ContactRead) {
         return Err("Transaction permissions require 'contact:read'".to_string());
     }
 
@@ -2467,9 +2503,26 @@ pub async fn put_permission_matrix(
     for entry in &payload.entries {
         let (allowed_names, denied_names) = entry.allowed_denied();
 
+        // Parse incoming action-name strings into typed `Action`s up front.
+        // Unknown names → 400 (caller error). After this point the handler
+        // operates on typed values exclusively.
+        let allowed_actions: Vec<domain::Action> = allowed_names
+            .iter()
+            .map(|n| {
+                domain::Action::from_str(n).ok_or_else(|| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": format!("Unknown permission action: {}", n)
+                        })),
+                    )
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
         // Dependency validation applies to allowed actions only (deny rows are gates,
         // not capabilities, so they don't induce read-prerequisites).
-        if let Err(e) = validate_permission_dependencies(&allowed_names) {
+        if let Err(e) = validate_permission_dependencies(&allowed_actions) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": e})),

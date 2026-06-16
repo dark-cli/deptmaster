@@ -1005,9 +1005,24 @@ impl Database {
                 }
             }
 
-            _ => {
-                // Not a permission event - no cache invalidation needed
-            }
+            // Non-permission events have no cache invalidation impact.
+            // Listed exhaustively so adding an `EventData` variant lands a
+            // compile error here demanding a deliberate choice.
+            EventData::ContactCreated { .. }
+            | EventData::ContactUpdated { .. }
+            | EventData::ContactDeleted { .. }
+            | EventData::ContactUndone { .. }
+            | EventData::TransactionCreated { .. }
+            | EventData::TransactionUpdated { .. }
+            | EventData::TransactionDeleted { .. }
+            | EventData::TransactionUndone { .. }
+            | EventData::WalletUserRoleChanged { .. }
+            | EventData::UserGroupCreated { .. }
+            | EventData::UserGroupUpdated { .. }
+            | EventData::ContactGroupCreated { .. }
+            | EventData::ContactGroupUpdated { .. }
+            | EventData::WalletDeleted { .. }
+            | EventData::OwnershipTransferred { .. } => {}
         }
 
         // Permission events (matrix changes, group memberships) can change every
@@ -1169,9 +1184,24 @@ impl Database {
                 }
             }
 
-            _ => {
-                // Not a permission event - no cache invalidation needed
-            }
+            // No-op for cache invalidation. Exhaustive list — adding a
+            // new EventType variant forces a deliberate choice between
+            // "invalidate" and "not relevant" here.
+            domain::EventType::Created
+            | domain::EventType::Updated
+            | domain::EventType::Deleted
+            | domain::EventType::Undo
+            | domain::EventType::WalletUserRoleChanged
+            | domain::EventType::UserGroupCreated
+            | domain::EventType::UserGroupUpdated
+            | domain::EventType::UserGroupDeleted
+            | domain::EventType::ContactGroupCreated
+            | domain::EventType::ContactGroupUpdated
+            | domain::EventType::ContactGroupDeleted
+            | domain::EventType::ContactGroupMemberAdded
+            | domain::EventType::ContactGroupMemberRemoved
+            | domain::EventType::WalletDeleted
+            | domain::EventType::OwnershipTransferred => {}
         }
 
         // Mirror the readable-events rebuild from handle_cache_invalidation_for_event:

@@ -292,7 +292,7 @@ pub async fn get_sync_events(
             id: event.id.to_string(),
             aggregate_type: event.aggregate_type_enum().as_str().to_string(),
             aggregate_id: event.aggregate_id.to_string(),
-            event_type: event.event_type().to_string(),
+            event_type: event.kind().as_str().to_string(),
             event_data: serde_json::to_value(&event.event_data).unwrap_or_default(),
             timestamp: event.created_at.to_rfc3339(),
             version: event.version,
@@ -449,7 +449,7 @@ async fn insert_event(
             domain_event.id,
             domain_event.aggregate_id,
             domain_event.aggregate_type_enum().as_str().to_string(),
-            domain_event.event_type().to_string(),
+            domain_event.kind().as_str().to_string(),
             event_data,
             wallet_id,
             user_id,
@@ -597,11 +597,13 @@ pub async fn insert_permission_event_and_apply(
         }
     }
 
-    // Invalidate permission matrix cache if this is a permission-affecting event
-    // (This handles direct permission event insertion, not through normal sync).
+    // Invalidate permission matrix cache if this is a permission-affecting event.
+    // Exhaustive over `EventType` — adding a variant fails compile here until
+    // an arm explicitly states "yes invalidate" or "no, this is a no-op for
+    // cache invalidation." No more silent miss-handling.
+    use domain::EventType as E;
     match event_type {
-        domain::EventType::UserGroupMemberAdded
-        | domain::EventType::UserGroupMemberRemoved => {
+        E::UserGroupMemberAdded | E::UserGroupMemberRemoved | E::WalletUserRemoved => {
             if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                 if let Ok(user_id) = Uuid::parse_str(user_id_str) {
                     let _ = db
@@ -610,12 +612,12 @@ pub async fn insert_permission_event_and_apply(
                 }
             }
         }
-        domain::EventType::PermissionMatrixSet => {
+        E::PermissionMatrixSet => {
             let _ = db
                 .invalidate_permission_matrix_cache_for_wallet(wallet_id)
                 .await;
         }
-        domain::EventType::WalletUserAdded => {
+        E::WalletUserAdded => {
             if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                 if let Ok(user_id) = Uuid::parse_str(user_id_str) {
                     let _ = db
@@ -624,16 +626,25 @@ pub async fn insert_permission_event_and_apply(
                 }
             }
         }
-        domain::EventType::WalletUserRemoved => {
-            if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
-                if let Ok(user_id) = Uuid::parse_str(user_id_str) {
-                    let _ = db
-                        .invalidate_permission_matrix_cache(wallet_id, user_id)
-                        .await;
-                }
-            }
-        }
-        _ => {}
+        // No-op for these — they don't change which (user, contact) the
+        // matrix cache must reflect. Listed explicitly so adding a new
+        // EventType variant lands a compile error here demanding a
+        // deliberate choice.
+        E::Created
+        | E::Updated
+        | E::Deleted
+        | E::Undo
+        | E::WalletUserRoleChanged
+        | E::UserGroupCreated
+        | E::UserGroupUpdated
+        | E::UserGroupDeleted
+        | E::ContactGroupCreated
+        | E::ContactGroupUpdated
+        | E::ContactGroupDeleted
+        | E::ContactGroupMemberAdded
+        | E::ContactGroupMemberRemoved
+        | E::WalletDeleted
+        | E::OwnershipTransferred => {}
     }
 
     // Broadcast permission change
