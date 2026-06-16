@@ -256,7 +256,9 @@ pub fn pull_and_merge() -> Result<(), String> {
     // UNDO events make applier::apply a no-op for the undone event; rebuild
     // the projection from the full local events log so undone effects drop.
     let has_undo = snapshots::batch_has_undo(server_events.iter().filter_map(|ev| {
-        ev.get("event_type").and_then(|v| v.as_str())
+        ev.get("event_type")
+            .and_then(|v| v.as_str())
+            .and_then(domain::EventType::from_str)
     }));
     if has_undo {
         let all_events = storage::events_get_all(&wallet_id)?;
@@ -408,7 +410,9 @@ pub(crate) fn rebuild_projection_tables(
         })
         .collect();
     let undone_ids = snapshots::collect_undone_event_ids(
-        parsed.iter().map(|(t, d)| (t.as_str(), d)),
+        parsed.iter().filter_map(|(t, d)| {
+            domain::EventType::from_str(t).map(|et| (et, d))
+        }),
     );
 
     crate::storage::with_db(|conn| {

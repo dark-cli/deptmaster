@@ -437,50 +437,6 @@ impl Database {
         Ok(result.rows_affected() > 0)
     }
 
-    /// Replace the entire (user_group, contact_group) permission set in one transaction.
-    /// Removes any existing rows for the pair, then inserts new rows for `allowed_action_ids`
-    /// (is_deny=false) and `denied_action_ids` (is_deny=true). This is the semantics the
-    /// PUT /permission-matrix endpoint exposes: each call is the complete desired state
-    /// for that (ug, cg) pair.
-    pub async fn set_permission_matrix_entries_impl(
-        &self,
-        user_group_id: Uuid,
-        contact_group_id: Uuid,
-        allowed_action_ids: &[i16],
-        denied_action_ids: &[i16],
-    ) -> Result<(), DbError> {
-        let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            "DELETE FROM group_permission_matrix WHERE user_group_id = $1 AND contact_group_id = $2"
-        )
-        .bind(user_group_id)
-        .bind(contact_group_id)
-        .execute(&mut *tx)
-        .await?;
-        for &aid in allowed_action_ids {
-            sqlx::query(
-                "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id, is_deny) VALUES ($1, $2, $3, false)"
-            )
-            .bind(user_group_id)
-            .bind(contact_group_id)
-            .bind(aid)
-            .execute(&mut *tx)
-            .await?;
-        }
-        for &aid in denied_action_ids {
-            sqlx::query(
-                "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id, is_deny) VALUES ($1, $2, $3, true)"
-            )
-            .bind(user_group_id)
-            .bind(contact_group_id)
-            .bind(aid)
-            .execute(&mut *tx)
-            .await?;
-        }
-        tx.commit().await?;
-        Ok(())
-    }
-
     // Utility checks
     pub async fn user_group_in_wallet_impl(
         &self,
@@ -1079,12 +1035,13 @@ impl Database {
     pub async fn handle_cache_invalidation_for_event_raw(
         &self,
         wallet_id: Uuid,
-        event_type: &str,
+        event_type: domain::EventType,
         event_data: &serde_json::Value,
     ) {
         match event_type {
             // User added/removed from group - invalidate that user's cache
-            "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED" => {
+            domain::EventType::UserGroupMemberAdded
+            | domain::EventType::UserGroupMemberRemoved => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
                         if let Err(e) = self
@@ -1102,7 +1059,7 @@ impl Database {
             }
 
             // Permission matrix changed - smart invalidation: only affected users
-            "PERMISSION_MATRIX_SET" => {
+            domain::EventType::PermissionMatrixSet => {
                 if let Some(contact_group_id_str) =
                     event_data.get("contact_group_id").and_then(|v| v.as_str())
                 {
@@ -1167,7 +1124,7 @@ impl Database {
             // New user added to wallet - populate matrix cache + backfill
             // user_readable_events from prior history. See the typed variant
             // for the rationale.
-            "WALLET_USER_ADDED" => {
+            domain::EventType::WalletUserAdded => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
                         if let Err(e) = self
@@ -1195,7 +1152,7 @@ impl Database {
             }
 
             // User removed from wallet - clean up cache
-            "WALLET_USER_REMOVED" => {
+            domain::EventType::WalletUserRemoved => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
                         if let Err(e) = self
@@ -1221,13 +1178,13 @@ impl Database {
         // events that change who-can-see-what need the per-user readable cache redone.
         if matches!(
             event_type,
-            "PERMISSION_MATRIX_SET"
-                | "USER_GROUP_MEMBER_ADDED"
-                | "USER_GROUP_MEMBER_REMOVED"
-                | "CONTACT_GROUP_MEMBER_ADDED"
-                | "CONTACT_GROUP_MEMBER_REMOVED"
-                | "USER_GROUP_DELETED"
-                | "CONTACT_GROUP_DELETED"
+            domain::EventType::PermissionMatrixSet
+                | domain::EventType::UserGroupMemberAdded
+                | domain::EventType::UserGroupMemberRemoved
+                | domain::EventType::ContactGroupMemberAdded
+                | domain::EventType::ContactGroupMemberRemoved
+                | domain::EventType::UserGroupDeleted
+                | domain::EventType::ContactGroupDeleted
         ) {
             if let Err(e) = self.rebuild_readable_events_for_wallet_impl(wallet_id).await {
                 tracing::warn!(

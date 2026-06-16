@@ -106,15 +106,16 @@ pub trait Projection {
 
     // ---------- Contact group memberships ----------
 
-    /// Add the contact to a wallet-scoped system group by its well-known
-    /// name (e.g., `"all_contacts"`). System groups are seeded on wallet
-    /// creation and looked up by `(wallet_id, name)`. No-op if the group
-    /// doesn't exist (defensive — should always exist).
+    /// Add the contact to a wallet-scoped system group. System groups are
+    /// seeded on wallet creation and looked up by `(wallet_id, name)` using
+    /// `system_group.as_str()`. No-op if the group doesn't exist
+    /// (defensive — should always exist). The contact-group-typed system
+    /// variants (currently only `AllContacts`) are the only valid input.
     async fn add_contact_to_system_group(
         &mut self,
         contact_id: Uuid,
         wallet_id: Uuid,
-        system_group_name: &str,
+        system_group: domain::SystemGroup,
     ) -> Result<(), Self::Error>;
 
     /// Add the contact to specific groups by id. Each id is validated
@@ -156,6 +157,8 @@ pub trait Projection {
     /// `%Y-%m-%d` format; impls parse them. `transaction_date = None`
     /// means "default to the event's created_at date" (impls use
     /// [`Self::set_event_context`] for the fallback).
+    /// `transaction_type = None` defaults to `TransactionType::Money`
+    /// (preserved from the prior string fallback).
     #[allow(clippy::too_many_arguments)]
     async fn upsert_transaction_row(
         &mut self,
@@ -164,9 +167,9 @@ pub trait Projection {
         user_id: Uuid,
         contact_id: Uuid,
         amount: i64,
-        direction: &str,
-        transaction_type: Option<&str>,
-        currency: Option<&str>,
+        direction: domain::TransactionDirection,
+        transaction_type: Option<domain::TransactionType>,
+        currency: Option<domain::Currency>,
         description: Option<&str>,
         transaction_date: Option<&str>,
         due_date: Option<&str>,
@@ -198,7 +201,7 @@ pub trait Projection {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        role: &str,
+        role: domain::WalletRole,
     ) -> Result<(), Self::Error>;
 
     /// Replace the user's role in the wallet. No-op if the user isn't a
@@ -207,7 +210,7 @@ pub trait Projection {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        role: &str,
+        role: domain::WalletRole,
     ) -> Result<(), Self::Error>;
 
     /// Remove the user from the wallet's membership table. Cascading
@@ -219,14 +222,14 @@ pub trait Projection {
         user_id: Uuid,
     ) -> Result<(), Self::Error>;
 
-    /// Add the user to a wallet-scoped system user-group by well-known
-    /// name (e.g., `"all_users"`). Mirror of
-    /// [`Self::add_contact_to_system_group`] for users.
+    /// Add the user to a wallet-scoped system user-group. Mirror of
+    /// [`Self::add_contact_to_system_group`] for users; valid variants are
+    /// the user-group-typed `SystemGroup`s (`AllUsers`, `Owners`).
     async fn add_user_to_system_group(
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        system_group_name: &str,
+        system_group: domain::SystemGroup,
     ) -> Result<(), Self::Error>;
 
     // ---------- User groups ----------
@@ -302,6 +305,24 @@ pub trait Projection {
         contact_group_id: Uuid,
         contact_id: Uuid,
     ) -> Result<(), Self::Error>;
+
+    // ---------- Permission matrix ----------
+
+    /// Replace the (user_group, contact_group) entry in the permission matrix
+    /// in one atomic step: drop any existing rows for the pair, then write
+    /// new rows from `allowed` (allow) and `denied` (deny). The server impl
+    /// resolves [`domain::Action`] against `permission_actions`; the SDK
+    /// impl stores `Action::as_str()` directly. Lives on the trait so any
+    /// `applier::apply(PermissionMatrixSet)` reconstructs the matrix during
+    /// replays (the prior no-op was the root cause of matrix loss on UNDO
+    /// rebuilds).
+    async fn set_permission_matrix_entries(
+        &mut self,
+        user_group_id: Uuid,
+        contact_group_id: Uuid,
+        allowed: &[domain::Action],
+        denied: &[domain::Action],
+    ) -> Result<(), Self::Error>;
 }
 
 /// Apply one event to a projection. Exhaustive match over every variant of
@@ -344,7 +365,11 @@ pub async fn apply<P: Projection + Send>(
                 .await?;
             // Every contact is implicitly in `all_contacts` (system group).
             projection
-                .add_contact_to_system_group(event.aggregate_id, event.wallet_id, "all_contacts")
+                .add_contact_to_system_group(
+                    event.aggregate_id,
+                    event.wallet_id,
+                    domain::SystemGroup::AllContacts,
+                )
                 .await?;
             // Plus any explicitly requested groups (validated against wallet).
             if !group_ids.is_empty() {
@@ -431,9 +456,9 @@ pub async fn apply<P: Projection + Send>(
                     event.user_id,
                     *contact_id,
                     *amount,
-                    direction,
-                    transaction_type.as_deref(),
-                    currency.as_deref(),
+                    *direction,
+                    *transaction_type,
+                    *currency,
                     description.as_deref(),
                     transaction_date.as_deref(),
                     due_date.as_deref(),
@@ -498,7 +523,15 @@ pub async fn apply<P: Projection + Send>(
 
         E::WalletUserAdded { data } => {
             let user_id = parse_uuid_field(data, "user_id");
-            let role = data.get("role").and_then(|v| v.as_str()).unwrap_or("member");
+            // Unknown / missing role → default to Member. This preserves
+            // the old `unwrap_or("member")` behavior with a typed value:
+            // an unrecognized role string is treated as Member rather
+            // than aborting the event (replay-safe).
+            let role = data
+                .get("role")
+                .and_then(|v| v.as_str())
+                .and_then(domain::WalletRole::from_str)
+                .unwrap_or(domain::WalletRole::Member);
             if let Some(uid) = user_id {
                 projection
                     .upsert_wallet_user(event.wallet_id, uid, role)
@@ -508,7 +541,11 @@ pub async fn apply<P: Projection + Send>(
                 // this they'd be in wallet_users but no permission group,
                 // and every action would be rejected.
                 projection
-                    .add_user_to_system_group(event.wallet_id, uid, "all_users")
+                    .add_user_to_system_group(
+                        event.wallet_id,
+                        uid,
+                        domain::SystemGroup::AllUsers,
+                    )
                     .await?;
             }
             Ok(())
@@ -517,7 +554,9 @@ pub async fn apply<P: Projection + Send>(
         E::WalletUserRoleChanged { data } => {
             if let (Some(uid), Some(role)) = (
                 parse_uuid_field(data, "user_id"),
-                data.get("role").and_then(|v| v.as_str()),
+                data.get("role")
+                    .and_then(|v| v.as_str())
+                    .and_then(domain::WalletRole::from_str),
             ) {
                 projection
                     .update_wallet_user_role(event.wallet_id, uid, role)
@@ -618,20 +657,46 @@ pub async fn apply<P: Projection + Send>(
             Ok(())
         }
 
-        // -------- Intentional no-ops at apply layer --------
-        //
-        // PermissionMatrixSet: the put_permission_matrix HTTP handler writes
-        // to group_permission_matrix directly via set_permission_matrix_entries_impl,
-        // then emits this event for cache invalidation / WS broadcast.
-        // Applying it here would double-write. Once the SDK has its own
-        // matrix-set path (post Phase 0.4) this branch may grow.
-        //
+        // PermissionMatrixSet: replay-safe matrix write. Both sides own a
+        // `group_permission_matrix` table; this branch drives the
+        // DELETE-pair-then-INSERT through the trait so the same event
+        // produces the same matrix state whether it's a live push or a
+        // rebuild_projections_from_events replay. Until this was wired,
+        // any UNDO event wiped the matrix via FK CASCADE and replays left
+        // it empty (see permission-matrix-undo-corruption-bug).
+        E::PermissionMatrixSet { data } => {
+            let ug = parse_uuid_field(data, "user_group_id");
+            let cg = parse_uuid_field(data, "contact_group_id");
+            if let (Some(ug), Some(cg)) = (ug, cg) {
+                let allowed = action_array_field(data, "allowed_actions");
+                let denied = action_array_field(data, "denied_actions");
+                projection
+                    .set_permission_matrix_entries(ug, cg, &allowed, &denied)
+                    .await?;
+            }
+            Ok(())
+        }
+
         // WalletDeleted / OwnershipTransferred: no projection rows are
         // mutated by these in the current model.
-        E::PermissionMatrixSet { .. }
-        | E::WalletDeleted { .. }
-        | E::OwnershipTransferred { .. } => Ok(()),
+        E::WalletDeleted { .. } | E::OwnershipTransferred { .. } => Ok(()),
     }
+}
+
+/// Parse a JSON string-array field into `Vec<domain::Action>`. Unknown
+/// action names are silently dropped (replay-safe: an event from a future
+/// version that introduced a new action shouldn't crash an older replay).
+/// The server validates names at HTTP-handler entry, so well-formed events
+/// never lose actions here.
+fn action_array_field(data: &serde_json::Value, field: &str) -> Vec<domain::Action> {
+    data.get(field)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().and_then(domain::Action::from_str))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Parse a UUID string out of a JSON object field. Returns `None` if the

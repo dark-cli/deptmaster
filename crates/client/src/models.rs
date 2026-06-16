@@ -1,5 +1,14 @@
 //! Data models for contacts, transactions, events, wallets.
-//! Wire format uses strings for IDs and dates (FFI/JSON). Use ids.rs and Currency for validation internally.
+//! Wire format uses strings for IDs and dates (FFI/JSON). Use ids.rs and
+//! `domain::Currency` for validation internally.
+//!
+//! `Currency` / `TransactionType` / `TransactionDirection` are defined
+//! here AND in `domain` — they're identical in serde shape, but the
+//! flutter_rust_bridge codegen impls traits on these types and the orphan
+//! rule forbids us from doing that on types declared in another crate.
+//! Internal logic uses `domain::*` exclusively; the FFI wire layer uses
+//! the local types and converts at the trait boundary (see
+//! `impl From<...>` blocks below).
 
 use serde::{Deserialize, Serialize};
 
@@ -31,58 +40,74 @@ pub enum Currency {
 
 impl Currency {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Currency::IQD => "IQD",
-            Currency::USD => "USD",
-            Currency::EUR => "EUR",
-            Currency::GBP => "GBP",
-            Currency::JPY => "JPY",
-            Currency::CHF => "CHF",
-            Currency::CAD => "CAD",
-            Currency::AUD => "AUD",
-            Currency::CNY => "CNY",
-            Currency::INR => "INR",
-            Currency::SAR => "SAR",
-            Currency::AED => "AED",
-            Currency::EGP => "EGP",
-            Currency::TRY => "TRY",
-            Currency::BRL => "BRL",
-            Currency::MXN => "MXN",
-            Currency::KRW => "KRW",
-            Currency::ZAR => "ZAR",
-            Currency::RUB => "RUB",
-        }
+        domain::Currency::from(*self).as_str()
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_uppercase().as_str() {
-            "IQD" => Some(Currency::IQD),
-            "USD" => Some(Currency::USD),
-            "EUR" => Some(Currency::EUR),
-            "GBP" => Some(Currency::GBP),
-            "JPY" => Some(Currency::JPY),
-            "CHF" => Some(Currency::CHF),
-            "CAD" => Some(Currency::CAD),
-            "AUD" => Some(Currency::AUD),
-            "CNY" => Some(Currency::CNY),
-            "INR" => Some(Currency::INR),
-            "SAR" => Some(Currency::SAR),
-            "AED" => Some(Currency::AED),
-            "EGP" => Some(Currency::EGP),
-            "TRY" => Some(Currency::TRY),
-            "BRL" => Some(Currency::BRL),
-            "MXN" => Some(Currency::MXN),
-            "KRW" => Some(Currency::KRW),
-            "ZAR" => Some(Currency::ZAR),
-            "RUB" => Some(Currency::RUB),
-            _ => None,
-        }
+        domain::Currency::from_str(s).map(Currency::from)
     }
 }
 
 impl std::fmt::Display for Currency {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+// ---------- conversions between FFI-layer and domain enums ----------
+//
+// Identity shape, so the converts are exhaustive matches the compiler
+// keeps in lockstep when either side grows a variant.
+
+impl From<Currency> for domain::Currency {
+    fn from(c: Currency) -> Self {
+        match c {
+            Currency::IQD => domain::Currency::IQD,
+            Currency::USD => domain::Currency::USD,
+            Currency::EUR => domain::Currency::EUR,
+            Currency::GBP => domain::Currency::GBP,
+            Currency::JPY => domain::Currency::JPY,
+            Currency::CHF => domain::Currency::CHF,
+            Currency::CAD => domain::Currency::CAD,
+            Currency::AUD => domain::Currency::AUD,
+            Currency::CNY => domain::Currency::CNY,
+            Currency::INR => domain::Currency::INR,
+            Currency::SAR => domain::Currency::SAR,
+            Currency::AED => domain::Currency::AED,
+            Currency::EGP => domain::Currency::EGP,
+            Currency::TRY => domain::Currency::TRY,
+            Currency::BRL => domain::Currency::BRL,
+            Currency::MXN => domain::Currency::MXN,
+            Currency::KRW => domain::Currency::KRW,
+            Currency::ZAR => domain::Currency::ZAR,
+            Currency::RUB => domain::Currency::RUB,
+        }
+    }
+}
+
+impl From<domain::Currency> for Currency {
+    fn from(c: domain::Currency) -> Self {
+        match c {
+            domain::Currency::IQD => Currency::IQD,
+            domain::Currency::USD => Currency::USD,
+            domain::Currency::EUR => Currency::EUR,
+            domain::Currency::GBP => Currency::GBP,
+            domain::Currency::JPY => Currency::JPY,
+            domain::Currency::CHF => Currency::CHF,
+            domain::Currency::CAD => Currency::CAD,
+            domain::Currency::AUD => Currency::AUD,
+            domain::Currency::CNY => Currency::CNY,
+            domain::Currency::INR => Currency::INR,
+            domain::Currency::SAR => Currency::SAR,
+            domain::Currency::AED => Currency::AED,
+            domain::Currency::EGP => Currency::EGP,
+            domain::Currency::TRY => Currency::TRY,
+            domain::Currency::BRL => Currency::BRL,
+            domain::Currency::MXN => Currency::MXN,
+            domain::Currency::KRW => Currency::KRW,
+            domain::Currency::ZAR => Currency::ZAR,
+            domain::Currency::RUB => Currency::RUB,
+        }
     }
 }
 
@@ -112,11 +137,47 @@ pub enum TransactionType {
     Item,
 }
 
+impl From<TransactionType> for domain::TransactionType {
+    fn from(t: TransactionType) -> Self {
+        match t {
+            TransactionType::Money => domain::TransactionType::Money,
+            TransactionType::Item => domain::TransactionType::Item,
+        }
+    }
+}
+
+impl From<domain::TransactionType> for TransactionType {
+    fn from(t: domain::TransactionType) -> Self {
+        match t {
+            domain::TransactionType::Money => TransactionType::Money,
+            domain::TransactionType::Item => TransactionType::Item,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransactionDirection {
     Owed,
     Lent,
+}
+
+impl From<TransactionDirection> for domain::TransactionDirection {
+    fn from(d: TransactionDirection) -> Self {
+        match d {
+            TransactionDirection::Owed => domain::TransactionDirection::Owed,
+            TransactionDirection::Lent => domain::TransactionDirection::Lent,
+        }
+    }
+}
+
+impl From<domain::TransactionDirection> for TransactionDirection {
+    fn from(d: domain::TransactionDirection) -> Self {
+        match d {
+            domain::TransactionDirection::Owed => TransactionDirection::Owed,
+            domain::TransactionDirection::Lent => TransactionDirection::Lent,
+        }
+    }
 }
 
 /// Transaction (wire format). Currency is enum; dates/IDs remain string for compatibility.

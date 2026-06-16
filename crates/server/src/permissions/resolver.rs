@@ -171,7 +171,7 @@ pub async fn get_permitted_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<HashSet<Uuid>, DbError> {
-    permitted_contacts_for_action(pool, ctx, "contact:read").await
+    permitted_contacts_for_action(pool, ctx, domain::Action::ContactRead).await
 }
 
 /// Return the set of contact IDs whose transactions the user has **permission** to read.
@@ -180,7 +180,7 @@ pub async fn get_permitted_transaction_contacts(
     pool: &PgPool,
     ctx: &PermissionContext,
 ) -> Result<HashSet<Uuid>, DbError> {
-    permitted_contacts_for_action(pool, ctx, "transaction:read").await
+    permitted_contacts_for_action(pool, ctx, domain::Action::TransactionRead).await
 }
 
 /// Shared implementation: resolves the user's allow-minus-deny contact set for one action.
@@ -188,7 +188,7 @@ pub async fn get_permitted_transaction_contacts(
 async fn permitted_contacts_for_action(
     pool: &PgPool,
     ctx: &PermissionContext,
-    action: &str,
+    action: domain::Action,
 ) -> Result<HashSet<Uuid>, DbError> {
     let store = super::server_store::ServerPermissionStore::new(pool);
     resolver::permitted_contacts_for_action(&store, ctx, action).await

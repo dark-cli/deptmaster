@@ -204,13 +204,13 @@ impl<'a> Projection for ServerProjection<'a> {
         &mut self,
         contact_id: Uuid,
         wallet_id: Uuid,
-        system_group_name: &str,
+        system_group: domain::SystemGroup,
     ) -> Result<(), Self::Error> {
         if let Some(group_id) = sqlx::query_scalar::<_, Uuid>(
             "SELECT id FROM contact_groups WHERE wallet_id = $1 AND name = $2 LIMIT 1",
         )
         .bind(wallet_id)
-        .bind(system_group_name)
+        .bind(system_group.as_str())
         .fetch_optional(self.pool)
         .await?
         {
@@ -316,16 +316,16 @@ impl<'a> Projection for ServerProjection<'a> {
         user_id: Uuid,
         contact_id: Uuid,
         amount: i64,
-        direction: &str,
-        transaction_type: Option<&str>,
-        currency: Option<&str>,
+        direction: domain::TransactionDirection,
+        transaction_type: Option<domain::TransactionType>,
+        currency: Option<domain::Currency>,
         description: Option<&str>,
         transaction_date: Option<&str>,
         due_date: Option<&str>,
     ) -> Result<(), Self::Error> {
         let c = self.ctx();
-        let tx_type = transaction_type.unwrap_or("money");
-        let currency = currency.unwrap_or("USD");
+        let tx_type = transaction_type.unwrap_or(domain::TransactionType::Money);
+        let currency = currency.unwrap_or(domain::Currency::USD);
 
         // Parse dates from "%Y-%m-%d" strings. transaction_date defaults to
         // the event's created_at date if not provided; due_date is optional.
@@ -364,10 +364,10 @@ impl<'a> Projection for ServerProjection<'a> {
         .bind(user_id)
         .bind(wallet_id)
         .bind(contact_id)
-        .bind(tx_type)
-        .bind(direction)
+        .bind(tx_type.as_str())
+        .bind(direction.as_str())
         .bind(amount)
-        .bind(currency)
+        .bind(currency.as_str())
         .bind(description)
         .bind(txn_date)
         .bind(parsed_due_date)
@@ -416,10 +416,10 @@ impl<'a> Projection for ServerProjection<'a> {
         )
         .bind(id)
         .bind(patch.contact_id)
-        .bind(patch.transaction_type)
-        .bind(patch.direction)
+        .bind(patch.transaction_type.map(|t| t.as_str()))
+        .bind(patch.direction.map(|d| d.as_str()))
         .bind(patch.amount)
-        .bind(patch.currency)
+        .bind(patch.currency.map(|c| c.as_str()))
         .bind(patch.description)
         .bind(new_transaction_date)
         .bind(new_due_date)
@@ -459,7 +459,7 @@ impl<'a> Projection for ServerProjection<'a> {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        role: &str,
+        role: domain::WalletRole,
     ) -> Result<(), Self::Error> {
         let c = self.ctx();
         sqlx::query(
@@ -471,7 +471,7 @@ impl<'a> Projection for ServerProjection<'a> {
         )
         .bind(wallet_id)
         .bind(user_id)
-        .bind(role)
+        .bind(role.as_str())
         .bind(c.created_at)
         .execute(self.pool)
         .await?;
@@ -482,10 +482,10 @@ impl<'a> Projection for ServerProjection<'a> {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        role: &str,
+        role: domain::WalletRole,
     ) -> Result<(), Self::Error> {
         sqlx::query("UPDATE wallet_users SET role = $1 WHERE wallet_id = $2 AND user_id = $3")
-            .bind(role)
+            .bind(role.as_str())
             .bind(wallet_id)
             .bind(user_id)
             .execute(self.pool)
@@ -510,7 +510,7 @@ impl<'a> Projection for ServerProjection<'a> {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        system_group_name: &str,
+        system_group: domain::SystemGroup,
     ) -> Result<(), Self::Error> {
         sqlx::query(
             r#"
@@ -523,7 +523,7 @@ impl<'a> Projection for ServerProjection<'a> {
         )
         .bind(wallet_id)
         .bind(user_id)
-        .bind(system_group_name)
+        .bind(system_group.as_str())
         .execute(self.pool)
         .await?;
         Ok(())
@@ -704,6 +704,64 @@ impl<'a> Projection for ServerProjection<'a> {
         .bind(contact_group_id)
         .execute(self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn set_permission_matrix_entries(
+        &mut self,
+        user_group_id: Uuid,
+        contact_group_id: Uuid,
+        allowed: &[domain::Action],
+        denied: &[domain::Action],
+    ) -> Result<(), Self::Error> {
+        // Resolve `Action` → `permission_actions.id`. The HTTP handler
+        // already rejected unknown action names at entry; during replay
+        // unknown actions are silently skipped (same defensive posture as
+        // the rest of the applier — an old event from a future-version
+        // server shouldn't abort replay).
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "DELETE FROM group_permission_matrix WHERE user_group_id = $1 AND contact_group_id = $2",
+        )
+        .bind(user_group_id)
+        .bind(contact_group_id)
+        .execute(&mut *tx)
+        .await?;
+        for action in allowed {
+            let aid: Option<i16> =
+                sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = $1")
+                    .bind(action.as_str())
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if let Some(aid) = aid {
+                sqlx::query(
+                    "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id, is_deny) VALUES ($1, $2, $3, false)"
+                )
+                .bind(user_group_id)
+                .bind(contact_group_id)
+                .bind(aid)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        for action in denied {
+            let aid: Option<i16> =
+                sqlx::query_scalar("SELECT id FROM permission_actions WHERE name = $1")
+                    .bind(action.as_str())
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if let Some(aid) = aid {
+                sqlx::query(
+                    "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, permission_action_id, is_deny) VALUES ($1, $2, $3, true)"
+                )
+                .bind(user_group_id)
+                .bind(contact_group_id)
+                .bind(aid)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        tx.commit().await?;
         Ok(())
     }
 }

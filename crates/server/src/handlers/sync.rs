@@ -516,13 +516,15 @@ async fn create_snapshot_if_needed(
     }
 }
 
-/// Insert permission event directly (used by wallet management handlers)
+/// Insert permission event directly (used by wallet management handlers).
+/// Takes the typed [`EventType`] so callers can't pass a typo'd string;
+/// the wire-format spelling is `event_type.as_str()` at the SQL bind.
 pub async fn insert_permission_event_and_apply(
     state: &AppState,
     user_id: Uuid,
     wallet_id: Uuid,
     aggregate_id: Uuid,
-    event_type: &str,
+    event_type: domain::EventType,
     event_data: serde_json::Value,
 ) -> Result<(), sqlx::Error> {
     let event_id = Uuid::new_v4();
@@ -533,8 +535,8 @@ pub async fn insert_permission_event_and_apply(
         .insert_event_impl(
             event_id,
             aggregate_id,
-            "permission".to_string(),
-            event_type.to_string(),
+            domain::AggregateType::Permission.as_str().to_string(),
+            event_type.as_str().to_string(),
             event_data.clone(),
             wallet_id,
             user_id,
@@ -572,6 +574,7 @@ pub async fn insert_permission_event_and_apply(
     //    rebuild (database responsibility). Now sees the post-apply projection state.
     db.handle_cache_invalidation_for_event_raw(wallet_id, event_type, &event_data)
         .await;
+    // (event_type is already typed; the DB call takes EventType.)
 
     // Permission events are readable by all wallet users - add to their readable events cache
     let wallet_users = match db.get_wallet_users_impl(wallet_id).await {
@@ -595,10 +598,10 @@ pub async fn insert_permission_event_and_apply(
     }
 
     // Invalidate permission matrix cache if this is a permission-affecting event
-    // (This handles direct permission event insertion, not through normal sync)
-    // Check event type to determine if cache invalidation is needed
+    // (This handles direct permission event insertion, not through normal sync).
     match event_type {
-        "USER_GROUP_MEMBER_ADDED" | "USER_GROUP_MEMBER_REMOVED" => {
+        domain::EventType::UserGroupMemberAdded
+        | domain::EventType::UserGroupMemberRemoved => {
             if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                 if let Ok(user_id) = Uuid::parse_str(user_id_str) {
                     let _ = db
@@ -607,12 +610,12 @@ pub async fn insert_permission_event_and_apply(
                 }
             }
         }
-        "PERMISSION_MATRIX_SET" => {
+        domain::EventType::PermissionMatrixSet => {
             let _ = db
                 .invalidate_permission_matrix_cache_for_wallet(wallet_id)
                 .await;
         }
-        "WALLET_USER_ADDED" => {
+        domain::EventType::WalletUserAdded => {
             if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                 if let Ok(user_id) = Uuid::parse_str(user_id_str) {
                     let _ = db
@@ -621,7 +624,7 @@ pub async fn insert_permission_event_and_apply(
                 }
             }
         }
-        "WALLET_USER_REMOVED" => {
+        domain::EventType::WalletUserRemoved => {
             if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                 if let Ok(user_id) = Uuid::parse_str(user_id_str) {
                     let _ = db

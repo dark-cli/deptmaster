@@ -16,32 +16,27 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use uuid::Uuid;
 
-/// Event-type string for UNDO events. Shared so the predicates below
-/// and per-side dispatchers stay in lockstep.
-pub const UNDO_EVENT_TYPE: &str = "UNDO";
-
-/// `true` if any event in the iterator has type [`UNDO_EVENT_TYPE`].
-/// Lets each side keep its own row/struct representation and pass
-/// just the type slice in.
-pub fn batch_has_undo<'a, I>(event_types: I) -> bool
+/// `true` if any event in the iterator is an UNDO. Lets each side keep
+/// its own row/struct representation and pass just the typed event-type
+/// iterator in.
+pub fn batch_has_undo<I>(event_types: I) -> bool
 where
-    I: IntoIterator<Item = &'a str>,
+    I: IntoIterator<Item = domain::EventType>,
 {
-    event_types.into_iter().any(|t| t == UNDO_EVENT_TYPE)
+    event_types.into_iter().any(|t| t.is_undo())
 }
 
 /// Collect `undone_event_id` values referenced by UNDO events in the
-/// iterator. The caller passes `(event_type, event_data)` pairs in
-/// whatever shape is convenient; this function pulls the field by
-/// name and returns the string ids as a set, ready for "skip these
-/// events when replaying" use.
+/// iterator. The caller passes `(event_type, event_data)` pairs (the
+/// type is typed; the payload stays as raw JSON because the field name
+/// is shared but the surrounding payload shape is wire-format).
 pub fn collect_undone_event_ids<'a, I>(events: I) -> HashSet<String>
 where
-    I: IntoIterator<Item = (&'a str, &'a serde_json::Value)>,
+    I: IntoIterator<Item = (domain::EventType, &'a serde_json::Value)>,
 {
     events
         .into_iter()
-        .filter(|(t, _)| *t == UNDO_EVENT_TYPE)
+        .filter(|(t, _)| t.is_undo())
         .filter_map(|(_, data)| {
             data.get("undone_event_id")
                 .and_then(|v| v.as_str())
@@ -220,13 +215,17 @@ mod tests {
         assert!(!should_create_snapshot_with_interval(10, -1));
     }
 
+    use domain::EventType;
+
     #[test]
     fn batch_has_undo_detects_an_undo_anywhere_in_the_batch() {
-        assert!(!batch_has_undo(["CREATED", "UPDATED"].iter().copied()));
-        assert!(batch_has_undo(["CREATED", "UNDO", "UPDATED"].iter().copied()));
-        assert!(batch_has_undo(["UNDO"].iter().copied()));
-        let empty: [&str; 0] = [];
-        assert!(!batch_has_undo(empty.iter().copied()));
+        assert!(!batch_has_undo([EventType::Created, EventType::Updated]));
+        assert!(batch_has_undo(
+            [EventType::Created, EventType::Undo, EventType::Updated]
+        ));
+        assert!(batch_has_undo([EventType::Undo]));
+        let empty: [EventType; 0] = [];
+        assert!(!batch_has_undo(empty));
     }
 
     #[test]
@@ -236,11 +235,11 @@ mod tests {
         let undo_b = serde_json::json!({ "undone_event_id": "def" });
         let undo_no_field = serde_json::json!({});
         let pairs = [
-            ("CREATED", &created),
-            ("UNDO", &undo_a),
-            ("UPDATED", &created),
-            ("UNDO", &undo_b),
-            ("UNDO", &undo_no_field),
+            (EventType::Created, &created),
+            (EventType::Undo, &undo_a),
+            (EventType::Updated, &created),
+            (EventType::Undo, &undo_b),
+            (EventType::Undo, &undo_no_field),
         ];
         let ids = collect_undone_event_ids(pairs.iter().map(|(t, d)| (*t, *d)));
         assert_eq!(ids.len(), 2);

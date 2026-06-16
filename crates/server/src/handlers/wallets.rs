@@ -666,7 +666,7 @@ pub async fn add_user_to_wallet(
         auth_user.user_id,
         wallet_uuid,
         user_uuid,
-        "WALLET_USER_ADDED",
+        domain::EventType::WalletUserAdded,
         event_data,
     )
     .await
@@ -855,7 +855,7 @@ pub async fn join_wallet_by_code(
         auth_user.user_id,
         wallet_uuid,
         auth_user.user_id,
-        "WALLET_USER_ADDED",
+        domain::EventType::WalletUserAdded,
         event_data,
     )
     .await
@@ -962,7 +962,7 @@ pub async fn update_wallet_user(
         auth_user.user_id,
         wallet_uuid,
         user_uuid,
-        "WALLET_USER_ROLE_CHANGED",
+        domain::EventType::WalletUserRoleChanged,
         event_data,
     )
     .await
@@ -1061,7 +1061,7 @@ pub async fn remove_user_from_wallet(
         auth_user.user_id,
         wallet_uuid,
         user_uuid,
-        "WALLET_USER_REMOVED",
+        domain::EventType::WalletUserRemoved,
         event_data,
     )
     .await
@@ -1566,7 +1566,7 @@ pub async fn create_user_group(
         auth_user.user_id,
         wallet_uuid,
         id,
-        "USER_GROUP_CREATED",
+        domain::EventType::UserGroupCreated,
         event_data,
     )
     .await
@@ -1625,7 +1625,7 @@ pub async fn update_user_group(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "USER_GROUP_RENAMED",
+        domain::EventType::UserGroupUpdated,
         event_data,
     )
     .await
@@ -1672,7 +1672,7 @@ pub async fn delete_user_group(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "USER_GROUP_DELETED",
+        domain::EventType::UserGroupDeleted,
         event_data,
     )
     .await
@@ -1835,7 +1835,7 @@ pub async fn add_user_group_member(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "USER_GROUP_MEMBER_ADDED",
+        domain::EventType::UserGroupMemberAdded,
         event_data,
     )
     .await
@@ -1886,7 +1886,7 @@ pub async fn remove_user_group_member(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "USER_GROUP_MEMBER_REMOVED",
+        domain::EventType::UserGroupMemberRemoved,
         event_data,
     )
     .await
@@ -1976,7 +1976,7 @@ pub async fn create_contact_group(
         auth_user.user_id,
         wallet_uuid,
         id,
-        "CONTACT_GROUP_CREATED",
+        domain::EventType::ContactGroupCreated,
         event_data,
     )
     .await
@@ -2036,7 +2036,7 @@ pub async fn update_contact_group(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "CONTACT_GROUP_RENAMED",
+        domain::EventType::ContactGroupUpdated,
         event_data,
     )
     .await
@@ -2084,7 +2084,7 @@ pub async fn delete_contact_group(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "CONTACT_GROUP_DELETED",
+        domain::EventType::ContactGroupDeleted,
         event_data,
     )
     .await
@@ -2231,7 +2231,7 @@ pub async fn add_contact_group_member(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "CONTACT_GROUP_MEMBER_ADDED",
+        domain::EventType::ContactGroupMemberAdded,
         event_data,
     )
     .await
@@ -2318,7 +2318,7 @@ pub async fn remove_contact_group_member(
         auth_user.user_id,
         wallet_uuid,
         group_uuid,
-        "CONTACT_GROUP_MEMBER_REMOVED",
+        domain::EventType::ContactGroupMemberRemoved,
         event_data,
     )
     .await
@@ -2519,21 +2519,13 @@ pub async fn put_permission_matrix(
             ));
         }
 
-        // Resolve action names to action ids. Unknown names are an error (caller is wrong).
-        let allowed_ids = action_ids_for(&db, &allowed_names).await?;
-        let denied_ids = action_ids_for(&db, &denied_names).await?;
-
-        // Replace the entire (ug, cg) entry in one transaction. This is the actual
-        // mutation; the event below exists for sync notification and cache invalidation.
-        db.set_permission_matrix_entries_impl(ug_id, cg_id, &allowed_ids, &denied_ids)
-            .await
-            .map_err(|e| {
-                tracing::error!("put_permission_matrix: set entries: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"error": "Failed to update matrix"})),
-                )
-            })?;
+        // Validate action names up front so a bad payload is rejected with
+        // 400 before we write anything. The matrix mutation itself now flows
+        // through `insert_permission_event_and_apply` → applier::apply →
+        // ServerProjection::set_permission_matrix_entries, so the same
+        // replay path that rebuilds groups also rebuilds their matrix rows.
+        let _ = action_ids_for(&db, &allowed_names).await?;
+        let _ = action_ids_for(&db, &denied_names).await?;
 
         let event_data = serde_json::json!({
             "user_group_id": entry.user_group_id,
@@ -2546,7 +2538,7 @@ pub async fn put_permission_matrix(
             auth_user.user_id,
             wallet_uuid,
             ug_id,
-            "PERMISSION_MATRIX_SET",
+            domain::EventType::PermissionMatrixSet,
             event_data,
         )
         .await
@@ -2655,7 +2647,7 @@ pub async fn transfer_ownership(
         auth_user.user_id,
         wallet_uuid,
         wallet_uuid,
-        "OWNERSHIP_TRANSFERRED",
+        domain::EventType::OwnershipTransferred,
         event_data,
     )
     .await

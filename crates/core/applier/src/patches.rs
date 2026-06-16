@@ -18,9 +18,9 @@ pub struct ContactPatch {
 pub struct TransactionPatch {
     pub contact_id: Option<uuid::Uuid>,
     pub amount: Option<i64>,
-    pub direction: Option<String>,
-    pub transaction_type: Option<String>,
-    pub currency: Option<String>,
+    pub direction: Option<domain::TransactionDirection>,
+    pub transaction_type: Option<domain::TransactionType>,
+    pub currency: Option<domain::Currency>,
     pub description: Option<String>,
     pub transaction_date: Option<String>,
     pub due_date: Option<String>,

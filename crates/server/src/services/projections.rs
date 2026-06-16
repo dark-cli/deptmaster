@@ -4,6 +4,16 @@ use crate::AppState;
 use sqlx::Row;
 use uuid::Uuid;
 
+/// Parse a row's `event_type` column into the typed [`domain::EventType`]
+/// and ask whether it's an UNDO event. The SQL row is the wire→type
+/// boundary; the rest of this module branches on the enum.
+fn row_is_undo(row: &sqlx::postgres::PgRow) -> bool {
+    let event_type: String = row.get("event_type");
+    domain::EventType::from_str(&event_type)
+        .map(|t| t.is_undo())
+        .unwrap_or(false)
+}
+
 /// Projections: Handles all projection-related operations (rebuilds, snapshots, etc.)
 /// Consolidates projection logic into a single model for consistency and testability
 pub struct Projections;
@@ -66,8 +76,7 @@ impl Projections {
 
         // Phase 2: Check if UNDO exists in Phase 1 loaded events (no extra query)
         let has_undo_in_loaded = events.iter().any(|row| {
-            let event_type: String = row.get("event_type");
-            event_type == "UNDO"
+            row_is_undo(row)
         });
 
         // Phase 3: If UNDO found but we used Phase 1 cutoff, reload events from after the last snapshot
@@ -109,8 +118,7 @@ impl Projections {
 
         // Check for UNDO events in the currently loaded events
         let has_undo_events = events.iter().any(|row| {
-            let event_type: String = row.get("event_type");
-            event_type == "UNDO"
+            row_is_undo(row)
         });
 
         // Clear projections and permission data if UNDO events exist (they require full rebuild)
@@ -174,8 +182,7 @@ impl Projections {
             let mut undone_event_ids = std::collections::HashSet::new();
 
             for row in &events {
-                let event_type: String = row.get("event_type");
-                if event_type == "UNDO" {
+                if row_is_undo(row) {
                     let event_data: serde_json::Value = row.get("event_data");
                     if let Some(undone_id_str) =
                         event_data.get("undone_event_id").and_then(|v| v.as_str())
@@ -253,10 +260,9 @@ impl Projections {
                 .iter()
                 .filter(|row| {
                     let event_id: Uuid = row.get("event_id");
-                    let event_type: String = row.get("event_type");
 
                     // Skip UNDO events
-                    if event_type == "UNDO" {
+                    if row_is_undo(row) {
                         return false;
                     }
 
@@ -372,8 +378,7 @@ impl Projections {
                         // snapshot might contain items undone by previous UNDO events)
                         let mut undone_event_ids = std::collections::HashSet::new();
                         for row in &events {
-                            let event_type: String = row.get("event_type");
-                            if event_type == "UNDO" {
+                            if row_is_undo(row) {
                                 let event_data: serde_json::Value = row.get("event_data");
                                 if let Some(undone_id_str) =
                                     event_data.get("undone_event_id").and_then(|v| v.as_str())
@@ -425,8 +430,7 @@ impl Projections {
                         // Still need to check for undone events in case snapshot contains undone items
                         let mut undone_event_ids = std::collections::HashSet::new();
                         for row in &events {
-                            let event_type: String = row.get("event_type");
-                            if event_type == "UNDO" {
+                            if row_is_undo(row) {
                                 let event_data: serde_json::Value = row.get("event_data");
                                 if let Some(undone_id_str) =
                                     event_data.get("undone_event_id").and_then(|v| v.as_str())
@@ -520,8 +524,7 @@ impl Projections {
                 std::collections::HashSet::new();
             if has_undo_events {
                 for row in &events {
-                    let event_type: String = row.get("event_type");
-                    if event_type == "UNDO" {
+                    if row_is_undo(row) {
                         let event_data: serde_json::Value = row.get("event_data");
                         if let Some(undone_id_str) =
                             event_data.get("undone_event_id").and_then(|v| v.as_str())
@@ -564,10 +567,7 @@ impl Projections {
                 // Filter out UNDO events from this batch
                 let filtered: Vec<_> = batch
                     .iter()
-                    .filter(|row| {
-                        let event_type: String = row.get("event_type");
-                        event_type != "UNDO"
-                    })
+                    .filter(|row| !row_is_undo(row))
                     .map(|row| row as &sqlx::postgres::PgRow)
                     .collect();
 

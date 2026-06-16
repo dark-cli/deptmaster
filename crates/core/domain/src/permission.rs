@@ -23,6 +23,7 @@ pub enum Action {
     TransactionRead,
     TransactionUpdate,
     TransactionDelete,
+    TransactionClose,
 
     // User Group actions
     UserGroupCreate,
@@ -38,6 +39,7 @@ pub enum Action {
     WalletRead,
     WalletUpdate,
     WalletDelete,
+    WalletManageMembers,
 
     /// Owner-only fallback: bypasses every other check when held.
     WalletSuperPermission,
@@ -58,6 +60,7 @@ impl Action {
             Action::TransactionRead => "transaction:read",
             Action::TransactionUpdate => "transaction:update",
             Action::TransactionDelete => "transaction:delete",
+            Action::TransactionClose => "transaction:close",
             Action::UserGroupCreate => "user_group:create",
             Action::UserGroupRead => "user_group:read",
             Action::UserGroupUpdate => "user_group:update",
@@ -67,6 +70,7 @@ impl Action {
             Action::WalletRead => "wallet:read",
             Action::WalletUpdate => "wallet:update",
             Action::WalletDelete => "wallet:delete",
+            Action::WalletManageMembers => "wallet:manage_members",
             Action::WalletSuperPermission => "wallet:super_permission",
             Action::EventsRead => "events:read",
         }
@@ -86,6 +90,7 @@ impl Action {
             "transaction:read" => Some(Action::TransactionRead),
             "transaction:update" => Some(Action::TransactionUpdate),
             "transaction:delete" => Some(Action::TransactionDelete),
+            "transaction:close" => Some(Action::TransactionClose),
             "user_group:create" => Some(Action::UserGroupCreate),
             "user_group:read" => Some(Action::UserGroupRead),
             "user_group:update" => Some(Action::UserGroupUpdate),
@@ -95,6 +100,7 @@ impl Action {
             "wallet:read" => Some(Action::WalletRead),
             "wallet:update" => Some(Action::WalletUpdate),
             "wallet:delete" => Some(Action::WalletDelete),
+            "wallet:manage_members" => Some(Action::WalletManageMembers),
             "wallet:super_permission" => Some(Action::WalletSuperPermission),
             "events:read" => Some(Action::EventsRead),
             _ => None,
@@ -112,6 +118,7 @@ impl Action {
             Action::TransactionRead,
             Action::TransactionUpdate,
             Action::TransactionDelete,
+            Action::TransactionClose,
             Action::UserGroupCreate,
             Action::UserGroupRead,
             Action::UserGroupUpdate,
@@ -121,6 +128,7 @@ impl Action {
             Action::WalletRead,
             Action::WalletUpdate,
             Action::WalletDelete,
+            Action::WalletManageMembers,
             Action::WalletSuperPermission,
             Action::EventsRead,
         ]
@@ -135,10 +143,12 @@ impl Action {
             (Action::ContactDelete, Action::ContactRead) => true,
             (Action::TransactionUpdate, Action::TransactionRead) => true,
             (Action::TransactionDelete, Action::TransactionRead) => true,
+            (Action::TransactionClose, Action::TransactionRead) => true,
             (Action::UserGroupUpdate, Action::UserGroupRead) => true,
             (Action::ContactGroupUpdate, Action::ContactGroupRead) => true,
             (Action::WalletUpdate, Action::WalletRead) => true,
             (Action::WalletDelete, Action::WalletRead) => true,
+            (Action::WalletManageMembers, Action::WalletRead) => true,
             (Action::WalletSuperPermission, _) => true,
             _ if self == &other => true,
             _ => false,

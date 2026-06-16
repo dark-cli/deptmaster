@@ -32,6 +32,109 @@ impl AggregateType {
             AggregateType::Permission => "permission",
         }
     }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "contact" => Some(AggregateType::Contact),
+            "transaction" => Some(AggregateType::Transaction),
+            "permission" => Some(AggregateType::Permission),
+            _ => None,
+        }
+    }
+}
+
+// ============ EVENT TYPE ============
+
+/// Discriminant of [`EventData`] that matches the `events.event_type`
+/// column — the cheap typed form for code that only needs to know
+/// "what kind of event is this?" without parsing the JSON payload.
+/// Some variants (`Created`, `Updated`, `Deleted`, `Undo`) are shared
+/// across aggregates; pair with [`AggregateType`] when full disambiguation
+/// matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EventType {
+    Created,
+    Updated,
+    Deleted,
+    Undo,
+    WalletUserAdded,
+    WalletUserRoleChanged,
+    WalletUserRemoved,
+    UserGroupCreated,
+    UserGroupUpdated,
+    UserGroupDeleted,
+    UserGroupMemberAdded,
+    UserGroupMemberRemoved,
+    ContactGroupCreated,
+    ContactGroupUpdated,
+    ContactGroupDeleted,
+    ContactGroupMemberAdded,
+    ContactGroupMemberRemoved,
+    PermissionMatrixSet,
+    WalletDeleted,
+    OwnershipTransferred,
+}
+
+impl EventType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EventType::Created => "CREATED",
+            EventType::Updated => "UPDATED",
+            EventType::Deleted => "DELETED",
+            EventType::Undo => "UNDO",
+            EventType::WalletUserAdded => "WALLET_USER_ADDED",
+            EventType::WalletUserRoleChanged => "WALLET_USER_ROLE_CHANGED",
+            EventType::WalletUserRemoved => "WALLET_USER_REMOVED",
+            EventType::UserGroupCreated => "USER_GROUP_CREATED",
+            // Canonical wire string is "RENAMED" (what handlers emit and what the
+            // DB stores). `from_str` accepts both "RENAMED" and "UPDATED" for
+            // backward compat with any code path that still says UPDATED.
+            EventType::UserGroupUpdated => "USER_GROUP_RENAMED",
+            EventType::UserGroupDeleted => "USER_GROUP_DELETED",
+            EventType::UserGroupMemberAdded => "USER_GROUP_MEMBER_ADDED",
+            EventType::UserGroupMemberRemoved => "USER_GROUP_MEMBER_REMOVED",
+            EventType::ContactGroupCreated => "CONTACT_GROUP_CREATED",
+            EventType::ContactGroupUpdated => "CONTACT_GROUP_RENAMED",
+            EventType::ContactGroupDeleted => "CONTACT_GROUP_DELETED",
+            EventType::ContactGroupMemberAdded => "CONTACT_GROUP_MEMBER_ADDED",
+            EventType::ContactGroupMemberRemoved => "CONTACT_GROUP_MEMBER_REMOVED",
+            EventType::PermissionMatrixSet => "PERMISSION_MATRIX_SET",
+            EventType::WalletDeleted => "WALLET_DELETED",
+            EventType::OwnershipTransferred => "OWNERSHIP_TRANSFERRED",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "CREATED" => Some(EventType::Created),
+            "UPDATED" => Some(EventType::Updated),
+            "DELETED" => Some(EventType::Deleted),
+            "UNDO" => Some(EventType::Undo),
+            "WALLET_USER_ADDED" => Some(EventType::WalletUserAdded),
+            "WALLET_USER_ROLE_CHANGED" => Some(EventType::WalletUserRoleChanged),
+            "WALLET_USER_REMOVED" => Some(EventType::WalletUserRemoved),
+            "USER_GROUP_CREATED" => Some(EventType::UserGroupCreated),
+            // Accept both wire spellings ("RENAMED" is canonical / live data;
+            // "UPDATED" survives in older paths). See `as_str`.
+            "USER_GROUP_RENAMED" | "USER_GROUP_UPDATED" => Some(EventType::UserGroupUpdated),
+            "USER_GROUP_DELETED" => Some(EventType::UserGroupDeleted),
+            "USER_GROUP_MEMBER_ADDED" => Some(EventType::UserGroupMemberAdded),
+            "USER_GROUP_MEMBER_REMOVED" => Some(EventType::UserGroupMemberRemoved),
+            "CONTACT_GROUP_CREATED" => Some(EventType::ContactGroupCreated),
+            "CONTACT_GROUP_RENAMED" | "CONTACT_GROUP_UPDATED" => Some(EventType::ContactGroupUpdated),
+            "CONTACT_GROUP_DELETED" => Some(EventType::ContactGroupDeleted),
+            "CONTACT_GROUP_MEMBER_ADDED" => Some(EventType::ContactGroupMemberAdded),
+            "CONTACT_GROUP_MEMBER_REMOVED" => Some(EventType::ContactGroupMemberRemoved),
+            "PERMISSION_MATRIX_SET" => Some(EventType::PermissionMatrixSet),
+            "WALLET_DELETED" => Some(EventType::WalletDeleted),
+            "OWNERSHIP_TRANSFERRED" => Some(EventType::OwnershipTransferred),
+            _ => None,
+        }
+    }
+
+    pub fn is_undo(&self) -> bool {
+        matches!(self, EventType::Undo)
+    }
 }
 
 // ============ EVENT DATA ============
@@ -82,11 +185,11 @@ pub enum EventData {
     TransactionCreated {
         contact_id: Uuid,
         amount: i64,
-        direction: String,
+        direction: crate::TransactionDirection,
         #[serde(default)]
-        transaction_type: Option<String>,
+        transaction_type: Option<crate::TransactionType>,
         #[serde(default)]
-        currency: Option<String>,
+        currency: Option<crate::Currency>,
         #[serde(default)]
         description: Option<String>,
         #[serde(default)]
@@ -99,11 +202,11 @@ pub enum EventData {
         #[serde(default)]
         amount: Option<i64>,
         #[serde(default)]
-        direction: Option<String>,
+        direction: Option<crate::TransactionDirection>,
         #[serde(default)]
-        transaction_type: Option<String>,
+        transaction_type: Option<crate::TransactionType>,
         #[serde(default)]
-        currency: Option<String>,
+        currency: Option<crate::Currency>,
         #[serde(default)]
         description: Option<String>,
         #[serde(default)]

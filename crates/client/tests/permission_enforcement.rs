@@ -163,7 +163,7 @@ fn member_default_cannot_create_transaction() {
     member.activate().expect("activate member");
     let res = create_transaction(
         contact_id,
-        "expense".to_string(),
+        "money".to_string(),
         "owed".to_string(),
         100,
         "IQD".to_string(),
@@ -187,7 +187,7 @@ fn member_default_cannot_update_transaction() {
     set_current_wallet_id(wallet_id.clone()).expect("owner wallet");
     let tx_json = create_transaction(
         contact_id.clone(),
-        "expense".to_string(),
+        "money".to_string(),
         "owed".to_string(),
         500,
         "IQD".to_string(),
@@ -207,7 +207,7 @@ fn member_default_cannot_update_transaction() {
     let res = update_transaction(
         tx_id,
         contact_id,
-        "expense".to_string(),
+        "money".to_string(),
         "lent".to_string(),
         999,
         "IQD".to_string(),
@@ -230,7 +230,7 @@ fn member_default_cannot_delete_transaction() {
     set_current_wallet_id(wallet_id.clone()).expect("owner wallet");
     let tx_json = create_transaction(
         contact_id,
-        "expense".to_string(),
+        "money".to_string(),
         "owed".to_string(),
         500,
         "IQD".to_string(),
@@ -265,7 +265,7 @@ fn member_default_blocked_on_every_write_action() {
     set_current_wallet_id(wallet_id.clone()).expect("owner wallet");
     let tx_json = create_transaction(
         contact_id.clone(),
-        "expense".to_string(),
+        "money".to_string(),
         "owed".to_string(),
         500,
         "IQD".to_string(),
@@ -302,7 +302,7 @@ fn member_default_blocked_on_every_write_action() {
     assert_perm_denied(
         create_transaction(
             contact_id.clone(),
-            "expense".to_string(),
+            "money".to_string(),
             "owed".to_string(),
             1,
             "IQD".to_string(),
@@ -316,7 +316,7 @@ fn member_default_blocked_on_every_write_action() {
         update_transaction(
             tx_id.clone(),
             contact_id,
-            "expense".to_string(),
+            "money".to_string(),
             "owed".to_string(),
             2,
             "IQD".to_string(),

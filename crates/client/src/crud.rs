@@ -247,6 +247,15 @@ pub fn create_transaction(
     due_date: Option<String>,
 ) -> Result<Transaction, String> {
     let _contact_id = ContactId::parse(&contact_id).map_err(|e| e)?;
+    // FFI entry: convert wire strings to typed domain values immediately
+    // and reject unknown ones. Past behavior silently tolerated unknown
+    // type/direction (e.g. "expense") with whatever fallback the applier
+    // happened to pick — that's the kind of string drift the no-strings
+    // rule exists to prevent. Now: invalid → clear error.
+    let type_typed = domain::TransactionType::from_str(&type_)
+        .ok_or_else(|| format!("Invalid transaction type: {}", type_))?;
+    let direction_typed = domain::TransactionDirection::from_str(&direction)
+        .ok_or_else(|| format!("Invalid transaction direction: {}", direction))?;
     let currency_typed = Currency::from_str(currency.as_str()).unwrap_or(Currency::IQD);
     let tx_date = NaiveDate::parse_from_str(transaction_date.trim(), "%Y-%m-%d")
         .map_err(|e| format!("Invalid transaction_date: {}", e))?;
@@ -260,8 +269,8 @@ pub fn create_transaction(
     let ts = chrono::Utc::now().to_rfc3339();
     let mut data = serde_json::json!({
         "contact_id": contact_id,
-        "type": type_,
-        "direction": direction,
+        "type": type_typed.as_str(),
+        "direction": direction_typed.as_str(),
         "amount": amount,
         "currency": currency_typed.as_str(),
         "transaction_date": tx_date.format("%Y-%m-%d").to_string(),
@@ -347,6 +356,11 @@ pub fn update_transaction(
     let _ = ContactId::parse(&contact_id).map_err(|e| e)?;
     let wallet_id = ensure_wallet()?;
     let ts = chrono::Utc::now().to_rfc3339();
+    // FFI entry typing (see create_transaction for the rationale).
+    let type_typed = domain::TransactionType::from_str(&type_)
+        .ok_or_else(|| format!("Invalid transaction type: {}", type_))?;
+    let direction_typed = domain::TransactionDirection::from_str(&direction)
+        .ok_or_else(|| format!("Invalid transaction direction: {}", direction))?;
     let currency_typed = Currency::from_str(currency.as_str()).unwrap_or(Currency::IQD);
     let tx_date = NaiveDate::parse_from_str(transaction_date.trim(), "%Y-%m-%d")
         .map_err(|e| format!("Invalid transaction_date: {}", e))?;
@@ -357,8 +371,8 @@ pub fn update_transaction(
         .map_err(|e| format!("Invalid due_date: {}", e))?;
     let mut data = serde_json::json!({
         "contact_id": contact_id,
-        "type": type_,
-        "direction": direction,
+        "type": type_typed.as_str(),
+        "direction": direction_typed.as_str(),
         "amount": amount,
         "currency": currency_typed.as_str(),
         "transaction_date": tx_date.format("%Y-%m-%d").to_string(),

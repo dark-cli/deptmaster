@@ -497,11 +497,15 @@ impl Database {
     ) -> Result<(), sqlx::Error> {
         tracing::info!("apply_event_batch: processing {} events", events.len());
 
-        // First pass: collect IDs of events undone by UNDO events in this batch
+        // First pass: collect IDs of events undone by UNDO events in this batch.
+        // The (aggregate_type, event_type) strings come from the SQL row — this
+        // is the wire→type boundary, parsed once here so the rest of the loop
+        // branches on typed values.
         if undone_event_ids.is_empty() {
             for row in events.iter() {
-                let event_type: String = row.get("event_type");
-                if event_type == "UNDO" {
+                let event_type_str: String = row.get("event_type");
+                let event_type = domain::EventType::from_str(&event_type_str);
+                if event_type == Some(domain::EventType::Undo) {
                     let event_data: Value = row.get("event_data");
                     if let Some(undone_id_str) =
                         event_data.get("undone_event_id").and_then(|v| v.as_str())
@@ -517,21 +521,22 @@ impl Database {
         // Second pass: parse and dispatch each event via typed handlers
         for row in events {
             let event_id: Uuid = row.get("event_id");
-            let aggregate_type: String = row.get("aggregate_type");
+            let aggregate_type_str: String = row.get("aggregate_type");
             let aggregate_id: Uuid = row.get("aggregate_id");
-            let event_type: String = row.get("event_type");
+            let event_type_str: String = row.get("event_type");
             let raw_data: Value = row.get("event_data");
             let created_at: NaiveDateTime = row.get("created_at");
             let event_db_id: i64 = row.get("id");
+            let event_type = domain::EventType::from_str(&event_type_str);
 
             tracing::info!(
                 "apply_event_batch processing: type={}/{}",
-                aggregate_type,
-                event_type
+                aggregate_type_str,
+                event_type_str
             );
 
             // Skip raw UNDO records - their effect is already captured in undone_event_ids
-            if event_type == "UNDO" {
+            if event_type == Some(domain::EventType::Undo) {
                 continue;
             }
 
@@ -542,16 +547,16 @@ impl Database {
 
             // Parse raw event_data into typed EventData enum
             let event_data = match Self::parse_event_data_typed(
-                &aggregate_type,
-                &event_type,
+                &aggregate_type_str,
+                &event_type_str,
                 raw_data.clone(),
             ) {
                 Ok(d) => d,
                 Err(e) => {
                     tracing::warn!(
                         "Skipping event {}/{} - failed type-driven parse: {}",
-                        aggregate_type,
-                        event_type,
+                        aggregate_type_str,
+                        event_type_str,
                         e
                     );
                     continue;
@@ -644,13 +649,17 @@ impl Database {
     /// insert_permission_event_and_apply store the payload directly. Normalize both
     /// shapes into the typed variant's `data` field.
     fn parse_event_data_typed(
-        aggregate_type: &str,
-        event_type: &str,
+        aggregate_type_str: &str,
+        event_type_str: &str,
         raw_data: Value,
     ) -> Result<domain::EventData, String> {
-        let discriminator = EventDiscriminator::from_database(aggregate_type, event_type)?;
+        let discriminator =
+            EventDiscriminator::from_database(aggregate_type_str, event_type_str)?;
+        let aggregate_type = domain::AggregateType::from_str(aggregate_type_str)
+            .ok_or_else(|| format!("Unknown aggregate type: {}", aggregate_type_str))?;
 
-        let mut data_with_type = if aggregate_type == "permission" && raw_data.get("data").is_none()
+        let mut data_with_type = if aggregate_type == domain::AggregateType::Permission
+            && raw_data.get("data").is_none()
         {
             serde_json::json!({ "data": raw_data })
         } else {
@@ -836,14 +845,21 @@ impl Database {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     if let Ok(contact_id) = uuid::Uuid::parse_str(contact_id_str) {
+                        // Parse to typed values; defaults match the live event
+                        // applier defaults (Money / IQD) — note that the prior
+                        // string-literal defaults here were inconsistent
+                        // ("USD" / "lent"), masked by Rust because everything
+                        // was &str. Typed enums make the defaults explicit.
                         let tx_type = transaction_json
                             .get("type")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("money");
+                            .and_then(domain::TransactionType::from_str)
+                            .unwrap_or(domain::TransactionType::Money);
                         let direction = transaction_json
                             .get("direction")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("lent");
+                            .and_then(domain::TransactionDirection::from_str)
+                            .unwrap_or(domain::TransactionDirection::Owed);
                         let amount = transaction_json
                             .get("amount")
                             .and_then(|v| v.as_i64())
@@ -851,7 +867,8 @@ impl Database {
                         let currency = transaction_json
                             .get("currency")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("USD");
+                            .and_then(domain::Currency::from_str)
+                            .unwrap_or(domain::Currency::IQD);
                         let description =
                             transaction_json.get("description").and_then(|v| v.as_str());
                         let transaction_date_str = transaction_json
@@ -901,10 +918,10 @@ impl Database {
                             .bind(user_id)
                             .bind(wallet_id)
                             .bind(contact_id)
-                            .bind(tx_type)
-                            .bind(direction)
+                            .bind(tx_type.as_str())
+                            .bind(direction.as_str())
                             .bind(amount)
-                            .bind(currency)
+                            .bind(currency.as_str())
                             .bind(description)
                             .bind(txn_date)
                             .bind(due_date)
@@ -1004,34 +1021,31 @@ impl Database {
     pub fn event_read_allowed(
         contact_ids_allowed: &Option<std::collections::HashSet<Uuid>>,
         transaction_contact_ids_allowed: &Option<std::collections::HashSet<Uuid>>,
-        aggregate_type: &str,
+        aggregate_type: domain::AggregateType,
         aggregate_id: Uuid,
         event_data: &serde_json::Value,
         transaction_contact_map: &std::collections::HashMap<Uuid, Uuid>,
     ) -> bool {
-        if aggregate_type == "permission" {
-            return true;
-        }
-        if aggregate_type == "contact" {
-            return match contact_ids_allowed {
+        match aggregate_type {
+            domain::AggregateType::Permission => true,
+            domain::AggregateType::Contact => match contact_ids_allowed {
                 None => true,
                 Some(set) => set.contains(&aggregate_id),
-            };
+            },
+            domain::AggregateType::Transaction => {
+                let contact_id = event_data
+                    .get("contact_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| Uuid::parse_str(s).ok())
+                    .or_else(|| transaction_contact_map.get(&aggregate_id).copied());
+                let Some(contact_id) = contact_id else {
+                    return false;
+                };
+                match transaction_contact_ids_allowed {
+                    None => true,
+                    Some(set) => set.contains(&contact_id),
+                }
+            }
         }
-        if aggregate_type == "transaction" {
-            let contact_id = event_data
-                .get("contact_id")
-                .and_then(|v| v.as_str())
-                .and_then(|s| Uuid::parse_str(s).ok())
-                .or_else(|| transaction_contact_map.get(&aggregate_id).copied());
-            let Some(contact_id) = contact_id else {
-                return false;
-            };
-            return match transaction_contact_ids_allowed {
-                None => true,
-                Some(set) => set.contains(&contact_id),
-            };
-        }
-        false
     }
 }

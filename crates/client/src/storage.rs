@@ -549,20 +549,18 @@ pub fn load_transactions_from_tables(wallet_id: &str) -> Result<Vec<Transaction>
             let type_str: String = r.get(2)?;
             let direction_str: String = r.get(3)?;
             let currency_str: String = r.get(5)?;
-            // Tolerant string-to-enum: unknown type defaults to Money,
-            // unknown direction to Owed. Currency is stored canonically
-            // so a missing match is a malformed row — fall back to IQD.
-            let type_ = if type_str == "item" {
-                crate::models::TransactionType::Item
-            } else {
-                crate::models::TransactionType::Money
-            };
-            let direction = if direction_str == "lent" {
-                crate::models::TransactionDirection::Lent
-            } else {
-                crate::models::TransactionDirection::Owed
-            };
-            let currency = crate::models::Currency::from_str(&currency_str)
+            // Parse each string column into its typed domain enum at the
+            // SQL→type boundary. Unknown values fall back to the safe
+            // defaults (Money / Owed / IQD) instead of being silently
+            // mis-decoded as the other variant.
+            let type_ = domain::TransactionType::from_str(&type_str)
+                .unwrap_or(domain::TransactionType::Money)
+                .into();
+            let direction = domain::TransactionDirection::from_str(&direction_str)
+                .unwrap_or(domain::TransactionDirection::Owed)
+                .into();
+            let currency = domain::Currency::from_str(&currency_str)
+                .map(crate::models::Currency::from)
                 .unwrap_or(crate::models::Currency::IQD);
             Ok(Transaction {
                 id: r.get::<_, String>(0)?,

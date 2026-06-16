@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `build_server_event_payload`, `chain_hash`, `event_data_discriminator`, `fold_event_id`, `last_sync_key`, `maybe_save_snapshot`, `parse_server_event_for_applier`, `rebuild_projection_tables`, `server_hash_key`
+// These functions are ignored because they are not marked as `pub`: `build_server_event_payload`, `event_data_discriminator`, `maybe_save_snapshot`, `parse_server_event_for_applier`, `rebuild_projection_tables`, `server_hash_key`
 
 /// Push unsynced events to server, mark accepted as synced.
 ///
@@ -18,22 +18,17 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 ///   (the client's local event id == the wire id == the server's event_id).
 Future<void> pushUnsynced() => RustLib.instance.api.crateSyncPushUnsynced();
 
-/// Pull server events for this wallet, merge into local, rebuild state.
+/// Pull server events for this wallet, merge into local.
 ///
-/// Sync semantics:
-/// - `since = last_sync_timestamp` (per-wallet) when present → incremental pull (only newer events).
-/// - `since = None` → server returns the full visible-to-this-user event set.
-///
-/// We only DESTRUCTIVELY replace local events when one of two things is true:
-///   1. Local has zero events (nothing to lose), AND it's a full pull (first sync).
-///   2. An incremental pull returned permission events — the user's visible set may
-///      have shrunk, so we full-reset to match the server's filter.
-///
-/// Otherwise we just upsert (`INSERT OR IGNORE`); the server-issued ids don't collide
-/// with our client-issued ones, and dedup happens on (id) plus replay tolerates duplicates.
-/// `last_sync_timestamp` is updated at the end of every successful pull (even when the
-/// server returned 0 events) so the next sync is incremental — without this, every sync
-/// would re-trigger the full-pull path and destroy local-only state.
+/// Per-row chain-hash protocol (server migration 033):
+///   - Client sends its `last_hash` (the `latest_hash` returned by the
+///     previous pull). Server does `WHERE hash = ?` on
+///     `user_readable_events`; found → returns events with greater id
+///     (incremental). Not found / first sync → returns all events plus
+///     `flush=true`.
+///   - Client never validates the hash. The server is authoritative.
+///   - If `flush` is set, client wipes local events for the wallet
+///     before applying the returned batch.
 Future<void> pullAndMerge() => RustLib.instance.api.crateSyncPullAndMerge();
 
 /// Full sync: push, then pull. The pull handles visibility-change detection

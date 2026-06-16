@@ -161,7 +161,7 @@ impl Projection for SdkProjection {
         &mut self,
         contact_id: Uuid,
         wallet_id: Uuid,
-        system_group_name: &str,
+        system_group: domain::SystemGroup,
     ) -> Result<(), Self::Error> {
         // Permission-table touch even on contact creation: the contact
         // needs to be in `all_contacts` for the local permission resolver
@@ -170,7 +170,7 @@ impl Projection for SdkProjection {
         // if the group isn't there yet, this no-ops cleanly.)
         let cid = contact_id.to_string();
         let wid = wallet_id.to_string();
-        let name = system_group_name.to_string();
+        let name = system_group.as_str();
         with_db(|conn| {
             conn.execute(
                 r#"
@@ -269,9 +269,9 @@ impl Projection for SdkProjection {
         _user_id: Uuid,
         contact_id: Uuid,
         amount: i64,
-        direction: &str,
-        transaction_type: Option<&str>,
-        currency: Option<&str>,
+        direction: domain::TransactionDirection,
+        transaction_type: Option<domain::TransactionType>,
+        currency: Option<domain::Currency>,
         description: Option<&str>,
         transaction_date: Option<&str>,
         due_date: Option<&str>,
@@ -280,9 +280,9 @@ impl Projection for SdkProjection {
         let id_s = id.to_string();
         let wallet_s = wallet_id.to_string();
         let cid = contact_id.to_string();
-        let direction = direction.to_string();
-        let tx_type = transaction_type.unwrap_or("money").to_string();
-        let currency = currency.unwrap_or("IQD").to_string();
+        let direction = direction.as_str();
+        let tx_type = transaction_type.unwrap_or(domain::TransactionType::Money).as_str();
+        let currency = currency.unwrap_or(domain::Currency::IQD).as_str();
         let description = description.map(String::from);
         // SDK stores dates as the raw "%Y-%m-%d" strings the wire format
         // carries. Today's date is the fallback when not supplied.
@@ -346,10 +346,10 @@ impl Projection for SdkProjection {
                     id_s,
                     wallet_s,
                     contact_id_s,
-                    patch.transaction_type,
-                    patch.direction,
+                    patch.transaction_type.map(|t| t.as_str()),
+                    patch.direction.map(|d| d.as_str()),
                     patch.amount,
-                    patch.currency,
+                    patch.currency.map(|c| c.as_str()),
                     patch.description,
                     patch.transaction_date,
                     patch.due_date,
@@ -383,12 +383,12 @@ impl Projection for SdkProjection {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        role: &str,
+        role: domain::WalletRole,
     ) -> Result<(), Self::Error> {
         let wid = wallet_id.to_string();
         let uid = user_id.to_string();
-        let role = role.to_string();
-        let is_owner = role == "owner";
+        let role_str = role.as_str();
+        let is_owner = role.is_owner();
         with_db(|conn| {
             conn.execute(
                 r#"
@@ -396,7 +396,7 @@ impl Projection for SdkProjection {
                 VALUES (?1, ?2, ?3)
                 ON CONFLICT(wallet_id, user_id) DO UPDATE SET role = ?3
                 "#,
-                params![wid, uid, role],
+                params![wid, uid, role_str],
             )?;
             // Mirror role='owner' into wallet_owners. Server tracks
             // ownership in a dedicated table; SDK mirrors so
@@ -420,16 +420,16 @@ impl Projection for SdkProjection {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        role: &str,
+        role: domain::WalletRole,
     ) -> Result<(), Self::Error> {
         let wid = wallet_id.to_string();
         let uid = user_id.to_string();
-        let role = role.to_string();
-        let is_owner = role == "owner";
+        let role_str = role.as_str();
+        let is_owner = role.is_owner();
         with_db(|conn| {
             conn.execute(
                 "UPDATE wallet_users SET role = ?1 WHERE wallet_id = ?2 AND user_id = ?3",
-                params![role, wid, uid],
+                params![role_str, wid, uid],
             )?;
             if is_owner {
                 conn.execute(
@@ -470,11 +470,11 @@ impl Projection for SdkProjection {
         &mut self,
         wallet_id: Uuid,
         user_id: Uuid,
-        system_group_name: &str,
+        system_group: domain::SystemGroup,
     ) -> Result<(), Self::Error> {
         let wid = wallet_id.to_string();
         let uid = user_id.to_string();
-        let name = system_group_name.to_string();
+        let name = system_group.as_str();
         with_db(|conn| {
             conn.execute(
                 r#"
@@ -665,6 +665,59 @@ impl Projection for SdkProjection {
                 params![cid, gid],
             )?;
             Ok(())
+        })
+    }
+
+    async fn set_permission_matrix_entries(
+        &mut self,
+        user_group_id: Uuid,
+        contact_group_id: Uuid,
+        allowed: &[domain::Action],
+        denied: &[domain::Action],
+    ) -> Result<(), Self::Error> {
+        // `with_db` hands out `&Connection`, not `&mut`, so the typed
+        // `Connection::transaction()` API isn't available here. The shared
+        // STORAGE mutex already serializes writers; we use SAVEPOINT for the
+        // intra-statement atomicity so a mid-loop rusqlite error rolls back
+        // the partial DELETE+INSERT rather than leaving the pair half-empty.
+        // Actions stay typed up to the SQL bind, where `as_str()` lands the
+        // canonical wire name into the `action` TEXT column.
+        let ug = user_group_id.to_string();
+        let cg = contact_group_id.to_string();
+        let allowed: Vec<&'static str> = allowed.iter().map(|a| a.as_str()).collect();
+        let denied: Vec<&'static str> = denied.iter().map(|a| a.as_str()).collect();
+        with_db(move |conn| {
+            conn.execute("SAVEPOINT set_matrix", [])?;
+            let result: rusqlite::Result<()> = (|| {
+                conn.execute(
+                    "DELETE FROM group_permission_matrix WHERE user_group_id = ?1 AND contact_group_id = ?2",
+                    params![ug, cg],
+                )?;
+                for name in &allowed {
+                    conn.execute(
+                        "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, action, is_deny) VALUES (?1, ?2, ?3, 0)",
+                        params![ug, cg, name],
+                    )?;
+                }
+                for name in &denied {
+                    conn.execute(
+                        "INSERT INTO group_permission_matrix (user_group_id, contact_group_id, action, is_deny) VALUES (?1, ?2, ?3, 1)",
+                        params![ug, cg, name],
+                    )?;
+                }
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    conn.execute("RELEASE set_matrix", [])?;
+                    Ok(())
+                }
+                Err(e) => {
+                    let _ = conn.execute("ROLLBACK TO set_matrix", []);
+                    let _ = conn.execute("RELEASE set_matrix", []);
+                    Err(e)
+                }
+            }
         })
     }
 }

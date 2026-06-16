@@ -174,7 +174,7 @@ pub async fn resolve_actions<S: PermissionStore + Sync>(
 pub async fn permitted_contacts_for_action<S: PermissionStore + Sync>(
     store: &S,
     ctx: &PermissionContext,
-    action_name: &str,
+    action: domain::Action,
 ) -> Result<HashSet<Uuid>, S::Error> {
     let ug_ids = store
         .user_group_ids_for_user(ctx.wallet_id, ctx.user_id)
@@ -189,11 +189,13 @@ pub async fn permitted_contacts_for_action<S: PermissionStore + Sync>(
     let mut allowed: HashSet<Uuid> = HashSet::new();
     let mut denied: HashSet<Uuid> = HashSet::new();
 
+    let action_name = action.as_str();
+    let all_contacts_name = domain::SystemGroup::AllContacts.as_str();
     for row in rows {
         if row.action != action_name {
             continue;
         }
-        let contacts_in_row_scope = if row.contact_group_name == "all_contacts" {
+        let contacts_in_row_scope = if row.contact_group_name == all_contacts_name {
             store.all_contact_ids_in_wallet(ctx.wallet_id).await?
         } else {
             store.contact_ids_in_group(row.contact_group_id).await?
