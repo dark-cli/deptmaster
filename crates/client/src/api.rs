@@ -66,6 +66,10 @@ pub fn login(username: String, password: String) -> Result<(), String> {
         let user_id = json.get("user_id").and_then(|v| v.as_str()).ok_or("No user_id in response")?;
         storage::config_set("token", token).map_err(|e| e.to_string())?;
         storage::config_set("user_id", user_id).map_err(|e| e.to_string())?;
+        // Signal session change: Dart providers were populated from
+        // whatever the (logged-out / previous-user) state was; force
+        // them to refetch against the just-authenticated user.
+        crate::data_bus::emit(crate::data_bus::DataChangeKind::Session, None);
         Ok(())
     })
 }
@@ -90,6 +94,9 @@ pub fn register(username: String, password: String) -> Result<(), String> {
         let user_id = json.get("user_id").and_then(|v| v.as_str()).ok_or("No user_id in response")?;
         storage::config_set("token", token).map_err(|e| e.to_string())?;
         storage::config_set("user_id", user_id).map_err(|e| e.to_string())?;
+        // Same rationale as `login`: a new session is now active,
+        // every cached provider must refetch.
+        crate::data_bus::emit(crate::data_bus::DataChangeKind::Session, None);
         Ok(())
     })
 }

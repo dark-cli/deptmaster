@@ -275,10 +275,12 @@ pub fn pull_and_merge() -> Result<(), String> {
     let mut kinds_touched: std::collections::HashSet<crate::DataChangeKind> =
         std::collections::HashSet::new();
     for ev in &server_events {
-        if let Some(agg) = ev.get("aggregate_type").and_then(|v| v.as_str()) {
-            if let Some(k) = crate::data_bus::kind_from_aggregate_type(agg) {
-                kinds_touched.insert(k);
-            }
+        if let Some(agg) = ev
+            .get("aggregate_type")
+            .and_then(|v| v.as_str())
+            .and_then(domain::AggregateType::from_str)
+        {
+            kinds_touched.insert(crate::data_bus::kind_from_aggregate(agg));
         }
     }
     for k in kinds_touched {

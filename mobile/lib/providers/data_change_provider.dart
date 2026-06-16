@@ -17,6 +17,11 @@ final dataChangeStreamProvider = StreamProvider<DataChangeEvent>((ref) {
 /// `kinds` arrives. Optionally scope to a specific wallet — events
 /// for other wallets are ignored. Pass `walletId = null` to invalidate
 /// on any wallet.
+///
+/// `DataChangeKind.session` ALWAYS triggers an invalidation, regardless
+/// of `kinds` or `walletId`. A session change (login/logout) wipes the
+/// local SQLite — any cached provider value is computed from now-deleted
+/// data and would leak across user switches.
 void invalidateOnDataChange(
   Ref ref, {
   required List<DataChangeKind> kinds,
@@ -25,6 +30,10 @@ void invalidateOnDataChange(
   ref.listen(dataChangeStreamProvider, (_, asyncEv) {
     final ev = asyncEv.valueOrNull;
     if (ev == null) return;
+    if (ev.kind == DataChangeKind.session) {
+      ref.invalidateSelf();
+      return;
+    }
     if (!kinds.contains(ev.kind)) return;
     if (walletId != null && ev.walletId != walletId) return;
     ref.invalidateSelf();

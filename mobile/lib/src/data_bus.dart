@@ -57,5 +57,12 @@ enum DataChangeKind {
 
   /// Wallet list (created / deleted / joined) changed.
   wallets,
+
+  /// The authenticated session changed (login or logout). Dart-side
+  /// providers MUST invalidate their cached state on this kind: the
+  /// local SQLite was wiped, so anything cached from the prior user is
+  /// now stale and must not bleed across the user switch. `walletId`
+  /// is always `null` for this kind.
+  session,
   ;
 }

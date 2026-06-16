@@ -28,6 +28,12 @@ pub enum DataChangeKind {
     WalletMembership,
     /// Wallet list (created / deleted / joined) changed.
     Wallets,
+    /// The authenticated session changed (login or logout). Dart-side
+    /// providers MUST invalidate their cached state on this kind:
+    /// the local SQLite was wiped, so anything cached from the prior
+    /// user is now stale and must not bleed across the user switch.
+    /// `wallet_id` is always `None` for this kind.
+    Session,
 }
 
 /// One data-change notification.
@@ -61,14 +67,13 @@ pub(crate) fn emit(kind: DataChangeKind, wallet_id: Option<String>) {
     }
 }
 
-/// Map an aggregate_type string ("contact", "transaction",
-/// "permission") to the corresponding [`DataChangeKind`]. Returns
-/// `None` for unrecognized types so callers can skip.
-pub(crate) fn kind_from_aggregate_type(aggregate_type: &str) -> Option<DataChangeKind> {
-    match aggregate_type {
-        "contact" => Some(DataChangeKind::Contacts),
-        "transaction" => Some(DataChangeKind::Transactions),
-        "permission" => Some(DataChangeKind::Permissions),
-        _ => None,
+/// Map an [`domain::AggregateType`] to the corresponding
+/// [`DataChangeKind`]. Exhaustive — adding an `AggregateType` variant
+/// fails compile here until handled.
+pub(crate) fn kind_from_aggregate(aggregate: domain::AggregateType) -> DataChangeKind {
+    match aggregate {
+        domain::AggregateType::Contact => DataChangeKind::Contacts,
+        domain::AggregateType::Transaction => DataChangeKind::Transactions,
+        domain::AggregateType::Permission => DataChangeKind::Permissions,
     }
 }

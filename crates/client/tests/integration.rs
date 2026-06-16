@@ -22,3 +22,4 @@ mod sync_chain_hash_stress;
 mod clear_wallet_anchor_regression;
 mod permission_enforcement;
 mod permission_matrix_undo_persistence;
+mod logout_clears_local_data;

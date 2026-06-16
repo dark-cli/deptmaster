@@ -148,8 +148,11 @@ fn append_event(
     // Emit before push so the UI updates instantly; the push happens
     // in the background and any server rejection produces its own
     // emission via the resync path.
-    if let Some(kind) = crate::data_bus::kind_from_aggregate_type(aggregate_type) {
-        crate::data_bus::emit(kind, Some(wallet_id.to_string()));
+    if let Some(agg) = domain::AggregateType::from_str(aggregate_type) {
+        crate::data_bus::emit(
+            crate::data_bus::kind_from_aggregate(agg),
+            Some(wallet_id.to_string()),
+        );
     }
     sync::push_unsynced()?;
     // Stamp the new event with total_debt so the chart can plot it
@@ -490,5 +493,9 @@ pub fn bulk_delete_transactions(transaction_ids: Vec<String>) -> Result<(), Stri
 
 pub fn logout() -> Result<(), String> {
     storage::clear_all()?;
+    // Tell Dart that the session changed so every cached provider
+    // invalidates. Without this, Riverpod hands the next user (or the
+    // pre-login screens) lists computed from the previous user's data.
+    crate::data_bus::emit(crate::data_bus::DataChangeKind::Session, None);
     Ok(())
 }
