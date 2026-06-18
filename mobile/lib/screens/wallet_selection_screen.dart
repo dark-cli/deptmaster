@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_carbon/carbon.dart';
 import '../api.dart';
 import '../models/wallet.dart';
 import '../utils/toast_service.dart';
 import '../utils/theme_colors.dart';
 import '../widgets/empty_state.dart';
-import '../widgets/gradient_background.dart';
 import 'manage_wallet_screen.dart';
 
 /// Shows wallet selection as a small, light modal bottom sheet that follows app theme.
@@ -211,18 +211,20 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
               children: [
                 Icon(Icons.account_balance_wallet_outlined, color: colorScheme.primary, size: 24),
                 const SizedBox(width: 12),
-                Text(
-                  'Select Wallet',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Text(
+                    'Select Wallet',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-                const Spacer(),
-                TextButton.icon(
+                CarbonButton(
+                  label: 'New wallet',
+                  kind: CarbonButtonKind.ghost,
+                  size: CarbonButtonSize.small,
                   onPressed: _openCreateWallet,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('New wallet'),
                 ),
               ],
             ),
@@ -231,43 +233,34 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: TextField(
+                  child: CarbonTextInput(
                     controller: _inviteCodeController,
-                    decoration: InputDecoration(
-                      hintText: 'Invite code',
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      errorText: _inviteCodeError,
-                    ),
+                    label: 'Invite code',
+                    placeholder: '4-digit code',
                     keyboardType: TextInputType.number,
                     maxLength: _inviteCodeLength,
-                    onSubmitted: (_) {
+                    errorText: _inviteCodeError,
+                    onFieldSubmitted: (_) {
                       if (_inviteCodeController.text.trim().length == _inviteCodeLength) {
                         _joinByCode();
                       }
                     },
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 22), // Align button with text field (ignoring error text space)
-                  child: FilledButton(
-                    onPressed: _joining || _inviteCodeController.text.trim().length != _inviteCodeLength 
-                        ? null 
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: CarbonButton(
+                    label: 'Join',
+                    kind: CarbonButtonKind.primary,
+                    size: CarbonButtonSize.small,
+                    onPressed: _joining || _inviteCodeController.text.trim().length != _inviteCodeLength
+                        ? null
                         : _joinByCode,
-                    child: _joining
-                        ? SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: colorScheme.onPrimary,
-                            ),
-                          )
-                        : const Text('Join'),
+                    isLoading: _joining,
                   ),
                 ),
               ],
@@ -313,37 +306,62 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 20),
-                            FilledButton.icon(
-                              onPressed: _loadWallets,
-                              icon: const Icon(Icons.refresh, size: 20),
-                              label: const Text('Retry'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: colorScheme.primary,
-                                foregroundColor: colorScheme.onPrimary,
+                            SizedBox(
+                              width: double.infinity,
+                              child: CarbonButton(
+                                label: 'Retry',
+                                kind: CarbonButtonKind.primary,
+                                onPressed: _loadWallets,
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextButton.icon(
-                              onPressed: _openCreateWallet,
-                              icon: const Icon(Icons.add, size: 20),
-                              label: const Text('Create new wallet anyway'),
+                            SizedBox(
+                              width: double.infinity,
+                              child: CarbonButton(
+                                label: 'Create new wallet anyway',
+                                kind: CarbonButtonKind.ghost,
+                                onPressed: _openCreateWallet,
+                              ),
                             ),
                           ],
                         ),
                       )
                     : _wallets.isEmpty
-                        ? EmptyState(
-                            icon: Icons.account_balance_wallet_outlined,
-                            title: 'No wallets yet',
-                            subtitle: 'Create your first wallet to track contacts and transactions.',
-                            action: FilledButton.icon(
-                              onPressed: _openCreateWallet,
-                              icon: const Icon(Icons.add, size: 20),
-                              label: const Text('Create your first wallet'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: colorScheme.primary,
-                                foregroundColor: colorScheme.onPrimary,
-                              ),
+                        ? Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  size: 48,
+                                  color: colorScheme.primary,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'No wallets yet',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Create your first wallet to track contacts and transactions.',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 20),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: CarbonButton(
+                                    label: 'Create your first wallet',
+                                    kind: CarbonButtonKind.primary,
+                                    onPressed: _openCreateWallet,
+                                  ),
+                                ),
+                              ],
                             ),
                           )
                         : ListView.builder(
@@ -443,14 +461,11 @@ class WalletSelectionScreen extends ConsumerStatefulWidget {
 class _WalletSelectionScreenState extends ConsumerState<WalletSelectionScreen> {
   @override
   Widget build(BuildContext context) {
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Select Wallet'),
-        ),
-        body: const _WalletSelectionSheet(),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Select Wallet'),
       ),
+      body: const _WalletSelectionSheet(),
     );
   }
 }
