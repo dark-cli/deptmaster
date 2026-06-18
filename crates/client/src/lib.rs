@@ -12,7 +12,7 @@ mod error;
 mod frb_generated;
 mod handlers;
 mod ids;
-mod log_bridge;
+mod logging;
 mod models;
 mod sdk;
 mod services;
@@ -440,7 +440,7 @@ pub fn get_events() -> Result<String, String> {
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).
 pub fn drain_rust_logs() -> Vec<String> {
-    log_bridge::drain_rust_logs()
+    logging::drain_rust_logs()
 }
 
 // --- UI preferences (stored in Rust config; Dart only reads/writes via these) ---

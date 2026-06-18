@@ -54,6 +54,6 @@ pub fn drain_rust_logs() -> Vec<String> {
 #[macro_export]
 macro_rules! rust_log {
     ($($t:tt)*) => {
-        crate::log_bridge::push(format!($($t)*))
+        crate::logging::push(format!($($t)*))
     };
 }

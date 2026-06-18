@@ -2671,7 +2671,7 @@ fn wire__crate__log_bridge__drain_rust_logs_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
-                    let output_ok = Result::<_, ()>::Ok(crate::log_bridge::drain_rust_logs())?;
+                    let output_ok = Result::<_, ()>::Ok(crate::logging::drain_rust_logs())?;
                     Ok(output_ok)
                 })())
             }
@@ -4949,7 +4949,7 @@ fn wire__crate__log_bridge__push_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok({
-                        crate::log_bridge::push(api_s);
+                        crate::logging::push(api_s);
                     })?;
                     Ok(output_ok)
                 })())

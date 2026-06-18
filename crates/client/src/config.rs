@@ -101,7 +101,7 @@ pub fn is_network_offline() -> bool {
 /// distinguish which simulated app produced each log line. Stub today — the
 /// log_bridge doesn't yet prepend it — but exposing the API unblocks the
 /// integration test setup (`AppInstance::activate`) that calls it on every
-/// app switch. If/when we want per-app prefixes, log_bridge::push can read
+/// app switch. If/when we want per-app prefixes, logging::push can read
 /// LOG_CONTEXT and prepend it.
 pub fn set_log_context(ctx: String) {
     LOG_CONTEXT.with(|cell| {
