@@ -1,8 +1,8 @@
 //! Database repository: SQLite queries and mutations with typed error handling.
 
 use crate::database::models::StoredEvent;
-use crate::error::ClientError;
-use crate::models::{Contact, Transaction};
+use crate::types::error::ClientError;
+use crate::types::models::{Contact, Transaction};
 use crate::rust_log;
 use once_cell::sync::Lazy;
 use rusqlite::{params, Connection};
@@ -35,7 +35,7 @@ pub fn init(path: &str) -> Result<(), ClientError> {
     }
     std::fs::create_dir_all(path_obj).map_err(|e| ClientError::Storage(e.to_string()))?;
     rust_log!(
-        "[debitum_rs] storage::init path={:?} db={:?}",
+        "[debitum_rs] database::storage::init path={:?} db={:?}",
         path,
         db_path
     );
@@ -48,7 +48,7 @@ pub fn init(path: &str) -> Result<(), ClientError> {
             conn,
         });
     }
-    rust_log!("[debitum_rs] storage::init OK");
+    rust_log!("[debitum_rs] database::storage::init OK");
     Ok(())
 }
 
@@ -291,7 +291,7 @@ pub fn clear_wallet(wallet_id: &str) -> Result<(), ClientError> {
 // Events
 pub fn events_insert(e: &StoredEvent) -> Result<(), ClientError> {
     rust_log!(
-        "[debitum_rs] storage::events_insert wallet_id={} aggregate={}/{} event_type={} id={}",
+        "[debitum_rs] database::storage::events_insert wallet_id={} aggregate={}/{} event_type={} id={}",
         e.wallet_id,
         e.aggregate_type,
         e.aggregate_id,
@@ -341,7 +341,7 @@ pub fn events_get_all(wallet_id: &str) -> Result<Vec<StoredEvent>, ClientError> 
         rows.collect::<Result<Vec<_>, _>>()
     })?;
     rust_log!(
-        "[debitum_rs] storage::events_get_all wallet_id={} -> {} events",
+        "[debitum_rs] database::storage::events_get_all wallet_id={} -> {} events",
         wallet_id,
         events.len()
     );
@@ -548,8 +548,8 @@ pub fn load_transactions_from_tables(wallet_id: &str) -> Result<Vec<Transaction>
                 .unwrap_or(domain::TransactionDirection::Owed)
                 .into();
             let currency = domain::Currency::from_str(&currency_str)
-                .map(crate::models::Currency::from)
-                .unwrap_or(crate::models::Currency::IQD);
+                .map(crate::types::models::Currency::from)
+                .unwrap_or(crate::types::models::Currency::IQD);
             Ok(Transaction {
                 id: r.get::<_, String>(0)?,
                 contact_id: r.get::<_, String>(1)?,

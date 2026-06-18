@@ -4,7 +4,7 @@
 //! error handling to typed ClientError. New code should use the database:: module directly.
 
 use crate::database;
-use crate::models::{Contact, Transaction};
+use crate::types::models::{Contact, Transaction};
 
 pub use database::StoredEvent;
 

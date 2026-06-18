@@ -18,7 +18,7 @@ pub use wallets::{
     update_user_group_api, update_wallet_user_api,
 };
 
-use crate::error::ClientError;
+use crate::types::error::ClientError;
 use once_cell::sync::Lazy;
 use std::future::Future;
 

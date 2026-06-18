@@ -1,6 +1,6 @@
 //! Sync orchestration: backoff, guards, and sync entry points.
 
-use crate::{config, rust_log, services, storage};
+use crate::{config, database, rust_log, services};
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 // Thread-local so parallel integration tests (each on their own thread) don't block each other's sync.
 thread_local! {
-    static SYNC_BACKOFF: RefCell<crate::backoff::Backoff> = RefCell::new(crate::backoff::Backoff::new(vec![
+    static SYNC_BACKOFF: RefCell<crate::util::backoff::Backoff> = RefCell::new(crate::util::backoff::Backoff::new(vec![
         Duration::from_millis(500),
         Duration::from_millis(500),
         Duration::from_secs(1),
@@ -62,7 +62,7 @@ pub(crate) fn start_sync_loop_if_ready() {
     if !BACKGROUND_SYNC_LOOP_ENABLED {
         return;
     }
-    if !storage::is_ready() {
+    if !database::storage::is_ready() {
         return;
     }
     let backend_ready = config::get_backend_config().is_some();
@@ -76,7 +76,7 @@ pub(crate) fn start_sync_loop_if_ready() {
     std::thread::spawn(|| {
         loop {
             // Only attempt sync when storage and backend are ready on this thread (sync loop has its own thread-local state; when disabled this is never true).
-            if storage::is_ready() && config::get_backend_config().is_some() {
+            if database::storage::is_ready() && config::get_backend_config().is_some() {
                 let _ = manual_sync_with_source("background_loop");
             }
             let delay_ms = SYNC_BACKOFF.with(|b| {

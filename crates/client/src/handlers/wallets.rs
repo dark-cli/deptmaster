@@ -1,7 +1,7 @@
 //! FFI handlers for wallet management.
 
 use crate::api;
-use crate::models::Wallet;
+use crate::types::models::Wallet;
 
 pub fn get_wallets_api() -> Result<Vec<Wallet>, String> {
     api::get_wallets_api().map_err(|e| e.to_string())

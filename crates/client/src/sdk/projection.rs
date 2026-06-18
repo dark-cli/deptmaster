@@ -16,7 +16,7 @@ use domain::DomainEvent;
 use rusqlite::params;
 use uuid::Uuid;
 
-use crate::storage::with_db;
+use crate::database::storage::with_db;
 
 #[flutter_rust_bridge::frb(opaque)]
 pub struct SdkProjection;

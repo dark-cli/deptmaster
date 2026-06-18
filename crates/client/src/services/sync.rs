@@ -295,11 +295,11 @@ pub fn pull_and_merge() -> Result<(), String> {
             .and_then(|v| v.as_str())
             .and_then(domain::AggregateType::from_str)
         {
-            kinds_touched.insert(crate::data_bus::kind_from_aggregate(agg));
+            kinds_touched.insert(crate::integration::data_bus::kind_from_aggregate(agg));
         }
     }
     for k in kinds_touched {
-        crate::data_bus::emit(k, Some(wallet_id.clone()));
+        crate::integration::data_bus::emit(k, Some(wallet_id.clone()));
     }
 
     // Store the server's latest_hash for the next pull. Server-driven; no

@@ -2,6 +2,7 @@
 
 mod models;
 pub mod repository;
+pub mod storage;
 
 pub use models::StoredEvent;
 pub use repository::{

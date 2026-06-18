@@ -1,29 +1,29 @@
 //! CRUD: append events, rebuild projection, trigger sync.
 //! Uses typed IDs (WalletId, ContactId, TransactionId) for validation; dates as chrono types internally.
 
-use crate::ids::{ContactId, TransactionId, WalletId};
-use crate::models::{Contact, Currency, Transaction};
+use crate::util::ids::{ContactId, TransactionId, WalletId};
+use crate::types::models::{Contact, Currency, Transaction};
 use crate::rust_log;
 use crate::sdk::projection::SdkProjection;
-use crate::storage;
+use crate::database;
 use crate::services::sync;
 use chrono::NaiveDate;
 use rusqlite::params;
 use uuid::Uuid;
 
 fn ensure_wallet() -> Result<String, String> {
-    let s = storage::config_get("current_wallet_id")?
+    let s = database::storage::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
     WalletId::parse(&s).map(|w| w.as_str().to_string())
 }
 
-/// Reshape a locally-created [`storage::StoredEvent`] into a typed
+/// Reshape a locally-created [`database::storage::StoredEvent`] into a typed
 /// [`domain::DomainEvent`] and run it through `applier::apply` so the
 /// SDK's contacts / transactions / permission SQLite tables reflect
 /// the new event. The `user_id` claim from the stored JWT is used as
 /// the event's user; missing claims default to nil-UUID (no harm —
 /// the SDK's projection methods don't consult event.user_id).
-fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
+fn apply_event_locally(e: &database::storage::StoredEvent) -> Result<(), String> {
     let discriminator = sync::event_data_discriminator(&e.aggregate_type, &e.event_type);
     let Some(discriminator) = discriminator else {
         // Unknown shape (shouldn't happen for events we generate locally);
@@ -82,7 +82,7 @@ fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
 /// for UNDO variants and the undone event's effect still sits in the
 /// projection tables.
 fn rebuild_projection_for_wallet(wallet_id: &str) -> Result<(), String> {
-    let events = storage::events_get_all(wallet_id)?;
+    let events = database::storage::events_get_all(wallet_id)?;
     sync::rebuild_projection_tables(wallet_id, &events)
 }
 
@@ -92,7 +92,7 @@ fn rebuild_projection_for_wallet(wallet_id: &str) -> Result<(), String> {
 pub fn wallet_total_debt(wallet_id: &str) -> Result<i64, String> {
 
     let wid = wallet_id.to_string();
-    storage::with_db(|conn| {
+    database::storage::with_db(|conn| {
         let total: i64 = conn.query_row(
             "SELECT COALESCE(SUM(
                 CASE direction
@@ -132,7 +132,7 @@ fn append_event(
     let id = Uuid::new_v4().to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
     let event_data_str = serde_json::to_string(&event_data).map_err(|e| e.to_string())?;
-    let e = storage::StoredEvent {
+    let e = database::storage::StoredEvent {
         id: id.clone(),
         wallet_id: wallet_id.to_string(),
         aggregate_type: aggregate_type.to_string(),
@@ -143,7 +143,7 @@ fn append_event(
         version: 1,
         synced: false,
     };
-    storage::events_insert(&e)?;
+    database::storage::events_insert(&e)?;
     // Feed the new event through applier so the contacts / transactions
     // SQLite tables reflect this event. Errors are logged but not
     // propagated — same defensive posture as `sync::pull_and_merge`.
@@ -159,8 +159,8 @@ fn append_event(
     // in the background and any server rejection produces its own
     // emission via the resync path.
     if let Some(agg) = domain::AggregateType::from_str(aggregate_type) {
-        crate::data_bus::emit(
-            crate::data_bus::kind_from_aggregate(agg),
+        crate::integration::data_bus::emit(
+            crate::integration::data_bus::kind_from_aggregate(agg),
             Some(wallet_id.to_string()),
         );
     }
@@ -171,7 +171,7 @@ fn append_event(
     let mut data = serde_json::from_str::<serde_json::Value>(&event_data_str).unwrap_or(event_data);
     data["total_debt"] = serde_json::json!(total_debt);
     let updated = serde_json::to_string(&data).map_err(|e| e.to_string())?;
-    storage::events_update_event_data(&id, &updated)?;
+    database::storage::events_update_event_data(&id, &updated)?;
     Ok(())
 }
 
@@ -209,7 +209,7 @@ pub fn create_contact(
         }
     }
     append_event(&wallet_id, "contact", &id, "CREATED", data)?;
-    storage::load_contacts_from_tables(&wallet_id)?
+    database::storage::load_contacts_from_tables(&wallet_id)?
         .into_iter()
         .find(|c| c.id == id)
         .ok_or_else(|| "Contact not found after create".to_string())
@@ -217,13 +217,13 @@ pub fn create_contact(
 
 pub fn get_contacts() -> Result<String, String> {
     let wallet_id = ensure_wallet()?;
-    let contacts = storage::load_contacts_from_tables(&wallet_id)?;
+    let contacts = database::storage::load_contacts_from_tables(&wallet_id)?;
     Ok(serde_json::to_string(&contacts).map_err(|e| e.to_string())?)
 }
 
 pub fn get_transactions() -> Result<String, String> {
     let wallet_id = ensure_wallet()?;
-    let transactions = storage::load_transactions_from_tables(&wallet_id)?;
+    let transactions = database::storage::load_transactions_from_tables(&wallet_id)?;
     Ok(serde_json::to_string(&transactions).map_err(|e| e.to_string())?)
 }
 
@@ -297,7 +297,7 @@ pub fn create_transaction(
         data["due_date"] = serde_json::json!(d.format("%Y-%m-%d").to_string());
     }
     append_event(&wallet_id, "transaction", &id, "CREATED", data)?;
-    storage::load_transactions_from_tables(&wallet_id)?
+    database::storage::load_transactions_from_tables(&wallet_id)?
         .into_iter()
         .find(|t| t.id == id)
         .ok_or_else(|| "Transaction not found after create".to_string())
@@ -408,8 +408,8 @@ fn last_event_for_aggregate(
     wallet_id: &str,
     aggregate_type: &str,
     aggregate_id: &str,
-) -> Result<Option<storage::StoredEvent>, String> {
-    let events = storage::events_get_for_aggregate(wallet_id, aggregate_type, aggregate_id)?;
+) -> Result<Option<database::storage::StoredEvent>, String> {
+    let events = database::storage::events_get_for_aggregate(wallet_id, aggregate_type, aggregate_id)?;
     Ok(events.into_iter().last())
 }
 
@@ -527,10 +527,10 @@ pub fn logout() -> Result<(), String> {
     // still wipe local — the user's intent is to log out and a stuck
     // logout button is worse than a refresh row that auto-expires.
     let _ = crate::api::server_logout();
-    storage::clear_all()?;
+    database::storage::clear_all()?;
     // Tell Dart that the session changed so every cached provider
     // invalidates. Without this, Riverpod hands the next user (or the
     // pre-login screens) lists computed from the previous user's data.
-    crate::data_bus::emit(crate::data_bus::DataChangeKind::Session, None);
+    crate::integration::data_bus::emit(crate::integration::data_bus::DataChangeKind::Session, None);
     Ok(())
 }

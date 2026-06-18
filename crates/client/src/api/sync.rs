@@ -1,7 +1,7 @@
 //! Sync endpoints: pull and push events.
 
 use crate::database;
-use crate::error::ClientError;
+use crate::types::error::ClientError;
 use super::{base_url, CLIENT, RUNTIME};
 use super::auth::auth_headers;
 

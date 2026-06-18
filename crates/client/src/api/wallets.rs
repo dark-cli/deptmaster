@@ -1,7 +1,7 @@
 //! Wallet management endpoints: CRUD, groups, permissions.
 
-use crate::error::ClientError;
-use crate::models::Wallet;
+use crate::types::error::ClientError;
+use crate::types::models::Wallet;
 use super::{base_url, CLIENT, RUNTIME};
 use super::auth::auth_headers;
 

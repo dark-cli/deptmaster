@@ -1,7 +1,7 @@
 //! Configuration and initialization: backend URLs, storage, logging context.
 
 use crate::rust_log;
-use crate::storage;
+use crate::database;
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
 use std::sync::Mutex;
@@ -32,11 +32,11 @@ thread_local! {
 /// Call once at startup with the app documents directory path (e.g. from path_provider).
 /// Storage is process-wide; no need to call again from every thread.
 pub fn init_storage(storage_path: String) -> Result<(), String> {
-    let was_ready = storage::is_ready();
-    storage::init(&storage_path)?;
+    let was_ready = database::storage::is_ready();
+    database::storage::init(&storage_path)?;
     if !was_ready {
         rust_log!("[debitum_rs] sync loop: storage ready");
-        crate::sync_control::start_sync_loop_if_ready();
+        crate::integration::sync_control::start_sync_loop_if_ready();
     }
     Ok(())
 }
@@ -56,7 +56,7 @@ pub fn set_backend_config(base_url: String, ws_url: String) {
     });
     *BACKEND_CONFIG_GLOBAL.lock().unwrap() = Some(cfg);
     rust_log!("[debitum_rs] sync loop: backend config set");
-    crate::sync_control::start_sync_loop_if_ready();
+    crate::integration::sync_control::start_sync_loop_if_ready();
 }
 
 pub fn get_base_url() -> Result<String, String> {

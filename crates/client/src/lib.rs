@@ -4,30 +4,24 @@ use flutter_rust_bridge::frb;
 pub use serde_json::Value;
 
 mod api;
-mod backoff;
 mod config;
-mod data_bus;
 mod database;
-mod error;
 mod frb_generated;
 mod handlers;
-mod ids;
-mod logging;
-mod models;
+mod integration;
 mod sdk;
 mod services;
-mod storage;
-mod sync_control;
-mod ws;
+mod types;
+mod util;
 
 pub use config::{
     get_base_url, get_ws_url, init_storage, is_network_offline, log_context, set_backend_config,
     set_log_context, set_network_offline,
 };
-pub use data_bus::{data_change_stream, DataChangeEvent, DataChangeKind};
-pub use error::ClientError;
-pub use sync_control::manual_sync;
-pub use ws::{connect_realtime, disconnect_realtime};
+pub use integration::data_bus::{data_change_stream, DataChangeEvent, DataChangeKind};
+pub use types::ClientError;
+pub use integration::sync_control::manual_sync;
+pub use integration::ws::{connect_realtime, disconnect_realtime};
 
 #[frb(init)]
 pub fn init_app() {
@@ -48,32 +42,32 @@ pub fn logout() -> Result<(), String> {
 }
 
 pub fn is_logged_in() -> bool {
-    storage::config_get("token").ok().and_then(|o| o).is_some()
+    database::storage::config_get("token").ok().and_then(|o| o).is_some()
 }
 
 pub fn get_user_id() -> Result<String, String> {
-    storage::config_get("user_id")?.ok_or_else(|| "Not logged in".to_string())
+    database::storage::config_get("user_id")?.ok_or_else(|| "Not logged in".to_string())
 }
 
 pub fn get_token() -> Result<String, String> {
-    storage::config_get("token")?.ok_or_else(|| "Not logged in".to_string())
+    database::storage::config_get("token")?.ok_or_else(|| "Not logged in".to_string())
 }
 
 // --- Wallet ---
 pub fn set_current_wallet_id(wallet_id: String) -> Result<(), String> {
     rust_log!("[debitum_rs] set_current_wallet_id wallet_id={}", wallet_id);
-    let _ = ids::WalletId::parse(&wallet_id).map_err(|e| e)?;
-    storage::config_set("current_wallet_id", &wallet_id)?;
+    let _ = util::ids::WalletId::parse(&wallet_id).map_err(|e| e)?;
+    database::storage::config_set("current_wallet_id", &wallet_id)?;
     // Tell Dart-side providers the active wallet changed so anything
     // scoped to currentWalletIdProvider re-fetches. Without this the
     // home screen stays stuck on its first read (often "no wallet
     // selected") even after we wrote the new value to config.
-    data_bus::emit(data_bus::DataChangeKind::Wallets, Some(wallet_id));
+    integration::data_bus::emit(integration::data_bus::DataChangeKind::Wallets, Some(wallet_id));
     Ok(())
 }
 
 pub fn get_current_wallet_id() -> Result<String, String> {
-    storage::config_get("current_wallet_id")?.ok_or_else(|| "No wallet selected".to_string())
+    database::storage::config_get("current_wallet_id")?.ok_or_else(|| "No wallet selected".to_string())
 }
 
 pub fn get_wallets() -> Result<String, String> {
@@ -86,7 +80,7 @@ pub fn create_wallet(name: String, description: String) -> Result<String, String
     // New wallet exists on the server — tell Dart-side providers so the
     // wallet list refreshes (no DataChangeKind.Wallets event would
     // otherwise reach the client until the next push/pull cycle).
-    data_bus::emit(data_bus::DataChangeKind::Wallets, None);
+    integration::data_bus::emit(integration::data_bus::DataChangeKind::Wallets, None);
     serde_json::to_string(&w).map_err(|e| e.to_string())
 }
 
@@ -96,7 +90,7 @@ pub fn ensure_current_wallet() -> Result<(), String> {
     }
     let list = api::get_wallets_api()?;
     let first = list.into_iter().next().ok_or("No wallets")?;
-    let _ = ids::WalletId::parse(&first.id).map_err(|e| e)?;
+    let _ = util::ids::WalletId::parse(&first.id).map_err(|e| e)?;
     set_current_wallet_id(first.id)
 }
 
@@ -234,8 +228,8 @@ pub fn create_wallet_invite_code(wallet_id: String) -> Result<String, String> {
 pub fn join_wallet_by_code(code: String) -> Result<String, String> {
     let id = api::join_wallet_by_code_api(&code).map_err(|e| e.to_string())?;
     // New wallet membership — refresh wallet list + membership views.
-    data_bus::emit(data_bus::DataChangeKind::Wallets, None);
-    data_bus::emit(data_bus::DataChangeKind::WalletMembership, Some(id.clone()));
+    integration::data_bus::emit(integration::data_bus::DataChangeKind::Wallets, None);
+    integration::data_bus::emit(integration::data_bus::DataChangeKind::WalletMembership, Some(id.clone()));
     Ok(id)
 }
 
@@ -354,7 +348,7 @@ pub fn add_wallet_contact_group_member(
     contact_id: String,
 ) -> Result<(), String> {
     api::add_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
-    if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
+    if let Ok(Some(current)) = database::storage::config_get("current_wallet_id") {
         if current == wallet_id {
             let _ = services::sync::invalidate_perms_cache_and_pull(&wallet_id);
         }
@@ -368,7 +362,7 @@ pub fn remove_wallet_contact_group_member(
     contact_id: String,
 ) -> Result<(), String> {
     api::remove_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
-    if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
+    if let Ok(Some(current)) = database::storage::config_get("current_wallet_id") {
         if current == wallet_id {
             let _ = services::sync::invalidate_perms_cache_and_pull(&wallet_id);
         }
@@ -385,7 +379,7 @@ pub fn get_my_permissions(wallet_id: String) -> Result<String, String> {
 }
 
 pub fn clear_wallet_data(wallet_id: String) -> Result<(), String> {
-    storage::clear_wallet(&wallet_id)
+    database::storage::clear_wallet(&wallet_id)
 }
 
 pub fn get_wallet_permission_matrix(wallet_id: String) -> Result<String, String> {
@@ -394,7 +388,7 @@ pub fn get_wallet_permission_matrix(wallet_id: String) -> Result<String, String>
 
 pub fn put_wallet_permission_matrix(wallet_id: String, entries_json: String) -> Result<(), String> {
     api::put_permission_matrix_api(&wallet_id, &entries_json)?;
-    if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
+    if let Ok(Some(current)) = database::storage::config_get("current_wallet_id") {
         if current == wallet_id {
             let _ = services::sync::clear_wallet_and_resync(&wallet_id);
         }
@@ -404,7 +398,7 @@ pub fn put_wallet_permission_matrix(wallet_id: String, entries_json: String) -> 
 
 // --- Events (for events log / EventStoreService) ---
 pub fn get_events() -> Result<String, String> {
-    let wallet_id = match storage::config_get("current_wallet_id")? {
+    let wallet_id = match database::storage::config_get("current_wallet_id")? {
         Some(id) => id,
         None => {
             rust_log!("[debitum_rs] get_events: no current_wallet_id in config -> []");
@@ -415,7 +409,7 @@ pub fn get_events() -> Result<String, String> {
         "[debitum_rs] get_events wallet_id={} querying storage...",
         wallet_id
     );
-    let events = storage::events_get_all(&wallet_id)?;
+    let events = database::storage::events_get_all(&wallet_id)?;
     rust_log!("[debitum_rs] get_events returning {} events", events.len());
     let list: Vec<serde_json::Value> = events
         .into_iter()
@@ -440,7 +434,7 @@ pub fn get_events() -> Result<String, String> {
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).
 pub fn drain_rust_logs() -> Vec<String> {
-    logging::drain_rust_logs()
+    util::logging::drain_rust_logs()
 }
 
 // --- UI preferences (stored in Rust config; Dart only reads/writes via these) ---
@@ -448,17 +442,17 @@ const PREF_PREFIX: &str = "pref_";
 
 pub fn get_preference(key: String) -> Result<String, String> {
     let storage_key = format!("{}{}", PREF_PREFIX, key);
-    storage::config_get(&storage_key)?.ok_or_else(|| format!("Preference '{}' not set", key))
+    database::storage::config_get(&storage_key)?.ok_or_else(|| format!("Preference '{}' not set", key))
 }
 
 pub fn set_preference(key: String, value: String) -> Result<(), String> {
     let storage_key = format!("{}{}", PREF_PREFIX, key);
-    storage::config_set(&storage_key, &value)
+    database::storage::config_set(&storage_key, &value)
 }
 
 // --- JWT (single place for token parsing; Dart no longer decodes) ---
 pub fn get_username() -> Result<String, String> {
-    let token = storage::config_get("token")?.ok_or_else(|| "Not logged in".to_string())?;
+    let token = database::storage::config_get("token")?.ok_or_else(|| "Not logged in".to_string())?;
     if token.is_empty() {
         return Err("Not logged in".to_string());
     }
@@ -469,7 +463,7 @@ pub fn get_username() -> Result<String, String> {
 
 /// True if JWT is expired or invalid. Used to avoid WebSocket 401 spam.
 pub fn is_token_expired() -> bool {
-    let token = match storage::config_get("token").ok().and_then(|o| o) {
+    let token = match database::storage::config_get("token").ok().and_then(|o| o) {
         Some(t) if !t.is_empty() => t,
         _ => return true,
     };
@@ -520,7 +514,7 @@ pub(crate) fn current_user_id_or_nil() -> String {
 /// Extract `user_id` claim from the stored JWT. Returns `None` if no
 /// token, the token is malformed, or the claim is missing.
 fn current_user_id() -> Option<String> {
-    let token = storage::config_get("token").ok().and_then(|o| o)?;
+    let token = database::storage::config_get("token").ok().and_then(|o| o)?;
     if token.is_empty() {
         return None;
     }
@@ -562,7 +556,7 @@ pub fn can_perform(
 ) -> Result<bool, String> {
     use domain::{Action, PermissionContext, WalletRole};
 
-    let token = match storage::config_get("token").ok().and_then(|o| o) {
+    let token = match database::storage::config_get("token").ok().and_then(|o| o) {
         Some(t) if !t.is_empty() => t,
         _ => return Ok(false),
     };
@@ -574,7 +568,7 @@ pub fn can_perform(
         Some(s) => s,
         None => return Ok(false),
     };
-    let wallet_id_str = match storage::config_get("current_wallet_id")
+    let wallet_id_str = match database::storage::config_get("current_wallet_id")
         .ok()
         .and_then(|o| o)
     {
@@ -635,7 +629,7 @@ pub fn greet(name: String) -> String {
 mod tests {
     // Storage is process-wide; run with: cargo test --lib -- --test-threads=1
     use super::*;
-    use crate::storage::{self, StoredEvent};
+    use crate::database::StoredEvent;
     use std::path::PathBuf;
 
     fn temp_storage_path() -> PathBuf {
@@ -646,7 +640,7 @@ mod tests {
     #[test]
     fn get_events_returns_empty_json_array_when_no_current_wallet() {
         let path = temp_storage_path();
-        storage::init(path.to_str().unwrap()).expect("init");
+        database::storage::init(path.to_str().unwrap()).expect("init");
         // Do not set current_wallet_id
         let json = get_events().expect("get_events");
         assert_eq!(json, "[]", "expected [] when no wallet set");
@@ -655,9 +649,9 @@ mod tests {
     #[test]
     fn get_events_returns_empty_json_array_when_wallet_has_no_events() {
         let path = temp_storage_path();
-        storage::init(path.to_str().unwrap()).expect("init");
+        database::storage::init(path.to_str().unwrap()).expect("init");
         let wallet_id = "f27978af-e56a-4b45-aede-fb450557699a";
-        storage::config_set("current_wallet_id", wallet_id).expect("config_set");
+        database::storage::config_set("current_wallet_id", wallet_id).expect("config_set");
         let json = get_events().expect("get_events");
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).expect("parse json");
         assert!(parsed.is_empty(), "expected no events for fresh wallet");
@@ -666,9 +660,9 @@ mod tests {
     #[test]
     fn get_events_returns_events_after_insert() {
         let path = temp_storage_path();
-        storage::init(path.to_str().unwrap()).expect("init");
+        database::storage::init(path.to_str().unwrap()).expect("init");
         let wallet_id = "f27978af-e56a-4b45-aede-fb450557699a";
-        storage::config_set("current_wallet_id", wallet_id).expect("config_set");
+        database::storage::config_set("current_wallet_id", wallet_id).expect("config_set");
 
         let event = StoredEvent {
             id: "event-1".to_string(),
@@ -681,7 +675,7 @@ mod tests {
             version: 1,
             synced: false,
         };
-        storage::events_insert(&event).expect("events_insert");
+        database::storage::events_insert(&event).expect("events_insert");
 
         let json = get_events().expect("get_events");
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).expect("parse json");
@@ -693,16 +687,16 @@ mod tests {
     #[test]
     fn events_count_zero_for_new_wallet() {
         let path = temp_storage_path();
-        storage::init(path.to_str().unwrap()).expect("init");
+        database::storage::init(path.to_str().unwrap()).expect("init");
         let wallet_id = "cb203efe-c27c-470e-bbc6-588172c3b1ae";
-        let count = storage::events_count(wallet_id).expect("events_count");
+        let count = database::storage::events_count(wallet_id).expect("events_count");
         assert_eq!(count, 0);
     }
 
     #[test]
     fn set_and_get_current_wallet_id() {
         let path = temp_storage_path();
-        storage::init(path.to_str().unwrap()).expect("init");
+        database::storage::init(path.to_str().unwrap()).expect("init");
         let wallet_id = "f27978af-e56a-4b45-aede-fb450557699a";
         set_current_wallet_id(wallet_id.to_string()).expect("set_current_wallet_id");
         let got = get_current_wallet_id();
@@ -723,10 +717,10 @@ mod tests {
     #[test]
     fn full_pull_condition_when_no_local_events() {
         let path = temp_storage_path();
-        storage::init(path.to_str().unwrap()).expect("init");
+        database::storage::init(path.to_str().unwrap()).expect("init");
         let wallet_id = "f27978af-e56a-4b45-aede-fb450557699a";
-        storage::config_set("current_wallet_id", wallet_id).expect("config_set");
-        let count = storage::events_count(wallet_id).expect("events_count");
+        database::storage::config_set("current_wallet_id", wallet_id).expect("config_set");
+        let count = database::storage::events_count(wallet_id).expect("events_count");
         assert_eq!(
             count, 0,
             "new wallet should have 0 events so sync will do full pull"

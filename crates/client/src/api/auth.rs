@@ -1,7 +1,7 @@
 //! Authentication endpoints: login, register, refresh, logout.
 
 use crate::database;
-use crate::error::ClientError;
+use crate::types::error::ClientError;
 use super::{base_url, CLIENT, RUNTIME};
 
 fn persist_auth_response(json: &serde_json::Value) -> Result<(), ClientError> {
@@ -47,7 +47,7 @@ fn try_refresh_blocking() -> Result<(), ClientError> {
         Ok(json) => persist_auth_response(&json),
         Err(e) => {
             let _ = database::clear_all();
-            crate::data_bus::emit(crate::data_bus::DataChangeKind::Session, None);
+            crate::integration::data_bus::emit(crate::integration::data_bus::DataChangeKind::Session, None);
             Err(e)
         }
     }
@@ -119,7 +119,7 @@ pub fn login(username: String, password: String) -> Result<(), ClientError> {
         }
         let json: serde_json::Value = serde_json::from_str(&text).map_err(ClientError::from)?;
         persist_auth_response(&json)?;
-        crate::data_bus::emit(crate::data_bus::DataChangeKind::Session, None);
+        crate::integration::data_bus::emit(crate::integration::data_bus::DataChangeKind::Session, None);
         Ok(())
     })
 }
@@ -144,7 +144,7 @@ pub fn register(username: String, password: String) -> Result<(), ClientError> {
         }
         let json: serde_json::Value = serde_json::from_str(&text).map_err(ClientError::from)?;
         persist_auth_response(&json)?;
-        crate::data_bus::emit(crate::data_bus::DataChangeKind::Session, None);
+        crate::integration::data_bus::emit(crate::integration::data_bus::DataChangeKind::Session, None);
         Ok(())
     })
 }
