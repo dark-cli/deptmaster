@@ -37,21 +37,40 @@ fn resync_full_after_app1_missed_events() {
         "app3: transaction create contact4 owed 1400 \"T15\" t15",
         "app2: transaction delete t5",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
-    generator.apps.get("app2").unwrap().sync().expect("app2 sync");
-    generator.apps.get("app3").unwrap().sync().expect("app3 sync");
+    generator
+        .apps
+        .get("app2")
+        .unwrap()
+        .sync()
+        .expect("app2 sync");
+    generator
+        .apps
+        .get("app3")
+        .unwrap()
+        .sync()
+        .expect("app3 sync");
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    generator.apps.get("app1").unwrap().sync().expect("app1 sync (full resync)");
+    generator
+        .apps
+        .get("app1")
+        .unwrap()
+        .sync()
+        .expect("app1 sync (full resync)");
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.assert_commands(&[
-        "contacts count 5",
-        "transactions count >= 13",
-        "events count >= 20",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "contacts count 5",
+            "transactions count >= 13",
+            "events count >= 20",
+        ])
+        .expect("assert_commands");
 }
 
 /// Incremental resync: app1 creates and syncs; app2 creates more and syncs; app1 syncs again and has all.
@@ -66,9 +85,16 @@ fn resync_incremental_app1_catches_new_events() {
         "app1: transaction create contact1 lent 500 \"T2\" t2",
         "app1: transaction create contact1 owed 2000 \"T3\" t3",
     ];
-    generator.execute_commands(&initial).expect("execute_commands");
+    generator
+        .execute_commands(&initial)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
-    generator.apps.get("app1").unwrap().sync().expect("app1 sync (initial)");
+    generator
+        .apps
+        .get("app1")
+        .unwrap()
+        .sync()
+        .expect("app1 sync (initial)");
 
     let new_commands = [
         "app2: contact create \"New Contact #0\" contact2",
@@ -87,17 +113,31 @@ fn resync_incremental_app1_catches_new_events() {
         "app2: transaction update t6 description \"Updated T6\"",
         "app2: transaction delete t8",
     ];
-    generator.execute_commands(&new_commands).expect("execute_commands");
+    generator
+        .execute_commands(&new_commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
-    generator.apps.get("app2").unwrap().sync().expect("app2 sync");
+    generator
+        .apps
+        .get("app2")
+        .unwrap()
+        .sync()
+        .expect("app2 sync");
 
-    generator.apps.get("app1").unwrap().sync().expect("app1 sync (incremental)");
+    generator
+        .apps
+        .get("app1")
+        .unwrap()
+        .sync()
+        .expect("app1 sync (incremental)");
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.assert_commands(&[
-        "contacts count 4",
-        "transactions count >= 11",
-        "events count >= 18",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "contacts count 4",
+            "transactions count >= 11",
+            "events count >= 18",
+        ])
+        .expect("assert_commands");
 }

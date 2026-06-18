@@ -5,7 +5,16 @@ pub struct Config {
     pub database_url: String,
     pub port: u16,
     pub jwt_secret: String,
+    /// Access-token (JWT) lifetime in seconds. Short by design — clients
+    /// trade their refresh token at `/api/auth/refresh` for a fresh
+    /// access+refresh pair whenever the access token nears or hits expiry.
     pub jwt_expiration: u64,
+    /// Refresh-token lifetime in seconds. Refresh tokens are rotated on
+    /// every use (each refresh issues a new one and revokes the old),
+    /// so the practical "stay logged in" window is the gap between any
+    /// two app opens, not this number — but no refresh older than this
+    /// is ever accepted.
+    pub refresh_token_expiration: u64,
     pub allowed_origins: Vec<String>,
     pub enable_tls: bool,
     pub tls_cert_path: Option<String>,
@@ -35,10 +44,18 @@ impl Config {
                 .unwrap_or(8000),
             jwt_secret: env::var("JWT_SECRET")
                 .unwrap_or_else(|_| "your-secret-key-change-in-production".to_string()),
+            // Default 15 minutes. Short access-token lifetime is the
+            // whole point of the refresh-token pattern — a leaked token
+            // is only useful for at most this many seconds.
             jwt_expiration: env::var("JWT_EXPIRATION")
-                .unwrap_or_else(|_| "3600".to_string())
+                .unwrap_or_else(|_| "900".to_string())
                 .parse()
-                .unwrap_or(3600),
+                .unwrap_or(900),
+            // Default 30 days.
+            refresh_token_expiration: env::var("REFRESH_TOKEN_EXPIRATION")
+                .unwrap_or_else(|_| "2592000".to_string())
+                .parse()
+                .unwrap_or(2592000),
             allowed_origins,
             enable_tls: env::var("ENABLE_TLS")
                 .unwrap_or_else(|_| "false".to_string())

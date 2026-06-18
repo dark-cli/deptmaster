@@ -48,17 +48,17 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::database::repository::Database;
-use domain::{DomainEvent, EventData};
 use crate::handlers::responses;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::permissions::PermissionModel;
-use domain::PermissionContext;
 use crate::services::projections::Projections;
 use crate::services::server_snapshot_store::ServerSnapshotStore;
 use crate::services::snapshots;
 use crate::websocket;
 use crate::AppState;
+use domain::PermissionContext;
+use domain::{DomainEvent, EventData};
 
 // ============ RESPONSE TYPES ============
 

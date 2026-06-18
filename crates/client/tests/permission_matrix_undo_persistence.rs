@@ -45,15 +45,12 @@ fn permission_matrix_grant_survives_wallet_undo() {
     // ---------- owner: wallet + contact + groups + grant ----------
     let (owner_username, owner_password, wallet_id) =
         create_unique_test_user_and_wallet(&server_url).expect("create owner");
-    let owner = AppInstance::with_credentials(
-        "owner",
-        &server_url,
-        owner_username,
-        owner_password,
-    );
+    let owner = AppInstance::with_credentials("owner", &server_url, owner_username, owner_password);
     owner.initialize().expect("init owner");
     owner.login().expect("login owner");
-    owner.select_wallet(&wallet_id).expect("owner select wallet");
+    owner
+        .select_wallet(&wallet_id)
+        .expect("owner select wallet");
     owner.activate().expect("activate owner");
     set_current_wallet_id(wallet_id.clone()).expect("owner current wallet");
 
@@ -68,19 +65,14 @@ fn permission_matrix_grant_survives_wallet_undo() {
     let team: serde_json::Value = serde_json::from_str(&team_json).expect("parse Team");
     let team_id = team["id"].as_str().expect("team id").to_string();
 
-    let sensitive_json =
-        create_wallet_contact_group(wallet_id.clone(), "Sensitive".to_string())
-            .expect("create Sensitive");
+    let sensitive_json = create_wallet_contact_group(wallet_id.clone(), "Sensitive".to_string())
+        .expect("create Sensitive");
     let sensitive: serde_json::Value =
         serde_json::from_str(&sensitive_json).expect("parse Sensitive");
     let sensitive_id = sensitive["id"].as_str().expect("sensitive id").to_string();
 
-    add_wallet_contact_group_member(
-        wallet_id.clone(),
-        sensitive_id.clone(),
-        target_id.clone(),
-    )
-    .expect("add Target to Sensitive");
+    add_wallet_contact_group_member(wallet_id.clone(), sensitive_id.clone(), target_id.clone())
+        .expect("add Target to Sensitive");
 
     // Sign up a fresh member, join them to the wallet, put them in Team.
     let member = AppInstance::new("member", &server_url);
@@ -89,14 +81,9 @@ fn permission_matrix_grant_survives_wallet_undo() {
 
     owner.activate().expect("re-activate owner");
     set_current_wallet_id(wallet_id.clone()).expect("owner current wallet");
-    add_user_to_wallet(wallet_id.clone(), member.username.clone())
-        .expect("add member to wallet");
-    add_wallet_user_group_member(
-        wallet_id.clone(),
-        team_id.clone(),
-        member.username.clone(),
-    )
-    .expect("add member to Team");
+    add_user_to_wallet(wallet_id.clone(), member.username.clone()).expect("add member to wallet");
+    add_wallet_user_group_member(wallet_id.clone(), team_id.clone(), member.username.clone())
+        .expect("add member to Team");
 
     // The grant under test: Team × Sensitive allowed to read + update contacts.
     let entries = serde_json::json!([{
@@ -115,7 +102,9 @@ fn permission_matrix_grant_survives_wallet_undo() {
         member.username.clone(),
         member.password.clone(),
     );
-    member_in_wallet.initialize().expect("init member-in-wallet");
+    member_in_wallet
+        .initialize()
+        .expect("init member-in-wallet");
     member_in_wallet.login().expect("login member-in-wallet");
     member_in_wallet
         .select_wallet(&wallet_id)
@@ -147,9 +136,8 @@ fn permission_matrix_grant_survives_wallet_undo() {
     // give us something to undo within the 5s window.
     owner.activate().expect("activate owner for UNDO");
     set_current_wallet_id(wallet_id.clone()).expect("owner current wallet");
-    let throwaway_json =
-        create_contact("Throwaway".to_string(), None, None, None, None, None)
-            .expect("owner create throwaway");
+    let throwaway_json = create_contact("Throwaway".to_string(), None, None, None, None, None)
+        .expect("owner create throwaway");
     let throwaway: serde_json::Value =
         serde_json::from_str(&throwaway_json).expect("parse throwaway");
     let throwaway_id = throwaway["id"].as_str().expect("throwaway id").to_string();

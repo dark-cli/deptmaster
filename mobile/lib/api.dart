@@ -243,7 +243,7 @@ class Api {
   }
 
   // ---------- Backend config (prefs + Rust) ----------
-  static String get defaultBackendHost => '10.95.12.45';
+  static String get defaultBackendHost => '10.95.12.46';
   static int get defaultBackendPort => 8000;
 
   static Future<String> getBackendHost() async {

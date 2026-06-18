@@ -9,8 +9,8 @@
 //! lives in the Flutter Riverpod provider cache (UI fix territory).
 
 use client::{
-    create_contact, get_contacts, init_storage, logout, manual_sync, register,
-    set_backend_config, set_current_wallet_id,
+    create_contact, get_contacts, init_storage, logout, manual_sync, register, set_backend_config,
+    set_current_wallet_id,
 };
 use std::path::PathBuf;
 
@@ -52,20 +52,12 @@ fn logout_clears_data_so_next_user_starts_empty() {
 
     let wallet_json =
         client::create_wallet("Wallet A".to_string(), String::new()).expect("create wallet A");
-    let wallet: serde_json::Value =
-        serde_json::from_str(&wallet_json).expect("parse wallet A");
+    let wallet: serde_json::Value = serde_json::from_str(&wallet_json).expect("parse wallet A");
     let wallet_id = wallet["id"].as_str().expect("wallet id").to_string();
     set_current_wallet_id(wallet_id.clone()).expect("select wallet A");
 
-    create_contact(
-        "Alice (A only)".to_string(),
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
-    .expect("create contact for A");
+    create_contact("Alice (A only)".to_string(), None, None, None, None, None)
+        .expect("create contact for A");
     manual_sync().expect("user A initial sync");
 
     let contacts_a = get_contacts().expect("contacts after A creates");
@@ -99,8 +91,7 @@ fn logout_clears_data_so_next_user_starts_empty() {
 
     let wallet_b_json =
         client::create_wallet("Wallet B".to_string(), String::new()).expect("create wallet B");
-    let wallet_b: serde_json::Value =
-        serde_json::from_str(&wallet_b_json).expect("parse wallet B");
+    let wallet_b: serde_json::Value = serde_json::from_str(&wallet_b_json).expect("parse wallet B");
     let wallet_b_id = wallet_b["id"].as_str().expect("wallet B id").to_string();
     set_current_wallet_id(wallet_b_id.clone()).expect("select wallet B");
 

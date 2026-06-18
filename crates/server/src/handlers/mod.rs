@@ -12,7 +12,7 @@ pub use admin::{
     get_latest_event_id, get_projection_status, get_total_debt,
 };
 pub use admin_auth::admin_login;
-pub use auth::{login, register};
+pub use auth::{login, logout, refresh, register};
 pub use settings::{get_settings, update_setting};
 pub use sync::{get_sync_events, get_sync_hash, post_sync_events};
 pub use users::{

@@ -75,9 +75,7 @@ impl Projections {
         .await?;
 
         // Phase 2: Check if UNDO exists in Phase 1 loaded events (no extra query)
-        let has_undo_in_loaded = events.iter().any(|row| {
-            row_is_undo(row)
-        });
+        let has_undo_in_loaded = events.iter().any(|row| row_is_undo(row));
 
         // Phase 3: If UNDO found but we used Phase 1 cutoff, reload events from after the last snapshot
         // This is critical: when UNDO events reference older events, we need them in memory
@@ -117,9 +115,7 @@ impl Projections {
         }
 
         // Check for UNDO events in the currently loaded events
-        let has_undo_events = events.iter().any(|row| {
-            row_is_undo(row)
-        });
+        let has_undo_events = events.iter().any(|row| row_is_undo(row));
 
         // Clear projections and permission data if UNDO events exist (they require full rebuild)
         // or if doing full rebuild (checked later in snapshot path)

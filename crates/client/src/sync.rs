@@ -2,7 +2,7 @@
 
 use crate::api;
 use crate::rust_log;
-use crate::storage;
+use crate::database;
 
 /// Storage key for the per-wallet last_hash from the most recent pull.
 /// The name is historical; under the migration-033 protocol the value
@@ -18,7 +18,10 @@ fn server_hash_key(wallet_id: &str) -> String {
 /// expects for a given (aggregate_type, event_type) pair. Returns `None` for unknown
 /// combinations so the caller can skip the event rather than send something the server
 /// will reject.
-pub(crate) fn event_data_discriminator(aggregate_type: &str, event_type: &str) -> Option<&'static str> {
+pub(crate) fn event_data_discriminator(
+    aggregate_type: &str,
+    event_type: &str,
+) -> Option<&'static str> {
     match (aggregate_type, event_type) {
         ("contact", "CREATED") => Some("contact_created"),
         ("contact", "UPDATED") => Some("contact_updated"),
@@ -38,7 +41,7 @@ pub(crate) fn event_data_discriminator(aggregate_type: &str, event_type: &str) -
 /// event_data, missing user_id). The caller skips those — better than sending a
 /// payload the server will reject for the whole batch.
 fn build_server_event_payload(
-    e: &storage::StoredEvent,
+    e: &database::StoredEvent,
     user_id: &str,
 ) -> Option<serde_json::Value> {
     let discriminator = event_data_discriminator(&e.aggregate_type, &e.event_type)?;
@@ -91,9 +94,9 @@ fn build_server_event_payload(
 /// - Server echoes back `accepted: [<event_id>]` so we can mark local rows synced
 ///   (the client's local event id == the wire id == the server's event_id).
 pub fn push_unsynced() -> Result<(), String> {
-    let wallet_id = storage::config_get("current_wallet_id")?
+    let wallet_id = database::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
-    let unsynced = storage::events_get_unsynced(&wallet_id)?;
+    let unsynced = database::events_get_unsynced(&wallet_id)?;
     if !unsynced.is_empty() {
         rust_log!(
             "[debitum_rs] push_unsynced wallet_id={} pending={}",
@@ -105,7 +108,7 @@ pub fn push_unsynced() -> Result<(), String> {
         return Ok(());
     }
 
-    let user_id = storage::config_get("user_id")?
+    let user_id = database::config_get("user_id")?
         .ok_or_else(|| "Not logged in (no user_id in storage)".to_string())?;
 
     let payload: Vec<String> = unsynced
@@ -128,11 +131,8 @@ pub fn push_unsynced() -> Result<(), String> {
     }
     match api::post_sync_events(payload) {
         Ok(accepted) => {
-            rust_log!(
-                "[debitum_rs] push_unsynced accepted={}",
-                accepted.len()
-            );
-            storage::events_mark_synced(&accepted)?;
+            rust_log!("[debitum_rs] push_unsynced accepted={}", accepted.len());
+            database::events_mark_synced(&accepted)?;
             // No need to invalidate any local permission cache here: the next
             // pull's hash comparison will detect any visibility change caused
             // by this push (contact-group membership flip, etc.) and trigger
@@ -142,19 +142,22 @@ pub fn push_unsynced() -> Result<(), String> {
         Err(e) => {
             // Only drop local events when the server explicitly sent our permission-denied code (in response body).
             // Network/offline errors never contain this string, so we never drop events for connection/timeout/etc.
-            if e.contains("DEBITUM_INSUFFICIENT_WALLET_PERMISSION") {
-                let dropped = storage::events_delete_unsynced(&wallet_id)?;
+            if e.to_string().contains("DEBITUM_INSUFFICIENT_WALLET_PERMISSION") {
+                let dropped = database::events_delete_unsynced(&wallet_id)?;
                 rust_log!(
                     "[debitum_rs] push_unsynced: server returned DEBITUM_INSUFFICIENT_WALLET_PERMISSION -> dropped {} local pending events (wallet_id={})",
                     dropped,
                     wallet_id
                 );
-                let events = storage::events_get_all(&wallet_id)?;
+                let events = database::events_get_all(&wallet_id)?;
                 // Forget the rolled-back events: rebuild from the remaining
                 // synced ones. Wipes + re-applies; UNDO-aware so any
                 // pending UNDO chains stay consistent.
                 rebuild_projection_tables(&wallet_id, &events)?;
-                return Err(format!("DEBITUM_INSUFFICIENT_WALLET_PERMISSION (dropped {} local pending events)", dropped));
+                return Err(format!(
+                    "DEBITUM_INSUFFICIENT_WALLET_PERMISSION (dropped {} local pending events)",
+                    dropped
+                ));
             }
             // Network/offline or other error: do NOT fail the write. Events stay unsynced and will sync later.
             rust_log!("[debitum_rs] push_unsynced: sync failed (e.g. offline), keeping {} local events for later sync: {}", unsynced.len(), e);
@@ -175,9 +178,9 @@ pub fn push_unsynced() -> Result<(), String> {
 ///   - If `flush` is set, client wipes local events for the wallet
 ///     before applying the returned batch.
 pub fn pull_and_merge() -> Result<(), String> {
-    let wallet_id = storage::config_get("current_wallet_id")?
+    let wallet_id = database::config_get("current_wallet_id")?
         .ok_or_else(|| "No wallet selected".to_string())?;
-    let last_hash = storage::config_get(&server_hash_key(&wallet_id))?.unwrap_or_default();
+    let last_hash = database::config_get(&server_hash_key(&wallet_id))?.unwrap_or_default();
     let last_hash_for_log = if last_hash.is_empty() {
         "<none>".to_string()
     } else {
@@ -185,7 +188,8 @@ pub fn pull_and_merge() -> Result<(), String> {
     };
     rust_log!(
         "[debitum_rs] pull_and_merge: pulling wallet={} last_hash={}",
-        wallet_id, last_hash_for_log
+        wallet_id,
+        last_hash_for_log
     );
 
     let last_hash_arg = if last_hash.is_empty() {
@@ -196,7 +200,9 @@ pub fn pull_and_merge() -> Result<(), String> {
     let (server_events, latest_hash, flush) = api::get_sync_events(last_hash_arg)?;
     rust_log!(
         "[debitum_rs] pull_and_merge: server returned {} events, latest_hash={}, flush={}",
-        server_events.len(), latest_hash, flush
+        server_events.len(),
+        latest_hash,
+        flush
     );
 
     // If the server says "your last_hash isn't in my chain anymore",
@@ -213,21 +219,30 @@ pub fn pull_and_merge() -> Result<(), String> {
             "[debitum_rs] pull_and_merge: server requested flush — wiping wallet and absorbing {} events",
             server_events.len()
         );
-        storage::events_delete_all_for_wallet(&wallet_id)?;
+        database::events_delete_all_for_wallet(&wallet_id)?;
     }
 
     for ev in &server_events {
         let id = ev.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let aggregate_type = ev.get("aggregate_type").and_then(|v| v.as_str()).unwrap_or("");
-        let aggregate_id = ev.get("aggregate_id").and_then(|v| v.as_str()).unwrap_or("");
+        let aggregate_type = ev
+            .get("aggregate_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let aggregate_id = ev
+            .get("aggregate_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let event_type = ev.get("event_type").and_then(|v| v.as_str()).unwrap_or("");
-        let event_data = ev.get("event_data").cloned().unwrap_or(serde_json::Value::Null);
+        let event_data = ev
+            .get("event_data")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let timestamp = ev.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
         let version = ev.get("version").and_then(|v| v.as_i64()).unwrap_or(1) as i32;
         if id.is_empty() {
             continue;
         }
-        let stored = storage::StoredEvent {
+        let stored = database::StoredEvent {
             id: id.to_string(),
             wallet_id: wallet_id.clone(),
             aggregate_type: aggregate_type.to_string(),
@@ -238,7 +253,7 @@ pub fn pull_and_merge() -> Result<(), String> {
             version,
             synced: true,
         };
-        storage::events_insert(&stored)?;
+        database::events_insert(&stored)?;
     }
 
     if !server_events.is_empty() {
@@ -261,7 +276,7 @@ pub fn pull_and_merge() -> Result<(), String> {
             .and_then(domain::EventType::from_str)
     }));
     if has_undo {
-        let all_events = storage::events_get_all(&wallet_id)?;
+        let all_events = database::events_get_all(&wallet_id)?;
         rebuild_projection_tables(&wallet_id, &all_events)?;
     }
 
@@ -289,10 +304,12 @@ pub fn pull_and_merge() -> Result<(), String> {
 
     // Store the server's latest_hash for the next pull. Server-driven; no
     // client computation needed.
-    storage::config_set(&server_hash_key(&wallet_id), &latest_hash)?;
+    database::config_set(&server_hash_key(&wallet_id), &latest_hash)?;
     rust_log!(
         "[debitum_rs] pull_and_merge: stored last_hash={} (applied {} events, flush={})",
-        latest_hash, server_events.len(), flush
+        latest_hash,
+        server_events.len(),
+        flush
     );
     Ok(())
 }
@@ -311,7 +328,7 @@ pub fn clear_wallet_and_resync(wallet_id: &str) -> Result<(), String> {
         "[debitum_rs] permission-related change for wallet {} — clearing local data and full resync",
         wallet_id
     );
-    storage::clear_wallet(wallet_id)?;
+    database::clear_wallet(wallet_id)?;
     pull_and_merge()
 }
 
@@ -319,7 +336,7 @@ pub fn clear_wallet_and_resync(wallet_id: &str) -> Result<(), String> {
 /// membership or permission matrix changes so the client sees updated data without logout/login.
 /// Only has effect when wallet_id is the current wallet.
 pub fn invalidate_perms_cache_and_pull(wallet_id: &str) -> Result<(), String> {
-    let current = storage::config_get("current_wallet_id")?.filter(|c| !c.is_empty());
+    let current = database::config_get("current_wallet_id")?.filter(|c| !c.is_empty());
     if current.as_deref() != Some(wallet_id) {
         return Ok(());
     }
@@ -393,7 +410,7 @@ fn parse_server_event_for_applier(
 /// needed to keep parity.
 pub(crate) fn rebuild_projection_tables(
     wallet_id: &str,
-    events: &[storage::StoredEvent],
+    events: &[database::StoredEvent],
 ) -> Result<(), String> {
     use crate::sdk_projection::SdkProjection;
     use rusqlite::params;
@@ -412,19 +429,40 @@ pub(crate) fn rebuild_projection_tables(
         })
         .collect();
     let undone_ids = snapshots::collect_undone_event_ids(
-        parsed.iter().filter_map(|(t, d)| {
-            domain::EventType::from_str(t).map(|et| (et, d))
-        }),
+        parsed
+            .iter()
+            .filter_map(|(t, d)| domain::EventType::from_str(t).map(|et| (et, d))),
     );
 
-    crate::storage::with_db(|conn| {
-        conn.execute("DELETE FROM contacts WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM transactions WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM wallet_users WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM wallet_owners WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM user_groups WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM contact_groups WHERE wallet_id = ?1", params![wallet_id])?;
-        conn.execute("DELETE FROM projection_snapshots WHERE wallet_id = ?1", params![wallet_id])?;
+    crate::database::with_db(|conn| {
+        conn.execute(
+            "DELETE FROM contacts WHERE wallet_id = ?1",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM transactions WHERE wallet_id = ?1",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM wallet_users WHERE wallet_id = ?1",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM wallet_owners WHERE wallet_id = ?1",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM user_groups WHERE wallet_id = ?1",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM contact_groups WHERE wallet_id = ?1",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM projection_snapshots WHERE wallet_id = ?1",
+            params![wallet_id],
+        )?;
         Ok(())
     })?;
     let mut proj = SdkProjection::new();
@@ -452,7 +490,10 @@ pub(crate) fn rebuild_projection_tables(
         });
         if let Some(de) = parse_server_event_for_applier(&ev_json, wallet_id) {
             if let Err(err) = rt.block_on(applier::apply(&mut proj, &de)) {
-                rust_log!("[debitum_rs] rebuild_projection_tables: apply failed: {:?}", err);
+                rust_log!(
+                    "[debitum_rs] rebuild_projection_tables: apply failed: {:?}",
+                    err
+                );
             }
         }
     }
@@ -464,16 +505,16 @@ pub(crate) fn rebuild_projection_tables(
 /// this batch. Snapshots speed up the next UNDO rollback and are
 /// dropped to [`snapshots::DEFAULT_MAX_SNAPSHOTS`] per wallet.
 fn maybe_save_snapshot(wallet_id: &str, has_undo: bool) -> Result<(), String> {
-    let event_count = storage::events_count(wallet_id)?;
+    let event_count = database::events_count(wallet_id)?;
     if !has_undo && !snapshots::should_create_snapshot(event_count) {
         return Ok(());
     }
     let wallet_uuid = uuid::Uuid::parse_str(wallet_id).map_err(|e| e.to_string())?;
-    let contacts = storage::load_contacts_from_tables(wallet_id)?;
-    let transactions = storage::load_transactions_from_tables(wallet_id)?;
+    let contacts = database::load_contacts_from_tables(wallet_id)?;
+    let transactions = database::load_transactions_from_tables(wallet_id)?;
     let contacts_json = serde_json::to_value(&contacts).map_err(|e| e.to_string())?;
     let transactions_json = serde_json::to_value(&transactions).map_err(|e| e.to_string())?;
-    let last_event_id = storage::events_get_all(wallet_id)?
+    let last_event_id = database::events_get_all(wallet_id)?
         .last()
         .map(|e| e.id.clone())
         .unwrap_or_default();

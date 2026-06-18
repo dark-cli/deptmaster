@@ -6,13 +6,13 @@
 
 use axum::extract::Query;
 use chrono::Utc;
+use domain::WalletRole;
 use domain::{DomainEvent, EventData};
 use server::handlers::sync::{
     get_sync_events, get_sync_hash, post_sync_events, SyncEvent, SyncEventsQuery,
 };
 use server::middleware::auth::AuthUser;
 use server::middleware::wallet_context::WalletContext;
-use domain::WalletRole;
 use server::{AppState, Config};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -29,7 +29,10 @@ struct AppInstance {
 impl AppInstance {
     /// Call get_sync_events (no since = full pull). Returns events (owned).
     async fn get_sync_events(&self, state: &AppState, since: Option<String>) -> Vec<SyncEvent> {
-        let query = SyncEventsQuery { since, last_hash: None };
+        let query = SyncEventsQuery {
+            since,
+            last_hash: None,
+        };
         let result = get_sync_events(
             Query(query),
             axum::extract::State(state.clone()),

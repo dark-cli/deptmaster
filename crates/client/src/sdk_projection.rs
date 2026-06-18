@@ -281,14 +281,19 @@ impl Projection for SdkProjection {
         let wallet_s = wallet_id.to_string();
         let cid = contact_id.to_string();
         let direction = direction.as_str();
-        let tx_type = transaction_type.unwrap_or(domain::TransactionType::Money).as_str();
+        let tx_type = transaction_type
+            .unwrap_or(domain::TransactionType::Money)
+            .as_str();
         let currency = currency.unwrap_or(domain::Currency::IQD).as_str();
         let description = description.map(String::from);
         // SDK stores dates as the raw "%Y-%m-%d" strings the wire format
         // carries. Today's date is the fallback when not supplied.
-        let txn_date = transaction_date
-            .map(String::from)
-            .unwrap_or_else(|| chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string());
+        let txn_date = transaction_date.map(String::from).unwrap_or_else(|| {
+            chrono::Utc::now()
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string()
+        });
         let due_date = due_date.map(String::from);
         with_db(|conn| {
             conn.execute(
@@ -309,8 +314,17 @@ impl Projection for SdkProjection {
                     updated_at       = excluded.updated_at
                 "#,
                 params![
-                    id_s, wallet_s, cid, tx_type, direction, amount, currency, description,
-                    txn_date, due_date, now
+                    id_s,
+                    wallet_s,
+                    cid,
+                    tx_type,
+                    direction,
+                    amount,
+                    currency,
+                    description,
+                    txn_date,
+                    due_date,
+                    now
                 ],
             )?;
             Ok(())
@@ -530,11 +544,7 @@ impl Projection for SdkProjection {
         })
     }
 
-    async fn delete_user_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<(), Self::Error> {
+    async fn delete_user_group(&mut self, id: Uuid, wallet_id: Uuid) -> Result<(), Self::Error> {
         let id = id.to_string();
         let wid = wallet_id.to_string();
         with_db(|conn| {
@@ -620,11 +630,7 @@ impl Projection for SdkProjection {
         })
     }
 
-    async fn delete_contact_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<(), Self::Error> {
+    async fn delete_contact_group(&mut self, id: Uuid, wallet_id: Uuid) -> Result<(), Self::Error> {
         let id = id.to_string();
         let wid = wallet_id.to_string();
         with_db(|conn| {

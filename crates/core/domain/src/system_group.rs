@@ -103,6 +103,9 @@ mod tests {
     fn kinds_are_correct() {
         assert_eq!(SystemGroup::AllUsers.kind(), SystemGroupKind::UserGroup);
         assert_eq!(SystemGroup::Owners.kind(), SystemGroupKind::UserGroup);
-        assert_eq!(SystemGroup::AllContacts.kind(), SystemGroupKind::ContactGroup);
+        assert_eq!(
+            SystemGroup::AllContacts.kind(),
+            SystemGroupKind::ContactGroup
+        );
     }
 }

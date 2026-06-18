@@ -24,18 +24,24 @@ fn multi_app_single_app_creates_then_sync() {
         "app1: transaction delete t5",
         "app1: contact update contact1 name \"Updated Contact 1\"",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events count >= 12",
-        "events event_type UPDATED count > 0",
-        "contacts count 1",
-        "contact 0 name \"Updated Contact 1\"",
-        "transactions count > 5",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events count >= 12",
+            "events event_type UPDATED count > 0",
+            "contacts count 1",
+            "contact 0 name \"Updated Contact 1\"",
+            "transactions count > 5",
+        ])
+        .expect("assert_commands");
 }
 
 /// All three apps create contacts and transactions; after sync all see the same set.
@@ -61,16 +67,22 @@ fn multi_app_concurrent_creates_then_sync() {
         "app2: transaction update t3 description \"Updated T3\"",
         "app3: transaction delete t5",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events count >= 12",
-        "contacts count 3",
-        "transactions count > 5",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events count >= 12",
+            "contacts count 3",
+            "transactions count > 5",
+        ])
+        .expect("assert_commands");
 }
 
 /// Updates from different apps propagate; final state has many UPDATED events.
@@ -100,15 +112,18 @@ fn multi_app_update_propagation() {
         "app2: transaction update t5 description \"Updated T5\"",
         "app3: transaction update t7 amount 1300",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events count >= 18",
-        "events event_type UPDATED count >= 7",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&["events count >= 18", "events event_type UPDATED count >= 7"])
+        .expect("assert_commands");
 }
 
 /// Deletes from different apps propagate; contact is removed from final state.
@@ -137,13 +152,19 @@ fn multi_app_delete_propagation() {
         "app3: transaction delete t5",
         "app3: contact delete contact1",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events count >= 14",
-        "contact name \"Contact to Delete\" removed",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events count >= 14",
+            "contact name \"Contact to Delete\" removed",
+        ])
+        .expect("assert_commands");
 }

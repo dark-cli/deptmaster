@@ -61,8 +61,7 @@ fn clear_wallet_followed_by_sync_restores_full_state() {
     // The bug-shape operation: clear_wallet wipes local events +
     // projection. Pre-fix this left server_hash behind; the next pull
     // would then return only events strictly after that stale anchor.
-    let wallet_id = client::get_current_wallet_id()
-        .expect("current_wallet_id present");
+    let wallet_id = client::get_current_wallet_id().expect("current_wallet_id present");
     client::clear_wallet_data(wallet_id).expect("clear_wallet_data");
 
     // Local should be wiped right after clear.
@@ -111,11 +110,10 @@ fn set_permission_matrix_preserves_pre_permission_events() {
     // Set a no-op permission matrix on the current wallet. The
     // `put_wallet_permission_matrix` server call followed by
     // `clear_wallet_and_resync` is what triggered the bug.
-    let wallet_id = client::get_current_wallet_id()
-        .expect("current_wallet_id present");
+    let wallet_id = client::get_current_wallet_id().expect("current_wallet_id present");
     let cg_all = {
-        let groups_json = client::list_wallet_contact_groups(wallet_id.clone())
-            .expect("list contact groups");
+        let groups_json =
+            client::list_wallet_contact_groups(wallet_id.clone()).expect("list contact groups");
         let groups: Vec<serde_json::Value> =
             serde_json::from_str(&groups_json).expect("parse contact groups");
         groups
@@ -126,8 +124,8 @@ fn set_permission_matrix_preserves_pre_permission_events() {
             .to_string()
     };
     let ug_all = {
-        let groups_json = client::list_wallet_user_groups(wallet_id.clone())
-            .expect("list user groups");
+        let groups_json =
+            client::list_wallet_user_groups(wallet_id.clone()).expect("list user groups");
         let groups: Vec<serde_json::Value> =
             serde_json::from_str(&groups_json).expect("parse user groups");
         groups

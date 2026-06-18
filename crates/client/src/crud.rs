@@ -2,8 +2,8 @@
 //! Uses typed IDs (WalletId, ContactId, TransactionId) for validation; dates as chrono types internally.
 
 use crate::ids::{ContactId, TransactionId, WalletId};
-use crate::rust_log;
 use crate::models::{Contact, Currency, Transaction};
+use crate::rust_log;
 use crate::sdk_projection::SdkProjection;
 use crate::storage;
 use crate::sync;
@@ -30,8 +30,8 @@ fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
         // skip silently, same as parse_server_event_for_applier.
         return Ok(());
     };
-    let event_data_val: serde_json::Value = serde_json::from_str(&e.event_data)
-        .map_err(|err| err.to_string())?;
+    let event_data_val: serde_json::Value =
+        serde_json::from_str(&e.event_data).map_err(|err| err.to_string())?;
     let mut payload = event_data_val;
     if let Some(obj) = payload.as_object_mut() {
         if e.aggregate_type == "permission" && !obj.contains_key("data") {
@@ -56,7 +56,10 @@ fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
     let domain_event = match serde_json::from_value::<domain::DomainEvent>(dto) {
         Ok(de) => de,
         Err(err) => {
-            rust_log!("[debitum_rs] apply_event_locally: deserialize failed: {}", err);
+            rust_log!(
+                "[debitum_rs] apply_event_locally: deserialize failed: {}",
+                err
+            );
             return Ok(());
         }
     };
@@ -66,7 +69,10 @@ fn apply_event_locally(e: &storage::StoredEvent) -> Result<(), String> {
         .build()
         .map_err(|err| err.to_string())?;
     if let Err(err) = rt.block_on(applier::apply(&mut proj, &domain_event)) {
-        rust_log!("[debitum_rs] applier::apply failed for local event: {:?}", err);
+        rust_log!(
+            "[debitum_rs] applier::apply failed for local event: {:?}",
+            err
+        );
     }
     Ok(())
 }
@@ -84,6 +90,7 @@ fn rebuild_projection_for_wallet(wallet_id: &str) -> Result<(), String> {
 /// wallet's total debt. Used to stamp events for the chart so the
 /// client value matches what the server records.
 fn wallet_total_debt(wallet_id: &str) -> Result<i64, String> {
+
     let wid = wallet_id.to_string();
     storage::with_db(|conn| {
         let total: i64 = conn.query_row(
@@ -112,7 +119,10 @@ fn append_event(
 ) -> Result<(), String> {
     rust_log!(
         "[debitum_rs] crud::append_event wallet_id={} aggregate={}/{} event_type={}",
-        wallet_id, aggregate_type, aggregate_id, event_type
+        wallet_id,
+        aggregate_type,
+        aggregate_id,
+        event_type
     );
     // Client generates event_id locally (UUID v4). Uniqueness is enforced per-wallet
     // on the server (UNIQUE (wallet_id, event_id)); collision odds at our scale are
@@ -426,7 +436,13 @@ pub fn delete_transaction(transaction_id: String) -> Result<(), String> {
             "timestamp": ts,
             "wallet_id": wallet_id
         });
-        append_event(&wallet_id, &last.aggregate_type, &last.aggregate_id, "UNDO", data)?;
+        append_event(
+            &wallet_id,
+            &last.aggregate_type,
+            &last.aggregate_id,
+            "UNDO",
+            data,
+        )?;
     } else {
         let data = serde_json::json!({
             "comment": "Transaction deleted",
@@ -453,7 +469,13 @@ pub fn undo_contact_action(contact_id: String) -> Result<(), String> {
         "timestamp": ts,
         "wallet_id": wallet_id
     });
-    append_event(&wallet_id, &last.aggregate_type, &last.aggregate_id, "UNDO", data)?;
+    append_event(
+        &wallet_id,
+        &last.aggregate_type,
+        &last.aggregate_id,
+        "UNDO",
+        data,
+    )?;
     Ok(())
 }
 
@@ -473,7 +495,13 @@ pub fn undo_transaction_action(transaction_id: String) -> Result<(), String> {
         "timestamp": ts,
         "wallet_id": wallet_id
     });
-    append_event(&wallet_id, &last.aggregate_type, &last.aggregate_id, "UNDO", data)?;
+    append_event(
+        &wallet_id,
+        &last.aggregate_type,
+        &last.aggregate_id,
+        "UNDO",
+        data,
+    )?;
     Ok(())
 }
 
@@ -492,6 +520,13 @@ pub fn bulk_delete_transactions(transaction_ids: Vec<String>) -> Result<(), Stri
 }
 
 pub fn logout() -> Result<(), String> {
+    // Best-effort: ask the server to revoke this device's refresh
+    // token first, so a leaked copy stops working the moment the user
+    // taps logout instead of living until its 30-day expiry. If the
+    // request fails (offline, dead access token, server down) we
+    // still wipe local — the user's intent is to log out and a stuck
+    // logout button is worse than a refresh row that auto-expires.
+    let _ = crate::api::server_logout();
     storage::clear_all()?;
     // Tell Dart that the session changed so every cached provider
     // invalidates. Without this, Riverpod hands the next user (or the

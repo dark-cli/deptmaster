@@ -16,8 +16,10 @@ pub fn test_server_url() -> String {
 pub fn setup_three_apps(server_url: &str) -> EventGenerator {
     let (username, password, wallet_id) =
         create_unique_test_user_and_wallet(server_url).expect("create_unique_test_user_and_wallet");
-    let app1 = AppInstance::with_credentials("app1", server_url, username.clone(), password.clone());
-    let app2 = AppInstance::with_credentials("app2", server_url, username.clone(), password.clone());
+    let app1 =
+        AppInstance::with_credentials("app1", server_url, username.clone(), password.clone());
+    let app2 =
+        AppInstance::with_credentials("app2", server_url, username.clone(), password.clone());
     let app3 = AppInstance::with_credentials("app3", server_url, username, password);
     app1.initialize().expect("initialize");
     app2.initialize().expect("initialize");

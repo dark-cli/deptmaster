@@ -1,12 +1,10 @@
 use crate::database::error::DbError;
 use crate::database::repository::{Database, DatabaseRepository};
-use domain::DomainEvent;
 use crate::handlers::responses::insufficient_permission_response;
 use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;
 use crate::middleware::wallet_context::WalletContext;
 use crate::permissions::PermissionModel;
-use domain::{PermissionContext, Resource, WalletRole};
 use crate::websocket;
 use crate::AppState;
 use axum::{
@@ -14,6 +12,8 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
+use domain::DomainEvent;
+use domain::{PermissionContext, Resource, WalletRole};
 use serde::{Deserialize, Deserializer, Serialize};
 use uuid::Uuid;
 
@@ -2434,17 +2434,19 @@ pub async fn get_permission_matrix(
 
     let list: Vec<MatrixEntry> = matrix
         .into_iter()
-        .map(|(user_group_id, contact_group_id, mut allowed, mut denied)| {
-            // Filter out the deprecated `events:read` action both ways.
-            allowed.retain(|a| a != "events:read");
-            denied.retain(|a| a != "events:read");
-            MatrixEntry {
-                user_group_id: user_group_id.to_string(),
-                contact_group_id: contact_group_id.to_string(),
-                allowed_actions: allowed,
-                denied_actions: denied,
-            }
-        })
+        .map(
+            |(user_group_id, contact_group_id, mut allowed, mut denied)| {
+                // Filter out the deprecated `events:read` action both ways.
+                allowed.retain(|a| a != "events:read");
+                denied.retain(|a| a != "events:read");
+                MatrixEntry {
+                    user_group_id: user_group_id.to_string(),
+                    contact_group_id: contact_group_id.to_string(),
+                    allowed_actions: allowed,
+                    denied_actions: denied,
+                }
+            },
+        )
         .collect();
     Ok(Json(list))
 }
@@ -2470,7 +2472,9 @@ async fn action_ids_for(
             Ok(None) => {
                 return Err((
                     StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"error": format!("Unknown permission action: {}", name)})),
+                    Json(
+                        serde_json::json!({"error": format!("Unknown permission action: {}", name)}),
+                    ),
                 ));
             }
             Err(e) => {

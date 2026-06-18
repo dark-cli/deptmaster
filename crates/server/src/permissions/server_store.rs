@@ -29,11 +29,7 @@ impl<'a> ServerPermissionStore<'a> {
 impl<'a> PermissionStore for ServerPermissionStore<'a> {
     type Error = DbError;
 
-    async fn is_wallet_owner(
-        &self,
-        wallet_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<bool, Self::Error> {
+    async fn is_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, Self::Error> {
         let is_owner: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM wallet_owners WHERE wallet_id = $1 AND user_id = $2)",
         )

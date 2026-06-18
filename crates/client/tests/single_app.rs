@@ -16,17 +16,15 @@ fn single_app_signup_create_contact_and_sync() {
     app1.initialize().expect("initialize");
     app1.signup().expect("signup");
 
-    app1
-        .run_commands(&["contact create \"Alice\" alice", "wait 300"])
+    app1.run_commands(&["contact create \"Alice\" alice", "wait 300"])
         .expect("run_commands");
 
-    app1
-        .assert_commands(&[
-            "contacts count 1",
-            "contact 0 name \"Alice\"",
-            "events count >= 1",
-        ])
-        .expect("assert_commands");
+    app1.assert_commands(&[
+        "contacts count 1",
+        "contact 0 name \"Alice\"",
+        "events count >= 1",
+    ])
+    .expect("assert_commands");
 }
 
 /// Single app with shared credentials: login then create contact and assert.
@@ -34,24 +32,19 @@ fn single_app_signup_create_contact_and_sync() {
 #[ignore]
 fn single_app_login_and_sync() {
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create_unique_test_user_and_wallet");
+    let (username, password, wallet_id) = create_unique_test_user_and_wallet(&server_url)
+        .expect("create_unique_test_user_and_wallet");
 
-    let app1 = AppInstance::with_credentials(
-        "app1",
-        &server_url,
-        username,
-        password,
-    );
+    let app1 = AppInstance::with_credentials("app1", &server_url, username, password);
     app1.initialize().expect("initialize");
     app1.login().expect("login");
     app1.select_wallet(&wallet_id).expect("select_wallet");
 
-    app1
-        .run_commands(&["contact create \"Bob\" bob", "wait 300"])
+    app1.run_commands(&["contact create \"Bob\" bob", "wait 300"])
         .expect("run_commands");
 
-    app1.assert_commands(&["contact name \"Bob\""]).expect("assert_commands");
+    app1.assert_commands(&["contact name \"Bob\""])
+        .expect("assert_commands");
 }
 
 /// Two apps (same user): app1 creates contact and syncs; app2 syncs and sees the contact.
@@ -59,15 +52,11 @@ fn single_app_login_and_sync() {
 #[ignore]
 fn two_apps_sync_via_server() {
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create_unique_test_user_and_wallet");
+    let (username, password, wallet_id) = create_unique_test_user_and_wallet(&server_url)
+        .expect("create_unique_test_user_and_wallet");
 
-    let app1 = AppInstance::with_credentials(
-        "app1",
-        &server_url,
-        username.clone(),
-        password.clone(),
-    );
+    let app1 =
+        AppInstance::with_credentials("app1", &server_url, username.clone(), password.clone());
     let app2 = AppInstance::with_credentials("app2", &server_url, username, password);
 
     app1.initialize().expect("initialize");
@@ -83,19 +72,20 @@ fn two_apps_sync_via_server() {
     let generator = EventGenerator::new(apps);
 
     generator
-        .execute_commands(&[
-            "app1: contact create \"Carol\" carol",
-            "app1: wait 300",
-        ])
+        .execute_commands(&["app1: contact create \"Carol\" carol", "app1: wait 300"])
         .expect("execute_commands");
 
     let app1_ref = generator.apps.get("app1").unwrap();
     let app2_ref = generator.apps.get("app2").unwrap();
     app1_ref.sync().expect("app1 sync (push)");
     std::thread::sleep(std::time::Duration::from_millis(300));
-    app2_ref.sync().expect("app2 sync (simulates WS notification)");
+    app2_ref
+        .sync()
+        .expect("app2 sync (simulates WS notification)");
 
-    app2_ref.assert_commands(&["contact name \"Carol\""]).expect("assert_commands");
+    app2_ref
+        .assert_commands(&["contact name \"Carol\""])
+        .expect("assert_commands");
 }
 
 /// Offline create then go online and sync: sync fails while offline, succeeds after go_online.
@@ -107,14 +97,20 @@ fn single_app_offline_create_then_online_sync() {
     app.initialize().expect("initialize");
     app.signup().expect("signup");
 
-    app.run_commands(&["contact create \"Online First\" contact1", "wait 300"]).expect("run_commands");
+    app.run_commands(&["contact create \"Online First\" contact1", "wait 300"])
+        .expect("run_commands");
     app.sync().expect("sync while online");
 
     app.go_offline().expect("go_offline");
-    app.run_commands(&["contact create \"Created Offline\" contact2"]).expect("create contact offline (local only)");
+    app.run_commands(&["contact create \"Created Offline\" contact2"])
+        .expect("create contact offline (local only)");
     let sync_offline = app.sync();
     let err = sync_offline.unwrap_err();
-    assert!(err.contains("Network offline"), "sync while offline should fail with Network offline; got {}", err);
+    assert!(
+        err.contains("Network offline"),
+        "sync while offline should fail with Network offline; got {}",
+        err
+    );
 
     app.go_online().expect("go_online");
     app.sync().expect("sync (as app does when WS connects)");
@@ -123,7 +119,8 @@ fn single_app_offline_create_then_online_sync() {
     app.assert_commands(&[
         "contact name \"Online First\"",
         "contact name \"Created Offline\"",
-    ]).expect("assert_commands");
+    ])
+    .expect("assert_commands");
 }
 
 /// Offline update then online sync (ported from Flutter offline_online_scenarios).
@@ -143,7 +140,8 @@ fn single_app_offline_update_then_online_sync() {
         "transaction create contact1 lent 800 \"T4\" t4",
         "transaction create contact1 owed 1500 \"T5\" t5",
         "wait 300",
-    ]).expect("run_commands (setup)");
+    ])
+    .expect("run_commands (setup)");
     app.sync().expect("sync while online");
 
     app.go_offline().expect("go_offline");
@@ -158,7 +156,8 @@ fn single_app_offline_update_then_online_sync() {
         "transaction create contact1 owed 1200 \"T7\" t7",
         "transaction update t6 amount 700",
         "transaction delete t5",
-    ]).expect("run_commands (offline updates)");
+    ])
+    .expect("run_commands (offline updates)");
 
     app.go_online().expect("go_online");
     app.sync().expect("sync after coming online");
@@ -169,7 +168,8 @@ fn single_app_offline_update_then_online_sync() {
         "contact name \"Updated Offline\"",
         "transactions count > 5",
         "events event_type UPDATED count >= 6",
-    ]).expect("assert_commands");
+    ])
+    .expect("assert_commands");
 }
 
 /// Single app: one contact, many transactions, updates, delete; assert final state and event counts.
@@ -205,7 +205,8 @@ fn single_app_many_events_then_assert() {
         "events count >= 12",
         "events event_type CREATED count >= 9",
         "events event_type UPDATED count >= 3",
-    ]).expect("assert_commands");
+    ])
+    .expect("assert_commands");
 }
 
 /// Multiple offline creates then online sync (ported from Flutter offline_online_scenarios).
@@ -246,7 +247,8 @@ fn single_app_multiple_offline_creates_then_online_sync() {
         "contact name \"Offline Contact 2\"",
         "contact name \"Offline Contact 3\"",
         "transactions count >= 8",
-    ]).expect("assert_commands");
+    ])
+    .expect("assert_commands");
 }
 
 /// Single app: multiple contacts and transactions, updates and deletes; assert final contacts and event count.
@@ -285,5 +287,6 @@ fn single_app_many_contacts_and_transactions() {
         "contact name \"Bob\"",
         "contact name \"Carol\"",
         "events count >= 15",
-    ]).expect("assert_commands");
+    ])
+    .expect("assert_commands");
 }

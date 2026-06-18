@@ -30,17 +30,21 @@ fn conflict_simultaneous_updates() {
         "app2: transaction update t5 description \"Updated by App2\"",
         "app3: transaction update t7 amount 1300",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync");
 
-    app1_ref.assert_commands(&[
-        "events count >= 18",
-        "events event_type UPDATED count >= 7",
-        "contacts count 1",
-        "transactions count > 8",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events count >= 18",
+            "events event_type UPDATED count >= 7",
+            "contacts count 1",
+            "transactions count > 8",
+        ])
+        .expect("assert_commands");
 }
 
 /// Update-delete conflict: one app updates, another deletes; delete wins for contact/transaction.
@@ -63,16 +67,20 @@ fn conflict_update_delete_resolution() {
         "app1: transaction update t4 amount 2000",
         "app2: transaction delete t4",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync");
 
-    app1_ref.assert_commands(&[
-        "contact name \"Contact to Conflict\" removed",
-        "contact name \"Updated Name\" removed",
-        "contacts count >= 1",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "contact name \"Contact to Conflict\" removed",
+            "contact name \"Updated Name\" removed",
+            "contacts count >= 1",
+        ])
+        .expect("assert_commands");
 }
 
 /// Offline update conflict: app1 offline updates, app2 online updates; both sync and resolve.

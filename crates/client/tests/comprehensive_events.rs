@@ -28,16 +28,22 @@ fn comprehensive_contact_event_types() {
         "app3: contact delete contact3",
         "app1: transaction delete t5",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events aggregate_type contact event_type CREATED count 3",
-        "events aggregate_type contact event_type UPDATED count 2",
-        "events aggregate_type contact event_type DELETED count 1",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events aggregate_type contact event_type CREATED count 3",
+            "events aggregate_type contact event_type UPDATED count 2",
+            "events aggregate_type contact event_type DELETED count 1",
+        ])
+        .expect("assert_commands");
 }
 
 /// Transaction event types: CREATED, UPDATED, DELETED (or UNDO).
@@ -67,15 +73,21 @@ fn comprehensive_transaction_event_types() {
         "app3: transaction delete t6",
         "app3: transaction delete t7",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events aggregate_type transaction event_type CREATED count >= 10",
-        "events aggregate_type transaction event_type UPDATED count >= 4",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events aggregate_type transaction event_type CREATED count >= 10",
+            "events aggregate_type transaction event_type UPDATED count >= 4",
+        ])
+        .expect("assert_commands");
 }
 
 /// Mixed operations: contacts and transactions from multiple apps; all event types present.
@@ -107,20 +119,26 @@ fn comprehensive_mixed_operations() {
         "app2: transaction delete t8",
         "app3: transaction create contact1 owed 1300 \"T12\" t12",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events aggregate_type contact count > 2",
-        "events aggregate_type transaction count > 15",
-        "events aggregate_type contact event_type CREATED count >= 1",
-        "events aggregate_type contact event_type UPDATED count >= 1",
-        "events aggregate_type transaction event_type CREATED count >= 1",
-        "events aggregate_type transaction event_type UPDATED count >= 1",
-        "events aggregate_type transaction event_type DELETED or UNDO count >= 1",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events aggregate_type contact count > 2",
+            "events aggregate_type transaction count > 15",
+            "events aggregate_type contact event_type CREATED count >= 1",
+            "events aggregate_type contact event_type UPDATED count >= 1",
+            "events aggregate_type transaction event_type CREATED count >= 1",
+            "events aggregate_type transaction event_type UPDATED count >= 1",
+            "events aggregate_type transaction event_type DELETED or UNDO count >= 1",
+        ])
+        .expect("assert_commands");
 }
 
 /// Concurrent mixed operations across all three apps.
@@ -157,15 +175,21 @@ fn comprehensive_concurrent_mixed_operations() {
         "app3: transaction delete t5",
         "app1: transaction delete t7",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events aggregate_type contact count 3",
-        "events aggregate_type transaction count > 20",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events aggregate_type contact count 3",
+            "events aggregate_type transaction count > 20",
+        ])
+        .expect("assert_commands");
 }
 
 /// Full lifecycle: create, update, delete for both contacts and transactions.
@@ -197,19 +221,25 @@ fn comprehensive_full_lifecycle() {
         "app3: contact delete contact1",
         "app3: transaction delete t1",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
-    app1_ref.sync().expect("app1 sync (simulates WS notification)");
+    app1_ref
+        .sync()
+        .expect("app1 sync (simulates WS notification)");
 
-    app1_ref.assert_commands(&[
-        "events aggregate_type contact event_type CREATED count 2",
-        "events aggregate_type contact event_type UPDATED count 1",
-        "events aggregate_type contact event_type DELETED count 1",
-        "events aggregate_type transaction event_type CREATED count >= 10",
-        "events aggregate_type transaction event_type UPDATED count > 2",
-        "events aggregate_type transaction event_type DELETED or UNDO count >= 1",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events aggregate_type contact event_type CREATED count 2",
+            "events aggregate_type contact event_type UPDATED count 1",
+            "events aggregate_type contact event_type DELETED count 1",
+            "events aggregate_type transaction event_type CREATED count >= 10",
+            "events aggregate_type transaction event_type UPDATED count > 2",
+            "events aggregate_type transaction event_type DELETED or UNDO count >= 1",
+        ])
+        .expect("assert_commands");
 }
 
 /// Complex multi-app scenario with 20+ events (ported from Flutter comprehensive_event_generator_test).
@@ -244,15 +274,19 @@ fn comprehensive_complex_multi_app_20_events() {
         "app2: transaction create bob lent 700 \"Extra 2\" t14",
         "app3: transaction create alice owed 900 \"Extra 3\" t15",
     ];
-    generator.execute_commands(&commands).expect("execute_commands");
+    generator
+        .execute_commands(&commands)
+        .expect("execute_commands");
     std::thread::sleep(std::time::Duration::from_millis(300));
     let app1_ref = generator.apps.get("app1").unwrap();
     app1_ref.sync().expect("app1 sync");
 
-    app1_ref.assert_commands(&[
-        "events count >= 20",
-        "events event_type UPDATED count > 0",
-        "contacts count >= 2",
-        "transactions count > 5",
-    ]).expect("assert_commands");
+    app1_ref
+        .assert_commands(&[
+            "events count >= 20",
+            "events event_type UPDATED count > 0",
+            "contacts count >= 2",
+            "transactions count > 5",
+        ])
+        .expect("assert_commands");
 }

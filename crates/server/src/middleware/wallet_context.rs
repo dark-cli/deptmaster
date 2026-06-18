@@ -1,5 +1,4 @@
 use crate::middleware::auth::AuthUser;
-use domain::WalletRole;
 use crate::AppState;
 use axum::extract::FromRequestParts;
 use axum::{
@@ -11,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use domain::WalletRole;
 use sqlx::Row;
 use uuid::Uuid;
 

@@ -45,8 +45,7 @@ pub struct DataChangeEvent {
     pub kind: DataChangeKind,
 }
 
-static DATA_SINK: Lazy<Mutex<Option<StreamSink<DataChangeEvent>>>> =
-    Lazy::new(|| Mutex::new(None));
+static DATA_SINK: Lazy<Mutex<Option<StreamSink<DataChangeEvent>>>> = Lazy::new(|| Mutex::new(None));
 
 /// Subscribe to data-change events. Dart calls this once at startup
 /// and listens to the returned Stream for the app's lifetime. If

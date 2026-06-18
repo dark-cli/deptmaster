@@ -128,7 +128,10 @@ async fn serial_calculate_and_store_matches_xor_reference() {
     .expect("read");
 
     let reference = xor_md5_reference(&event_ids);
-    assert_eq!(stored, reference, "serial folds don't match XOR-of-MD5 reference");
+    assert_eq!(
+        stored, reference,
+        "serial folds don't match XOR-of-MD5 reference"
+    );
 
     // XOR is its own inverse: re-folding the same events cancels them.
     // This is the property that lets the server safely re-process

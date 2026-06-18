@@ -31,8 +31,7 @@ fn parse_args(input: &str) -> Vec<String> {
 fn unquote(s: &str) -> String {
     let s = s.trim();
     if s.len() >= 2
-        && ((s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\'')))
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
     {
         s[1..s.len() - 1].to_string()
     } else {
@@ -68,12 +67,7 @@ pub fn assert_commands(
         if cmd.is_empty() || cmd.starts_with('#') {
             continue;
         }
-        run_one(
-            cmd,
-            &contacts,
-            &events,
-            &transactions,
-        )?;
+        run_one(cmd, &contacts, &events, &transactions)?;
     }
     Ok(())
 }
@@ -121,20 +115,34 @@ fn run_one(
     if action == "contact" {
         if args.len() >= 3 && args[1].to_lowercase() == "name" {
             let name = unquote(args[2]);
-            let removed = args.get(3).map(|s| s.to_lowercase() == "removed").unwrap_or(false);
-            let found = contacts.iter().any(|c| c["name"].as_str() == Some(name.as_str()));
+            let removed = args
+                .get(3)
+                .map(|s| s.to_lowercase() == "removed")
+                .unwrap_or(false);
+            let found = contacts
+                .iter()
+                .any(|c| c["name"].as_str() == Some(name.as_str()));
             if removed {
                 if found {
-                    return Err(format!("contact name \"{}\" should be removed; got {:?}", name, contacts));
+                    return Err(format!(
+                        "contact name \"{}\" should be removed; got {:?}",
+                        name, contacts
+                    ));
                 }
             } else if !found {
-                return Err(format!("contact name \"{}\" not found; got {:?}", name, contacts));
+                return Err(format!(
+                    "contact name \"{}\" not found; got {:?}",
+                    name, contacts
+                ));
             }
             return Ok(());
         }
         if args.len() >= 4 && args[1] == "0" && args[2].to_lowercase() == "name" {
             let name = unquote(args[3]);
-            let first = contacts.first().and_then(|c| c["name"].as_str()).unwrap_or("");
+            let first = contacts
+                .first()
+                .and_then(|c| c["name"].as_str())
+                .unwrap_or("");
             if first != name {
                 return Err(format!("contact 0 name \"{}\"; got \"{}\"", name, first));
             }
@@ -218,7 +226,10 @@ fn run_one(
         if args.len() >= 5 && args[1].to_lowercase() == "event_type" {
             let event_type = args[2].to_uppercase();
             if args[3].to_lowercase() != "count" {
-                return Err(format!("events event_type X count [>=|>] n; got {:?}", args));
+                return Err(format!(
+                    "events event_type X count [>=|>] n; got {:?}",
+                    args
+                ));
             }
             let (n, op_ge, op_gt) = if args.len() >= 6 && args[4] == ">=" {
                 (args[5].parse::<usize>().ok(), true, false)
@@ -227,23 +238,39 @@ fn run_one(
             } else {
                 (args.get(4).and_then(|s| s.parse().ok()), false, false)
             };
-            let n = n.ok_or_else(|| format!("events event_type count: need number, got {:?}", args))?;
-            let count = events.iter().filter(|e| e["event_type"].as_str() == Some(event_type.as_str())).count();
+            let n =
+                n.ok_or_else(|| format!("events event_type count: need number, got {:?}", args))?;
+            let count = events
+                .iter()
+                .filter(|e| e["event_type"].as_str() == Some(event_type.as_str()))
+                .count();
             if op_ge {
                 if count < n {
-                    return Err(format!("events event_type {} count >= {}; got {}", event_type, n, count));
+                    return Err(format!(
+                        "events event_type {} count >= {}; got {}",
+                        event_type, n, count
+                    ));
                 }
             } else if op_gt {
                 if count <= n {
-                    return Err(format!("events event_type {} count > {}; got {}", event_type, n, count));
+                    return Err(format!(
+                        "events event_type {} count > {}; got {}",
+                        event_type, n, count
+                    ));
                 }
             } else if count != n {
-                return Err(format!("events event_type {} count {}; got {}", event_type, n, count));
+                return Err(format!(
+                    "events event_type {} count {}; got {}",
+                    event_type, n, count
+                ));
             }
             return Ok(());
         }
         // events aggregate_type contact count >= n | events aggregate_type transaction count > n
-        if args.len() >= 5 && args[1].to_lowercase() == "aggregate_type" && args[3].to_lowercase() == "count" {
+        if args.len() >= 5
+            && args[1].to_lowercase() == "aggregate_type"
+            && args[3].to_lowercase() == "count"
+        {
             let agg = args[2].to_lowercase();
             let (n, op_ge, op_gt) = if args.len() >= 6 && args[4] == ">=" {
                 (args[5].parse::<usize>().ok(), true, false)
@@ -252,42 +279,71 @@ fn run_one(
             } else {
                 (args.get(4).and_then(|s| s.parse().ok()), false, false)
             };
-            let n = n.ok_or_else(|| format!("events aggregate_type count: need number, got {:?}", args))?;
-            let count = events.iter()
-                .filter(|e| e["aggregate_type"].as_str().map(|s| s.to_lowercase()) == Some(agg.clone()))
+            let n = n.ok_or_else(|| {
+                format!("events aggregate_type count: need number, got {:?}", args)
+            })?;
+            let count = events
+                .iter()
+                .filter(|e| {
+                    e["aggregate_type"].as_str().map(|s| s.to_lowercase()) == Some(agg.clone())
+                })
                 .count();
             if op_ge {
                 if count < n {
-                    return Err(format!("events aggregate_type {} count >= {}; got {}", agg, n, count));
+                    return Err(format!(
+                        "events aggregate_type {} count >= {}; got {}",
+                        agg, n, count
+                    ));
                 }
             } else if op_gt {
                 if count <= n {
-                    return Err(format!("events aggregate_type {} count > {}; got {}", agg, n, count));
+                    return Err(format!(
+                        "events aggregate_type {} count > {}; got {}",
+                        agg, n, count
+                    ));
                 }
             } else if count != n {
-                return Err(format!("events aggregate_type {} count {}; got {}", agg, n, count));
+                return Err(format!(
+                    "events aggregate_type {} count {}; got {}",
+                    agg, n, count
+                ));
             }
             return Ok(());
         }
         // events aggregate_type transaction event_type DELETED or UNDO count >= 1  (10 args)
-        if args.len() >= 10 && args[1].to_lowercase() == "aggregate_type" && args[3].to_lowercase() == "event_type" && args[5].to_lowercase() == "or" && args[7].to_lowercase() == "count" {
+        if args.len() >= 10
+            && args[1].to_lowercase() == "aggregate_type"
+            && args[3].to_lowercase() == "event_type"
+            && args[5].to_lowercase() == "or"
+            && args[7].to_lowercase() == "count"
+        {
             let agg = args[2].to_lowercase();
             let n: usize = args.get(9).and_then(|s| s.parse().ok())
                 .ok_or_else(|| format!("events aggregate_type event_type DELETED or UNDO count >= n; need number, got {:?}", args))?;
-            let count = events.iter()
-                .filter(|e| e["aggregate_type"].as_str().map(|s| s.to_lowercase()) == Some(agg.clone()))
+            let count = events
+                .iter()
+                .filter(|e| {
+                    e["aggregate_type"].as_str().map(|s| s.to_lowercase()) == Some(agg.clone())
+                })
                 .filter(|e| {
                     let et = e["event_type"].as_str();
                     et == Some("DELETED") || et == Some("UNDO")
                 })
                 .count();
             if count < n {
-                return Err(format!("events aggregate_type {} event_type DELETED or UNDO count >= {}; got {}", agg, n, count));
+                return Err(format!(
+                    "events aggregate_type {} event_type DELETED or UNDO count >= {}; got {}",
+                    agg, n, count
+                ));
             }
             return Ok(());
         }
         // events aggregate_type contact event_type CREATED count 3 | count >= 10 | count > 2  (7–8 args)
-        if args.len() >= 7 && args[1].to_lowercase() == "aggregate_type" && args[3].to_lowercase() == "event_type" && args[5].to_lowercase() == "count" {
+        if args.len() >= 7
+            && args[1].to_lowercase() == "aggregate_type"
+            && args[3].to_lowercase() == "event_type"
+            && args[5].to_lowercase() == "count"
+        {
             let agg = args[2].to_lowercase();
             let event_type_raw = args[4].to_uppercase();
             let (n, op_ge, op_gt) = if args.len() >= 8 && args[6] == ">=" {
@@ -297,21 +353,38 @@ fn run_one(
             } else {
                 (args.get(6).and_then(|s| s.parse().ok()), false, false)
             };
-            let n = n.ok_or_else(|| format!("events aggregate_type event_type count: need number, got {:?}", args))?;
-            let count = events.iter()
-                .filter(|e| e["aggregate_type"].as_str().map(|s| s.to_lowercase()) == Some(agg.clone()))
+            let n = n.ok_or_else(|| {
+                format!(
+                    "events aggregate_type event_type count: need number, got {:?}",
+                    args
+                )
+            })?;
+            let count = events
+                .iter()
+                .filter(|e| {
+                    e["aggregate_type"].as_str().map(|s| s.to_lowercase()) == Some(agg.clone())
+                })
                 .filter(|e| e["event_type"].as_str() == Some(event_type_raw.as_str()))
                 .count();
             if op_ge {
                 if count < n {
-                    return Err(format!("events aggregate_type {} event_type {} count >= {}; got {}", agg, event_type_raw, n, count));
+                    return Err(format!(
+                        "events aggregate_type {} event_type {} count >= {}; got {}",
+                        agg, event_type_raw, n, count
+                    ));
                 }
             } else if op_gt {
                 if count <= n {
-                    return Err(format!("events aggregate_type {} event_type {} count > {}; got {}", agg, event_type_raw, n, count));
+                    return Err(format!(
+                        "events aggregate_type {} event_type {} count > {}; got {}",
+                        agg, event_type_raw, n, count
+                    ));
                 }
             } else if count != n {
-                return Err(format!("events aggregate_type {} event_type {} count {}; got {}", agg, event_type_raw, n, count));
+                return Err(format!(
+                    "events aggregate_type {} event_type {} count {}; got {}",
+                    agg, event_type_raw, n, count
+                ));
             }
             return Ok(());
         }
@@ -328,15 +401,27 @@ fn run_one(
                 .ok_or_else(|| format!("transactions count: need number, got {:?}", args))?;
             if args.len() >= 4 && args[2] == ">" {
                 if transactions.len() <= n {
-                    return Err(format!("transactions count > {}; got {}", n, transactions.len()));
+                    return Err(format!(
+                        "transactions count > {}; got {}",
+                        n,
+                        transactions.len()
+                    ));
                 }
             } else if args.len() >= 4 && args[2] == ">=" {
                 if transactions.len() < n {
-                    return Err(format!("transactions count >= {}; got {}", n, transactions.len()));
+                    return Err(format!(
+                        "transactions count >= {}; got {}",
+                        n,
+                        transactions.len()
+                    ));
                 }
             } else {
                 if transactions.len() != n {
-                    return Err(format!("transactions count {}; got {}", n, transactions.len()));
+                    return Err(format!(
+                        "transactions count {}; got {}",
+                        n,
+                        transactions.len()
+                    ));
                 }
             }
             return Ok(());

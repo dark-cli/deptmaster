@@ -113,7 +113,10 @@ fn server_broadcasts_events_synced_when_transaction_created() {
 
     // Sanity: the broadcast carries something identifying it as the
     // sync trigger (the existing server code passes source="sync").
-    let source = received.get("source").and_then(|v| v.as_str()).unwrap_or("");
+    let source = received
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     assert!(
         source == "sync" || source.is_empty(),
         "unexpected events_synced source: {}",

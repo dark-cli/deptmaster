@@ -1,24 +1,20 @@
 {
   "main": {
-    "id": "9af14c9922ad9252",
+    "id": "df7417663350dd72",
     "type": "split",
     "children": [
       {
-        "id": "1f3b7eaacd16a5cb",
+        "id": "8964e9949bbdd17c",
         "type": "tabs",
         "children": [
           {
-            "id": "1b21b235138f2619",
+            "id": "1391b4bc9fafa71a",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "06-client/00-overview.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "00-overview"
+              "title": "New tab"
             }
           }
         ]
@@ -27,15 +23,15 @@
     "direction": "vertical"
   },
   "left": {
-    "id": "d322ac85b93b4677",
+    "id": "2b8a3b3e73551627",
     "type": "split",
     "children": [
       {
-        "id": "c81162b6d9a63ddf",
+        "id": "a16a7009f5a6d143",
         "type": "tabs",
         "children": [
           {
-            "id": "d7e45c260aa8c8c3",
+            "id": "f406b263e5dd28ed",
             "type": "leaf",
             "state": {
               "type": "file-explorer",
@@ -48,7 +44,7 @@
             }
           },
           {
-            "id": "3f6504edf24593a6",
+            "id": "14f5fbb9fd445f04",
             "type": "leaf",
             "state": {
               "type": "search",
@@ -65,7 +61,7 @@
             }
           },
           {
-            "id": "d849a33a1352bb39",
+            "id": "03dc5aa8ad96cd02",
             "type": "leaf",
             "state": {
               "type": "bookmarks",
@@ -78,23 +74,22 @@
       }
     ],
     "direction": "horizontal",
-    "width": 428.51103591918945
+    "width": 300
   },
   "right": {
-    "id": "4185b8121e38160f",
+    "id": "d29974e61bbf7923",
     "type": "split",
     "children": [
       {
-        "id": "03b0c031f7f20b62",
+        "id": "2f350d1481cf34e2",
         "type": "tabs",
         "children": [
           {
-            "id": "46e69185cb006061",
+            "id": "1354abba7eee238c",
             "type": "leaf",
             "state": {
               "type": "backlink",
               "state": {
-                "file": "architecture.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,25 +99,24 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for architecture"
+              "title": "Backlinks"
             }
           },
           {
-            "id": "be8012c4eff0b362",
+            "id": "36cdaacc2a5ce863",
             "type": "leaf",
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "architecture.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from architecture"
+              "title": "Outgoing links"
             }
           },
           {
-            "id": "f58f561f92dedd62",
+            "id": "87ab2d4af03a1bdc",
             "type": "leaf",
             "state": {
               "type": "tag",
@@ -137,7 +131,7 @@
             }
           },
           {
-            "id": "d6f866df97e84790",
+            "id": "eab6736ca36baf30",
             "type": "leaf",
             "state": {
               "type": "all-properties",
@@ -151,18 +145,17 @@
             }
           },
           {
-            "id": "30549365d0af7699",
+            "id": "20b4890918d837d9",
             "type": "leaf",
             "state": {
               "type": "outline",
               "state": {
-                "file": "architecture.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of architecture"
+              "title": "Outline"
             }
           }
         ]
@@ -183,43 +176,6 @@
       "bases:Create new base": false
     }
   },
-  "active": "1b21b235138f2619",
-  "lastOpenFiles": [
-    "client-backend-security.md.tmp.212282.7dbba2178f91",
-    "database-setup.md.tmp.212282.48dc3cd0d125",
-    "client-todo.md.tmp.212282.a7922c707ff9",
-    "99-reference/01-glossary.md.tmp.212282.da24266e7253",
-    "03-snapshots/04-snapshot-tables-schema.md.tmp.212282.dcd542d4cb8b",
-    "02-projections/03-projection-rebuilds.md.tmp.212282.486c7991b9e5",
-    "05-implementation-patterns/02-code-organization.md.tmp.212282.9dd8bf1d6ab3",
-    "00-getting-started/04-main-architecture.md.tmp.212282.24f554a00dbc",
-    "00-getting-started/04-main-architecture.md.tmp.212282.e451533a0f3a",
-    "00-getting-started/04-main-architecture.md.tmp.212282.9aeafb748091",
-    "00-getting-started/04-main-architecture.md.tmp.212282.f7fdabbee37b",
-    "06-client/00-refactoring-plan.md",
-    "09-design/02-animation-guidelines.md",
-    "09-design/01-theme-catalog.md",
-    "06-client/04-test-baseline-2026-06-08.md",
-    "06-client/03-api-contract-audit.md",
-    "06-client/00-overview.md",
-    "06-client/01-design-notes.md",
-    "06-client/02-shared-domain-crate.md",
-    "database-crate-separation.md",
-    "migration-guidelines.md",
-    "migration-guide.md",
-    "database-setup.md",
-    "client-todo.md",
-    "client-backend-security.md",
-    "backend-todo.md",
-    "MEMORY.md",
-    "99-reference/01-glossary.md",
-    "08-wallet-refactoring/README.md",
-    "08-wallet-refactoring/01-wallets-2-0-refactoring-plan.md",
-    "07-advanced-topics/03-performance-benchmarks.md",
-    "07-advanced-topics/02-consistency-verification.md",
-    "07-advanced-topics/01-memory-bounds-analysis.md",
-    "06-advanced-extensions/03-expense-events-walkthrough.md",
-    "06-advanced-extensions/02-team-events-walkthrough.md",
-    "06-advanced-extensions/01-user-events-walkthrough.md"
-  ]
+  "active": "1391b4bc9fafa71a",
+  "lastOpenFiles": []
 }

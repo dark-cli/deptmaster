@@ -59,11 +59,7 @@ pub trait PermissionStore {
 
     /// True iff `user_id` is recorded as an owner of `wallet_id`. Owners
     /// short-circuit to "all actions allowed."
-    async fn is_wallet_owner(
-        &self,
-        wallet_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<bool, Self::Error>;
+    async fn is_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, Self::Error>;
 
     /// IDs of every user_group the user is a member of in this wallet,
     /// INCLUDING the implicit `all_users` system group (every wallet
@@ -119,10 +115,7 @@ pub async fn resolve_actions<S: PermissionStore + Sync>(
     ctx: &PermissionContext,
     resource: &Resource,
 ) -> Result<HashSet<Action>, S::Error> {
-    if store
-        .is_wallet_owner(ctx.wallet_id, ctx.user_id)
-        .await?
-    {
+    if store.is_wallet_owner(ctx.wallet_id, ctx.user_id).await? {
         return Ok(Action::all().iter().copied().collect());
     }
 
@@ -200,7 +193,11 @@ pub async fn permitted_contacts_for_action<S: PermissionStore + Sync>(
         } else {
             store.contact_ids_in_group(row.contact_group_id).await?
         };
-        let target = if row.is_deny { &mut denied } else { &mut allowed };
+        let target = if row.is_deny {
+            &mut denied
+        } else {
+            &mut allowed
+        };
         target.extend(contacts_in_row_scope);
     }
 

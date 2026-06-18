@@ -2,6 +2,7 @@ pub mod contacts;
 pub mod events;
 pub mod hash;
 pub mod permissions;
+pub mod refresh_tokens;
 pub mod server_projection;
 pub mod snapshots;
 pub mod transactions;
@@ -26,10 +27,8 @@ pub trait DatabaseRepository: Send + Sync {
         since_timestamp: DateTime<Utc>,
     ) -> Result<Vec<domain::DomainEvent>, DbError>;
 
-    async fn get_event_by_id(
-        &self,
-        event_id: Uuid,
-    ) -> Result<Option<domain::DomainEvent>, DbError>;
+    async fn get_event_by_id(&self, event_id: Uuid)
+        -> Result<Option<domain::DomainEvent>, DbError>;
 
     async fn get_latest_event_id(&self) -> Result<Option<i64>, DbError>;
 

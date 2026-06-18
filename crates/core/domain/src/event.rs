@@ -121,7 +121,9 @@ impl EventType {
             "USER_GROUP_MEMBER_ADDED" => Some(EventType::UserGroupMemberAdded),
             "USER_GROUP_MEMBER_REMOVED" => Some(EventType::UserGroupMemberRemoved),
             "CONTACT_GROUP_CREATED" => Some(EventType::ContactGroupCreated),
-            "CONTACT_GROUP_RENAMED" | "CONTACT_GROUP_UPDATED" => Some(EventType::ContactGroupUpdated),
+            "CONTACT_GROUP_RENAMED" | "CONTACT_GROUP_UPDATED" => {
+                Some(EventType::ContactGroupUpdated)
+            }
             "CONTACT_GROUP_DELETED" => Some(EventType::ContactGroupDeleted),
             "CONTACT_GROUP_MEMBER_ADDED" => Some(EventType::ContactGroupMemberAdded),
             "CONTACT_GROUP_MEMBER_REMOVED" => Some(EventType::ContactGroupMemberRemoved),
@@ -365,10 +367,7 @@ impl EventData {
     /// variant to either enum is a compile error here. This is the
     /// reverse of [`serde_tag`] and the only path from DB-string-pair
     /// back to a tag used by `parse_event_data_typed`.
-    pub fn serde_tag_for(
-        aggregate: AggregateType,
-        event_type: EventType,
-    ) -> Option<&'static str> {
+    pub fn serde_tag_for(aggregate: AggregateType, event_type: EventType) -> Option<&'static str> {
         use AggregateType as A;
         use EventType as E;
         match event_type {

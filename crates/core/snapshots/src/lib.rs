@@ -220,9 +220,11 @@ mod tests {
     #[test]
     fn batch_has_undo_detects_an_undo_anywhere_in_the_batch() {
         assert!(!batch_has_undo([EventType::Created, EventType::Updated]));
-        assert!(batch_has_undo(
-            [EventType::Created, EventType::Undo, EventType::Updated]
-        ));
+        assert!(batch_has_undo([
+            EventType::Created,
+            EventType::Undo,
+            EventType::Updated
+        ]));
         assert!(batch_has_undo([EventType::Undo]));
         let empty: [EventType; 0] = [];
         assert!(!batch_has_undo(empty));

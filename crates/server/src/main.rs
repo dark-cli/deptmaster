@@ -129,6 +129,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/auth/register",
             axum::routing::post(handlers::register),
         ) // Sign up
+        .route(
+            "/api/auth/refresh",
+            axum::routing::post(handlers::refresh),
+        ) // Trade refresh token for fresh access+refresh pair
         .route("/api/auth/admin/login", post(handlers::admin_login)) // Admin login
         .route("/admin", get(handlers::admin_panel)) // Admin page HTML is public (login form)
         .route("/config.js", get(handlers::config_js)) // Admin config.js (optional, returns empty if not exists)
@@ -236,6 +240,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/auth/change-password",
             axum::routing::put(handlers::change_password),
+        )
+        .route(
+            "/api/auth/logout",
+            axum::routing::post(handlers::logout),
         )
         .route(
             "/api/wallets",

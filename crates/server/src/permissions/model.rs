@@ -3,9 +3,9 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 use uuid::Uuid;
 
+use super::resolver;
 use domain::Action;
 use domain::PermissionContext;
-use super::resolver;
 use domain::Resource;
 
 /// Permission Model - Single source of truth for all permission checks

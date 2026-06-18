@@ -44,16 +44,25 @@ pub fn connect_realtime() -> Result<(), String> {
         }
     }
 
-    let token = crate::get_token()
-        .map_err(|e| { rust_log!("[debitum_rs] connect_realtime: no token: {}", e); e })?;
-    let wallet_id = crate::get_current_wallet_id()
-        .map_err(|e| { rust_log!("[debitum_rs] connect_realtime: no wallet: {}", e); e })?;
-    let ws_url = crate::get_ws_url()
-        .map_err(|e| { rust_log!("[debitum_rs] connect_realtime: no ws_url: {}", e); e })?;
+    let token = crate::get_token().map_err(|e| {
+        rust_log!("[debitum_rs] connect_realtime: no token: {}", e);
+        e
+    })?;
+    let wallet_id = crate::get_current_wallet_id().map_err(|e| {
+        rust_log!("[debitum_rs] connect_realtime: no wallet: {}", e);
+        e
+    })?;
+    let ws_url = crate::get_ws_url().map_err(|e| {
+        rust_log!("[debitum_rs] connect_realtime: no ws_url: {}", e);
+        e
+    })?;
 
     let cancel = Arc::new(Notify::new());
     *CANCEL.lock().unwrap() = Some(cancel.clone());
-    rust_log!("[debitum_rs] connect_realtime spawning worker (wallet={})", wallet_id);
+    rust_log!(
+        "[debitum_rs] connect_realtime spawning worker (wallet={})",
+        wallet_id
+    );
 
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()

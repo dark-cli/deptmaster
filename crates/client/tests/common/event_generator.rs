@@ -43,7 +43,10 @@ impl EventGenerator {
     pub fn execute_command(&self, command: &str) -> Result<(), String> {
         let parts: Vec<&str> = command.splitn(2, ':').collect();
         if parts.len() != 2 {
-            return Err(format!("Invalid command format: {}. Expected: \"app: action\"", command));
+            return Err(format!(
+                "Invalid command format: {}. Expected: \"app: action\"",
+                command
+            ));
         }
         let app_name = parts[0].trim();
         let action_part = parts[1].trim();

@@ -2,11 +2,11 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 use uuid::Uuid;
 
+use super::queries;
+use crate::database::error::DbError;
 use domain::Action;
 use domain::PermissionContext;
-use super::queries;
 use domain::Resource;
-use crate::database::error::DbError;
 
 /// Check if user is a wallet owner (stored in wallet_owners table)
 async fn is_wallet_owner(pool: &PgPool, wallet_id: Uuid, user_id: Uuid) -> Result<bool, DbError> {

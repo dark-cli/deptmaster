@@ -1,9 +1,9 @@
 // Test helpers for setting up test database and data
 
 use chrono::Utc;
+use domain::WalletRole;
 use server::middleware::auth::AuthUser;
 use server::middleware::wallet_context::WalletContext;
-use domain::WalletRole;
 use sqlx::PgPool;
 use std::str::FromStr;
 use uuid::Uuid;

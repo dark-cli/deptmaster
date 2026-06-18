@@ -1443,7 +1443,7 @@ fn wire__crate__storage__clear_all_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::clear_all()?;
+                    let output_ok = crate::database::clear_all()?;
                     Ok(output_ok)
                 })())
             }
@@ -1476,7 +1476,7 @@ fn wire__crate__storage__clear_wallet_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::clear_wallet(&api_wallet_id)?;
+                    let output_ok = crate::database::clear_wallet(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -1575,7 +1575,7 @@ fn wire__crate__storage__config_get_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::config_get(&api_key)?;
+                    let output_ok = crate::database::config_get(&api_key)?;
                     Ok(output_ok)
                 })())
             }
@@ -1608,7 +1608,7 @@ fn wire__crate__storage__config_remove_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::config_remove(&api_key)?;
+                    let output_ok = crate::database::config_remove(&api_key)?;
                     Ok(output_ok)
                 })())
             }
@@ -1642,7 +1642,7 @@ fn wire__crate__storage__config_set_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::config_set(&api_key, &api_value)?;
+                    let output_ok = crate::database::config_set(&api_key, &api_value)?;
                     Ok(output_ok)
                 })())
             }
@@ -2771,7 +2771,7 @@ fn wire__crate__storage__events_count_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_count(&api_wallet_id)?;
+                    let output_ok = crate::database::events_count(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2804,7 +2804,7 @@ fn wire__crate__storage__events_delete_all_for_wallet_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_delete_all_for_wallet(&api_wallet_id)?;
+                    let output_ok = crate::database::events_delete_all_for_wallet(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2837,7 +2837,7 @@ fn wire__crate__storage__events_delete_unsynced_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_delete_unsynced(&api_wallet_id)?;
+                    let output_ok = crate::database::events_delete_unsynced(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2870,7 +2870,7 @@ fn wire__crate__storage__events_get_all_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_get_all(&api_wallet_id)?;
+                    let output_ok = crate::database::events_get_all(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2905,7 +2905,7 @@ fn wire__crate__storage__events_get_for_aggregate_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_get_for_aggregate(
+                    let output_ok = crate::database::events_get_for_aggregate(
                         &api_wallet_id,
                         &api_aggregate_type,
                         &api_aggregate_id,
@@ -2942,7 +2942,7 @@ fn wire__crate__storage__events_get_unsynced_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_get_unsynced(&api_wallet_id)?;
+                    let output_ok = crate::database::events_get_unsynced(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2971,11 +2971,11 @@ fn wire__crate__storage__events_insert_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_e = <crate::storage::StoredEvent>::sse_decode(&mut deserializer);
+            let api_e = <crate::database::StoredEvent>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_insert(&api_e)?;
+                    let output_ok = crate::database::events_insert(&api_e)?;
                     Ok(output_ok)
                 })())
             }
@@ -3008,7 +3008,7 @@ fn wire__crate__storage__events_mark_synced_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_mark_synced(&api_ids)?;
+                    let output_ok = crate::database::events_mark_synced(&api_ids)?;
                     Ok(output_ok)
                 })())
             }
@@ -3042,7 +3042,7 @@ fn wire__crate__storage__events_update_event_data_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::events_update_event_data(
+                    let output_ok = crate::database::events_update_event_data(
                         &api_event_id,
                         &api_event_data_json,
                     )?;
@@ -3891,7 +3891,7 @@ fn wire__crate__storage__init_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::init(&api_path)?;
+                    let output_ok = crate::database::init(&api_path)?;
                     Ok(output_ok)
                 })())
             }
@@ -4087,7 +4087,7 @@ fn wire__crate__storage__is_ready_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
-                    let output_ok = Result::<_, ()>::Ok(crate::storage::is_ready())?;
+                    let output_ok = Result::<_, ()>::Ok(crate::database::is_ready())?;
                     Ok(output_ok)
                 })())
             }
@@ -4654,7 +4654,7 @@ fn wire__crate__storage__load_contacts_from_tables_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::load_contacts_from_tables(&api_wallet_id)?;
+                    let output_ok = crate::database::load_contacts_from_tables(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -4687,7 +4687,7 @@ fn wire__crate__storage__load_transactions_from_tables_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::storage::load_transactions_from_tables(&api_wallet_id)?;
+                    let output_ok = crate::database::load_transactions_from_tables(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -6566,13 +6566,13 @@ impl SseDecode for Vec<u8> {
     }
 }
 
-impl SseDecode for Vec<crate::storage::StoredEvent> {
+impl SseDecode for Vec<crate::database::StoredEvent> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut len_ = <i32>::sse_decode(deserializer);
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
-            ans_.push(<crate::storage::StoredEvent>::sse_decode(deserializer));
+            ans_.push(<crate::database::StoredEvent>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -6635,7 +6635,7 @@ impl SseDecode for Option<Vec<String>> {
     }
 }
 
-impl SseDecode for crate::storage::StoredEvent {
+impl SseDecode for crate::database::StoredEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
@@ -6647,7 +6647,7 @@ impl SseDecode for crate::storage::StoredEvent {
         let mut var_timestamp = <String>::sse_decode(deserializer);
         let mut var_version = <i32>::sse_decode(deserializer);
         let mut var_synced = <bool>::sse_decode(deserializer);
-        return crate::storage::StoredEvent {
+        return crate::database::StoredEvent {
             id: var_id,
             wallet_id: var_walletId,
             aggregate_type: var_aggregateType,
@@ -7319,7 +7319,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::JwtPayload> for crate::JwtPayload 
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::storage::StoredEvent {
+impl flutter_rust_bridge::IntoDart for crate::database::StoredEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.id.into_into_dart().into_dart(),
@@ -7335,11 +7335,11 @@ impl flutter_rust_bridge::IntoDart for crate::storage::StoredEvent {
         .into_dart()
     }
 }
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::storage::StoredEvent {}
-impl flutter_rust_bridge::IntoIntoDart<crate::storage::StoredEvent>
-    for crate::storage::StoredEvent
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::database::StoredEvent {}
+impl flutter_rust_bridge::IntoIntoDart<crate::database::StoredEvent>
+    for crate::database::StoredEvent
 {
-    fn into_into_dart(self) -> crate::storage::StoredEvent {
+    fn into_into_dart(self) -> crate::database::StoredEvent {
         self
     }
 }
@@ -7736,12 +7736,12 @@ impl SseEncode for Vec<u8> {
     }
 }
 
-impl SseEncode for Vec<crate::storage::StoredEvent> {
+impl SseEncode for Vec<crate::database::StoredEvent> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
-            <crate::storage::StoredEvent>::sse_encode(item, serializer);
+            <crate::database::StoredEvent>::sse_encode(item, serializer);
         }
     }
 }
@@ -7796,7 +7796,7 @@ impl SseEncode for Option<Vec<String>> {
     }
 }
 
-impl SseEncode for crate::storage::StoredEvent {
+impl SseEncode for crate::database::StoredEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);

@@ -1,10 +1,10 @@
 use crate::database::error::DbError;
 use crate::database::models::event::{Event, EventRow};
 use crate::database::repository::Database;
-use domain::DomainEvent;
 use crate::permissions::PermissionModel;
-use domain::PermissionContext;
 use chrono::{DateTime, NaiveDateTime, Utc};
+use domain::DomainEvent;
+use domain::PermissionContext;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -51,8 +51,8 @@ impl Database {
         // Parse the DB's (aggregate, event_type) string pair into typed
         // domain enums, then resolve the serde discriminator the same
         // way the rest of the codebase does — one source of truth.
-        let aggregate = domain::AggregateType::from_str(&event.aggregate_type)
-            .ok_or_else(|| {
+        let aggregate =
+            domain::AggregateType::from_str(&event.aggregate_type).ok_or_else(|| {
                 DbError::SerializationError(format!(
                     "Unknown aggregate_type: {}",
                     event.aggregate_type
@@ -77,11 +77,10 @@ impl Database {
             );
         }
 
-        let event_data =
-            serde_json::from_value::<domain::EventData>(event_data_with_type)
-                .map_err(|e| {
-                    DbError::SerializationError(format!("Failed to deserialize event data: {}", e))
-                })?;
+        let event_data = serde_json::from_value::<domain::EventData>(event_data_with_type)
+            .map_err(|e| {
+                DbError::SerializationError(format!("Failed to deserialize event data: {}", e))
+            })?;
 
         Ok(DomainEvent {
             id: event.id,
@@ -329,8 +328,8 @@ impl Database {
         // For each event, check which users can read it and populate cache
         for event in events {
             for (wallet_user_id, role_str) in &wallet_users {
-                let user_role = domain::WalletRole::from_str(role_str)
-                    .unwrap_or(domain::WalletRole::Member);
+                let user_role =
+                    domain::WalletRole::from_str(role_str).unwrap_or(domain::WalletRole::Member);
                 let user_perm_ctx = PermissionContext::new(wallet_id, *wallet_user_id, user_role);
 
                 // Check if user can read this event
@@ -498,7 +497,8 @@ impl Database {
                         wallet_id,
                         user_id,
                         created_at: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
-                            created_at, chrono::Utc,
+                            created_at,
+                            chrono::Utc,
                         ),
                         version: 1,
                         event_data: event_data.clone(),
@@ -520,7 +520,8 @@ impl Database {
                         wallet_id,
                         user_id,
                         created_at: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
-                            created_at, chrono::Utc,
+                            created_at,
+                            chrono::Utc,
                         ),
                         version: 1,
                         event_data: event_data.clone(),
@@ -544,7 +545,8 @@ impl Database {
                         wallet_id,
                         user_id,
                         created_at: chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
-                            created_at, chrono::Utc,
+                            created_at,
+                            chrono::Utc,
                         ),
                         version: 1,
                         event_data: event_data.clone(),
@@ -583,14 +585,13 @@ impl Database {
             .ok_or_else(|| format!("Unknown aggregate type: {}", aggregate_type_str))?;
         let event_type = domain::EventType::from_str(event_type_str)
             .ok_or_else(|| format!("Unknown event type: {}", event_type_str))?;
-        let tag = domain::EventData::serde_tag_for(aggregate_type, event_type).ok_or_else(
-            || {
+        let tag =
+            domain::EventData::serde_tag_for(aggregate_type, event_type).ok_or_else(|| {
                 format!(
                     "Invalid (aggregate, event_type) combination: {} / {}",
                     aggregate_type_str, event_type_str
                 )
-            },
-        )?;
+            })?;
 
         let mut data_with_type = if aggregate_type == domain::AggregateType::Permission
             && raw_data.get("data").is_none()

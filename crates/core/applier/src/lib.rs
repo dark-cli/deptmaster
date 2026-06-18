@@ -254,11 +254,7 @@ pub trait Projection {
 
     /// Delete a non-system user group. Members are cleaned up by DB
     /// cascade. Silently no-op for system groups.
-    async fn delete_user_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<(), Self::Error>;
+    async fn delete_user_group(&mut self, id: Uuid, wallet_id: Uuid) -> Result<(), Self::Error>;
 
     async fn add_user_group_member(
         &mut self,
@@ -288,11 +284,7 @@ pub trait Projection {
         name: &str,
     ) -> Result<(), Self::Error>;
 
-    async fn delete_contact_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<(), Self::Error>;
+    async fn delete_contact_group(&mut self, id: Uuid, wallet_id: Uuid) -> Result<(), Self::Error>;
 
     async fn add_contact_group_member(
         &mut self,
@@ -520,7 +512,6 @@ pub async fn apply<P: Projection + Send>(
         // (the inner payload varies by variant). apply() extracts the typed
         // fields it needs here so the Projection trait sees only well-typed
         // args, never raw JSON.
-
         E::WalletUserAdded { data } => {
             let user_id = parse_uuid_field(data, "user_id");
             // Unknown / missing role → default to Member. This preserves
@@ -541,11 +532,7 @@ pub async fn apply<P: Projection + Send>(
                 // this they'd be in wallet_users but no permission group,
                 // and every action would be rejected.
                 projection
-                    .add_user_to_system_group(
-                        event.wallet_id,
-                        uid,
-                        domain::SystemGroup::AllUsers,
-                    )
+                    .add_user_to_system_group(event.wallet_id, uid, domain::SystemGroup::AllUsers)
                     .await?;
             }
             Ok(())

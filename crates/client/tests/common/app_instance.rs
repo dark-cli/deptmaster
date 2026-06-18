@@ -11,8 +11,8 @@
 //! So: **signup** = register only. **login** = auth only. Wallet selection and creation are separate.
 
 use client::{
-    create_wallet, get_contacts, get_transactions, init_storage, register, set_backend_config, set_log_context,
-    set_current_wallet_id, set_network_offline,
+    create_wallet, get_contacts, get_transactions, init_storage, register, set_backend_config,
+    set_current_wallet_id, set_log_context, set_network_offline,
 };
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -122,7 +122,8 @@ impl AppInstance {
     pub fn create_wallet(&self, name: String, description: String) -> Result<String, String> {
         self.activate()?;
         let wallet_json = create_wallet(name, description)?;
-        let wallet: serde_json::Value = serde_json::from_str(&wallet_json).map_err(|e| e.to_string())?;
+        let wallet: serde_json::Value =
+            serde_json::from_str(&wallet_json).map_err(|e| e.to_string())?;
         let wallet_id = wallet["id"].as_str().ok_or("No wallet id")?.to_string();
         set_current_wallet_id(wallet_id.clone())?;
         *self.wallet_id.borrow_mut() = Some(wallet_id.clone());
@@ -205,7 +206,9 @@ fn ws_url_from_base(base: &str) -> String {
 }
 
 /// Create a unique test user and wallet via the client (register, login, create_wallet). Returns (username, password, wallet_id).
-pub fn create_unique_test_user_and_wallet(server_url: &str) -> Result<(String, String, String), String> {
+pub fn create_unique_test_user_and_wallet(
+    server_url: &str,
+) -> Result<(String, String, String), String> {
     let app = AppInstance::new("_setup", server_url);
     app.initialize()?;
     app.signup()?;

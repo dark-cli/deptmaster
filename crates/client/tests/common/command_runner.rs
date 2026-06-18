@@ -8,8 +8,8 @@
 
 use client::{
     create_contact, create_transaction, delete_contact, delete_transaction, get_transaction,
-    list_wallet_contact_groups, list_wallet_user_groups, manual_sync,
-    put_wallet_permission_matrix, update_contact, update_transaction,
+    list_wallet_contact_groups, list_wallet_user_groups, manual_sync, put_wallet_permission_matrix,
+    update_contact, update_transaction,
 };
 use std::collections::HashMap;
 
@@ -43,7 +43,11 @@ fn parse_args(input: &str) -> Vec<String> {
 /// or `{groups: [...]}`).
 fn find_group_id(json: &str, name: &str) -> Result<String, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let arr = v.get("groups").and_then(|g| g.as_array()).cloned().or_else(|| v.as_array().cloned())
+    let arr = v
+        .get("groups")
+        .and_then(|g| g.as_array())
+        .cloned()
+        .or_else(|| v.as_array().cloned())
         .ok_or_else(|| "Response is neither {groups:[...]} nor an array".to_string())?;
     arr.iter()
         .find(|g| g.get("name").and_then(|n| n.as_str()) == Some(name))
@@ -54,8 +58,7 @@ fn find_group_id(json: &str, name: &str) -> Result<String, String> {
 fn unquote(s: &str) -> &str {
     let s = s.trim();
     if s.len() >= 2
-        && ((s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\'')))
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
     {
         &s[1..s.len() - 1]
     } else {
@@ -96,7 +99,10 @@ impl CommandRunner {
             return Ok(());
         }
         if action == "wait" {
-            let ms = args.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(100);
+            let ms = args
+                .get(1)
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(100);
             std::thread::sleep(std::time::Duration::from_millis(ms));
             return Ok(());
         }
@@ -125,9 +131,12 @@ impl CommandRunner {
             return Err(format!("Permission command requires action: {}", original));
         }
         let wallet_id = client::get_current_wallet_id()?;
-        let ug_all_users = find_group_id(&list_wallet_user_groups(wallet_id.clone())?, "all_users")?;
-        let cg_all_contacts =
-            find_group_id(&list_wallet_contact_groups(wallet_id.clone())?, "all_contacts")?;
+        let ug_all_users =
+            find_group_id(&list_wallet_user_groups(wallet_id.clone())?, "all_users")?;
+        let cg_all_contacts = find_group_id(
+            &list_wallet_contact_groups(wallet_id.clone())?,
+            "all_contacts",
+        )?;
         let (allowed, denied): (Vec<&str>, Vec<&str>) = match args[0].to_lowercase().as_str() {
             "grant-full" => (
                 vec![
@@ -173,13 +182,20 @@ impl CommandRunner {
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| name.to_lowercase().replace(' ', "_"));
                 let json = create_contact(name, None, None, None, None, None)?;
-                let c: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-                let id = c["id"].as_str().ok_or("No id in contact response")?.to_string();
+                let c: serde_json::Value =
+                    serde_json::from_str(&json).map_err(|e| e.to_string())?;
+                let id = c["id"]
+                    .as_str()
+                    .ok_or("No id in contact response")?
+                    .to_string();
                 self.contact_ids.insert(label, id);
             }
             "update" => {
                 if args.len() < 4 {
-                    return Err(format!("Contact update requires label field value: {}", original));
+                    return Err(format!(
+                        "Contact update requires label field value: {}",
+                        original
+                    ));
                 }
                 let contact_id = self
                     .contact_ids
@@ -261,8 +277,12 @@ impl CommandRunner {
                     today,
                     None,
                 )?;
-                let t: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-                let id = t["id"].as_str().ok_or("No id in transaction response")?.to_string();
+                let t: serde_json::Value =
+                    serde_json::from_str(&json).map_err(|e| e.to_string())?;
+                let id = t["id"]
+                    .as_str()
+                    .ok_or("No id in transaction response")?
+                    .to_string();
                 self.transaction_ids.insert(label, id);
             }
             "update" => {
@@ -280,8 +300,12 @@ impl CommandRunner {
                 let field = args[2].to_lowercase();
                 let value = args[3];
                 let tx_json = get_transaction(trans_id.clone())?;
-                let tx: serde_json::Value = serde_json::from_str(&tx_json).map_err(|e| e.to_string())?;
-                let contact_id = tx["contact_id"].as_str().ok_or("No contact_id")?.to_string();
+                let tx: serde_json::Value =
+                    serde_json::from_str(&tx_json).map_err(|e| e.to_string())?;
+                let contact_id = tx["contact_id"]
+                    .as_str()
+                    .ok_or("No contact_id")?
+                    .to_string();
                 let type_s = tx["type"].as_str().unwrap_or("money").to_string();
                 let direction = tx["direction"].as_str().unwrap_or("owed").to_string();
                 let mut amount = tx["amount"].as_i64().unwrap_or(0);

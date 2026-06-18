@@ -507,7 +507,12 @@ impl Database {
                 let contact_group_id: Uuid = row.get("contact_group_id");
                 let allowed_actions: Vec<String> = row.get("allowed_actions");
                 let denied_actions: Vec<String> = row.get("denied_actions");
-                (user_group_id, contact_group_id, allowed_actions, denied_actions)
+                (
+                    user_group_id,
+                    contact_group_id,
+                    allowed_actions,
+                    denied_actions,
+                )
             })
             .collect();
 
@@ -692,10 +697,14 @@ impl Database {
         for (user_id, role_str) in users {
             let role = WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member);
             let ctx = PermissionContext::new(wallet_id, user_id, role);
-            if let Err(e) = resolver::rebuild_readable_events_cache(&self.pool, &ctx, &all_events).await {
+            if let Err(e) =
+                resolver::rebuild_readable_events_cache(&self.pool, &ctx, &all_events).await
+            {
                 tracing::warn!(
                     "Failed to rebuild readable events for user {} in wallet {}: {:?}",
-                    user_id, wallet_id, e
+                    user_id,
+                    wallet_id,
+                    e
                 );
             }
         }
@@ -933,7 +942,8 @@ impl Database {
                     {
                         tracing::warn!(
                             "Failed to invalidate permission cache for wallet {}: {:?}",
-                            wallet_id, e
+                            wallet_id,
+                            e
                         );
                     }
                 }
@@ -997,10 +1007,14 @@ impl Database {
             | EventData::ContactGroupMemberRemoved { .. }
             | EventData::UserGroupDeleted { .. }
             | EventData::ContactGroupDeleted { .. } => {
-                if let Err(e) = self.rebuild_readable_events_for_wallet_impl(wallet_id).await {
+                if let Err(e) = self
+                    .rebuild_readable_events_for_wallet_impl(wallet_id)
+                    .await
+                {
                     tracing::warn!(
                         "Failed to rebuild readable events for wallet {}: {:?}",
-                        wallet_id, e
+                        wallet_id,
+                        e
                     );
                 }
             }
@@ -1036,10 +1050,14 @@ impl Database {
                 | EventData::UserGroupMemberAdded { .. }
                 | EventData::UserGroupMemberRemoved { .. }
         ) {
-            if let Err(e) = self.rebuild_readable_events_for_wallet_impl(wallet_id).await {
+            if let Err(e) = self
+                .rebuild_readable_events_for_wallet_impl(wallet_id)
+                .await
+            {
                 tracing::warn!(
                     "Failed to rebuild readable events for wallet {}: {:?}",
-                    wallet_id, e
+                    wallet_id,
+                    e
                 );
             }
         }
@@ -1055,8 +1073,7 @@ impl Database {
     ) {
         match event_type {
             // User added/removed from group - invalidate that user's cache
-            domain::EventType::UserGroupMemberAdded
-            | domain::EventType::UserGroupMemberRemoved => {
+            domain::EventType::UserGroupMemberAdded | domain::EventType::UserGroupMemberRemoved => {
                 if let Some(user_id_str) = event_data.get("user_id").and_then(|v| v.as_str()) {
                     if let Ok(user_id) = uuid::Uuid::parse_str(user_id_str) {
                         if let Err(e) = self
@@ -1216,10 +1233,14 @@ impl Database {
                 | domain::EventType::UserGroupDeleted
                 | domain::EventType::ContactGroupDeleted
         ) {
-            if let Err(e) = self.rebuild_readable_events_for_wallet_impl(wallet_id).await {
+            if let Err(e) = self
+                .rebuild_readable_events_for_wallet_impl(wallet_id)
+                .await
+            {
                 tracing::warn!(
                     "Failed to rebuild readable events for wallet {}: {:?}",
-                    wallet_id, e
+                    wallet_id,
+                    e
                 );
             }
         }

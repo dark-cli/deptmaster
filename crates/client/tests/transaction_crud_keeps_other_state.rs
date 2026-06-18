@@ -51,7 +51,8 @@ fn deleting_one_transaction_keeps_contact_and_other_transactions() {
         .expect("pre-delete state");
 
     // The op under test.
-    app.run_commands(&["transaction delete t2"]).expect("delete t2");
+    app.run_commands(&["transaction delete t2"])
+        .expect("delete t2");
     app.sync().expect("sync after delete");
 
     // Bug claim: the wallet gets wiped locally. Correct behavior:
@@ -120,7 +121,8 @@ fn deleting_transaction_via_ws_sync_keeps_other_state() {
     // Wait for the WS-triggered syncs from the setup events to settle.
     std::thread::sleep(std::time::Duration::from_secs(1));
 
-    app.run_commands(&["transaction delete t2"]).expect("delete t2");
+    app.run_commands(&["transaction delete t2"])
+        .expect("delete t2");
     // Crucially: NO explicit sync. The WS worker's events_synced
     // handler must run manual_sync, and that path must NOT wipe the
     // wallet.
@@ -166,7 +168,8 @@ fn rapid_transaction_crud_burst_does_not_corrupt_state() {
     ])
     .expect("rapid creates");
     // One delete in the middle of the burst's tail.
-    app.run_commands(&["transaction delete t5"]).expect("delete t5");
+    app.run_commands(&["transaction delete t5"])
+        .expect("delete t5");
 
     // Let all the WS-triggered syncs drain.
     std::thread::sleep(std::time::Duration::from_secs(3));

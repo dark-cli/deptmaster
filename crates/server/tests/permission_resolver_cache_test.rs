@@ -1,11 +1,9 @@
 //! Tests for resolver integration with permission matrix cache
 //! Verifies that the resolver correctly uses the cached permissions for ContactGroup lookups
 
+use domain::{Action, PermissionContext, Resource, WalletRole};
 use server::database::repository::Database;
 use server::permissions::PermissionModel;
-use domain::{
-    Action, PermissionContext, Resource, WalletRole,
-};
 use uuid::Uuid;
 
 mod test_helpers;

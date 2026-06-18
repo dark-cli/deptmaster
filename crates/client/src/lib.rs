@@ -1,17 +1,20 @@
 #![allow(unexpected_cfgs)] // flutter_rust_bridge macro emits frb_expand cfg
-use std::cell::RefCell;
-use std::sync::Mutex;
-use std::time::Duration;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
+use std::time::Instant;
 
 pub use serde_json::Value;
 
 mod api;
+mod backoff;
 mod crud;
 mod data_bus;
+mod database;
+mod error;
 mod frb_generated;
 mod ids;
 mod log_bridge;
@@ -22,9 +25,9 @@ mod sdk_store;
 mod storage;
 mod sync;
 mod ws;
-mod backoff;
 
 pub use data_bus::{data_change_stream, DataChangeEvent, DataChangeKind};
+pub use error::ClientError;
 pub use ws::{connect_realtime, disconnect_realtime};
 
 struct BackendConfig {
@@ -78,12 +81,7 @@ impl SyncGuard {
     fn try_acquire() -> Option<Self> {
         // compare_exchange: only the first caller wins; subsequent
         // calls see `true` and return None until the holder drops.
-        match SYNC_IN_FLIGHT.compare_exchange(
-            false,
-            true,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
+        match SYNC_IN_FLIGHT.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire) {
             Ok(_) => Some(Self),
             Err(_) => None,
         }
@@ -121,13 +119,12 @@ fn start_sync_loop_if_ready() {
             if storage::is_ready() && BACKEND_CONFIG.with(|c| c.borrow().is_some()) {
                 let _ = manual_sync_with_source("background_loop");
             }
-            let delay_ms = SYNC_BACKOFF
-                .with(|b| {
-                    b.borrow()
-                        .remaining()
-                        .map(|d| d.as_millis().clamp(100, 3000) as u64)
-                        .unwrap_or(1000)
-                });
+            let delay_ms = SYNC_BACKOFF.with(|b| {
+                b.borrow()
+                    .remaining()
+                    .map(|d| d.as_millis().clamp(100, 3000) as u64)
+                    .unwrap_or(1000)
+            });
             std::thread::sleep(Duration::from_millis(delay_ms));
         }
     });
@@ -169,7 +166,12 @@ pub fn set_backend_config(base_url: String, ws_url: String) {
         return;
     }
     let cfg = BackendConfig { base_url, ws_url };
-    BACKEND_CONFIG.with(|cell| *cell.borrow_mut() = Some(BackendConfig { base_url: cfg.base_url.clone(), ws_url: cfg.ws_url.clone() }));
+    BACKEND_CONFIG.with(|cell| {
+        *cell.borrow_mut() = Some(BackendConfig {
+            base_url: cfg.base_url.clone(),
+            ws_url: cfg.ws_url.clone(),
+        })
+    });
     *BACKEND_CONFIG_GLOBAL.lock().unwrap() = Some(cfg);
     rust_log!("[debitum_rs] sync loop: backend config set");
     start_sync_loop_if_ready();
@@ -178,14 +180,26 @@ pub fn set_backend_config(base_url: String, ws_url: String) {
 pub fn get_base_url() -> Result<String, String> {
     BACKEND_CONFIG
         .with(|cell| cell.borrow().as_ref().map(|c| c.base_url.clone()))
-        .or_else(|| BACKEND_CONFIG_GLOBAL.lock().unwrap().as_ref().map(|c| c.base_url.clone()))
+        .or_else(|| {
+            BACKEND_CONFIG_GLOBAL
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|c| c.base_url.clone())
+        })
         .ok_or_else(|| "Backend not configured".to_string())
 }
 
 pub fn get_ws_url() -> Result<String, String> {
     BACKEND_CONFIG
         .with(|cell| cell.borrow().as_ref().map(|c| c.ws_url.clone()))
-        .or_else(|| BACKEND_CONFIG_GLOBAL.lock().unwrap().as_ref().map(|c| c.ws_url.clone()))
+        .or_else(|| {
+            BACKEND_CONFIG_GLOBAL
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|c| c.ws_url.clone())
+        })
         .ok_or_else(|| "Backend not configured".to_string())
 }
 
@@ -225,15 +239,15 @@ pub fn log_context() -> String {
 
 // --- Auth ---
 pub fn login(username: String, password: String) -> Result<(), String> {
-    api::login(username, password)
+    api::login(username, password).map_err(|e| e.to_string())
 }
 
 pub fn register(username: String, password: String) -> Result<(), String> {
-    api::register(username, password)
+    api::register(username, password).map_err(|e| e.to_string())
 }
 
 pub fn logout() -> Result<(), String> {
-    crud::logout()
+    crud::logout().map_err(|e| e.to_string())
 }
 
 pub fn is_logged_in() -> bool {
@@ -241,13 +255,11 @@ pub fn is_logged_in() -> bool {
 }
 
 pub fn get_user_id() -> Result<String, String> {
-    storage::config_get("user_id")?
-        .ok_or_else(|| "Not logged in".to_string())
+    storage::config_get("user_id")?.ok_or_else(|| "Not logged in".to_string())
 }
 
 pub fn get_token() -> Result<String, String> {
-    storage::config_get("token")?
-        .ok_or_else(|| "Not logged in".to_string())
+    storage::config_get("token")?.ok_or_else(|| "Not logged in".to_string())
 }
 
 // --- Wallet ---
@@ -264,8 +276,7 @@ pub fn set_current_wallet_id(wallet_id: String) -> Result<(), String> {
 }
 
 pub fn get_current_wallet_id() -> Result<String, String> {
-    storage::config_get("current_wallet_id")?
-        .ok_or_else(|| "No wallet selected".to_string())
+    storage::config_get("current_wallet_id")?.ok_or_else(|| "No wallet selected".to_string())
 }
 
 pub fn get_wallets() -> Result<String, String> {
@@ -406,94 +417,121 @@ pub fn bulk_delete_transactions(transaction_ids: Vec<String>) -> Result<(), Stri
 
 // --- Wallet management (manage wallet screen: users, groups, matrix) ---
 pub fn list_wallet_users(wallet_id: String) -> Result<String, String> {
-    api::list_wallet_users_api(&wallet_id)
+    api::list_wallet_users_api(&wallet_id).map_err(|e| e.to_string())
 }
 
 pub fn search_wallet_users(wallet_id: String, query: String) -> Result<String, String> {
-    api::search_wallet_users_api(&wallet_id, &query)
+    api::search_wallet_users_api(&wallet_id, &query).map_err(|e| e.to_string())
 }
 
 pub fn add_user_to_wallet(wallet_id: String, username: String) -> Result<(), String> {
-    api::add_user_to_wallet_api(&wallet_id, &username)
+    api::add_user_to_wallet_api(&wallet_id, &username).map_err(|e| e.to_string())
 }
 
 /// Create or replace 4-digit invite code for the wallet. Returns the code string.
 pub fn create_wallet_invite_code(wallet_id: String) -> Result<String, String> {
-    api::create_wallet_invite_api(&wallet_id)
+    api::create_wallet_invite_api(&wallet_id).map_err(|e| e.to_string())
 }
 
 /// Join a wallet by invite code. Returns the wallet_id of the joined wallet.
 pub fn join_wallet_by_code(code: String) -> Result<String, String> {
-    let id = api::join_wallet_by_code_api(&code)?;
+    let id = api::join_wallet_by_code_api(&code).map_err(|e| e.to_string())?;
     // New wallet membership — refresh wallet list + membership views.
     data_bus::emit(data_bus::DataChangeKind::Wallets, None);
-    data_bus::emit(
-        data_bus::DataChangeKind::WalletMembership,
-        Some(id.clone()),
-    );
+    data_bus::emit(data_bus::DataChangeKind::WalletMembership, Some(id.clone()));
     Ok(id)
 }
 
-pub fn update_wallet_user_role(wallet_id: String, user_id: String, role: String) -> Result<(), String> {
-    api::update_wallet_user_api(&wallet_id, &user_id, &role)
+pub fn update_wallet_user_role(
+    wallet_id: String,
+    user_id: String,
+    role: String,
+) -> Result<(), String> {
+    api::update_wallet_user_api(&wallet_id, &user_id, &role).map_err(|e| e.to_string())
 }
 
 pub fn remove_wallet_user(wallet_id: String, user_id: String) -> Result<(), String> {
-    api::remove_wallet_user_api(&wallet_id, &user_id)
+    api::remove_wallet_user_api(&wallet_id, &user_id).map_err(|e| e.to_string())
 }
 
 pub fn list_wallet_user_groups(wallet_id: String) -> Result<String, String> {
-    api::list_user_groups_api(&wallet_id)
+    api::list_user_groups_api(&wallet_id).map_err(|e| e.to_string())
 }
 
 pub fn create_wallet_user_group(wallet_id: String, name: String) -> Result<String, String> {
-    api::create_user_group_api(&wallet_id, &name)
+    api::create_user_group_api(&wallet_id, &name).map_err(|e| e.to_string())
 }
 
-pub fn update_wallet_user_group(wallet_id: String, group_id: String, name: String) -> Result<(), String> {
-    api::update_user_group_api(&wallet_id, &group_id, &name)
+pub fn update_wallet_user_group(
+    wallet_id: String,
+    group_id: String,
+    name: String,
+) -> Result<(), String> {
+    api::update_user_group_api(&wallet_id, &group_id, &name).map_err(|e| e.to_string())
 }
 
 pub fn delete_wallet_user_group(wallet_id: String, group_id: String) -> Result<(), String> {
-    api::delete_user_group_api(&wallet_id, &group_id)
+    api::delete_user_group_api(&wallet_id, &group_id).map_err(|e| e.to_string())
 }
 
-pub fn list_wallet_user_group_members(wallet_id: String, group_id: String) -> Result<String, String> {
-    api::list_user_group_members_api(&wallet_id, &group_id)
+pub fn list_wallet_user_group_members(
+    wallet_id: String,
+    group_id: String,
+) -> Result<String, String> {
+    api::list_user_group_members_api(&wallet_id, &group_id).map_err(|e| e.to_string())
 }
 
-pub fn add_wallet_user_group_member(wallet_id: String, group_id: String, user_id: String) -> Result<(), String> {
-    api::add_user_group_member_api(&wallet_id, &group_id, &user_id)
+pub fn add_wallet_user_group_member(
+    wallet_id: String,
+    group_id: String,
+    user_id: String,
+) -> Result<(), String> {
+    api::add_user_group_member_api(&wallet_id, &group_id, &user_id).map_err(|e| e.to_string())
 }
 
-pub fn remove_wallet_user_group_member(wallet_id: String, group_id: String, user_id: String) -> Result<(), String> {
-    api::remove_user_group_member_api(&wallet_id, &group_id, &user_id)
+pub fn remove_wallet_user_group_member(
+    wallet_id: String,
+    group_id: String,
+    user_id: String,
+) -> Result<(), String> {
+    api::remove_user_group_member_api(&wallet_id, &group_id, &user_id).map_err(|e| e.to_string())
 }
 
 pub fn list_wallet_contact_groups(wallet_id: String) -> Result<String, String> {
-    api::list_contact_groups_api(&wallet_id)
+    api::list_contact_groups_api(&wallet_id).map_err(|e| e.to_string())
 }
 
 pub fn create_wallet_contact_group(wallet_id: String, name: String) -> Result<String, String> {
-    api::create_contact_group_api(&wallet_id, &name)
+    api::create_contact_group_api(&wallet_id, &name).map_err(|e| e.to_string())
 }
 
-pub fn update_wallet_contact_group(wallet_id: String, group_id: String, name: String) -> Result<(), String> {
-    api::update_contact_group_api(&wallet_id, &group_id, &name)
+pub fn update_wallet_contact_group(
+    wallet_id: String,
+    group_id: String,
+    name: String,
+) -> Result<(), String> {
+    api::update_contact_group_api(&wallet_id, &group_id, &name).map_err(|e| e.to_string())
 }
 
 pub fn delete_wallet_contact_group(wallet_id: String, group_id: String) -> Result<(), String> {
-    api::delete_contact_group_api(&wallet_id, &group_id)
+    api::delete_contact_group_api(&wallet_id, &group_id).map_err(|e| e.to_string())
 }
 
-pub fn list_wallet_contact_group_members(wallet_id: String, group_id: String) -> Result<String, String> {
-    api::list_contact_group_members_api(&wallet_id, &group_id)
+pub fn list_wallet_contact_group_members(
+    wallet_id: String,
+    group_id: String,
+) -> Result<String, String> {
+    api::list_contact_group_members_api(&wallet_id, &group_id).map_err(|e| e.to_string())
 }
 
 /// Returns JSON array of contact group ids that contain this contact. Used by edit-contact UI.
-pub fn get_contact_group_ids_for_contact(wallet_id: String, contact_id: String) -> Result<String, String> {
+pub fn get_contact_group_ids_for_contact(
+    wallet_id: String,
+    contact_id: String,
+) -> Result<String, String> {
     let groups_json = api::list_contact_groups_api(&wallet_id)?;
-    let groups: Vec<serde_json::Value> = serde_json::from_str(&groups_json).map_err(|e| e.to_string())?;
+    let groups: Vec<serde_json::Value> =
+        serde_json::from_str(&groups_json).map_err(|e| e.to_string())?;
     let mut result = Vec::new();
     for g in groups {
         let group_id = match g.get("id").and_then(|v| v.as_str()) {
@@ -501,7 +539,8 @@ pub fn get_contact_group_ids_for_contact(wallet_id: String, contact_id: String) 
             None => continue,
         };
         let members_json = api::list_contact_group_members_api(&wallet_id, &group_id)?;
-        let members: Vec<serde_json::Value> = serde_json::from_str(&members_json).unwrap_or_default();
+        let members: Vec<serde_json::Value> =
+            serde_json::from_str(&members_json).unwrap_or_default();
         for m in members {
             if m.get("contact_id").and_then(|v| v.as_str()) == Some(contact_id.as_str()) {
                 result.push(group_id);
@@ -512,7 +551,11 @@ pub fn get_contact_group_ids_for_contact(wallet_id: String, contact_id: String) 
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
-pub fn add_wallet_contact_group_member(wallet_id: String, group_id: String, contact_id: String) -> Result<(), String> {
+pub fn add_wallet_contact_group_member(
+    wallet_id: String,
+    group_id: String,
+    contact_id: String,
+) -> Result<(), String> {
     api::add_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
     if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
         if current == wallet_id {
@@ -522,7 +565,11 @@ pub fn add_wallet_contact_group_member(wallet_id: String, group_id: String, cont
     Ok(())
 }
 
-pub fn remove_wallet_contact_group_member(wallet_id: String, group_id: String, contact_id: String) -> Result<(), String> {
+pub fn remove_wallet_contact_group_member(
+    wallet_id: String,
+    group_id: String,
+    contact_id: String,
+) -> Result<(), String> {
     api::remove_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
     if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
         if current == wallet_id {
@@ -533,11 +580,11 @@ pub fn remove_wallet_contact_group_member(wallet_id: String, group_id: String, c
 }
 
 pub fn list_wallet_permission_actions(wallet_id: String) -> Result<String, String> {
-    api::list_permission_actions_api(&wallet_id)
+    api::list_permission_actions_api(&wallet_id).map_err(|e| e.to_string())
 }
 
 pub fn get_my_permissions(wallet_id: String) -> Result<String, String> {
-    api::get_my_permissions_api(&wallet_id)
+    api::get_my_permissions_api(&wallet_id).map_err(|e| e.to_string())
 }
 
 pub fn clear_wallet_data(wallet_id: String) -> Result<(), String> {
@@ -545,7 +592,7 @@ pub fn clear_wallet_data(wallet_id: String) -> Result<(), String> {
 }
 
 pub fn get_wallet_permission_matrix(wallet_id: String) -> Result<String, String> {
-    api::get_permission_matrix_api(&wallet_id)
+    api::get_permission_matrix_api(&wallet_id).map_err(|e| e.to_string())
 }
 
 pub fn put_wallet_permission_matrix(wallet_id: String, entries_json: String) -> Result<(), String> {
@@ -567,13 +614,17 @@ pub fn get_events() -> Result<String, String> {
             return Ok("[]".to_string());
         }
     };
-    rust_log!("[debitum_rs] get_events wallet_id={} querying storage...", wallet_id);
+    rust_log!(
+        "[debitum_rs] get_events wallet_id={} querying storage...",
+        wallet_id
+    );
     let events = storage::events_get_all(&wallet_id)?;
     rust_log!("[debitum_rs] get_events returning {} events", events.len());
     let list: Vec<serde_json::Value> = events
         .into_iter()
         .map(|e| {
-            let event_data: serde_json::Value = serde_json::from_str(&e.event_data).unwrap_or(serde_json::Value::Null);
+            let event_data: serde_json::Value =
+                serde_json::from_str(&e.event_data).unwrap_or(serde_json::Value::Null);
             serde_json::json!({
                 "id": e.id,
                 "aggregate_type": e.aggregate_type,
@@ -629,7 +680,10 @@ fn manual_sync_with_source(source: &str) -> Result<(), String> {
         Some(g) => g,
         None => {
             if should_log_skip(&LAST_INFLIGHT_SKIP_LOG, 1000) {
-                rust_log!("[debitum_rs] manual_sync skipped (in-flight, source={})", source);
+                rust_log!(
+                    "[debitum_rs] manual_sync skipped (in-flight, source={})",
+                    source
+                );
             }
             return Ok(());
         }
@@ -686,8 +740,7 @@ const PREF_PREFIX: &str = "pref_";
 
 pub fn get_preference(key: String) -> Result<String, String> {
     let storage_key = format!("{}{}", PREF_PREFIX, key);
-    storage::config_get(&storage_key)?
-        .ok_or_else(|| format!("Preference '{}' not set", key))
+    storage::config_get(&storage_key)?.ok_or_else(|| format!("Preference '{}' not set", key))
 }
 
 pub fn set_preference(key: String, value: String) -> Result<(), String> {
@@ -697,8 +750,7 @@ pub fn set_preference(key: String, value: String) -> Result<(), String> {
 
 // --- JWT (single place for token parsing; Dart no longer decodes) ---
 pub fn get_username() -> Result<String, String> {
-    let token = storage::config_get("token")?
-        .ok_or_else(|| "Not logged in".to_string())?;
+    let token = storage::config_get("token")?.ok_or_else(|| "Not logged in".to_string())?;
     if token.is_empty() {
         return Err("Not logged in".to_string());
     }
@@ -742,9 +794,10 @@ fn jwt_payload(token: &str) -> Option<JwtPayload> {
         .get("username")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let expired = obj.get("exp").and_then(|v| v.as_i64()).map_or(true, |exp_sec| {
-        chrono::Utc::now().timestamp() >= exp_sec
-    });
+    let expired = obj
+        .get("exp")
+        .and_then(|v| v.as_i64())
+        .map_or(true, |exp_sec| chrono::Utc::now().timestamp() >= exp_sec);
     Some(JwtPayload { username, expired })
 }
 
@@ -813,7 +866,10 @@ pub fn can_perform(
         Some(s) => s,
         None => return Ok(false),
     };
-    let wallet_id_str = match storage::config_get("current_wallet_id").ok().and_then(|o| o) {
+    let wallet_id_str = match storage::config_get("current_wallet_id")
+        .ok()
+        .and_then(|o| o)
+    {
         Some(w) if !w.is_empty() => w,
         _ => return Ok(false),
     };
@@ -963,6 +1019,9 @@ mod tests {
         let wallet_id = "f27978af-e56a-4b45-aede-fb450557699a";
         storage::config_set("current_wallet_id", wallet_id).expect("config_set");
         let count = storage::events_count(wallet_id).expect("events_count");
-        assert_eq!(count, 0, "new wallet should have 0 events so sync will do full pull");
+        assert_eq!(
+            count, 0,
+            "new wallet should have 0 events so sync will do full pull"
+        );
     }
 }

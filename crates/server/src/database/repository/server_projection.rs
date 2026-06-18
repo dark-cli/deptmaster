@@ -338,8 +338,8 @@ impl<'a> Projection for ServerProjection<'a> {
             },
             None => c.created_at.date(),
         };
-        let parsed_due_date = due_date
-            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+        let parsed_due_date =
+            due_date.and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
 
         sqlx::query(
             r#"
@@ -569,11 +569,7 @@ impl<'a> Projection for ServerProjection<'a> {
         Ok(())
     }
 
-    async fn delete_user_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<(), Self::Error> {
+    async fn delete_user_group(&mut self, id: Uuid, wallet_id: Uuid) -> Result<(), Self::Error> {
         sqlx::query(
             "DELETE FROM user_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false",
         )
@@ -608,13 +604,11 @@ impl<'a> Projection for ServerProjection<'a> {
         user_group_id: Uuid,
         user_id: Uuid,
     ) -> Result<(), Self::Error> {
-        sqlx::query(
-            "DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2",
-        )
-        .bind(user_id)
-        .bind(user_group_id)
-        .execute(self.pool)
-        .await?;
+        sqlx::query("DELETE FROM user_group_members WHERE user_id = $1 AND user_group_id = $2")
+            .bind(user_id)
+            .bind(user_group_id)
+            .execute(self.pool)
+            .await?;
         Ok(())
     }
 
@@ -658,11 +652,7 @@ impl<'a> Projection for ServerProjection<'a> {
         Ok(())
     }
 
-    async fn delete_contact_group(
-        &mut self,
-        id: Uuid,
-        wallet_id: Uuid,
-    ) -> Result<(), Self::Error> {
+    async fn delete_contact_group(&mut self, id: Uuid, wallet_id: Uuid) -> Result<(), Self::Error> {
         sqlx::query(
             "DELETE FROM contact_groups WHERE id = $1 AND wallet_id = $2 AND is_system = false",
         )

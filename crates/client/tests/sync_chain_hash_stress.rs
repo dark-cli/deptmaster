@@ -201,7 +201,8 @@ fn solo_delete_after_create_never_flushes() {
     app.sync().expect("sync 1");
 
     // The bug shape: delete one, sync; the previous protocol diverged here.
-    app.run_commands(&["transaction delete t2"]).expect("delete t2");
+    app.run_commands(&["transaction delete t2"])
+        .expect("delete t2");
     app.sync().expect("sync after delete");
 
     let logs = client::drain_rust_logs();
@@ -326,7 +327,8 @@ fn solo_undo_inside_window_never_flushes() {
     app.sync().expect("sync 1");
 
     // Delete-with-undo runs an UNDO event (delete within the 5s window).
-    app.run_commands(&["transaction delete t1"]).expect("delete t1 (undo)");
+    app.run_commands(&["transaction delete t1"])
+        .expect("delete t1 (undo)");
     app.sync().expect("sync after delete");
 
     let logs = client::drain_rust_logs();

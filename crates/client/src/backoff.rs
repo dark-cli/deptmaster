@@ -1,5 +1,5 @@
-use std::time::{Duration, Instant};
 use flutter_rust_bridge::frb;
+use std::time::{Duration, Instant};
 
 #[frb(ignore)]
 pub(crate) struct Backoff {

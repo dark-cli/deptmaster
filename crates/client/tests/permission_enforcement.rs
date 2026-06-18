@@ -18,9 +18,8 @@
 //! found the actual gap.
 
 use client::{
-    add_user_to_wallet, create_contact, create_transaction, delete_contact,
-    delete_transaction, manual_sync, set_current_wallet_id, update_contact,
-    update_transaction,
+    add_user_to_wallet, create_contact, create_transaction, delete_contact, delete_transaction,
+    manual_sync, set_current_wallet_id, update_contact, update_transaction,
 };
 
 use crate::common::app_instance::{create_unique_test_user_and_wallet, AppInstance};
@@ -37,8 +36,7 @@ fn setup_owner_and_member_with_one_contact() -> (AppInstance, AppInstance, Strin
     let server_url = test_server_url();
     let (owner_user, owner_pass, wallet_id) =
         create_unique_test_user_and_wallet(&server_url).expect("create owner");
-    let owner =
-        AppInstance::with_credentials("owner", &server_url, owner_user, owner_pass);
+    let owner = AppInstance::with_credentials("owner", &server_url, owner_user, owner_pass);
     owner.initialize().expect("init owner");
     owner.login().expect("login owner");
     owner.select_wallet(&wallet_id).expect("select wallet");
@@ -47,11 +45,9 @@ fn setup_owner_and_member_with_one_contact() -> (AppInstance, AppInstance, Strin
     // user_readable_events for the about-to-be-added member.
     owner.activate().expect("activate owner");
     set_current_wallet_id(wallet_id.clone()).expect("owner current wallet");
-    let contact_json =
-        create_contact("Target".to_string(), None, None, None, None, None)
-            .expect("owner create contact");
-    let contact: serde_json::Value =
-        serde_json::from_str(&contact_json).expect("parse contact");
+    let contact_json = create_contact("Target".to_string(), None, None, None, None, None)
+        .expect("owner create contact");
+    let contact: serde_json::Value = serde_json::from_str(&contact_json).expect("parse contact");
     let contact_id = contact["id"].as_str().expect("contact id").to_string();
     manual_sync().expect("owner sync");
 
@@ -60,9 +56,10 @@ fn setup_owner_and_member_with_one_contact() -> (AppInstance, AppInstance, Strin
     member.initialize().expect("init member");
     member.signup().expect("signup member");
 
-    owner.activate().expect("activate owner for add_user_to_wallet");
-    add_user_to_wallet(wallet_id.clone(), member.username.clone())
-        .expect("add member to wallet");
+    owner
+        .activate()
+        .expect("activate owner for add_user_to_wallet");
+    add_user_to_wallet(wallet_id.clone(), member.username.clone()).expect("add member to wallet");
 
     let member_in_wallet = AppInstance::with_credentials(
         "member",
@@ -70,7 +67,9 @@ fn setup_owner_and_member_with_one_contact() -> (AppInstance, AppInstance, Strin
         member.username.clone(),
         member.password.clone(),
     );
-    member_in_wallet.initialize().expect("init member-in-wallet");
+    member_in_wallet
+        .initialize()
+        .expect("init member-in-wallet");
     member_in_wallet.login().expect("login member-in-wallet");
     member_in_wallet
         .select_wallet(&wallet_id)
@@ -110,8 +109,7 @@ fn assert_perm_denied(result: Result<impl std::fmt::Debug, String>, what: &str) 
 #[test]
 #[ignore]
 fn member_default_cannot_create_contact() {
-    let (_owner, member, _wallet_id, _contact_id) =
-        setup_owner_and_member_with_one_contact();
+    let (_owner, member, _wallet_id, _contact_id) = setup_owner_and_member_with_one_contact();
 
     member.activate().expect("activate member");
     let res = create_contact("Member's Try".to_string(), None, None, None, None, None);
@@ -123,8 +121,7 @@ fn member_default_cannot_create_contact() {
 #[test]
 #[ignore]
 fn member_default_cannot_update_contact() {
-    let (_owner, member, _wallet_id, contact_id) =
-        setup_owner_and_member_with_one_contact();
+    let (_owner, member, _wallet_id, contact_id) = setup_owner_and_member_with_one_contact();
 
     member.activate().expect("activate member");
     let res = update_contact(
@@ -144,8 +141,7 @@ fn member_default_cannot_update_contact() {
 #[test]
 #[ignore]
 fn member_default_cannot_delete_contact() {
-    let (_owner, member, _wallet_id, contact_id) =
-        setup_owner_and_member_with_one_contact();
+    let (_owner, member, _wallet_id, contact_id) = setup_owner_and_member_with_one_contact();
 
     member.activate().expect("activate member");
     let res = delete_contact(contact_id);
@@ -157,8 +153,7 @@ fn member_default_cannot_delete_contact() {
 #[test]
 #[ignore]
 fn member_default_cannot_create_transaction() {
-    let (_owner, member, _wallet_id, contact_id) =
-        setup_owner_and_member_with_one_contact();
+    let (_owner, member, _wallet_id, contact_id) = setup_owner_and_member_with_one_contact();
 
     member.activate().expect("activate member");
     let res = create_transaction(
@@ -179,8 +174,7 @@ fn member_default_cannot_create_transaction() {
 #[test]
 #[ignore]
 fn member_default_cannot_update_transaction() {
-    let (owner, member, wallet_id, contact_id) =
-        setup_owner_and_member_with_one_contact();
+    let (owner, member, wallet_id, contact_id) = setup_owner_and_member_with_one_contact();
 
     // Owner creates a transaction the member can read but shouldn't update.
     owner.activate().expect("activate owner");
@@ -223,8 +217,7 @@ fn member_default_cannot_update_transaction() {
 #[test]
 #[ignore]
 fn member_default_cannot_delete_transaction() {
-    let (owner, member, wallet_id, contact_id) =
-        setup_owner_and_member_with_one_contact();
+    let (owner, member, wallet_id, contact_id) = setup_owner_and_member_with_one_contact();
 
     owner.activate().expect("activate owner");
     set_current_wallet_id(wallet_id.clone()).expect("owner wallet");
@@ -257,8 +250,7 @@ fn member_default_cannot_delete_transaction() {
 #[test]
 #[ignore]
 fn member_default_blocked_on_every_write_action() {
-    let (owner, member, wallet_id, contact_id) =
-        setup_owner_and_member_with_one_contact();
+    let (owner, member, wallet_id, contact_id) = setup_owner_and_member_with_one_contact();
 
     // Owner pre-creates a transaction we can try to mutate.
     owner.activate().expect("activate owner");

@@ -35,11 +35,7 @@ impl Default for SdkPermissionStore {
 impl PermissionStore for SdkPermissionStore {
     type Error = String;
 
-    async fn is_wallet_owner(
-        &self,
-        wallet_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<bool, Self::Error> {
+    async fn is_wallet_owner(&self, wallet_id: Uuid, user_id: Uuid) -> Result<bool, Self::Error> {
         // Mirrors server's query verbatim (modulo placeholder syntax).
         let wid = wallet_id.to_string();
         let uid = user_id.to_string();
@@ -101,8 +97,9 @@ impl PermissionStore for SdkPermissionStore {
         let wid = wallet_id.to_string();
         // SQLite has no `= ANY($1::uuid[])`. Build an IN (?, ?, ...) list.
         // The list is small (typical wallet has 2-4 user_groups per user).
-        let placeholders: Vec<String> =
-            (0..user_group_ids.len()).map(|i| format!("?{}", i + 2)).collect();
+        let placeholders: Vec<String> = (0..user_group_ids.len())
+            .map(|i| format!("?{}", i + 2))
+            .collect();
         let sql = format!(
             r#"
             SELECT m.contact_group_id, cg.name, m.action, m.is_deny
@@ -171,9 +168,8 @@ impl PermissionStore for SdkPermissionStore {
     ) -> Result<HashSet<Uuid>, Self::Error> {
         let wid = wallet_id.to_string();
         with_db(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id FROM contacts WHERE wallet_id = ?1 AND is_deleted = 0",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT id FROM contacts WHERE wallet_id = ?1 AND is_deleted = 0")?;
             let rows = stmt.query_map(params![wid], |r| r.get::<_, String>(0))?;
             let mut set = HashSet::new();
             for row in rows {

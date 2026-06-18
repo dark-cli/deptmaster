@@ -48,7 +48,8 @@ fn transaction_create_auto_syncs_peer_via_ws_owned_by_rust() {
     // is where assert_commands below will read from). In production
     // each device runs a single app, so there's only ever one handle —
     // this re-bind is purely a test isolation thing.
-    app2.activate().expect("re-bind storage to app2 before WS sync arrives");
+    app2.activate()
+        .expect("re-bind storage to app2 before WS sync arrives");
 
     // Wait for app2's WS worker to receive the message and run
     // manual_sync. NO explicit app2.sync() here — that's the whole
@@ -63,5 +64,6 @@ fn transaction_create_auto_syncs_peer_via_ws_owned_by_rust() {
     .expect("app2 must auto-sync on ws events_synced without explicit sync");
 
     // Cleanup so the worker thread exits before the next test starts.
-    app2.disconnect_realtime().expect("app2 disconnect_realtime");
+    app2.disconnect_realtime()
+        .expect("app2 disconnect_realtime");
 }
