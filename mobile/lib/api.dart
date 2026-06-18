@@ -183,7 +183,7 @@ class Api {
       if (prefs.getBool(_keyBackendConfigured) == true) {
         final baseUrl = await getBaseUrl();
         final wsUrl = await getWebSocketUrl();
-        await rust.setBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
+        await RustLib.instance.api.crateConfigSetBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
       }
       return true;
     } catch (e) {
@@ -198,7 +198,7 @@ class Api {
     _storagePath = path;
     if (!_initialized) await init();
     try {
-      await rust.initStorage(storagePath: path);
+      await RustLib.instance.api.crateConfigInitStorage(storagePath: path);
       await _migratePreferencesToRust();
       try {
         final id = await rust.getCurrentWalletId();
@@ -294,7 +294,7 @@ class Api {
     final wsUrl = await getWebSocketUrl();
     if (!kIsWeb && _initialized) {
       try {
-        await rust.setBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
+        await RustLib.instance.api.crateConfigSetBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
       } catch (e) {
         debugPrint('Api.setBackendConfig: Rust setBackendConfig failed: $e');
         rethrow;
@@ -309,7 +309,7 @@ class Api {
       if (await isBackendConfigured()) {
         final baseUrl = await getBaseUrl();
         final wsUrl = await getWebSocketUrl();
-        await rust.setBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
+        await RustLib.instance.api.crateConfigSetBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
       }
     } catch (e) {
       debugPrint('Api._ensureRustReady: $e');
@@ -418,7 +418,7 @@ class Api {
     if (kIsWeb) return false;
     try {
       await _ensureRustReady();
-      await rust.manualSync();
+      await RustLib.instance.api.crateIntegrationSyncControlManualSync();
       _hasSyncError = false;
       _hasAuthIssue = false;
       _notifyConnectionStateChanged();
@@ -1004,7 +1004,7 @@ class Api {
     if (kIsWeb) return;
     try {
       await _ensureRustReady();
-      await rust.manualSync();
+      await RustLib.instance.api.crateIntegrationSyncControlManualSync();
       _hasSyncError = false;
       _hasAuthIssue = false;
       _notifyConnectionStateChanged();

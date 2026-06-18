@@ -11,8 +11,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// Start the realtime WS worker. Picks up token + wallet + ws_url
 /// from the client state at call time. Idempotent — if a worker is
 /// already running, returns `Ok(())` and does nothing.
-Future<void> connectRealtime() => RustLib.instance.api.crateWsConnectRealtime();
+Future<void> connectRealtime() =>
+    RustLib.instance.api.crateIntegrationWsConnectRealtime();
 
 /// Stop the realtime WS worker. Idempotent.
 Future<void> disconnectRealtime() =>
-    RustLib.instance.api.crateWsDisconnectRealtime();
+    RustLib.instance.api.crateIntegrationWsDisconnectRealtime();
