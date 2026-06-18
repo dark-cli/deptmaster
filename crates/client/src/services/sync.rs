@@ -257,7 +257,7 @@ pub fn pull_and_merge() -> Result<(), String> {
     }
 
     if !server_events.is_empty() {
-        let mut proj = crate::sdk_projection::SdkProjection::new();
+        let mut proj = crate::sdk::projection::SdkProjection::new();
         let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
         for ev_json in &server_events {
             if let Some(domain_event) = parse_server_event_for_applier(ev_json, &wallet_id) {
@@ -412,7 +412,7 @@ pub(crate) fn rebuild_projection_tables(
     wallet_id: &str,
     events: &[database::StoredEvent],
 ) -> Result<(), String> {
-    use crate::sdk_projection::SdkProjection;
+    use crate::sdk::projection::SdkProjection;
     use rusqlite::params;
 
     // Collect ids referenced by UNDO events — these events are filtered
@@ -518,7 +518,7 @@ fn maybe_save_snapshot(wallet_id: &str, has_undo: bool) -> Result<(), String> {
         .last()
         .map(|e| e.id.clone())
         .unwrap_or_default();
-    let store = crate::sdk_snapshot_store::SdkSnapshotStore::new();
+    let store = crate::sdk::snapshot_store::SdkSnapshotStore::new();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

@@ -14,9 +14,7 @@ mod handlers;
 mod ids;
 mod log_bridge;
 mod models;
-mod sdk_projection;
-mod sdk_snapshot_store;
-mod sdk_store;
+mod sdk;
 mod services;
 mod storage;
 mod sync_control;
@@ -596,7 +594,7 @@ pub fn can_perform(
     // Role doesn't affect resolver output (the store does its own owner check)
     // but PermissionContext needs one. Member is the conservative default.
     let ctx = PermissionContext::new(wallet_id, user_id, WalletRole::Member);
-    let store = sdk_store::SdkPermissionStore::new();
+    let store = sdk::store::SdkPermissionStore::new();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

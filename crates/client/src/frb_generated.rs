@@ -26,9 +26,9 @@
 // Section: imports
 
 use crate::models::*;
-use crate::sdk_projection::*;
-use crate::sdk_snapshot_store::*;
-use crate::sdk_store::*;
+use crate::sdk::projection::*;
+use crate::sdk::snapshot_store::*;
+use crate::sdk::store::*;
 use crate::*;
 use flutter_rust_bridge::for_generated::byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use flutter_rust_bridge::for_generated::{transform_result_dco, Lifetimeable, Lockable};
@@ -852,7 +852,7 @@ fn wire__crate__sdk_store__SdkPermissionStore_default_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok =
-                        Result::<_, ()>::Ok(crate::sdk_store::SdkPermissionStore::default())?;
+                        Result::<_, ()>::Ok(crate::sdk::store::SdkPermissionStore::default())?;
                     Ok(output_ok)
                 })())
             }
@@ -885,7 +885,7 @@ fn wire__crate__sdk_store__SdkPermissionStore_new_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok =
-                        Result::<_, ()>::Ok(crate::sdk_store::SdkPermissionStore::new())?;
+                        Result::<_, ()>::Ok(crate::sdk::store::SdkPermissionStore::new())?;
                     Ok(output_ok)
                 })())
             }
@@ -918,7 +918,7 @@ fn wire__crate__sdk_projection__SdkProjection_default_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok =
-                        Result::<_, ()>::Ok(crate::sdk_projection::SdkProjection::default())?;
+                        Result::<_, ()>::Ok(crate::sdk::projection::SdkProjection::default())?;
                     Ok(output_ok)
                 })())
             }
@@ -951,7 +951,7 @@ fn wire__crate__sdk_projection__SdkProjection_new_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok =
-                        Result::<_, ()>::Ok(crate::sdk_projection::SdkProjection::new())?;
+                        Result::<_, ()>::Ok(crate::sdk::projection::SdkProjection::new())?;
                     Ok(output_ok)
                 })())
             }
@@ -984,7 +984,7 @@ fn wire__crate__sdk_snapshot_store__SdkSnapshotStore_default_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok(
-                        crate::sdk_snapshot_store::SdkSnapshotStore::default(),
+                        crate::sdk::snapshot_store::SdkSnapshotStore::default(),
                     )?;
                     Ok(output_ok)
                 })())
@@ -1018,7 +1018,7 @@ fn wire__crate__sdk_snapshot_store__SdkSnapshotStore_new_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok =
-                        Result::<_, ()>::Ok(crate::sdk_snapshot_store::SdkSnapshotStore::new())?;
+                        Result::<_, ()>::Ok(crate::sdk::snapshot_store::SdkSnapshotStore::new())?;
                     Ok(output_ok)
                 })())
             }
@@ -7935,9 +7935,9 @@ mod io {
 
     use super::*;
     use crate::models::*;
-    use crate::sdk_projection::*;
-    use crate::sdk_snapshot_store::*;
-    use crate::sdk_store::*;
+    use crate::sdk::projection::*;
+    use crate::sdk::snapshot_store::*;
+    use crate::sdk::store::*;
     use crate::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,
@@ -8032,9 +8032,9 @@ mod web {
 
     use super::*;
     use crate::models::*;
-    use crate::sdk_projection::*;
-    use crate::sdk_snapshot_store::*;
-    use crate::sdk_store::*;
+    use crate::sdk::projection::*;
+    use crate::sdk::snapshot_store::*;
+    use crate::sdk::store::*;
     use crate::*;
     use flutter_rust_bridge::for_generated::byteorder::{
         NativeEndian, ReadBytesExt, WriteBytesExt,

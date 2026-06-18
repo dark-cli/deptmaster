@@ -4,7 +4,7 @@
 use crate::ids::{ContactId, TransactionId, WalletId};
 use crate::models::{Contact, Currency, Transaction};
 use crate::rust_log;
-use crate::sdk_projection::SdkProjection;
+use crate::sdk::projection::SdkProjection;
 use crate::storage;
 use crate::services::sync;
 use chrono::NaiveDate;
