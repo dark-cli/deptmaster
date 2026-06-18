@@ -11,7 +11,6 @@ pub use serde_json::Value;
 
 mod api;
 mod backoff;
-mod crud;
 mod data_bus;
 mod database;
 mod error;
@@ -22,8 +21,8 @@ mod models;
 mod sdk_projection;
 mod sdk_snapshot_store;
 mod sdk_store;
+mod services;
 mod storage;
-mod sync;
 mod ws;
 
 pub use data_bus::{data_change_stream, DataChangeEvent, DataChangeKind};
@@ -247,7 +246,7 @@ pub fn register(username: String, password: String) -> Result<(), String> {
 }
 
 pub fn logout() -> Result<(), String> {
-    crud::logout().map_err(|e| e.to_string())
+    services::crud::logout().map_err(|e| e.to_string())
 }
 
 pub fn is_logged_in() -> bool {
@@ -305,15 +304,15 @@ pub fn ensure_current_wallet() -> Result<(), String> {
 
 // --- Data (JSON strings for Dart) ---
 pub fn get_contacts() -> Result<String, String> {
-    crud::get_contacts()
+    services::crud::get_contacts()
 }
 
 pub fn get_transactions() -> Result<String, String> {
-    crud::get_transactions()
+    services::crud::get_transactions()
 }
 
 pub fn get_contact(id: String) -> Result<String, String> {
-    crud::get_contact(id)
+    services::crud::get_contact(id)
 }
 
 pub fn create_contact(
@@ -324,7 +323,7 @@ pub fn create_contact(
     notes: Option<String>,
     group_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
-    let c = crud::create_contact(name, username, phone, email, notes, group_ids)?;
+    let c = services::crud::create_contact(name, username, phone, email, notes, group_ids)?;
     serde_json::to_string(&c).map_err(|e| e.to_string())
 }
 
@@ -338,7 +337,7 @@ pub fn create_transaction(
     transaction_date: String,
     due_date: Option<String>,
 ) -> Result<String, String> {
-    let t = crud::create_transaction(
+    let t = services::crud::create_transaction(
         contact_id,
         type_,
         direction,
@@ -352,7 +351,7 @@ pub fn create_transaction(
 }
 
 pub fn get_transaction(id: String) -> Result<String, String> {
-    crud::get_transaction(id)
+    services::crud::get_transaction(id)
 }
 
 pub fn update_contact(
@@ -364,11 +363,11 @@ pub fn update_contact(
     notes: Option<String>,
     group_ids: Option<Vec<String>>,
 ) -> Result<(), String> {
-    crud::update_contact(id, name, username, phone, email, notes, group_ids)
+    services::crud::update_contact(id, name, username, phone, email, notes, group_ids)
 }
 
 pub fn delete_contact(contact_id: String) -> Result<(), String> {
-    crud::delete_contact(contact_id)
+    services::crud::delete_contact(contact_id)
 }
 
 pub fn update_transaction(
@@ -382,7 +381,7 @@ pub fn update_transaction(
     transaction_date: String,
     due_date: Option<String>,
 ) -> Result<(), String> {
-    crud::update_transaction(
+    services::crud::update_transaction(
         id,
         contact_id,
         type_,
@@ -396,23 +395,23 @@ pub fn update_transaction(
 }
 
 pub fn delete_transaction(transaction_id: String) -> Result<(), String> {
-    crud::delete_transaction(transaction_id)
+    services::crud::delete_transaction(transaction_id)
 }
 
 pub fn undo_contact_action(contact_id: String) -> Result<(), String> {
-    crud::undo_contact_action(contact_id)
+    services::crud::undo_contact_action(contact_id)
 }
 
 pub fn undo_transaction_action(transaction_id: String) -> Result<(), String> {
-    crud::undo_transaction_action(transaction_id)
+    services::crud::undo_transaction_action(transaction_id)
 }
 
 pub fn bulk_delete_contacts(contact_ids: Vec<String>) -> Result<(), String> {
-    crud::bulk_delete_contacts(contact_ids)
+    services::crud::bulk_delete_contacts(contact_ids)
 }
 
 pub fn bulk_delete_transactions(transaction_ids: Vec<String>) -> Result<(), String> {
-    crud::bulk_delete_transactions(transaction_ids)
+    services::crud::bulk_delete_transactions(transaction_ids)
 }
 
 // --- Wallet management (manage wallet screen: users, groups, matrix) ---
@@ -559,7 +558,7 @@ pub fn add_wallet_contact_group_member(
     api::add_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
     if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
         if current == wallet_id {
-            let _ = sync::invalidate_perms_cache_and_pull(&wallet_id);
+            let _ = services::sync::invalidate_perms_cache_and_pull(&wallet_id);
         }
     }
     Ok(())
@@ -573,7 +572,7 @@ pub fn remove_wallet_contact_group_member(
     api::remove_contact_group_member_api(&wallet_id, &group_id, &contact_id)?;
     if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
         if current == wallet_id {
-            let _ = sync::invalidate_perms_cache_and_pull(&wallet_id);
+            let _ = services::sync::invalidate_perms_cache_and_pull(&wallet_id);
         }
     }
     Ok(())
@@ -599,7 +598,7 @@ pub fn put_wallet_permission_matrix(wallet_id: String, entries_json: String) -> 
     api::put_permission_matrix_api(&wallet_id, &entries_json)?;
     if let Ok(Some(current)) = storage::config_get("current_wallet_id") {
         if current == wallet_id {
-            let _ = sync::clear_wallet_and_resync(&wallet_id);
+            let _ = services::sync::clear_wallet_and_resync(&wallet_id);
         }
     }
     Ok(())
@@ -690,7 +689,7 @@ fn manual_sync_with_source(source: &str) -> Result<(), String> {
     };
 
     rust_log!("[debitum_rs] manual_sync start (source={})", source);
-    match sync::full_sync() {
+    match services::sync::full_sync() {
         Ok(()) => {
             SYNC_BACKOFF.with(|b| b.borrow_mut().reset());
             rust_log!("[debitum_rs] manual_sync success (source={})", source);
@@ -698,7 +697,7 @@ fn manual_sync_with_source(source: &str) -> Result<(), String> {
         }
         Err(e) => {
             if e.contains("DEBITUM_AUTH_DECLINED") {
-                let _ = crud::logout();
+                let _ = services::crud::logout();
             }
             if is_network_error(&e) || is_rate_limited(&e) {
                 let delay = SYNC_BACKOFF.with(|b| b.borrow_mut().on_failure());

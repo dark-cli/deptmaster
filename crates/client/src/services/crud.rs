@@ -6,7 +6,7 @@ use crate::models::{Contact, Currency, Transaction};
 use crate::rust_log;
 use crate::sdk_projection::SdkProjection;
 use crate::storage;
-use crate::sync;
+use crate::services::sync;
 use chrono::NaiveDate;
 use rusqlite::params;
 use uuid::Uuid;
@@ -89,7 +89,7 @@ fn rebuild_projection_for_wallet(wallet_id: &str) -> Result<(), String> {
 /// Sum transaction amounts (filtered to live rows) to compute the
 /// wallet's total debt. Used to stamp events for the chart so the
 /// client value matches what the server records.
-fn wallet_total_debt(wallet_id: &str) -> Result<i64, String> {
+pub fn wallet_total_debt(wallet_id: &str) -> Result<i64, String> {
 
     let wid = wallet_id.to_string();
     storage::with_db(|conn| {

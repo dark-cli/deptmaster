@@ -1309,7 +1309,7 @@ fn wire__crate__crud__bulk_delete_contacts_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::bulk_delete_contacts(api_contact_ids)?;
+                    let output_ok = crate::services::crud::bulk_delete_contacts(api_contact_ids)?;
                     Ok(output_ok)
                 })())
             }
@@ -1375,7 +1375,7 @@ fn wire__crate__crud__bulk_delete_transactions_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::bulk_delete_transactions(api_transaction_ids)?;
+                    let output_ok = crate::services::crud::bulk_delete_transactions(api_transaction_ids)?;
                     Ok(output_ok)
                 })())
             }
@@ -1509,7 +1509,7 @@ fn wire__crate__sync__clear_wallet_and_resync_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::sync::clear_wallet_and_resync(&api_wallet_id)?;
+                    let output_ok = crate::services::sync::clear_wallet_and_resync(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -1792,7 +1792,7 @@ fn wire__crate__crud__create_contact_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::create_contact(
+                    let output_ok = crate::services::crud::create_contact(
                         api_name,
                         api_username,
                         api_phone,
@@ -1923,7 +1923,7 @@ fn wire__crate__crud__create_transaction_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::create_transaction(
+                    let output_ok = crate::services::crud::create_transaction(
                         api_contact_id,
                         api_type_,
                         api_direction,
@@ -2370,7 +2370,7 @@ fn wire__crate__crud__delete_contact_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::delete_contact(api_contact_id)?;
+                    let output_ok = crate::services::crud::delete_contact(api_contact_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -2471,7 +2471,7 @@ fn wire__crate__crud__delete_transaction_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::delete_transaction(api_transaction_id)?;
+                    let output_ok = crate::services::crud::delete_transaction(api_transaction_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -3077,7 +3077,7 @@ fn wire__crate__sync__full_sync_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::sync::full_sync()?;
+                    let output_ok = crate::services::sync::full_sync()?;
                     Ok(output_ok)
                 })())
             }
@@ -3175,7 +3175,7 @@ fn wire__crate__crud__get_contact_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::get_contact(api_id)?;
+                    let output_ok = crate::services::crud::get_contact(api_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -3274,7 +3274,7 @@ fn wire__crate__crud__get_contacts_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::get_contacts()?;
+                    let output_ok = crate::services::crud::get_contacts()?;
                     Ok(output_ok)
                 })())
             }
@@ -3568,7 +3568,7 @@ fn wire__crate__crud__get_transaction_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::get_transaction(api_id)?;
+                    let output_ok = crate::services::crud::get_transaction(api_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -3632,7 +3632,7 @@ fn wire__crate__crud__get_transactions_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::get_transactions()?;
+                    let output_ok = crate::services::crud::get_transactions()?;
                     Ok(output_ok)
                 })())
             }
@@ -3991,7 +3991,7 @@ fn wire__crate__sync__invalidate_perms_cache_and_pull_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::sync::invalidate_perms_cache_and_pull(&api_wallet_id)?;
+                    let output_ok = crate::services::sync::invalidate_perms_cache_and_pull(&api_wallet_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -4851,7 +4851,7 @@ fn wire__crate__crud__logout_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::logout()?;
+                    let output_ok = crate::services::crud::logout()?;
                     Ok(output_ok)
                 })())
             }
@@ -4915,7 +4915,7 @@ fn wire__crate__sync__pull_and_merge_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::sync::pull_and_merge()?;
+                    let output_ok = crate::services::sync::pull_and_merge()?;
                     Ok(output_ok)
                 })())
             }
@@ -4982,7 +4982,7 @@ fn wire__crate__sync__push_unsynced_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::sync::push_unsynced()?;
+                    let output_ok = crate::services::sync::push_unsynced()?;
                     Ok(output_ok)
                 })())
             }
@@ -5688,7 +5688,7 @@ fn wire__crate__crud__undo_contact_action_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::undo_contact_action(api_contact_id)?;
+                    let output_ok = crate::services::crud::undo_contact_action(api_contact_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -5754,7 +5754,7 @@ fn wire__crate__crud__undo_transaction_action_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::undo_transaction_action(api_transaction_id)?;
+                    let output_ok = crate::services::crud::undo_transaction_action(api_transaction_id)?;
                     Ok(output_ok)
                 })())
             }
@@ -5840,7 +5840,7 @@ fn wire__crate__crud__update_contact_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::update_contact(
+                    let output_ok = crate::services::crud::update_contact(
                         api_id,
                         api_name,
                         api_username,
@@ -5979,7 +5979,7 @@ fn wire__crate__crud__update_transaction_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::crud::update_transaction(
+                    let output_ok = crate::services::crud::update_transaction(
                         api_id,
                         api_contact_id,
                         api_type_,
