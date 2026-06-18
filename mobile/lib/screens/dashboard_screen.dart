@@ -13,6 +13,7 @@ import '../providers/transactions_provider.dart';
 import '../providers/events_provider.dart';
 import '../utils/app_colors.dart';
 import '../utils/theme_colors.dart';
+import '../utils/carbon_tokens.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/gradient_card.dart';
 import '../widgets/sync_status_icon.dart';
@@ -229,9 +230,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 _buildDueDatesSection(context, upcomingDueDates, contactMap, 'Payment Reminders'),
                 const SizedBox(height: 16),
               ] else ...[
-                GradientCard(
-                  padding: const EdgeInsets.all(16),
-                  variationSeed: 1,
+                CarbonCard(
+                  padding: const EdgeInsets.all(CarbonTokens.lg),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -280,9 +280,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ? AppColors.getGiveColor(flipColors, isDark) // Positive = Gave = green
             : AppColors.getReceivedColor(flipColors, isDark); // Negative = Received = red
         
-        return GradientCard(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          variationSeed: 2,
+        return CarbonCard(
+          padding: const EdgeInsets.all(CarbonTokens.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -350,9 +349,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         final debtColor = AppColors.getReceivedColor(flipColors, isDark); // Debts = Received = red
         final creditColor = AppColors.getGiveColor(flipColors, isDark); // Credits = Gave = green
         
-        return GradientCard(
-          padding: const EdgeInsets.all(16),
-          variationSeed: 3,
+        return CarbonCard(
+          padding: const EdgeInsets.all(CarbonTokens.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -599,9 +597,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         final warningColor = ThemeColors.warning(context);
         final errorColor = ThemeColors.error(context);
         
-        return GradientCard(
-          padding: const EdgeInsets.all(16),
-          variationSeed: title.hashCode,
+        return CarbonCard(
+          padding: const EdgeInsets.all(CarbonTokens.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
