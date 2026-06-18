@@ -176,7 +176,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                           placeholder: 'Re-enter your password',
                           obscureText: true,
                           textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _handleSubmit(),
+                          onFieldSubmitted: () => _handleSubmit(),
                           validator: (value) {
                             if (value != _passwordController.text) {
                               return 'Passwords do not match';
@@ -225,14 +225,14 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                           children: [
                             CarbonButton(
                               label: _loading ? 'Signing up...' : 'Sign up',
-                              kind: CarbonButtonKind.primary,
+                              kind: ButtonKind.primary,
                               onPressed: _loading ? null : _handleSubmit,
                               isLoading: _loading,
                             ),
                             const SizedBox(height: 12),
                             CarbonButton(
                               label: 'Back to Backend Setup',
-                              kind: CarbonButtonKind.secondary,
+                              kind: ButtonKind.secondary,
                               onPressed: _loading
                                   ? null
                                   : () {
@@ -246,7 +246,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                             const SizedBox(height: 12),
                             CarbonButton(
                               label: 'Already have an account? Sign in',
-                              kind: CarbonButtonKind.ghost,
+                              kind: ButtonKind.ghost,
                               onPressed: _loading
                                   ? null
                                   : () {

@@ -246,14 +246,6 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
-  flutter_carbon:
-    dependency: "direct main"
-    description:
-      name: flutter_carbon
-      sha256: "420d04e41cbbe09f7dccdb3a138f6ff4eb44b953ed6ecf57eab66aeaedd9d36c"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.2.1"
   flutter_driver:
     dependency: transitive
     description: flutter

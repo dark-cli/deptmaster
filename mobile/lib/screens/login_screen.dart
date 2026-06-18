@@ -172,6 +172,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             }
                             return null;
                           },
+                          onFieldSubmitted: () => _handleSubmit(),
                         ),
                         const SizedBox(height: 16),
                         CarbonTextInput(
@@ -180,7 +181,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           placeholder: 'Enter your password',
                           obscureText: true,
                           textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _handleSubmit(),
+                          onFieldSubmitted: () => _handleSubmit(),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
                               return 'Password is required';
@@ -224,14 +225,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           children: [
                             CarbonButton(
                               label: _loading ? 'Signing in...' : 'Sign in',
-                              kind: CarbonButtonKind.primary,
+                              kind: ButtonKind.primary,
                               onPressed: _loading ? null : _handleSubmit,
                               isLoading: _loading,
                             ),
                             const SizedBox(height: 12),
                             CarbonButton(
                               label: 'Back to Backend Setup',
-                              kind: CarbonButtonKind.secondary,
+                              kind: ButtonKind.secondary,
                               onPressed: _loading
                                   ? null
                                   : () {
@@ -245,7 +246,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             const SizedBox(height: 12),
                             CarbonButton(
                               label: 'Don\'t have an account? Sign up',
-                              kind: CarbonButtonKind.ghost,
+                              kind: ButtonKind.ghost,
                               onPressed: _loading
                                   ? null
                                   : () {

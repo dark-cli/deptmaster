@@ -243,7 +243,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                     keyboardType: TextInputType.number,
                     maxLength: _inviteCodeLength,
                     errorText: _inviteCodeError,
-                    onFieldSubmitted: (_) {
+                    onFieldSubmitted: () {
                       if (_inviteCodeController.text.trim().length == _inviteCodeLength) {
                         _joinByCode();
                       }
