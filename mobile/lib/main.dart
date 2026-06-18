@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint, defaultTargetPlatform;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_carbon/carbon.dart';
 
 import 'api.dart';
 import 'providers/settings_provider.dart';
@@ -13,7 +14,6 @@ import 'screens/login_screen.dart';
 import 'screens/sign_up_screen.dart';
 import 'screens/backend_setup_screen.dart';
 import 'screens/create_wallet_screen.dart';
-import 'utils/app_theme.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -181,8 +181,8 @@ class _DebtTrackerAppState extends ConsumerState<DebtTrackerApp> {
       scaffoldMessengerKey: scaffoldMessengerKey,
       title: appTitle,
       builder: (context, child) => Directionality(textDirection: TextDirection.ltr, child: child!),
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
+      theme: CarbonTheme.light(),
+      darkTheme: CarbonTheme.dark(),
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       initialRoute: widget.initialRoute,
       routes: {
