@@ -3,8 +3,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_carbon/carbon.dart';
 import '../api.dart';
+import '../utils/carbon_tokens.dart';
 import 'backend_setup_screen.dart';
 import 'login_screen.dart';
 

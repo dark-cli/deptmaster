@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_carbon/carbon.dart';
 import '../api.dart';
+import '../utils/carbon_tokens.dart';
 import '../models/wallet.dart';
 import '../utils/toast_service.dart';
 import '../utils/theme_colors.dart';
@@ -222,8 +222,8 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                 ),
                 CarbonButton(
                   label: 'New wallet',
-                  kind: CarbonButtonKind.ghost,
-                  size: CarbonButtonSize.small,
+                  kind: ButtonKind.ghost,
+                  size: ButtonSize.small,
                   onPressed: _openCreateWallet,
                 ),
               ],
@@ -255,8 +255,8 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: CarbonButton(
                     label: 'Join',
-                    kind: CarbonButtonKind.primary,
-                    size: CarbonButtonSize.small,
+                    kind: ButtonKind.primary,
+                    size: ButtonSize.small,
                     onPressed: _joining || _inviteCodeController.text.trim().length != _inviteCodeLength
                         ? null
                         : _joinByCode,
@@ -310,7 +310,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                               width: double.infinity,
                               child: CarbonButton(
                                 label: 'Retry',
-                                kind: CarbonButtonKind.primary,
+                                kind: ButtonKind.primary,
                                 onPressed: _loadWallets,
                               ),
                             ),
@@ -319,7 +319,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                               width: double.infinity,
                               child: CarbonButton(
                                 label: 'Create new wallet anyway',
-                                kind: CarbonButtonKind.ghost,
+                                kind: ButtonKind.ghost,
                                 onPressed: _openCreateWallet,
                               ),
                             ),
@@ -357,7 +357,7 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
                                   width: double.infinity,
                                   child: CarbonButton(
                                     label: 'Create your first wallet',
-                                    kind: CarbonButtonKind.primary,
+                                    kind: ButtonKind.primary,
                                     onPressed: _openCreateWallet,
                                   ),
                                 ),

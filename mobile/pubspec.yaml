@@ -51,9 +51,6 @@ dependencies:
   # Code generation
   freezed_annotation: ^2.4.1
 
-  # IBM Carbon Design System
-  flutter_carbon: ^1.2.1
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
