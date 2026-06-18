@@ -1,8 +1,8 @@
 //! HTTP client for backend API (auth, sync, wallets).
 
-mod auth;
-mod sync;
-mod wallets;
+pub(crate) mod auth;
+pub(crate) mod sync;
+pub(crate) mod wallets;
 
 pub use auth::{login, register, server_logout};
 pub use sync::{get_sync_events, post_sync_events};

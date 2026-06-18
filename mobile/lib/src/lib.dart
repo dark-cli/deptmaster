@@ -6,43 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `current_user_id_or_nil`, `current_user_id`, `is_network_error`, `is_rate_limited`, `jwt_payload`, `manual_sync_with_source`, `parse_resource`, `should_log_skip`, `start_sync_loop_if_ready`, `try_acquire`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BackendConfig`, `SyncGuard`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
-
-/// Call once at startup with the app documents directory path (e.g. from path_provider).
-/// Storage is process-wide; no need to call again from every thread.
-Future<void> initStorage({required String storagePath}) =>
-    RustLib.instance.api.crateInitStorage(storagePath: storagePath);
-
-Future<void> setBackendConfig(
-        {required String baseUrl, required String wsUrl}) =>
-    RustLib.instance.api.crateSetBackendConfig(baseUrl: baseUrl, wsUrl: wsUrl);
-
-Future<String> getBaseUrl() => RustLib.instance.api.crateGetBaseUrl();
-
-Future<String> getWsUrl() => RustLib.instance.api.crateGetWsUrl();
-
-/// Set whether the client is in "offline" mode. When true, all API requests return an error without hitting the network.
-/// The app reconnects WS when going online; WS connection triggers sync (app logic, not here).
-/// Thread-local (per test / per app when using multiple instances).
-Future<void> setNetworkOffline({required bool offline}) =>
-    RustLib.instance.api.crateSetNetworkOffline(offline: offline);
-
-/// True if the client is in offline mode (network requests will fail).
-Future<bool> isNetworkOffline() => RustLib.instance.api.crateIsNetworkOffline();
-
-/// Set or clear a per-thread log tag. When set, the multi-app log viewer can
-/// distinguish which simulated app produced each log line. Stub today — the
-/// log_bridge doesn't yet prepend it — but exposing the API unblocks the
-/// integration test setup (`AppInstance::activate`) that calls it on every
-/// app switch. If/when we want per-app prefixes, log_bridge::push can read
-/// LOG_CONTEXT and prepend it.
-Future<void> setLogContext({required String ctx}) =>
-    RustLib.instance.api.crateSetLogContext(ctx: ctx);
-
-/// Read the current per-thread log tag. Empty string if not set.
-Future<String> logContext() => RustLib.instance.api.crateLogContext();
+// These functions are ignored because they are not marked as `pub`: `current_user_id_or_nil`, `current_user_id`, `jwt_payload`, `parse_resource`
 
 Future<void> login({required String username, required String password}) =>
     RustLib.instance.api.crateLogin(username: username, password: password);
@@ -311,9 +275,6 @@ Future<void> putWalletPermissionMatrix(
         walletId: walletId, entriesJson: entriesJson);
 
 Future<String> getEvents() => RustLib.instance.api.crateGetEvents();
-
-/// Sync with server. If server responds with DEBITUM_AUTH_DECLINED, Rust clears session (logout) and returns that error; Dart only needs to react (e.g. show login).
-Future<void> manualSync() => RustLib.instance.api.crateManualSync();
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).
 Future<List<String>> drainRustLogs() =>

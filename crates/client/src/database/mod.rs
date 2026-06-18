@@ -1,6 +1,6 @@
 //! Database layer: storage abstraction with typed error handling.
 
-mod models;
+pub(crate) mod models;
 pub mod repository;
 pub mod storage;
 

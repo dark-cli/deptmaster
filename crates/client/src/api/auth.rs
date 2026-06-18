@@ -75,7 +75,7 @@ fn jwt_needs_refresh(token: &str) -> bool {
     exp - now < 60
 }
 
-pub fn auth_headers() -> Result<reqwest::header::HeaderMap, ClientError> {
+pub(super) fn auth_headers() -> Result<reqwest::header::HeaderMap, ClientError> {
     let mut token = database::config_get("token")
         ?
         .ok_or(ClientError::AuthExpired)?;

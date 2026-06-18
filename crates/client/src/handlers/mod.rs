@@ -1,8 +1,8 @@
 //! Public FFI handler layer: converts typed errors to String for Dart boundary.
 
-mod auth;
-mod sync;
-mod wallets;
+pub(crate) mod auth;
+pub(crate) mod sync;
+pub(crate) mod wallets;
 
 pub use auth::*;
 pub use sync::*;

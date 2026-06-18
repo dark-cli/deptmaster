@@ -3,25 +3,35 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import 'api.dart';
-import 'crud.dart';
+import 'api/auth.dart';
+import 'api/sync.dart';
+import 'api/wallets.dart';
+import 'config.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'data_bus.dart';
+import 'database/models.dart';
+import 'database/repository.dart';
+import 'database/storage.dart';
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
-import 'ids.dart';
+import 'handlers/auth.dart';
+import 'handlers/sync.dart';
+import 'handlers/wallets.dart';
+import 'integration/data_bus.dart';
+import 'integration/sync_control.dart';
+import 'integration/ws.dart';
 import 'lib.dart';
-import 'log_bridge.dart';
-import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-import 'sdk_projection.dart';
-import 'sdk_snapshot_store.dart';
-import 'sdk_store.dart';
-import 'storage.dart';
-import 'sync.dart';
-import 'ws.dart';
+import 'sdk/projection.dart';
+import 'sdk/snapshot_store.dart';
+import 'sdk/store.dart';
+import 'services/crud.dart';
+import 'services/sync.dart';
+import 'types/error.dart';
+import 'types/models.dart';
+import 'util/ids.dart';
+import 'util/logging.dart';
 
 /// Main entrypoint of the Rust API
 class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
@@ -82,7 +92,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1660453537;
+  int get rustContentHash => 1907728524;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -93,44 +103,45 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
-  String crateModelsEventAutoAccessorGetAggregateId({required Event that});
+  String crateTypesModelsEventAutoAccessorGetAggregateId({required Event that});
 
-  String crateModelsEventAutoAccessorGetAggregateType({required Event that});
+  String crateTypesModelsEventAutoAccessorGetAggregateType(
+      {required Event that});
 
-  Value crateModelsEventAutoAccessorGetEventData({required Event that});
+  Value crateTypesModelsEventAutoAccessorGetEventData({required Event that});
 
-  String crateModelsEventAutoAccessorGetEventType({required Event that});
+  String crateTypesModelsEventAutoAccessorGetEventType({required Event that});
 
-  String crateModelsEventAutoAccessorGetId({required Event that});
+  String crateTypesModelsEventAutoAccessorGetId({required Event that});
 
-  bool crateModelsEventAutoAccessorGetSynced({required Event that});
+  bool crateTypesModelsEventAutoAccessorGetSynced({required Event that});
 
-  String crateModelsEventAutoAccessorGetTimestamp({required Event that});
+  String crateTypesModelsEventAutoAccessorGetTimestamp({required Event that});
 
-  int crateModelsEventAutoAccessorGetVersion({required Event that});
+  int crateTypesModelsEventAutoAccessorGetVersion({required Event that});
 
-  void crateModelsEventAutoAccessorSetAggregateId(
+  void crateTypesModelsEventAutoAccessorSetAggregateId(
       {required Event that, required String aggregateId});
 
-  void crateModelsEventAutoAccessorSetAggregateType(
+  void crateTypesModelsEventAutoAccessorSetAggregateType(
       {required Event that, required String aggregateType});
 
-  void crateModelsEventAutoAccessorSetEventData(
+  void crateTypesModelsEventAutoAccessorSetEventData(
       {required Event that, required Value eventData});
 
-  void crateModelsEventAutoAccessorSetEventType(
+  void crateTypesModelsEventAutoAccessorSetEventType(
       {required Event that, required String eventType});
 
-  void crateModelsEventAutoAccessorSetId(
+  void crateTypesModelsEventAutoAccessorSetId(
       {required Event that, required String id});
 
-  void crateModelsEventAutoAccessorSetSynced(
+  void crateTypesModelsEventAutoAccessorSetSynced(
       {required Event that, required bool synced});
 
-  void crateModelsEventAutoAccessorSetTimestamp(
+  void crateTypesModelsEventAutoAccessorSetTimestamp(
       {required Event that, required String timestamp});
 
-  void crateModelsEventAutoAccessorSetVersion(
+  void crateTypesModelsEventAutoAccessorSetVersion(
       {required Event that, required int version});
 
   Future<SdkPermissionStore> crateSdkStoreSdkPermissionStoreDefault();
@@ -145,12 +156,22 @@ abstract class RustLibApi extends BaseApi {
 
   Future<SdkSnapshotStore> crateSdkSnapshotStoreSdkSnapshotStoreNew();
 
-  Future<void> crateApiAddContactGroupMemberApi(
+  Future<void> crateApiWalletsAddContactGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String contactId});
 
-  Future<void> crateApiAddUserGroupMemberApi(
+  Future<void> crateHandlersWalletsAddContactGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String contactId});
+
+  Future<void> crateApiWalletsAddUserGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String username});
+
+  Future<void> crateHandlersWalletsAddUserGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String username});
@@ -158,7 +179,10 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateAddUserToWallet(
       {required String walletId, required String username});
 
-  Future<void> crateApiAddUserToWalletApi(
+  Future<void> crateApiWalletsAddUserToWalletApi(
+      {required String walletId, required String username});
+
+  Future<void> crateHandlersWalletsAddUserToWalletApi(
       {required String walletId, required String username});
 
   Future<void> crateAddWalletContactGroupMember(
@@ -173,12 +197,13 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateBulkDeleteContacts({required List<String> contactIds});
 
-  Future<void> crateCrudBulkDeleteContacts({required List<String> contactIds});
+  Future<void> crateServicesCrudBulkDeleteContacts(
+      {required List<String> contactIds});
 
   Future<void> crateBulkDeleteTransactions(
       {required List<String> transactionIds});
 
-  Future<void> crateCrudBulkDeleteTransactions(
+  Future<void> crateServicesCrudBulkDeleteTransactions(
       {required List<String> transactionIds});
 
   Future<bool> crateCanPerform(
@@ -186,24 +211,36 @@ abstract class RustLibApi extends BaseApi {
       required String resourceType,
       String? resourceId});
 
-  Future<void> crateStorageClearAll();
+  Future<void> crateDatabaseRepositoryClearAll();
 
-  Future<void> crateStorageClearWallet({required String walletId});
+  Future<void> crateDatabaseStorageClearAll();
 
-  Future<void> crateSyncClearWalletAndResync({required String walletId});
+  Future<void> crateDatabaseRepositoryClearWallet({required String walletId});
+
+  Future<void> crateDatabaseStorageClearWallet({required String walletId});
+
+  Future<void> crateServicesSyncClearWalletAndResync(
+      {required String walletId});
 
   Future<void> crateClearWalletData({required String walletId});
 
-  Future<String?> crateStorageConfigGet({required String key});
+  Future<String?> crateDatabaseRepositoryConfigGet({required String key});
 
-  Future<void> crateStorageConfigRemove({required String key});
+  Future<String?> crateDatabaseStorageConfigGet({required String key});
 
-  Future<void> crateStorageConfigSet(
+  Future<void> crateDatabaseRepositoryConfigRemove({required String key});
+
+  Future<void> crateDatabaseStorageConfigRemove({required String key});
+
+  Future<void> crateDatabaseRepositoryConfigSet(
       {required String key, required String value});
 
-  Future<void> crateWsConnectRealtime();
+  Future<void> crateDatabaseStorageConfigSet(
+      {required String key, required String value});
 
-  Future<void> crateIdsContactIdAsStr({required ContactId that});
+  Future<void> crateIntegrationWsConnectRealtime();
+
+  Future<void> crateUtilIdsContactIdAsStr({required ContactId that});
 
   Future<String> crateCreateContact(
       {required String name,
@@ -213,7 +250,7 @@ abstract class RustLibApi extends BaseApi {
       String? notes,
       List<String>? groupIds});
 
-  Future<Contact> crateCrudCreateContact(
+  Future<Contact> crateServicesCrudCreateContact(
       {required String name,
       String? username,
       String? phone,
@@ -221,7 +258,10 @@ abstract class RustLibApi extends BaseApi {
       String? notes,
       List<String>? groupIds});
 
-  Future<String> crateApiCreateContactGroupApi(
+  Future<String> crateApiWalletsCreateContactGroupApi(
+      {required String walletId, required String name});
+
+  Future<String> crateHandlersWalletsCreateContactGroupApi(
       {required String walletId, required String name});
 
   Future<String> crateCreateTransaction(
@@ -234,7 +274,7 @@ abstract class RustLibApi extends BaseApi {
       required String transactionDate,
       String? dueDate});
 
-  Future<Transaction> crateCrudCreateTransaction(
+  Future<Transaction> crateServicesCrudCreateTransaction(
       {required String contactId,
       required String type,
       required String direction,
@@ -244,45 +284,62 @@ abstract class RustLibApi extends BaseApi {
       required String transactionDate,
       String? dueDate});
 
-  Future<String> crateApiCreateUserGroupApi(
+  Future<String> crateApiWalletsCreateUserGroupApi(
+      {required String walletId, required String name});
+
+  Future<String> crateHandlersWalletsCreateUserGroupApi(
       {required String walletId, required String name});
 
   Future<String> crateCreateWallet(
       {required String name, required String description});
 
-  Future<Wallet> crateApiCreateWalletApi(
+  Future<Wallet> crateApiWalletsCreateWalletApi(
+      {required String name, required String description});
+
+  Future<Wallet> crateHandlersWalletsCreateWalletApi(
       {required String name, required String description});
 
   Future<String> crateCreateWalletContactGroup(
       {required String walletId, required String name});
 
-  Future<String> crateApiCreateWalletInviteApi({required String walletId});
+  Future<String> crateApiWalletsCreateWalletInviteApi(
+      {required String walletId});
+
+  Future<String> crateHandlersWalletsCreateWalletInviteApi(
+      {required String walletId});
 
   Future<String> crateCreateWalletInviteCode({required String walletId});
 
   Future<String> crateCreateWalletUserGroup(
       {required String walletId, required String name});
 
-  Future<void> crateModelsCurrencyAsStr({required Currency that});
+  Future<void> crateTypesModelsCurrencyAsStr({required Currency that});
 
-  Future<Currency> crateModelsCurrencyDefault();
+  Future<Currency> crateTypesModelsCurrencyDefault();
 
-  Future<Currency?> crateModelsCurrencyFromStr({required String s});
+  Future<Currency?> crateTypesModelsCurrencyFromStr({required String s});
 
-  Stream<DataChangeEvent> crateDataBusDataChangeStream();
+  Stream<DataChangeEvent> crateIntegrationDataBusDataChangeStream();
 
   Future<void> crateDeleteContact({required String contactId});
 
-  Future<void> crateCrudDeleteContact({required String contactId});
+  Future<void> crateServicesCrudDeleteContact({required String contactId});
 
-  Future<void> crateApiDeleteContactGroupApi(
+  Future<void> crateApiWalletsDeleteContactGroupApi(
+      {required String walletId, required String groupId});
+
+  Future<void> crateHandlersWalletsDeleteContactGroupApi(
       {required String walletId, required String groupId});
 
   Future<void> crateDeleteTransaction({required String transactionId});
 
-  Future<void> crateCrudDeleteTransaction({required String transactionId});
+  Future<void> crateServicesCrudDeleteTransaction(
+      {required String transactionId});
 
-  Future<void> crateApiDeleteUserGroupApi(
+  Future<void> crateApiWalletsDeleteUserGroupApi(
+      {required String walletId, required String groupId});
+
+  Future<void> crateHandlersWalletsDeleteUserGroupApi(
       {required String walletId, required String groupId});
 
   Future<void> crateDeleteWalletContactGroup(
@@ -291,54 +348,86 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateDeleteWalletUserGroup(
       {required String walletId, required String groupId});
 
-  Future<void> crateWsDisconnectRealtime();
+  Future<void> crateIntegrationWsDisconnectRealtime();
 
   Future<List<String>> crateDrainRustLogs();
 
-  Future<List<String>> crateLogBridgeDrainRustLogs();
+  Future<List<String>> crateUtilLoggingDrainRustLogs();
 
   Future<void> crateEnsureCurrentWallet();
 
-  Future<void> crateIdsEventIdAsStr({required EventId that});
+  Future<void> crateUtilIdsEventIdAsStr({required EventId that});
 
-  Future<PlatformInt64> crateStorageEventsCount({required String walletId});
-
-  Future<void> crateStorageEventsDeleteAllForWallet({required String walletId});
-
-  Future<BigInt> crateStorageEventsDeleteUnsynced({required String walletId});
-
-  Future<List<StoredEvent>> crateStorageEventsGetAll(
+  Future<PlatformInt64> crateDatabaseRepositoryEventsCount(
       {required String walletId});
 
-  Future<List<StoredEvent>> crateStorageEventsGetForAggregate(
+  Future<PlatformInt64> crateDatabaseStorageEventsCount(
+      {required String walletId});
+
+  Future<void> crateDatabaseRepositoryEventsDeleteAllForWallet(
+      {required String walletId});
+
+  Future<void> crateDatabaseStorageEventsDeleteAllForWallet(
+      {required String walletId});
+
+  Future<BigInt> crateDatabaseRepositoryEventsDeleteUnsynced(
+      {required String walletId});
+
+  Future<BigInt> crateDatabaseStorageEventsDeleteUnsynced(
+      {required String walletId});
+
+  Future<List<StoredEvent>> crateDatabaseRepositoryEventsGetAll(
+      {required String walletId});
+
+  Future<List<StoredEvent>> crateDatabaseStorageEventsGetAll(
+      {required String walletId});
+
+  Future<List<StoredEvent>> crateDatabaseRepositoryEventsGetForAggregate(
       {required String walletId,
       required String aggregateType,
       required String aggregateId});
 
-  Future<List<StoredEvent>> crateStorageEventsGetUnsynced(
+  Future<List<StoredEvent>> crateDatabaseStorageEventsGetForAggregate(
+      {required String walletId,
+      required String aggregateType,
+      required String aggregateId});
+
+  Future<List<StoredEvent>> crateDatabaseRepositoryEventsGetUnsynced(
       {required String walletId});
 
-  Future<void> crateStorageEventsInsert({required StoredEvent e});
+  Future<List<StoredEvent>> crateDatabaseStorageEventsGetUnsynced(
+      {required String walletId});
 
-  Future<void> crateStorageEventsMarkSynced({required List<String> ids});
+  Future<void> crateDatabaseRepositoryEventsInsert({required StoredEvent e});
 
-  Future<void> crateStorageEventsUpdateEventData(
+  Future<void> crateDatabaseStorageEventsInsert({required StoredEvent e});
+
+  Future<void> crateDatabaseRepositoryEventsMarkSynced(
+      {required List<String> ids});
+
+  Future<void> crateDatabaseStorageEventsMarkSynced(
+      {required List<String> ids});
+
+  Future<void> crateDatabaseRepositoryEventsUpdateEventData(
       {required String eventId, required String eventDataJson});
 
-  Future<void> crateSyncFullSync();
+  Future<void> crateDatabaseStorageEventsUpdateEventData(
+      {required String eventId, required String eventDataJson});
 
-  Future<String> crateGetBaseUrl();
+  Future<void> crateServicesSyncFullSync();
+
+  Future<String> crateConfigGetBaseUrl();
 
   Future<String> crateGetContact({required String id});
 
-  Future<String> crateCrudGetContact({required String id});
+  Future<String> crateServicesCrudGetContact({required String id});
 
   Future<String> crateGetContactGroupIdsForContact(
       {required String walletId, required String contactId});
 
   Future<String> crateGetContacts();
 
-  Future<String> crateCrudGetContacts();
+  Future<String> crateServicesCrudGetContacts();
 
   Future<String> crateGetCurrentWalletId();
 
@@ -346,21 +435,31 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateGetMyPermissions({required String walletId});
 
-  Future<String> crateApiGetMyPermissionsApi({required String walletId});
+  Future<String> crateApiWalletsGetMyPermissionsApi({required String walletId});
 
-  Future<String> crateApiGetPermissionMatrixApi({required String walletId});
+  Future<String> crateHandlersWalletsGetMyPermissionsApi(
+      {required String walletId});
+
+  Future<String> crateApiWalletsGetPermissionMatrixApi(
+      {required String walletId});
+
+  Future<String> crateHandlersWalletsGetPermissionMatrixApi(
+      {required String walletId});
 
   Future<String> crateGetPreference({required String key});
+
+  Future<(List<Value>, String, bool)> crateApiSyncGetSyncEvents(
+      {String? lastHash});
 
   Future<String> crateGetToken();
 
   Future<String> crateGetTransaction({required String id});
 
-  Future<String> crateCrudGetTransaction({required String id});
+  Future<String> crateServicesCrudGetTransaction({required String id});
 
   Future<String> crateGetTransactions();
 
-  Future<String> crateCrudGetTransactions();
+  Future<String> crateServicesCrudGetTransactions();
 
   Future<String> crateGetUserId();
 
@@ -370,45 +469,72 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateGetWallets();
 
-  Future<List<Wallet>> crateApiGetWalletsApi();
+  Future<List<Wallet>> crateApiWalletsGetWalletsApi();
 
-  Future<String> crateGetWsUrl();
+  Future<List<Wallet>> crateHandlersWalletsGetWalletsApi();
+
+  Future<String> crateConfigGetWsUrl();
 
   Future<String> crateGreet({required String name});
 
-  Future<void> crateStorageInit({required String path});
+  Future<void> crateDatabaseRepositoryInit({required String path});
+
+  Future<void> crateDatabaseStorageInit({required String path});
 
   Future<void> crateInitApp();
 
-  Future<void> crateInitStorage({required String storagePath});
+  Future<void> crateConfigInitStorage({required String storagePath});
 
-  Future<void> crateSyncInvalidatePermsCacheAndPull({required String walletId});
+  Future<void> crateServicesSyncInvalidatePermsCacheAndPull(
+      {required String walletId});
 
   Future<bool> crateIsLoggedIn();
 
-  Future<bool> crateIsNetworkOffline();
+  Future<bool> crateConfigIsNetworkOffline();
 
-  Future<bool> crateStorageIsReady();
+  Future<bool> crateDatabaseRepositoryIsReady();
+
+  Future<bool> crateDatabaseStorageIsReady();
 
   Future<bool> crateIsTokenExpired();
 
   Future<String> crateJoinWalletByCode({required String code});
 
-  Future<String> crateApiJoinWalletByCodeApi({required String code});
+  Future<String> crateApiWalletsJoinWalletByCodeApi({required String code});
+
+  Future<String> crateHandlersWalletsJoinWalletByCodeApi(
+      {required String code});
 
   Future<JwtPayload> crateJwtPayloadDefault();
 
-  Future<String> crateApiListContactGroupMembersApi(
+  Future<String> crateApiWalletsListContactGroupMembersApi(
       {required String walletId, required String groupId});
 
-  Future<String> crateApiListContactGroupsApi({required String walletId});
-
-  Future<String> crateApiListPermissionActionsApi({required String walletId});
-
-  Future<String> crateApiListUserGroupMembersApi(
+  Future<String> crateHandlersWalletsListContactGroupMembersApi(
       {required String walletId, required String groupId});
 
-  Future<String> crateApiListUserGroupsApi({required String walletId});
+  Future<String> crateApiWalletsListContactGroupsApi(
+      {required String walletId});
+
+  Future<String> crateHandlersWalletsListContactGroupsApi(
+      {required String walletId});
+
+  Future<String> crateApiWalletsListPermissionActionsApi(
+      {required String walletId});
+
+  Future<String> crateHandlersWalletsListPermissionActionsApi(
+      {required String walletId});
+
+  Future<String> crateApiWalletsListUserGroupMembersApi(
+      {required String walletId, required String groupId});
+
+  Future<String> crateHandlersWalletsListUserGroupMembersApi(
+      {required String walletId, required String groupId});
+
+  Future<String> crateApiWalletsListUserGroupsApi({required String walletId});
+
+  Future<String> crateHandlersWalletsListUserGroupsApi(
+      {required String walletId});
 
   Future<String> crateListWalletContactGroupMembers(
       {required String walletId, required String groupId});
@@ -424,34 +550,54 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateListWalletUsers({required String walletId});
 
-  Future<String> crateApiListWalletUsersApi({required String walletId});
+  Future<String> crateApiWalletsListWalletUsersApi({required String walletId});
 
-  Future<List<Contact>> crateStorageLoadContactsFromTables(
+  Future<String> crateHandlersWalletsListWalletUsersApi(
       {required String walletId});
 
-  Future<List<Transaction>> crateStorageLoadTransactionsFromTables(
+  Future<List<Contact>> crateDatabaseRepositoryLoadContactsFromTables(
       {required String walletId});
 
-  Future<String> crateLogContext();
+  Future<List<Contact>> crateDatabaseStorageLoadContactsFromTables(
+      {required String walletId});
+
+  Future<List<Transaction>> crateDatabaseRepositoryLoadTransactionsFromTables(
+      {required String walletId});
+
+  Future<List<Transaction>> crateDatabaseStorageLoadTransactionsFromTables(
+      {required String walletId});
+
+  Future<String> crateConfigLogContext();
 
   Future<void> crateLogin({required String username, required String password});
 
-  Future<void> crateApiLogin(
+  Future<void> crateApiAuthLogin(
+      {required String username, required String password});
+
+  Future<void> crateHandlersAuthLogin(
       {required String username, required String password});
 
   Future<void> crateLogout();
 
-  Future<void> crateCrudLogout();
+  Future<void> crateServicesCrudLogout();
 
-  Future<void> crateManualSync();
+  Future<void> crateIntegrationSyncControlManualSync();
 
-  Future<void> crateSyncPullAndMerge();
+  Future<void> crateHandlersSyncManualSyncApi();
 
-  Future<void> crateLogBridgePush({required String s});
+  Future<List<String>> crateApiSyncPostSyncEvents(
+      {required List<String> eventsJson});
 
-  Future<void> crateSyncPushUnsynced();
+  Future<void> crateServicesSyncPullAndMerge();
 
-  Future<void> crateApiPutPermissionMatrixApi(
+  Future<void> crateUtilLoggingPush({required String s});
+
+  Future<void> crateServicesSyncPushUnsynced();
+
+  Future<void> crateApiWalletsPutPermissionMatrixApi(
+      {required String walletId, required String entriesJson});
+
+  Future<void> crateHandlersWalletsPutPermissionMatrixApi(
       {required String walletId, required String entriesJson});
 
   Future<void> cratePutWalletPermissionMatrix(
@@ -460,15 +606,28 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateRegister(
       {required String username, required String password});
 
-  Future<void> crateApiRegister(
+  Future<void> crateApiAuthRegister(
       {required String username, required String password});
 
-  Future<void> crateApiRemoveContactGroupMemberApi(
+  Future<void> crateHandlersAuthRegister(
+      {required String username, required String password});
+
+  Future<void> crateApiWalletsRemoveContactGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String contactId});
 
-  Future<void> crateApiRemoveUserGroupMemberApi(
+  Future<void> crateHandlersWalletsRemoveContactGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String contactId});
+
+  Future<void> crateApiWalletsRemoveUserGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String userId});
+
+  Future<void> crateHandlersWalletsRemoveUserGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String userId});
@@ -481,7 +640,10 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateRemoveWalletUser(
       {required String walletId, required String userId});
 
-  Future<void> crateApiRemoveWalletUserApi(
+  Future<void> crateApiWalletsRemoveWalletUserApi(
+      {required String walletId, required String userId});
+
+  Future<void> crateHandlersWalletsRemoveWalletUserApi(
       {required String walletId, required String userId});
 
   Future<void> crateRemoveWalletUserGroupMember(
@@ -492,29 +654,35 @@ abstract class RustLibApi extends BaseApi {
   Future<String> crateSearchWalletUsers(
       {required String walletId, required String query});
 
-  Future<String> crateApiSearchWalletUsersApi(
+  Future<String> crateApiWalletsSearchWalletUsersApi(
       {required String walletId, required String query});
 
-  Future<void> crateSetBackendConfig(
+  Future<String> crateHandlersWalletsSearchWalletUsersApi(
+      {required String walletId, required String query});
+
+  Future<void> crateApiAuthServerLogout();
+
+  Future<void> crateConfigSetBackendConfig(
       {required String baseUrl, required String wsUrl});
 
   Future<void> crateSetCurrentWalletId({required String walletId});
 
-  Future<void> crateSetLogContext({required String ctx});
+  Future<void> crateConfigSetLogContext({required String ctx});
 
-  Future<void> crateSetNetworkOffline({required bool offline});
+  Future<void> crateConfigSetNetworkOffline({required bool offline});
 
   Future<void> crateSetPreference({required String key, required String value});
 
-  Future<void> crateIdsTransactionIdAsStr({required TransactionId that});
+  Future<void> crateUtilIdsTransactionIdAsStr({required TransactionId that});
 
   Future<void> crateUndoContactAction({required String contactId});
 
-  Future<void> crateCrudUndoContactAction({required String contactId});
+  Future<void> crateServicesCrudUndoContactAction({required String contactId});
 
   Future<void> crateUndoTransactionAction({required String transactionId});
 
-  Future<void> crateCrudUndoTransactionAction({required String transactionId});
+  Future<void> crateServicesCrudUndoTransactionAction(
+      {required String transactionId});
 
   Future<void> crateUpdateContact(
       {required String id,
@@ -525,7 +693,7 @@ abstract class RustLibApi extends BaseApi {
       String? notes,
       List<String>? groupIds});
 
-  Future<void> crateCrudUpdateContact(
+  Future<void> crateServicesCrudUpdateContact(
       {required String id,
       required String name,
       String? username,
@@ -534,7 +702,12 @@ abstract class RustLibApi extends BaseApi {
       String? notes,
       List<String>? groupIds});
 
-  Future<void> crateApiUpdateContactGroupApi(
+  Future<void> crateApiWalletsUpdateContactGroupApi(
+      {required String walletId,
+      required String groupId,
+      required String name});
+
+  Future<void> crateHandlersWalletsUpdateContactGroupApi(
       {required String walletId,
       required String groupId,
       required String name});
@@ -550,7 +723,7 @@ abstract class RustLibApi extends BaseApi {
       required String transactionDate,
       String? dueDate});
 
-  Future<void> crateCrudUpdateTransaction(
+  Future<void> crateServicesCrudUpdateTransaction(
       {required String id,
       required String contactId,
       required String type,
@@ -561,7 +734,12 @@ abstract class RustLibApi extends BaseApi {
       required String transactionDate,
       String? dueDate});
 
-  Future<void> crateApiUpdateUserGroupApi(
+  Future<void> crateApiWalletsUpdateUserGroupApi(
+      {required String walletId,
+      required String groupId,
+      required String name});
+
+  Future<void> crateHandlersWalletsUpdateUserGroupApi(
       {required String walletId,
       required String groupId,
       required String name});
@@ -571,7 +749,10 @@ abstract class RustLibApi extends BaseApi {
       required String groupId,
       required String name});
 
-  Future<void> crateApiUpdateWalletUserApi(
+  Future<void> crateApiWalletsUpdateWalletUserApi(
+      {required String walletId, required String userId, required String role});
+
+  Future<void> crateHandlersWalletsUpdateWalletUserApi(
       {required String walletId, required String userId, required String role});
 
   Future<void> crateUpdateWalletUserGroup(
@@ -582,9 +763,12 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateUpdateWalletUserRole(
       {required String walletId, required String userId, required String role});
 
-  Future<void> crateIdsUserIdAsStr({required UserId that});
+  Future<void> crateUtilIdsUserIdAsStr({required UserId that});
 
-  Future<void> crateIdsWalletIdAsStr({required WalletId that});
+  Future<void> crateUtilIdsWalletIdAsStr({required WalletId that});
+
+  Future<PlatformInt64> crateServicesCrudWalletTotalDebt(
+      {required String walletId});
 
   RustArcIncrementStrongCountFnType get rust_arc_increment_strong_count_Event;
 
@@ -635,7 +819,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
-  String crateModelsEventAutoAccessorGetAggregateId({required Event that}) {
+  String crateTypesModelsEventAutoAccessorGetAggregateId(
+      {required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -647,20 +832,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_String,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetAggregateIdConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetAggregateIdConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetAggregateIdConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorGetAggregateIdConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_get_aggregate_id",
         argNames: ["that"],
       );
 
   @override
-  String crateModelsEventAutoAccessorGetAggregateType({required Event that}) {
+  String crateTypesModelsEventAutoAccessorGetAggregateType(
+      {required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -672,20 +858,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_String,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetAggregateTypeConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetAggregateTypeConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetAggregateTypeConstMeta =>
-      const TaskConstMeta(
-        debugName: "Event_auto_accessor_get_aggregate_type",
-        argNames: ["that"],
-      );
+  TaskConstMeta
+      get kCrateTypesModelsEventAutoAccessorGetAggregateTypeConstMeta =>
+          const TaskConstMeta(
+            debugName: "Event_auto_accessor_get_aggregate_type",
+            argNames: ["that"],
+          );
 
   @override
-  Value crateModelsEventAutoAccessorGetEventData({required Event that}) {
+  Value crateTypesModelsEventAutoAccessorGetEventData({required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -698,20 +885,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetEventDataConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetEventDataConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetEventDataConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorGetEventDataConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_get_event_data",
         argNames: ["that"],
       );
 
   @override
-  String crateModelsEventAutoAccessorGetEventType({required Event that}) {
+  String crateTypesModelsEventAutoAccessorGetEventType({required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -723,20 +910,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_String,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetEventTypeConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetEventTypeConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetEventTypeConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorGetEventTypeConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_get_event_type",
         argNames: ["that"],
       );
 
   @override
-  String crateModelsEventAutoAccessorGetId({required Event that}) {
+  String crateTypesModelsEventAutoAccessorGetId({required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -748,20 +935,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_String,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetIdConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetIdConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetIdConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorGetIdConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_get_id",
         argNames: ["that"],
       );
 
   @override
-  bool crateModelsEventAutoAccessorGetSynced({required Event that}) {
+  bool crateTypesModelsEventAutoAccessorGetSynced({required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -773,20 +960,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_bool,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetSyncedConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetSyncedConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetSyncedConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorGetSyncedConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_get_synced",
         argNames: ["that"],
       );
 
   @override
-  String crateModelsEventAutoAccessorGetTimestamp({required Event that}) {
+  String crateTypesModelsEventAutoAccessorGetTimestamp({required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -798,20 +985,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_String,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetTimestampConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetTimestampConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetTimestampConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorGetTimestampConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_get_timestamp",
         argNames: ["that"],
       );
 
   @override
-  int crateModelsEventAutoAccessorGetVersion({required Event that}) {
+  int crateTypesModelsEventAutoAccessorGetVersion({required Event that}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -823,20 +1010,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_i_32,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorGetVersionConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorGetVersionConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorGetVersionConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorGetVersionConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_get_version",
         argNames: ["that"],
       );
 
   @override
-  void crateModelsEventAutoAccessorSetAggregateId(
+  void crateTypesModelsEventAutoAccessorSetAggregateId(
       {required Event that, required String aggregateId}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -850,20 +1037,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetAggregateIdConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetAggregateIdConstMeta,
       argValues: [that, aggregateId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetAggregateIdConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorSetAggregateIdConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_set_aggregate_id",
         argNames: ["that", "aggregateId"],
       );
 
   @override
-  void crateModelsEventAutoAccessorSetAggregateType(
+  void crateTypesModelsEventAutoAccessorSetAggregateType(
       {required Event that, required String aggregateType}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -877,20 +1064,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetAggregateTypeConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetAggregateTypeConstMeta,
       argValues: [that, aggregateType],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetAggregateTypeConstMeta =>
-      const TaskConstMeta(
-        debugName: "Event_auto_accessor_set_aggregate_type",
-        argNames: ["that", "aggregateType"],
-      );
+  TaskConstMeta
+      get kCrateTypesModelsEventAutoAccessorSetAggregateTypeConstMeta =>
+          const TaskConstMeta(
+            debugName: "Event_auto_accessor_set_aggregate_type",
+            argNames: ["that", "aggregateType"],
+          );
 
   @override
-  void crateModelsEventAutoAccessorSetEventData(
+  void crateTypesModelsEventAutoAccessorSetEventData(
       {required Event that, required Value eventData}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -905,20 +1093,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetEventDataConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetEventDataConstMeta,
       argValues: [that, eventData],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetEventDataConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorSetEventDataConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_set_event_data",
         argNames: ["that", "eventData"],
       );
 
   @override
-  void crateModelsEventAutoAccessorSetEventType(
+  void crateTypesModelsEventAutoAccessorSetEventType(
       {required Event that, required String eventType}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -932,20 +1120,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetEventTypeConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetEventTypeConstMeta,
       argValues: [that, eventType],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetEventTypeConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorSetEventTypeConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_set_event_type",
         argNames: ["that", "eventType"],
       );
 
   @override
-  void crateModelsEventAutoAccessorSetId(
+  void crateTypesModelsEventAutoAccessorSetId(
       {required Event that, required String id}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -959,20 +1147,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetIdConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetIdConstMeta,
       argValues: [that, id],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetIdConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorSetIdConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_set_id",
         argNames: ["that", "id"],
       );
 
   @override
-  void crateModelsEventAutoAccessorSetSynced(
+  void crateTypesModelsEventAutoAccessorSetSynced(
       {required Event that, required bool synced}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -986,20 +1174,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetSyncedConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetSyncedConstMeta,
       argValues: [that, synced],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetSyncedConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorSetSyncedConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_set_synced",
         argNames: ["that", "synced"],
       );
 
   @override
-  void crateModelsEventAutoAccessorSetTimestamp(
+  void crateTypesModelsEventAutoAccessorSetTimestamp(
       {required Event that, required String timestamp}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -1013,20 +1201,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetTimestampConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetTimestampConstMeta,
       argValues: [that, timestamp],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetTimestampConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorSetTimestampConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_set_timestamp",
         argNames: ["that", "timestamp"],
       );
 
   @override
-  void crateModelsEventAutoAccessorSetVersion(
+  void crateTypesModelsEventAutoAccessorSetVersion(
       {required Event that, required int version}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
@@ -1040,13 +1228,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsEventAutoAccessorSetVersionConstMeta,
+      constMeta: kCrateTypesModelsEventAutoAccessorSetVersionConstMeta,
       argValues: [that, version],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsEventAutoAccessorSetVersionConstMeta =>
+  TaskConstMeta get kCrateTypesModelsEventAutoAccessorSetVersionConstMeta =>
       const TaskConstMeta(
         debugName: "Event_auto_accessor_set_version",
         argNames: ["that", "version"],
@@ -1203,7 +1391,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiAddContactGroupMemberApi(
+  Future<void> crateApiWalletsAddContactGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String contactId}) {
@@ -1218,22 +1406,52 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiAddContactGroupMemberApiConstMeta,
+      constMeta: kCrateApiWalletsAddContactGroupMemberApiConstMeta,
       argValues: [walletId, groupId, contactId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiAddContactGroupMemberApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsAddContactGroupMemberApiConstMeta =>
       const TaskConstMeta(
         debugName: "add_contact_group_member_api",
         argNames: ["walletId", "groupId", "contactId"],
       );
 
   @override
-  Future<void> crateApiAddUserGroupMemberApi(
+  Future<void> crateHandlersWalletsAddContactGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String contactId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        sse_encode_String(contactId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 24, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsAddContactGroupMemberApiConstMeta,
+      argValues: [walletId, groupId, contactId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsAddContactGroupMemberApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "add_contact_group_member_api",
+        argNames: ["walletId", "groupId", "contactId"],
+      );
+
+  @override
+  Future<void> crateApiWalletsAddUserGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String username}) {
@@ -1244,19 +1462,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(username, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 24, port: port_);
+            funcId: 25, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiAddUserGroupMemberApiConstMeta,
+      constMeta: kCrateApiWalletsAddUserGroupMemberApiConstMeta,
       argValues: [walletId, groupId, username],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiAddUserGroupMemberApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsAddUserGroupMemberApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "add_user_group_member_api",
+        argNames: ["walletId", "groupId", "username"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsAddUserGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String username}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        sse_encode_String(username, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 26, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsAddUserGroupMemberApiConstMeta,
+      argValues: [walletId, groupId, username],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsAddUserGroupMemberApiConstMeta =>
       const TaskConstMeta(
         debugName: "add_user_group_member_api",
         argNames: ["walletId", "groupId", "username"],
@@ -1271,7 +1519,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(username, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 25, port: port_);
+            funcId: 27, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1289,7 +1537,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiAddUserToWalletApi(
+  Future<void> crateApiWalletsAddUserToWalletApi(
       {required String walletId, required String username}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1297,19 +1545,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(username, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 26, port: port_);
+            funcId: 28, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiAddUserToWalletApiConstMeta,
+      constMeta: kCrateApiWalletsAddUserToWalletApiConstMeta,
       argValues: [walletId, username],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiAddUserToWalletApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsAddUserToWalletApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "add_user_to_wallet_api",
+        argNames: ["walletId", "username"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsAddUserToWalletApi(
+      {required String walletId, required String username}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(username, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 29, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsAddUserToWalletApiConstMeta,
+      argValues: [walletId, username],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsAddUserToWalletApiConstMeta =>
+      const TaskConstMeta(
         debugName: "add_user_to_wallet_api",
         argNames: ["walletId", "username"],
       );
@@ -1326,7 +1602,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 27, port: port_);
+            funcId: 30, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1356,7 +1632,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(userId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 28, port: port_);
+            funcId: 31, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1381,7 +1657,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_list_String(contactIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 29, port: port_);
+            funcId: 32, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1399,25 +1675,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudBulkDeleteContacts({required List<String> contactIds}) {
+  Future<void> crateServicesCrudBulkDeleteContacts(
+      {required List<String> contactIds}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_list_String(contactIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 30, port: port_);
+            funcId: 33, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudBulkDeleteContactsConstMeta,
+      constMeta: kCrateServicesCrudBulkDeleteContactsConstMeta,
       argValues: [contactIds],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudBulkDeleteContactsConstMeta =>
+  TaskConstMeta get kCrateServicesCrudBulkDeleteContactsConstMeta =>
       const TaskConstMeta(
         debugName: "bulk_delete_contacts",
         argNames: ["contactIds"],
@@ -1431,7 +1708,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_list_String(transactionIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 31, port: port_);
+            funcId: 34, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1450,26 +1727,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudBulkDeleteTransactions(
+  Future<void> crateServicesCrudBulkDeleteTransactions(
       {required List<String> transactionIds}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_list_String(transactionIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 32, port: port_);
+            funcId: 35, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudBulkDeleteTransactionsConstMeta,
+      constMeta: kCrateServicesCrudBulkDeleteTransactionsConstMeta,
       argValues: [transactionIds],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudBulkDeleteTransactionsConstMeta =>
+  TaskConstMeta get kCrateServicesCrudBulkDeleteTransactionsConstMeta =>
       const TaskConstMeta(
         debugName: "bulk_delete_transactions",
         argNames: ["transactionIds"],
@@ -1487,7 +1764,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(resourceType, serializer);
         sse_encode_opt_String(resourceId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 33, port: port_);
+            funcId: 36, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1505,72 +1782,124 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateStorageClearAll() {
+  Future<void> crateDatabaseRepositoryClearAll() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 34, port: port_);
+            funcId: 37, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageClearAllConstMeta,
+      constMeta: kCrateDatabaseRepositoryClearAllConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageClearAllConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseRepositoryClearAllConstMeta =>
+      const TaskConstMeta(
         debugName: "clear_all",
         argNames: [],
       );
 
   @override
-  Future<void> crateStorageClearWallet({required String walletId}) {
+  Future<void> crateDatabaseStorageClearAll() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 35, port: port_);
+            funcId: 38, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateStorageClearWalletConstMeta,
+      constMeta: kCrateDatabaseStorageClearAllConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageClearAllConstMeta =>
+      const TaskConstMeta(
+        debugName: "clear_all",
+        argNames: [],
+      );
+
+  @override
+  Future<void> crateDatabaseRepositoryClearWallet({required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 39, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryClearWalletConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageClearWalletConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseRepositoryClearWalletConstMeta =>
+      const TaskConstMeta(
         debugName: "clear_wallet",
         argNames: ["walletId"],
       );
 
   @override
-  Future<void> crateSyncClearWalletAndResync({required String walletId}) {
+  Future<void> crateDatabaseStorageClearWallet({required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 36, port: port_);
+            funcId: 40, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateSyncClearWalletAndResyncConstMeta,
+      constMeta: kCrateDatabaseStorageClearWalletConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSyncClearWalletAndResyncConstMeta =>
+  TaskConstMeta get kCrateDatabaseStorageClearWalletConstMeta =>
+      const TaskConstMeta(
+        debugName: "clear_wallet",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<void> crateServicesSyncClearWalletAndResync(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 41, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateServicesSyncClearWalletAndResyncConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateServicesSyncClearWalletAndResyncConstMeta =>
       const TaskConstMeta(
         debugName: "clear_wallet_and_resync",
         argNames: ["walletId"],
@@ -1583,7 +1912,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 37, port: port_);
+            funcId: 42, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1601,55 +1930,107 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String?> crateStorageConfigGet({required String key}) {
+  Future<String?> crateDatabaseRepositoryConfigGet({required String key}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(key, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 38, port: port_);
+            funcId: 43, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageConfigGetConstMeta,
+      constMeta: kCrateDatabaseRepositoryConfigGetConstMeta,
       argValues: [key],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageConfigGetConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseRepositoryConfigGetConstMeta =>
+      const TaskConstMeta(
         debugName: "config_get",
         argNames: ["key"],
       );
 
   @override
-  Future<void> crateStorageConfigRemove({required String key}) {
+  Future<String?> crateDatabaseStorageConfigGet({required String key}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(key, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 39, port: port_);
+            funcId: 44, port: port_);
       },
       codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
+        decodeSuccessData: sse_decode_opt_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateStorageConfigRemoveConstMeta,
+      constMeta: kCrateDatabaseStorageConfigGetConstMeta,
       argValues: [key],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageConfigRemoveConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseStorageConfigGetConstMeta =>
+      const TaskConstMeta(
+        debugName: "config_get",
+        argNames: ["key"],
+      );
+
+  @override
+  Future<void> crateDatabaseRepositoryConfigRemove({required String key}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(key, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 45, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryConfigRemoveConstMeta,
+      argValues: [key],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseRepositoryConfigRemoveConstMeta =>
+      const TaskConstMeta(
         debugName: "config_remove",
         argNames: ["key"],
       );
 
   @override
-  Future<void> crateStorageConfigSet(
+  Future<void> crateDatabaseStorageConfigRemove({required String key}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(key, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 46, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageConfigRemoveConstMeta,
+      argValues: [key],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageConfigRemoveConstMeta =>
+      const TaskConstMeta(
+        debugName: "config_remove",
+        argNames: ["key"],
+      );
+
+  @override
+  Future<void> crateDatabaseRepositoryConfigSet(
       {required String key, required String value}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1657,66 +2038,95 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(key, serializer);
         sse_encode_String(value, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 40, port: port_);
+            funcId: 47, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageConfigSetConstMeta,
+      constMeta: kCrateDatabaseRepositoryConfigSetConstMeta,
       argValues: [key, value],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageConfigSetConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseRepositoryConfigSetConstMeta =>
+      const TaskConstMeta(
         debugName: "config_set",
         argNames: ["key", "value"],
       );
 
   @override
-  Future<void> crateWsConnectRealtime() {
+  Future<void> crateDatabaseStorageConfigSet(
+      {required String key, required String value}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(key, serializer);
+        sse_encode_String(value, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 41, port: port_);
+            funcId: 48, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateWsConnectRealtimeConstMeta,
+      constMeta: kCrateDatabaseStorageConfigSetConstMeta,
+      argValues: [key, value],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageConfigSetConstMeta =>
+      const TaskConstMeta(
+        debugName: "config_set",
+        argNames: ["key", "value"],
+      );
+
+  @override
+  Future<void> crateIntegrationWsConnectRealtime() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 49, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateIntegrationWsConnectRealtimeConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateWsConnectRealtimeConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateIntegrationWsConnectRealtimeConstMeta =>
+      const TaskConstMeta(
         debugName: "connect_realtime",
         argNames: [],
       );
 
   @override
-  Future<void> crateIdsContactIdAsStr({required ContactId that}) {
+  Future<void> crateUtilIdsContactIdAsStr({required ContactId that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_box_autoadd_contact_id(that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 42, port: port_);
+            funcId: 50, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateIdsContactIdAsStrConstMeta,
+      constMeta: kCrateUtilIdsContactIdAsStrConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateIdsContactIdAsStrConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateUtilIdsContactIdAsStrConstMeta => const TaskConstMeta(
         debugName: "contact_id_as_str",
         argNames: ["that"],
       );
@@ -1739,7 +2149,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(notes, serializer);
         sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 43, port: port_);
+            funcId: 51, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1757,7 +2167,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Contact> crateCrudCreateContact(
+  Future<Contact> crateServicesCrudCreateContact(
       {required String name,
       String? username,
       String? phone,
@@ -1774,25 +2184,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(notes, serializer);
         sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
+            funcId: 52, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_contact,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudCreateContactConstMeta,
+      constMeta: kCrateServicesCrudCreateContactConstMeta,
       argValues: [name, username, phone, email, notes, groupIds],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudCreateContactConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudCreateContactConstMeta =>
+      const TaskConstMeta(
         debugName: "create_contact",
         argNames: ["name", "username", "phone", "email", "notes", "groupIds"],
       );
 
   @override
-  Future<String> crateApiCreateContactGroupApi(
+  Future<String> crateApiWalletsCreateContactGroupApi(
       {required String walletId, required String name}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1800,19 +2211,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 45, port: port_);
+            funcId: 53, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiCreateContactGroupApiConstMeta,
+      constMeta: kCrateApiWalletsCreateContactGroupApiConstMeta,
       argValues: [walletId, name],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiCreateContactGroupApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsCreateContactGroupApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "create_contact_group_api",
+        argNames: ["walletId", "name"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsCreateContactGroupApi(
+      {required String walletId, required String name}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(name, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 54, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsCreateContactGroupApiConstMeta,
+      argValues: [walletId, name],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsCreateContactGroupApiConstMeta =>
       const TaskConstMeta(
         debugName: "create_contact_group_api",
         argNames: ["walletId", "name"],
@@ -1840,7 +2278,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(transactionDate, serializer);
         sse_encode_opt_String(dueDate, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 46, port: port_);
+            funcId: 55, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1876,7 +2314,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Transaction> crateCrudCreateTransaction(
+  Future<Transaction> crateServicesCrudCreateTransaction(
       {required String contactId,
       required String type,
       required String direction,
@@ -1897,13 +2335,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(transactionDate, serializer);
         sse_encode_opt_String(dueDate, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 47, port: port_);
+            funcId: 56, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_transaction,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudCreateTransactionConstMeta,
+      constMeta: kCrateServicesCrudCreateTransactionConstMeta,
       argValues: [
         contactId,
         type,
@@ -1918,7 +2356,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     ));
   }
 
-  TaskConstMeta get kCrateCrudCreateTransactionConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudCreateTransactionConstMeta =>
+      const TaskConstMeta(
         debugName: "create_transaction",
         argNames: [
           "contactId",
@@ -1933,7 +2372,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiCreateUserGroupApi(
+  Future<String> crateApiWalletsCreateUserGroupApi(
       {required String walletId, required String name}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1941,19 +2380,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 48, port: port_);
+            funcId: 57, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiCreateUserGroupApiConstMeta,
+      constMeta: kCrateApiWalletsCreateUserGroupApiConstMeta,
       argValues: [walletId, name],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiCreateUserGroupApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsCreateUserGroupApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "create_user_group_api",
+        argNames: ["walletId", "name"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsCreateUserGroupApi(
+      {required String walletId, required String name}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(name, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 58, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsCreateUserGroupApiConstMeta,
+      argValues: [walletId, name],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsCreateUserGroupApiConstMeta =>
+      const TaskConstMeta(
         debugName: "create_user_group_api",
         argNames: ["walletId", "name"],
       );
@@ -1967,7 +2434,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(name, serializer);
         sse_encode_String(description, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 49, port: port_);
+            funcId: 59, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1985,7 +2452,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Wallet> crateApiCreateWalletApi(
+  Future<Wallet> crateApiWalletsCreateWalletApi(
       {required String name, required String description}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1993,19 +2460,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(name, serializer);
         sse_encode_String(description, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 50, port: port_);
+            funcId: 60, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_wallet,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiCreateWalletApiConstMeta,
+      constMeta: kCrateApiWalletsCreateWalletApiConstMeta,
       argValues: [name, description],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiCreateWalletApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsCreateWalletApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "create_wallet_api",
+        argNames: ["name", "description"],
+      );
+
+  @override
+  Future<Wallet> crateHandlersWalletsCreateWalletApi(
+      {required String name, required String description}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(name, serializer);
+        sse_encode_String(description, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 61, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_wallet,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsCreateWalletApiConstMeta,
+      argValues: [name, description],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsCreateWalletApiConstMeta =>
+      const TaskConstMeta(
         debugName: "create_wallet_api",
         argNames: ["name", "description"],
       );
@@ -2019,7 +2514,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 51, port: port_);
+            funcId: 62, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2038,25 +2533,52 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiCreateWalletInviteApi({required String walletId}) {
+  Future<String> crateApiWalletsCreateWalletInviteApi(
+      {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 52, port: port_);
+            funcId: 63, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiCreateWalletInviteApiConstMeta,
+      constMeta: kCrateApiWalletsCreateWalletInviteApiConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiCreateWalletInviteApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsCreateWalletInviteApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "create_wallet_invite_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsCreateWalletInviteApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 64, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsCreateWalletInviteApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsCreateWalletInviteApiConstMeta =>
       const TaskConstMeta(
         debugName: "create_wallet_invite_api",
         argNames: ["walletId"],
@@ -2069,7 +2591,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 53, port: port_);
+            funcId: 65, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2096,7 +2618,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 54, port: port_);
+            funcId: 66, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2114,98 +2636,101 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateModelsCurrencyAsStr({required Currency that}) {
+  Future<void> crateTypesModelsCurrencyAsStr({required Currency that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_currency(that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 55, port: port_);
+            funcId: 67, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsCurrencyAsStrConstMeta,
+      constMeta: kCrateTypesModelsCurrencyAsStrConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsCurrencyAsStrConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateTypesModelsCurrencyAsStrConstMeta =>
+      const TaskConstMeta(
         debugName: "currency_as_str",
         argNames: ["that"],
       );
 
   @override
-  Future<Currency> crateModelsCurrencyDefault() {
+  Future<Currency> crateTypesModelsCurrencyDefault() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 56, port: port_);
+            funcId: 68, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_currency,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsCurrencyDefaultConstMeta,
+      constMeta: kCrateTypesModelsCurrencyDefaultConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsCurrencyDefaultConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateTypesModelsCurrencyDefaultConstMeta =>
+      const TaskConstMeta(
         debugName: "currency_default",
         argNames: [],
       );
 
   @override
-  Future<Currency?> crateModelsCurrencyFromStr({required String s}) {
+  Future<Currency?> crateTypesModelsCurrencyFromStr({required String s}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(s, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 57, port: port_);
+            funcId: 69, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_box_autoadd_currency,
         decodeErrorData: null,
       ),
-      constMeta: kCrateModelsCurrencyFromStrConstMeta,
+      constMeta: kCrateTypesModelsCurrencyFromStrConstMeta,
       argValues: [s],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateModelsCurrencyFromStrConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateTypesModelsCurrencyFromStrConstMeta =>
+      const TaskConstMeta(
         debugName: "currency_from_str",
         argNames: ["s"],
       );
 
   @override
-  Stream<DataChangeEvent> crateDataBusDataChangeStream() {
+  Stream<DataChangeEvent> crateIntegrationDataBusDataChangeStream() {
     final sink = RustStreamSink<DataChangeEvent>();
     unawaited(handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_StreamSink_data_change_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 58, port: port_);
+            funcId: 70, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateDataBusDataChangeStreamConstMeta,
+      constMeta: kCrateIntegrationDataBusDataChangeStreamConstMeta,
       argValues: [sink],
       apiImpl: this,
     )));
     return sink.stream;
   }
 
-  TaskConstMeta get kCrateDataBusDataChangeStreamConstMeta =>
+  TaskConstMeta get kCrateIntegrationDataBusDataChangeStreamConstMeta =>
       const TaskConstMeta(
         debugName: "data_change_stream",
         argNames: ["sink"],
@@ -2218,7 +2743,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 59, port: port_);
+            funcId: 71, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2236,31 +2761,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudDeleteContact({required String contactId}) {
+  Future<void> crateServicesCrudDeleteContact({required String contactId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 60, port: port_);
+            funcId: 72, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudDeleteContactConstMeta,
+      constMeta: kCrateServicesCrudDeleteContactConstMeta,
       argValues: [contactId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudDeleteContactConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudDeleteContactConstMeta =>
+      const TaskConstMeta(
         debugName: "delete_contact",
         argNames: ["contactId"],
       );
 
   @override
-  Future<void> crateApiDeleteContactGroupApi(
+  Future<void> crateApiWalletsDeleteContactGroupApi(
       {required String walletId, required String groupId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -2268,19 +2794,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 61, port: port_);
+            funcId: 73, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiDeleteContactGroupApiConstMeta,
+      constMeta: kCrateApiWalletsDeleteContactGroupApiConstMeta,
       argValues: [walletId, groupId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiDeleteContactGroupApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsDeleteContactGroupApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "delete_contact_group_api",
+        argNames: ["walletId", "groupId"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsDeleteContactGroupApi(
+      {required String walletId, required String groupId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 74, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsDeleteContactGroupApiConstMeta,
+      argValues: [walletId, groupId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsDeleteContactGroupApiConstMeta =>
       const TaskConstMeta(
         debugName: "delete_contact_group_api",
         argNames: ["walletId", "groupId"],
@@ -2293,7 +2846,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(transactionId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 62, port: port_);
+            funcId: 75, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2311,31 +2864,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudDeleteTransaction({required String transactionId}) {
+  Future<void> crateServicesCrudDeleteTransaction(
+      {required String transactionId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(transactionId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 63, port: port_);
+            funcId: 76, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudDeleteTransactionConstMeta,
+      constMeta: kCrateServicesCrudDeleteTransactionConstMeta,
       argValues: [transactionId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudDeleteTransactionConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudDeleteTransactionConstMeta =>
+      const TaskConstMeta(
         debugName: "delete_transaction",
         argNames: ["transactionId"],
       );
 
   @override
-  Future<void> crateApiDeleteUserGroupApi(
+  Future<void> crateApiWalletsDeleteUserGroupApi(
       {required String walletId, required String groupId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -2343,19 +2898,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 64, port: port_);
+            funcId: 77, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiDeleteUserGroupApiConstMeta,
+      constMeta: kCrateApiWalletsDeleteUserGroupApiConstMeta,
       argValues: [walletId, groupId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiDeleteUserGroupApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsDeleteUserGroupApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "delete_user_group_api",
+        argNames: ["walletId", "groupId"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsDeleteUserGroupApi(
+      {required String walletId, required String groupId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 78, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsDeleteUserGroupApiConstMeta,
+      argValues: [walletId, groupId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsDeleteUserGroupApiConstMeta =>
+      const TaskConstMeta(
         debugName: "delete_user_group_api",
         argNames: ["walletId", "groupId"],
       );
@@ -2369,7 +2952,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 65, port: port_);
+            funcId: 79, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2396,7 +2979,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 66, port: port_);
+            funcId: 80, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2414,24 +2997,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateWsDisconnectRealtime() {
+  Future<void> crateIntegrationWsDisconnectRealtime() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 67, port: port_);
+            funcId: 81, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateWsDisconnectRealtimeConstMeta,
+      constMeta: kCrateIntegrationWsDisconnectRealtimeConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateWsDisconnectRealtimeConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateIntegrationWsDisconnectRealtimeConstMeta =>
+      const TaskConstMeta(
         debugName: "disconnect_realtime",
         argNames: [],
       );
@@ -2442,7 +3026,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 68, port: port_);
+            funcId: 82, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_String,
@@ -2460,24 +3044,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<String>> crateLogBridgeDrainRustLogs() {
+  Future<List<String>> crateUtilLoggingDrainRustLogs() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 69, port: port_);
+            funcId: 83, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_String,
         decodeErrorData: null,
       ),
-      constMeta: kCrateLogBridgeDrainRustLogsConstMeta,
+      constMeta: kCrateUtilLoggingDrainRustLogsConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateLogBridgeDrainRustLogsConstMeta =>
+  TaskConstMeta get kCrateUtilLoggingDrainRustLogsConstMeta =>
       const TaskConstMeta(
         debugName: "drain_rust_logs",
         argNames: [],
@@ -2489,7 +3073,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 70, port: port_);
+            funcId: 84, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2507,131 +3091,239 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateIdsEventIdAsStr({required EventId that}) {
+  Future<void> crateUtilIdsEventIdAsStr({required EventId that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_box_autoadd_event_id(that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 71, port: port_);
+            funcId: 85, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateIdsEventIdAsStrConstMeta,
+      constMeta: kCrateUtilIdsEventIdAsStrConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateIdsEventIdAsStrConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateUtilIdsEventIdAsStrConstMeta => const TaskConstMeta(
         debugName: "event_id_as_str",
         argNames: ["that"],
       );
 
   @override
-  Future<PlatformInt64> crateStorageEventsCount({required String walletId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(walletId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 72, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_i_64,
-        decodeErrorData: sse_decode_String,
-      ),
-      constMeta: kCrateStorageEventsCountConstMeta,
-      argValues: [walletId],
-      apiImpl: this,
-    ));
-  }
-
-  TaskConstMeta get kCrateStorageEventsCountConstMeta => const TaskConstMeta(
-        debugName: "events_count",
-        argNames: ["walletId"],
-      );
-
-  @override
-  Future<void> crateStorageEventsDeleteAllForWallet(
+  Future<PlatformInt64> crateDatabaseRepositoryEventsCount(
       {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 73, port: port_);
+            funcId: 86, port: port_);
       },
       codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeSuccessData: sse_decode_i_64,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageEventsDeleteAllForWalletConstMeta,
+      constMeta: kCrateDatabaseRepositoryEventsCountConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageEventsDeleteAllForWalletConstMeta =>
+  TaskConstMeta get kCrateDatabaseRepositoryEventsCountConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_count",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<PlatformInt64> crateDatabaseStorageEventsCount(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 87, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_i_64,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageEventsCountConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsCountConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_count",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<void> crateDatabaseRepositoryEventsDeleteAllForWallet(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 88, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryEventsDeleteAllForWalletConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseRepositoryEventsDeleteAllForWalletConstMeta =>
       const TaskConstMeta(
         debugName: "events_delete_all_for_wallet",
         argNames: ["walletId"],
       );
 
   @override
-  Future<BigInt> crateStorageEventsDeleteUnsynced({required String walletId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(walletId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 74, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_u_64,
-        decodeErrorData: sse_decode_String,
-      ),
-      constMeta: kCrateStorageEventsDeleteUnsyncedConstMeta,
-      argValues: [walletId],
-      apiImpl: this,
-    ));
-  }
-
-  TaskConstMeta get kCrateStorageEventsDeleteUnsyncedConstMeta =>
-      const TaskConstMeta(
-        debugName: "events_delete_unsynced",
-        argNames: ["walletId"],
-      );
-
-  @override
-  Future<List<StoredEvent>> crateStorageEventsGetAll(
+  Future<void> crateDatabaseStorageEventsDeleteAllForWallet(
       {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 75, port: port_);
+            funcId: 89, port: port_);
       },
       codec: SseCodec(
-        decodeSuccessData: sse_decode_list_stored_event,
+        decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateStorageEventsGetAllConstMeta,
+      constMeta: kCrateDatabaseStorageEventsDeleteAllForWalletConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageEventsGetAllConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseStorageEventsDeleteAllForWalletConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_delete_all_for_wallet",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<BigInt> crateDatabaseRepositoryEventsDeleteUnsynced(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 90, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_u_64,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryEventsDeleteUnsyncedConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseRepositoryEventsDeleteUnsyncedConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_delete_unsynced",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<BigInt> crateDatabaseStorageEventsDeleteUnsynced(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 91, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_u_64,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageEventsDeleteUnsyncedConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsDeleteUnsyncedConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_delete_unsynced",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<List<StoredEvent>> crateDatabaseRepositoryEventsGetAll(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 92, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_stored_event,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryEventsGetAllConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseRepositoryEventsGetAllConstMeta =>
+      const TaskConstMeta(
         debugName: "events_get_all",
         argNames: ["walletId"],
       );
 
   @override
-  Future<List<StoredEvent>> crateStorageEventsGetForAggregate(
+  Future<List<StoredEvent>> crateDatabaseStorageEventsGetAll(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 93, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_stored_event,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageEventsGetAllConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsGetAllConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_get_all",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<List<StoredEvent>> crateDatabaseRepositoryEventsGetForAggregate(
       {required String walletId,
       required String aggregateType,
       required String aggregateId}) {
@@ -2642,101 +3334,210 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(aggregateType, serializer);
         sse_encode_String(aggregateId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 76, port: port_);
+            funcId: 94, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_stored_event,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageEventsGetForAggregateConstMeta,
+      constMeta: kCrateDatabaseRepositoryEventsGetForAggregateConstMeta,
       argValues: [walletId, aggregateType, aggregateId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageEventsGetForAggregateConstMeta =>
+  TaskConstMeta get kCrateDatabaseRepositoryEventsGetForAggregateConstMeta =>
       const TaskConstMeta(
         debugName: "events_get_for_aggregate",
         argNames: ["walletId", "aggregateType", "aggregateId"],
       );
 
   @override
-  Future<List<StoredEvent>> crateStorageEventsGetUnsynced(
+  Future<List<StoredEvent>> crateDatabaseStorageEventsGetForAggregate(
+      {required String walletId,
+      required String aggregateType,
+      required String aggregateId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(aggregateType, serializer);
+        sse_encode_String(aggregateId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 95, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_stored_event,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageEventsGetForAggregateConstMeta,
+      argValues: [walletId, aggregateType, aggregateId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsGetForAggregateConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_get_for_aggregate",
+        argNames: ["walletId", "aggregateType", "aggregateId"],
+      );
+
+  @override
+  Future<List<StoredEvent>> crateDatabaseRepositoryEventsGetUnsynced(
       {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 77, port: port_);
+            funcId: 96, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_stored_event,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageEventsGetUnsyncedConstMeta,
+      constMeta: kCrateDatabaseRepositoryEventsGetUnsyncedConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageEventsGetUnsyncedConstMeta =>
+  TaskConstMeta get kCrateDatabaseRepositoryEventsGetUnsyncedConstMeta =>
       const TaskConstMeta(
         debugName: "events_get_unsynced",
         argNames: ["walletId"],
       );
 
   @override
-  Future<void> crateStorageEventsInsert({required StoredEvent e}) {
+  Future<List<StoredEvent>> crateDatabaseStorageEventsGetUnsynced(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 97, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_stored_event,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageEventsGetUnsyncedConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsGetUnsyncedConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_get_unsynced",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<void> crateDatabaseRepositoryEventsInsert({required StoredEvent e}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_box_autoadd_stored_event(e, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 78, port: port_);
+            funcId: 98, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageEventsInsertConstMeta,
+      constMeta: kCrateDatabaseRepositoryEventsInsertConstMeta,
       argValues: [e],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageEventsInsertConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseRepositoryEventsInsertConstMeta =>
+      const TaskConstMeta(
         debugName: "events_insert",
         argNames: ["e"],
       );
 
   @override
-  Future<void> crateStorageEventsMarkSynced({required List<String> ids}) {
+  Future<void> crateDatabaseStorageEventsInsert({required StoredEvent e}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_list_String(ids, serializer);
+        sse_encode_box_autoadd_stored_event(e, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 79, port: port_);
+            funcId: 99, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateStorageEventsMarkSyncedConstMeta,
+      constMeta: kCrateDatabaseStorageEventsInsertConstMeta,
+      argValues: [e],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsInsertConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_insert",
+        argNames: ["e"],
+      );
+
+  @override
+  Future<void> crateDatabaseRepositoryEventsMarkSynced(
+      {required List<String> ids}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_list_String(ids, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 100, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryEventsMarkSyncedConstMeta,
       argValues: [ids],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageEventsMarkSyncedConstMeta =>
+  TaskConstMeta get kCrateDatabaseRepositoryEventsMarkSyncedConstMeta =>
       const TaskConstMeta(
         debugName: "events_mark_synced",
         argNames: ["ids"],
       );
 
   @override
-  Future<void> crateStorageEventsUpdateEventData(
+  Future<void> crateDatabaseStorageEventsMarkSynced(
+      {required List<String> ids}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_list_String(ids, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 101, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageEventsMarkSyncedConstMeta,
+      argValues: [ids],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsMarkSyncedConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_mark_synced",
+        argNames: ["ids"],
+      );
+
+  @override
+  Future<void> crateDatabaseRepositoryEventsUpdateEventData(
       {required String eventId, required String eventDataJson}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -2744,66 +3545,93 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(eventId, serializer);
         sse_encode_String(eventDataJson, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 80, port: port_);
+            funcId: 102, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageEventsUpdateEventDataConstMeta,
+      constMeta: kCrateDatabaseRepositoryEventsUpdateEventDataConstMeta,
       argValues: [eventId, eventDataJson],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageEventsUpdateEventDataConstMeta =>
+  TaskConstMeta get kCrateDatabaseRepositoryEventsUpdateEventDataConstMeta =>
       const TaskConstMeta(
         debugName: "events_update_event_data",
         argNames: ["eventId", "eventDataJson"],
       );
 
   @override
-  Future<void> crateSyncFullSync() {
+  Future<void> crateDatabaseStorageEventsUpdateEventData(
+      {required String eventId, required String eventDataJson}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(eventId, serializer);
+        sse_encode_String(eventDataJson, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 81, port: port_);
+            funcId: 103, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateSyncFullSyncConstMeta,
+      constMeta: kCrateDatabaseStorageEventsUpdateEventDataConstMeta,
+      argValues: [eventId, eventDataJson],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageEventsUpdateEventDataConstMeta =>
+      const TaskConstMeta(
+        debugName: "events_update_event_data",
+        argNames: ["eventId", "eventDataJson"],
+      );
+
+  @override
+  Future<void> crateServicesSyncFullSync() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 104, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateServicesSyncFullSyncConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSyncFullSyncConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesSyncFullSyncConstMeta => const TaskConstMeta(
         debugName: "full_sync",
         argNames: [],
       );
 
   @override
-  Future<String> crateGetBaseUrl() {
+  Future<String> crateConfigGetBaseUrl() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 82, port: port_);
+            funcId: 105, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateGetBaseUrlConstMeta,
+      constMeta: kCrateConfigGetBaseUrlConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateGetBaseUrlConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateConfigGetBaseUrlConstMeta => const TaskConstMeta(
         debugName: "get_base_url",
         argNames: [],
       );
@@ -2815,7 +3643,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(id, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 83, port: port_);
+            funcId: 106, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2833,25 +3661,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateCrudGetContact({required String id}) {
+  Future<String> crateServicesCrudGetContact({required String id}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(id, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 84, port: port_);
+            funcId: 107, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudGetContactConstMeta,
+      constMeta: kCrateServicesCrudGetContactConstMeta,
       argValues: [id],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudGetContactConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudGetContactConstMeta =>
+      const TaskConstMeta(
         debugName: "get_contact",
         argNames: ["id"],
       );
@@ -2865,7 +3694,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 85, port: port_);
+            funcId: 108, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2889,7 +3718,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 86, port: port_);
+            funcId: 109, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2907,24 +3736,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateCrudGetContacts() {
+  Future<String> crateServicesCrudGetContacts() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 87, port: port_);
+            funcId: 110, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudGetContactsConstMeta,
+      constMeta: kCrateServicesCrudGetContactsConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudGetContactsConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudGetContactsConstMeta =>
+      const TaskConstMeta(
         debugName: "get_contacts",
         argNames: [],
       );
@@ -2935,7 +3765,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 88, port: port_);
+            funcId: 111, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2958,7 +3788,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 89, port: port_);
+            funcId: 112, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2982,7 +3812,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 90, port: port_);
+            funcId: 113, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3000,50 +3830,104 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiGetMyPermissionsApi({required String walletId}) {
+  Future<String> crateApiWalletsGetMyPermissionsApi(
+      {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 91, port: port_);
+            funcId: 114, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiGetMyPermissionsApiConstMeta,
+      constMeta: kCrateApiWalletsGetMyPermissionsApiConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiGetMyPermissionsApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsGetMyPermissionsApiConstMeta =>
       const TaskConstMeta(
         debugName: "get_my_permissions_api",
         argNames: ["walletId"],
       );
 
   @override
-  Future<String> crateApiGetPermissionMatrixApi({required String walletId}) {
+  Future<String> crateHandlersWalletsGetMyPermissionsApi(
+      {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 92, port: port_);
+            funcId: 115, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateApiGetPermissionMatrixApiConstMeta,
+      constMeta: kCrateHandlersWalletsGetMyPermissionsApiConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiGetPermissionMatrixApiConstMeta =>
+  TaskConstMeta get kCrateHandlersWalletsGetMyPermissionsApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "get_my_permissions_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateApiWalletsGetPermissionMatrixApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 116, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiWalletsGetPermissionMatrixApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiWalletsGetPermissionMatrixApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "get_permission_matrix_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsGetPermissionMatrixApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 117, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsGetPermissionMatrixApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsGetPermissionMatrixApiConstMeta =>
       const TaskConstMeta(
         debugName: "get_permission_matrix_api",
         argNames: ["walletId"],
@@ -3056,7 +3940,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(key, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 93, port: port_);
+            funcId: 118, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3074,12 +3958,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<(List<Value>, String, bool)> crateApiSyncGetSyncEvents(
+      {String? lastHash}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_opt_String(lastHash, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 119, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData:
+            sse_decode_record_list_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_value_string_bool,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiSyncGetSyncEventsConstMeta,
+      argValues: [lastHash],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiSyncGetSyncEventsConstMeta => const TaskConstMeta(
+        debugName: "get_sync_events",
+        argNames: ["lastHash"],
+      );
+
+  @override
   Future<String> crateGetToken() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 94, port: port_);
+            funcId: 120, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3103,7 +4013,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(id, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 95, port: port_);
+            funcId: 121, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3121,25 +4031,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateCrudGetTransaction({required String id}) {
+  Future<String> crateServicesCrudGetTransaction({required String id}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(id, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 96, port: port_);
+            funcId: 122, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudGetTransactionConstMeta,
+      constMeta: kCrateServicesCrudGetTransactionConstMeta,
       argValues: [id],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudGetTransactionConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudGetTransactionConstMeta =>
+      const TaskConstMeta(
         debugName: "get_transaction",
         argNames: ["id"],
       );
@@ -3150,7 +4061,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 97, port: port_);
+            funcId: 123, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3168,24 +4079,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateCrudGetTransactions() {
+  Future<String> crateServicesCrudGetTransactions() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 98, port: port_);
+            funcId: 124, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudGetTransactionsConstMeta,
+      constMeta: kCrateServicesCrudGetTransactionsConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudGetTransactionsConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudGetTransactionsConstMeta =>
+      const TaskConstMeta(
         debugName: "get_transactions",
         argNames: [],
       );
@@ -3196,7 +4108,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 99, port: port_);
+            funcId: 125, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3219,7 +4131,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 100, port: port_);
+            funcId: 126, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3243,7 +4155,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 101, port: port_);
+            funcId: 127, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3267,7 +4179,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 102, port: port_);
+            funcId: 128, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3285,47 +4197,72 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<Wallet>> crateApiGetWalletsApi() {
+  Future<List<Wallet>> crateApiWalletsGetWalletsApi() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 103, port: port_);
+            funcId: 129, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_wallet,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiGetWalletsApiConstMeta,
+      constMeta: kCrateApiWalletsGetWalletsApiConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiGetWalletsApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsGetWalletsApiConstMeta =>
+      const TaskConstMeta(
         debugName: "get_wallets_api",
         argNames: [],
       );
 
   @override
-  Future<String> crateGetWsUrl() {
+  Future<List<Wallet>> crateHandlersWalletsGetWalletsApi() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 104, port: port_);
+            funcId: 130, port: port_);
       },
       codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
+        decodeSuccessData: sse_decode_list_wallet,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateGetWsUrlConstMeta,
+      constMeta: kCrateHandlersWalletsGetWalletsApiConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateGetWsUrlConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateHandlersWalletsGetWalletsApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "get_wallets_api",
+        argNames: [],
+      );
+
+  @override
+  Future<String> crateConfigGetWsUrl() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 131, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateConfigGetWsUrlConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateConfigGetWsUrlConstMeta => const TaskConstMeta(
         debugName: "get_ws_url",
         argNames: [],
       );
@@ -3337,7 +4274,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 105, port: port_);
+            funcId: 132, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3355,25 +4292,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateStorageInit({required String path}) {
+  Future<void> crateDatabaseRepositoryInit({required String path}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 106, port: port_);
+            funcId: 133, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateStorageInitConstMeta,
+      constMeta: kCrateDatabaseRepositoryInitConstMeta,
       argValues: [path],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageInitConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseRepositoryInitConstMeta =>
+      const TaskConstMeta(
+        debugName: "init",
+        argNames: ["path"],
+      );
+
+  @override
+  Future<void> crateDatabaseStorageInit({required String path}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(path, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 134, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageInitConstMeta,
+      argValues: [path],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageInitConstMeta => const TaskConstMeta(
         debugName: "init",
         argNames: ["path"],
       );
@@ -3384,7 +4346,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 107, port: port_);
+            funcId: 135, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -3402,50 +4364,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateInitStorage({required String storagePath}) {
+  Future<void> crateConfigInitStorage({required String storagePath}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(storagePath, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 108, port: port_);
+            funcId: 136, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateInitStorageConstMeta,
+      constMeta: kCrateConfigInitStorageConstMeta,
       argValues: [storagePath],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateInitStorageConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateConfigInitStorageConstMeta => const TaskConstMeta(
         debugName: "init_storage",
         argNames: ["storagePath"],
       );
 
   @override
-  Future<void> crateSyncInvalidatePermsCacheAndPull(
+  Future<void> crateServicesSyncInvalidatePermsCacheAndPull(
       {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 109, port: port_);
+            funcId: 137, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateSyncInvalidatePermsCacheAndPullConstMeta,
+      constMeta: kCrateServicesSyncInvalidatePermsCacheAndPullConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSyncInvalidatePermsCacheAndPullConstMeta =>
+  TaskConstMeta get kCrateServicesSyncInvalidatePermsCacheAndPullConstMeta =>
       const TaskConstMeta(
         debugName: "invalidate_perms_cache_and_pull",
         argNames: ["walletId"],
@@ -3457,7 +4419,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 110, port: port_);
+            funcId: 138, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -3475,47 +4437,73 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<bool> crateIsNetworkOffline() {
+  Future<bool> crateConfigIsNetworkOffline() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 111, port: port_);
+            funcId: 139, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
         decodeErrorData: null,
       ),
-      constMeta: kCrateIsNetworkOfflineConstMeta,
+      constMeta: kCrateConfigIsNetworkOfflineConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateIsNetworkOfflineConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateConfigIsNetworkOfflineConstMeta =>
+      const TaskConstMeta(
         debugName: "is_network_offline",
         argNames: [],
       );
 
   @override
-  Future<bool> crateStorageIsReady() {
+  Future<bool> crateDatabaseRepositoryIsReady() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 112, port: port_);
+            funcId: 140, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
         decodeErrorData: null,
       ),
-      constMeta: kCrateStorageIsReadyConstMeta,
+      constMeta: kCrateDatabaseRepositoryIsReadyConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageIsReadyConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateDatabaseRepositoryIsReadyConstMeta =>
+      const TaskConstMeta(
+        debugName: "is_ready",
+        argNames: [],
+      );
+
+  @override
+  Future<bool> crateDatabaseStorageIsReady() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 141, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateDatabaseStorageIsReadyConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageIsReadyConstMeta =>
+      const TaskConstMeta(
         debugName: "is_ready",
         argNames: [],
       );
@@ -3526,7 +4514,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 113, port: port_);
+            funcId: 142, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -3550,7 +4538,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(code, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 114, port: port_);
+            funcId: 143, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3568,25 +4556,51 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiJoinWalletByCodeApi({required String code}) {
+  Future<String> crateApiWalletsJoinWalletByCodeApi({required String code}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(code, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 115, port: port_);
+            funcId: 144, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiJoinWalletByCodeApiConstMeta,
+      constMeta: kCrateApiWalletsJoinWalletByCodeApiConstMeta,
       argValues: [code],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiJoinWalletByCodeApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsJoinWalletByCodeApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "join_wallet_by_code_api",
+        argNames: ["code"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsJoinWalletByCodeApi(
+      {required String code}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(code, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 145, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsJoinWalletByCodeApiConstMeta,
+      argValues: [code],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsJoinWalletByCodeApiConstMeta =>
       const TaskConstMeta(
         debugName: "join_wallet_by_code_api",
         argNames: ["code"],
@@ -3598,7 +4612,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 116, port: port_);
+            funcId: 146, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_jwt_payload,
@@ -3616,7 +4630,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiListContactGroupMembersApi(
+  Future<String> crateApiWalletsListContactGroupMembersApi(
       {required String walletId, required String groupId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -3624,76 +4638,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 117, port: port_);
+            funcId: 147, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiListContactGroupMembersApiConstMeta,
+      constMeta: kCrateApiWalletsListContactGroupMembersApiConstMeta,
       argValues: [walletId, groupId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiListContactGroupMembersApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsListContactGroupMembersApiConstMeta =>
       const TaskConstMeta(
         debugName: "list_contact_group_members_api",
         argNames: ["walletId", "groupId"],
       );
 
   @override
-  Future<String> crateApiListContactGroupsApi({required String walletId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(walletId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 118, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
-      ),
-      constMeta: kCrateApiListContactGroupsApiConstMeta,
-      argValues: [walletId],
-      apiImpl: this,
-    ));
-  }
-
-  TaskConstMeta get kCrateApiListContactGroupsApiConstMeta =>
-      const TaskConstMeta(
-        debugName: "list_contact_groups_api",
-        argNames: ["walletId"],
-      );
-
-  @override
-  Future<String> crateApiListPermissionActionsApi({required String walletId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(walletId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 119, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
-      ),
-      constMeta: kCrateApiListPermissionActionsApiConstMeta,
-      argValues: [walletId],
-      apiImpl: this,
-    ));
-  }
-
-  TaskConstMeta get kCrateApiListPermissionActionsApiConstMeta =>
-      const TaskConstMeta(
-        debugName: "list_permission_actions_api",
-        argNames: ["walletId"],
-      );
-
-  @override
-  Future<String> crateApiListUserGroupMembersApi(
+  Future<String> crateHandlersWalletsListContactGroupMembersApi(
       {required String walletId, required String groupId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -3701,44 +4665,229 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 120, port: port_);
+            funcId: 148, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateApiListUserGroupMembersApiConstMeta,
+      constMeta: kCrateHandlersWalletsListContactGroupMembersApiConstMeta,
       argValues: [walletId, groupId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiListUserGroupMembersApiConstMeta =>
+  TaskConstMeta get kCrateHandlersWalletsListContactGroupMembersApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_contact_group_members_api",
+        argNames: ["walletId", "groupId"],
+      );
+
+  @override
+  Future<String> crateApiWalletsListContactGroupsApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 149, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiWalletsListContactGroupsApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiWalletsListContactGroupsApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_contact_groups_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsListContactGroupsApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 150, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsListContactGroupsApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsListContactGroupsApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_contact_groups_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateApiWalletsListPermissionActionsApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 151, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiWalletsListPermissionActionsApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiWalletsListPermissionActionsApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_permission_actions_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsListPermissionActionsApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 152, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsListPermissionActionsApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsListPermissionActionsApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_permission_actions_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateApiWalletsListUserGroupMembersApi(
+      {required String walletId, required String groupId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 153, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiWalletsListUserGroupMembersApiConstMeta,
+      argValues: [walletId, groupId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiWalletsListUserGroupMembersApiConstMeta =>
       const TaskConstMeta(
         debugName: "list_user_group_members_api",
         argNames: ["walletId", "groupId"],
       );
 
   @override
-  Future<String> crateApiListUserGroupsApi({required String walletId}) {
+  Future<String> crateHandlersWalletsListUserGroupMembersApi(
+      {required String walletId, required String groupId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 121, port: port_);
+            funcId: 154, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateApiListUserGroupsApiConstMeta,
+      constMeta: kCrateHandlersWalletsListUserGroupMembersApiConstMeta,
+      argValues: [walletId, groupId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsListUserGroupMembersApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_user_group_members_api",
+        argNames: ["walletId", "groupId"],
+      );
+
+  @override
+  Future<String> crateApiWalletsListUserGroupsApi({required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 155, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiWalletsListUserGroupsApiConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiListUserGroupsApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsListUserGroupsApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_user_groups_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<String> crateHandlersWalletsListUserGroupsApi(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 156, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsListUserGroupsApiConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsListUserGroupsApiConstMeta =>
+      const TaskConstMeta(
         debugName: "list_user_groups_api",
         argNames: ["walletId"],
       );
@@ -3752,7 +4901,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 122, port: port_);
+            funcId: 157, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3777,7 +4926,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 123, port: port_);
+            funcId: 158, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3802,7 +4951,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 124, port: port_);
+            funcId: 159, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3829,7 +4978,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(groupId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 125, port: port_);
+            funcId: 160, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3854,7 +5003,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 126, port: port_);
+            funcId: 161, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3878,7 +5027,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 127, port: port_);
+            funcId: 162, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -3896,100 +5045,180 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiListWalletUsersApi({required String walletId}) {
+  Future<String> crateApiWalletsListWalletUsersApi({required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 128, port: port_);
+            funcId: 163, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiListWalletUsersApiConstMeta,
+      constMeta: kCrateApiWalletsListWalletUsersApiConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiListWalletUsersApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsListWalletUsersApiConstMeta =>
+      const TaskConstMeta(
         debugName: "list_wallet_users_api",
         argNames: ["walletId"],
       );
 
   @override
-  Future<List<Contact>> crateStorageLoadContactsFromTables(
+  Future<String> crateHandlersWalletsListWalletUsersApi(
       {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 129, port: port_);
+            funcId: 164, port: port_);
       },
       codec: SseCodec(
-        decodeSuccessData: sse_decode_list_contact,
+        decodeSuccessData: sse_decode_String,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateStorageLoadContactsFromTablesConstMeta,
+      constMeta: kCrateHandlersWalletsListWalletUsersApiConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageLoadContactsFromTablesConstMeta =>
+  TaskConstMeta get kCrateHandlersWalletsListWalletUsersApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "list_wallet_users_api",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<List<Contact>> crateDatabaseRepositoryLoadContactsFromTables(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 165, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_contact,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryLoadContactsFromTablesConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseRepositoryLoadContactsFromTablesConstMeta =>
       const TaskConstMeta(
         debugName: "load_contacts_from_tables",
         argNames: ["walletId"],
       );
 
   @override
-  Future<List<Transaction>> crateStorageLoadTransactionsFromTables(
+  Future<List<Contact>> crateDatabaseStorageLoadContactsFromTables(
       {required String walletId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 130, port: port_);
+            funcId: 166, port: port_);
       },
       codec: SseCodec(
-        decodeSuccessData: sse_decode_list_transaction,
+        decodeSuccessData: sse_decode_list_contact,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateStorageLoadTransactionsFromTablesConstMeta,
+      constMeta: kCrateDatabaseStorageLoadContactsFromTablesConstMeta,
       argValues: [walletId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateStorageLoadTransactionsFromTablesConstMeta =>
+  TaskConstMeta get kCrateDatabaseStorageLoadContactsFromTablesConstMeta =>
+      const TaskConstMeta(
+        debugName: "load_contacts_from_tables",
+        argNames: ["walletId"],
+      );
+
+  @override
+  Future<List<Transaction>> crateDatabaseRepositoryLoadTransactionsFromTables(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 167, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_transaction,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateDatabaseRepositoryLoadTransactionsFromTablesConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta
+      get kCrateDatabaseRepositoryLoadTransactionsFromTablesConstMeta =>
+          const TaskConstMeta(
+            debugName: "load_transactions_from_tables",
+            argNames: ["walletId"],
+          );
+
+  @override
+  Future<List<Transaction>> crateDatabaseStorageLoadTransactionsFromTables(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 168, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_transaction,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateDatabaseStorageLoadTransactionsFromTablesConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateDatabaseStorageLoadTransactionsFromTablesConstMeta =>
       const TaskConstMeta(
         debugName: "load_transactions_from_tables",
         argNames: ["walletId"],
       );
 
   @override
-  Future<String> crateLogContext() {
+  Future<String> crateConfigLogContext() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 131, port: port_);
+            funcId: 169, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
         decodeErrorData: null,
       ),
-      constMeta: kCrateLogContextConstMeta,
+      constMeta: kCrateConfigLogContextConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateLogContextConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateConfigLogContextConstMeta => const TaskConstMeta(
         debugName: "log_context",
         argNames: [],
       );
@@ -4003,7 +5232,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(username, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 132, port: port_);
+            funcId: 170, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4021,7 +5250,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiLogin(
+  Future<void> crateApiAuthLogin(
       {required String username, required String password}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -4029,19 +5258,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(username, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 133, port: port_);
+            funcId: 171, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiLoginConstMeta,
+      constMeta: kCrateApiAuthLoginConstMeta,
       argValues: [username, password],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiLoginConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiAuthLoginConstMeta => const TaskConstMeta(
+        debugName: "login",
+        argNames: ["username", "password"],
+      );
+
+  @override
+  Future<void> crateHandlersAuthLogin(
+      {required String username, required String password}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(username, serializer);
+        sse_encode_String(password, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 172, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersAuthLoginConstMeta,
+      argValues: [username, password],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersAuthLoginConstMeta => const TaskConstMeta(
         debugName: "login",
         argNames: ["username", "password"],
       );
@@ -4052,7 +5307,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 134, port: port_);
+            funcId: 173, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4070,123 +5325,175 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudLogout() {
+  Future<void> crateServicesCrudLogout() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 135, port: port_);
+            funcId: 174, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudLogoutConstMeta,
+      constMeta: kCrateServicesCrudLogoutConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudLogoutConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudLogoutConstMeta => const TaskConstMeta(
         debugName: "logout",
         argNames: [],
       );
 
   @override
-  Future<void> crateManualSync() {
+  Future<void> crateIntegrationSyncControlManualSync() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 136, port: port_);
+            funcId: 175, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateManualSyncConstMeta,
+      constMeta: kCrateIntegrationSyncControlManualSyncConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateManualSyncConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateIntegrationSyncControlManualSyncConstMeta =>
+      const TaskConstMeta(
         debugName: "manual_sync",
         argNames: [],
       );
 
   @override
-  Future<void> crateSyncPullAndMerge() {
+  Future<void> crateHandlersSyncManualSyncApi() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 137, port: port_);
+            funcId: 176, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateSyncPullAndMergeConstMeta,
+      constMeta: kCrateHandlersSyncManualSyncApiConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSyncPullAndMergeConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateHandlersSyncManualSyncApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "manual_sync_api",
+        argNames: [],
+      );
+
+  @override
+  Future<List<String>> crateApiSyncPostSyncEvents(
+      {required List<String> eventsJson}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_list_String(eventsJson, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 177, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_String,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiSyncPostSyncEventsConstMeta,
+      argValues: [eventsJson],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiSyncPostSyncEventsConstMeta => const TaskConstMeta(
+        debugName: "post_sync_events",
+        argNames: ["eventsJson"],
+      );
+
+  @override
+  Future<void> crateServicesSyncPullAndMerge() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 178, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateServicesSyncPullAndMergeConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateServicesSyncPullAndMergeConstMeta =>
+      const TaskConstMeta(
         debugName: "pull_and_merge",
         argNames: [],
       );
 
   @override
-  Future<void> crateLogBridgePush({required String s}) {
+  Future<void> crateUtilLoggingPush({required String s}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(s, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 138, port: port_);
+            funcId: 179, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateLogBridgePushConstMeta,
+      constMeta: kCrateUtilLoggingPushConstMeta,
       argValues: [s],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateLogBridgePushConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateUtilLoggingPushConstMeta => const TaskConstMeta(
         debugName: "push",
         argNames: ["s"],
       );
 
   @override
-  Future<void> crateSyncPushUnsynced() {
+  Future<void> crateServicesSyncPushUnsynced() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 139, port: port_);
+            funcId: 180, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateSyncPushUnsyncedConstMeta,
+      constMeta: kCrateServicesSyncPushUnsyncedConstMeta,
       argValues: [],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSyncPushUnsyncedConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesSyncPushUnsyncedConstMeta =>
+      const TaskConstMeta(
         debugName: "push_unsynced",
         argNames: [],
       );
 
   @override
-  Future<void> crateApiPutPermissionMatrixApi(
+  Future<void> crateApiWalletsPutPermissionMatrixApi(
       {required String walletId, required String entriesJson}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -4194,19 +5501,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(entriesJson, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 140, port: port_);
+            funcId: 181, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiPutPermissionMatrixApiConstMeta,
+      constMeta: kCrateApiWalletsPutPermissionMatrixApiConstMeta,
       argValues: [walletId, entriesJson],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiPutPermissionMatrixApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsPutPermissionMatrixApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "put_permission_matrix_api",
+        argNames: ["walletId", "entriesJson"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsPutPermissionMatrixApi(
+      {required String walletId, required String entriesJson}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(entriesJson, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 182, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsPutPermissionMatrixApiConstMeta,
+      argValues: [walletId, entriesJson],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsPutPermissionMatrixApiConstMeta =>
       const TaskConstMeta(
         debugName: "put_permission_matrix_api",
         argNames: ["walletId", "entriesJson"],
@@ -4221,7 +5555,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(entriesJson, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 141, port: port_);
+            funcId: 183, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4248,7 +5582,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(username, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 142, port: port_);
+            funcId: 184, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4266,7 +5600,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiRegister(
+  Future<void> crateApiAuthRegister(
       {required String username, required String password}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -4274,25 +5608,51 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(username, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 143, port: port_);
+            funcId: 185, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiRegisterConstMeta,
+      constMeta: kCrateApiAuthRegisterConstMeta,
       argValues: [username, password],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiRegisterConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiAuthRegisterConstMeta => const TaskConstMeta(
         debugName: "register",
         argNames: ["username", "password"],
       );
 
   @override
-  Future<void> crateApiRemoveContactGroupMemberApi(
+  Future<void> crateHandlersAuthRegister(
+      {required String username, required String password}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(username, serializer);
+        sse_encode_String(password, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 186, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersAuthRegisterConstMeta,
+      argValues: [username, password],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersAuthRegisterConstMeta => const TaskConstMeta(
+        debugName: "register",
+        argNames: ["username", "password"],
+      );
+
+  @override
+  Future<void> crateApiWalletsRemoveContactGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String contactId}) {
@@ -4303,26 +5663,56 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 144, port: port_);
+            funcId: 187, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiRemoveContactGroupMemberApiConstMeta,
+      constMeta: kCrateApiWalletsRemoveContactGroupMemberApiConstMeta,
       argValues: [walletId, groupId, contactId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiRemoveContactGroupMemberApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsRemoveContactGroupMemberApiConstMeta =>
       const TaskConstMeta(
         debugName: "remove_contact_group_member_api",
         argNames: ["walletId", "groupId", "contactId"],
       );
 
   @override
-  Future<void> crateApiRemoveUserGroupMemberApi(
+  Future<void> crateHandlersWalletsRemoveContactGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String contactId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        sse_encode_String(contactId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 188, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsRemoveContactGroupMemberApiConstMeta,
+      argValues: [walletId, groupId, contactId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsRemoveContactGroupMemberApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "remove_contact_group_member_api",
+        argNames: ["walletId", "groupId", "contactId"],
+      );
+
+  @override
+  Future<void> crateApiWalletsRemoveUserGroupMemberApi(
       {required String walletId,
       required String groupId,
       required String userId}) {
@@ -4333,19 +5723,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(userId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 145, port: port_);
+            funcId: 189, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiRemoveUserGroupMemberApiConstMeta,
+      constMeta: kCrateApiWalletsRemoveUserGroupMemberApiConstMeta,
       argValues: [walletId, groupId, userId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiRemoveUserGroupMemberApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsRemoveUserGroupMemberApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "remove_user_group_member_api",
+        argNames: ["walletId", "groupId", "userId"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsRemoveUserGroupMemberApi(
+      {required String walletId,
+      required String groupId,
+      required String userId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        sse_encode_String(userId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 190, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsRemoveUserGroupMemberApiConstMeta,
+      argValues: [walletId, groupId, userId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsRemoveUserGroupMemberApiConstMeta =>
       const TaskConstMeta(
         debugName: "remove_user_group_member_api",
         argNames: ["walletId", "groupId", "userId"],
@@ -4363,7 +5783,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 146, port: port_);
+            funcId: 191, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4390,7 +5810,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(userId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 147, port: port_);
+            funcId: 192, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4408,7 +5828,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiRemoveWalletUserApi(
+  Future<void> crateApiWalletsRemoveWalletUserApi(
       {required String walletId, required String userId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -4416,19 +5836,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(userId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 148, port: port_);
+            funcId: 193, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiRemoveWalletUserApiConstMeta,
+      constMeta: kCrateApiWalletsRemoveWalletUserApiConstMeta,
       argValues: [walletId, userId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiRemoveWalletUserApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsRemoveWalletUserApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "remove_wallet_user_api",
+        argNames: ["walletId", "userId"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsRemoveWalletUserApi(
+      {required String walletId, required String userId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(userId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 194, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsRemoveWalletUserApiConstMeta,
+      argValues: [walletId, userId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsRemoveWalletUserApiConstMeta =>
       const TaskConstMeta(
         debugName: "remove_wallet_user_api",
         argNames: ["walletId", "userId"],
@@ -4446,7 +5893,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(userId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 149, port: port_);
+            funcId: 195, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4473,7 +5920,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(query, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 150, port: port_);
+            funcId: 196, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -4491,7 +5938,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiSearchWalletUsersApi(
+  Future<String> crateApiWalletsSearchWalletUsersApi(
       {required String walletId, required String query}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -4499,26 +5946,76 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(walletId, serializer);
         sse_encode_String(query, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 151, port: port_);
+            funcId: 197, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiSearchWalletUsersApiConstMeta,
+      constMeta: kCrateApiWalletsSearchWalletUsersApiConstMeta,
       argValues: [walletId, query],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiSearchWalletUsersApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsSearchWalletUsersApiConstMeta =>
       const TaskConstMeta(
         debugName: "search_wallet_users_api",
         argNames: ["walletId", "query"],
       );
 
   @override
-  Future<void> crateSetBackendConfig(
+  Future<String> crateHandlersWalletsSearchWalletUsersApi(
+      {required String walletId, required String query}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(query, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 198, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsSearchWalletUsersApiConstMeta,
+      argValues: [walletId, query],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsSearchWalletUsersApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "search_wallet_users_api",
+        argNames: ["walletId", "query"],
+      );
+
+  @override
+  Future<void> crateApiAuthServerLogout() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 199, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_client_error,
+      ),
+      constMeta: kCrateApiAuthServerLogoutConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiAuthServerLogoutConstMeta => const TaskConstMeta(
+        debugName: "server_logout",
+        argNames: [],
+      );
+
+  @override
+  Future<void> crateConfigSetBackendConfig(
       {required String baseUrl, required String wsUrl}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -4526,19 +6023,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(baseUrl, serializer);
         sse_encode_String(wsUrl, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 152, port: port_);
+            funcId: 200, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateSetBackendConfigConstMeta,
+      constMeta: kCrateConfigSetBackendConfigConstMeta,
       argValues: [baseUrl, wsUrl],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSetBackendConfigConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateConfigSetBackendConfigConstMeta =>
+      const TaskConstMeta(
         debugName: "set_backend_config",
         argNames: ["baseUrl", "wsUrl"],
       );
@@ -4550,7 +6048,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(walletId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 153, port: port_);
+            funcId: 201, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4568,49 +6066,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateSetLogContext({required String ctx}) {
+  Future<void> crateConfigSetLogContext({required String ctx}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(ctx, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 154, port: port_);
+            funcId: 202, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateSetLogContextConstMeta,
+      constMeta: kCrateConfigSetLogContextConstMeta,
       argValues: [ctx],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSetLogContextConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateConfigSetLogContextConstMeta => const TaskConstMeta(
         debugName: "set_log_context",
         argNames: ["ctx"],
       );
 
   @override
-  Future<void> crateSetNetworkOffline({required bool offline}) {
+  Future<void> crateConfigSetNetworkOffline({required bool offline}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_bool(offline, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 155, port: port_);
+            funcId: 203, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateSetNetworkOfflineConstMeta,
+      constMeta: kCrateConfigSetNetworkOfflineConstMeta,
       argValues: [offline],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateSetNetworkOfflineConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateConfigSetNetworkOfflineConstMeta =>
+      const TaskConstMeta(
         debugName: "set_network_offline",
         argNames: ["offline"],
       );
@@ -4624,7 +6123,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(key, serializer);
         sse_encode_String(value, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 156, port: port_);
+            funcId: 204, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4642,25 +6141,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateIdsTransactionIdAsStr({required TransactionId that}) {
+  Future<void> crateUtilIdsTransactionIdAsStr({required TransactionId that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_box_autoadd_transaction_id(that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 157, port: port_);
+            funcId: 205, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateIdsTransactionIdAsStrConstMeta,
+      constMeta: kCrateUtilIdsTransactionIdAsStrConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateIdsTransactionIdAsStrConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateUtilIdsTransactionIdAsStrConstMeta =>
+      const TaskConstMeta(
         debugName: "transaction_id_as_str",
         argNames: ["that"],
       );
@@ -4672,7 +6172,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 158, port: port_);
+            funcId: 206, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4690,25 +6190,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudUndoContactAction({required String contactId}) {
+  Future<void> crateServicesCrudUndoContactAction({required String contactId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 159, port: port_);
+            funcId: 207, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudUndoContactActionConstMeta,
+      constMeta: kCrateServicesCrudUndoContactActionConstMeta,
       argValues: [contactId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudUndoContactActionConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudUndoContactActionConstMeta =>
+      const TaskConstMeta(
         debugName: "undo_contact_action",
         argNames: ["contactId"],
       );
@@ -4720,7 +6221,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(transactionId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 160, port: port_);
+            funcId: 208, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4738,25 +6239,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudUndoTransactionAction({required String transactionId}) {
+  Future<void> crateServicesCrudUndoTransactionAction(
+      {required String transactionId}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(transactionId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 161, port: port_);
+            funcId: 209, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudUndoTransactionActionConstMeta,
+      constMeta: kCrateServicesCrudUndoTransactionActionConstMeta,
       argValues: [transactionId],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudUndoTransactionActionConstMeta =>
+  TaskConstMeta get kCrateServicesCrudUndoTransactionActionConstMeta =>
       const TaskConstMeta(
         debugName: "undo_transaction_action",
         argNames: ["transactionId"],
@@ -4782,7 +6284,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(notes, serializer);
         sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 162, port: port_);
+            funcId: 210, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4808,7 +6310,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudUpdateContact(
+  Future<void> crateServicesCrudUpdateContact(
       {required String id,
       required String name,
       String? username,
@@ -4827,19 +6329,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(notes, serializer);
         sse_encode_opt_list_String(groupIds, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 163, port: port_);
+            funcId: 211, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudUpdateContactConstMeta,
+      constMeta: kCrateServicesCrudUpdateContactConstMeta,
       argValues: [id, name, username, phone, email, notes, groupIds],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateCrudUpdateContactConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudUpdateContactConstMeta =>
+      const TaskConstMeta(
         debugName: "update_contact",
         argNames: [
           "id",
@@ -4853,7 +6356,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiUpdateContactGroupApi(
+  Future<void> crateApiWalletsUpdateContactGroupApi(
       {required String walletId,
       required String groupId,
       required String name}) {
@@ -4864,19 +6367,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 164, port: port_);
+            funcId: 212, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiUpdateContactGroupApiConstMeta,
+      constMeta: kCrateApiWalletsUpdateContactGroupApiConstMeta,
       argValues: [walletId, groupId, name],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiUpdateContactGroupApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsUpdateContactGroupApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "update_contact_group_api",
+        argNames: ["walletId", "groupId", "name"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsUpdateContactGroupApi(
+      {required String walletId,
+      required String groupId,
+      required String name}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        sse_encode_String(name, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 213, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsUpdateContactGroupApiConstMeta,
+      argValues: [walletId, groupId, name],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsUpdateContactGroupApiConstMeta =>
       const TaskConstMeta(
         debugName: "update_contact_group_api",
         argNames: ["walletId", "groupId", "name"],
@@ -4906,7 +6439,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(transactionDate, serializer);
         sse_encode_opt_String(dueDate, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 165, port: port_);
+            funcId: 214, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -4944,7 +6477,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateCrudUpdateTransaction(
+  Future<void> crateServicesCrudUpdateTransaction(
       {required String id,
       required String contactId,
       required String type,
@@ -4967,13 +6500,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(transactionDate, serializer);
         sse_encode_opt_String(dueDate, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 166, port: port_);
+            funcId: 215, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: sse_decode_String,
       ),
-      constMeta: kCrateCrudUpdateTransactionConstMeta,
+      constMeta: kCrateServicesCrudUpdateTransactionConstMeta,
       argValues: [
         id,
         contactId,
@@ -4989,7 +6522,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     ));
   }
 
-  TaskConstMeta get kCrateCrudUpdateTransactionConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateServicesCrudUpdateTransactionConstMeta =>
+      const TaskConstMeta(
         debugName: "update_transaction",
         argNames: [
           "id",
@@ -5005,7 +6539,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiUpdateUserGroupApi(
+  Future<void> crateApiWalletsUpdateUserGroupApi(
       {required String walletId,
       required String groupId,
       required String name}) {
@@ -5016,19 +6550,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 167, port: port_);
+            funcId: 216, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiUpdateUserGroupApiConstMeta,
+      constMeta: kCrateApiWalletsUpdateUserGroupApiConstMeta,
       argValues: [walletId, groupId, name],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiUpdateUserGroupApiConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateApiWalletsUpdateUserGroupApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "update_user_group_api",
+        argNames: ["walletId", "groupId", "name"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsUpdateUserGroupApi(
+      {required String walletId,
+      required String groupId,
+      required String name}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(groupId, serializer);
+        sse_encode_String(name, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 217, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsUpdateUserGroupApiConstMeta,
+      argValues: [walletId, groupId, name],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsUpdateUserGroupApiConstMeta =>
+      const TaskConstMeta(
         debugName: "update_user_group_api",
         argNames: ["walletId", "groupId", "name"],
       );
@@ -5045,7 +6610,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 168, port: port_);
+            funcId: 218, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -5064,7 +6629,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiUpdateWalletUserApi(
+  Future<void> crateApiWalletsUpdateWalletUserApi(
       {required String walletId,
       required String userId,
       required String role}) {
@@ -5075,19 +6640,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(userId, serializer);
         sse_encode_String(role, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 169, port: port_);
+            funcId: 219, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_String,
+        decodeErrorData: sse_decode_client_error,
       ),
-      constMeta: kCrateApiUpdateWalletUserApiConstMeta,
+      constMeta: kCrateApiWalletsUpdateWalletUserApiConstMeta,
       argValues: [walletId, userId, role],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiUpdateWalletUserApiConstMeta =>
+  TaskConstMeta get kCrateApiWalletsUpdateWalletUserApiConstMeta =>
+      const TaskConstMeta(
+        debugName: "update_wallet_user_api",
+        argNames: ["walletId", "userId", "role"],
+      );
+
+  @override
+  Future<void> crateHandlersWalletsUpdateWalletUserApi(
+      {required String walletId,
+      required String userId,
+      required String role}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        sse_encode_String(userId, serializer);
+        sse_encode_String(role, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 220, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateHandlersWalletsUpdateWalletUserApiConstMeta,
+      argValues: [walletId, userId, role],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateHandlersWalletsUpdateWalletUserApiConstMeta =>
       const TaskConstMeta(
         debugName: "update_wallet_user_api",
         argNames: ["walletId", "userId", "role"],
@@ -5105,7 +6700,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(groupId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 170, port: port_);
+            funcId: 221, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -5134,7 +6729,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(userId, serializer);
         sse_encode_String(role, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 171, port: port_);
+            funcId: 222, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -5152,51 +6747,77 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateIdsUserIdAsStr({required UserId that}) {
+  Future<void> crateUtilIdsUserIdAsStr({required UserId that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_box_autoadd_user_id(that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 172, port: port_);
+            funcId: 223, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateIdsUserIdAsStrConstMeta,
+      constMeta: kCrateUtilIdsUserIdAsStrConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateIdsUserIdAsStrConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateUtilIdsUserIdAsStrConstMeta => const TaskConstMeta(
         debugName: "user_id_as_str",
         argNames: ["that"],
       );
 
   @override
-  Future<void> crateIdsWalletIdAsStr({required WalletId that}) {
+  Future<void> crateUtilIdsWalletIdAsStr({required WalletId that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_box_autoadd_wallet_id(that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 173, port: port_);
+            funcId: 224, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
         decodeErrorData: null,
       ),
-      constMeta: kCrateIdsWalletIdAsStrConstMeta,
+      constMeta: kCrateUtilIdsWalletIdAsStrConstMeta,
       argValues: [that],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateIdsWalletIdAsStrConstMeta => const TaskConstMeta(
+  TaskConstMeta get kCrateUtilIdsWalletIdAsStrConstMeta => const TaskConstMeta(
         debugName: "wallet_id_as_str",
         argNames: ["that"],
+      );
+
+  @override
+  Future<PlatformInt64> crateServicesCrudWalletTotalDebt(
+      {required String walletId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(walletId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 225, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_i_64,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateServicesCrudWalletTotalDebtConstMeta,
+      argValues: [walletId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateServicesCrudWalletTotalDebtConstMeta =>
+      const TaskConstMeta(
+        debugName: "wallet_total_debt",
+        argNames: ["walletId"],
       );
 
   RustArcIncrementStrongCountFnType get rust_arc_increment_strong_count_Event =>
@@ -5399,6 +7020,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ClientError dco_decode_client_error(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    switch (raw[0]) {
+      case 0:
+        return ClientError_Network(
+          dco_decode_String(raw[1]),
+        );
+      case 1:
+        return const ClientError_AuthDeclined();
+      case 2:
+        return const ClientError_AuthExpired();
+      case 3:
+        return ClientError_InvalidResponse(
+          dco_decode_String(raw[1]),
+        );
+      case 4:
+        return ClientError_Storage(
+          dco_decode_String(raw[1]),
+        );
+      case 5:
+        return ClientError_Sync(
+          dco_decode_String(raw[1]),
+        );
+      case 6:
+        return ClientError_InvalidInput(
+          dco_decode_String(raw[1]),
+        );
+      case 7:
+        return ClientError_Internal(
+          dco_decode_String(raw[1]),
+        );
+      default:
+        throw Exception("unreachable");
+    }
+  }
+
+  @protected
   Contact dco_decode_contact(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -5490,6 +7148,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<Value>
+      dco_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(
+            dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue)
+        .toList();
+  }
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
@@ -5541,6 +7210,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<String>? dco_decode_opt_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_String(raw);
+  }
+
+  @protected
+  (
+    List<Value>,
+    String,
+    bool
+  ) dco_decode_record_list_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_value_string_bool(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3) {
+      throw Exception('Expected 3 elements, got ${arr.length}');
+    }
+    return (
+      dco_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          arr[0]),
+      dco_decode_String(arr[1]),
+      dco_decode_bool(arr[2]),
+    );
   }
 
   @protected
@@ -5852,6 +7541,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ClientError sse_decode_client_error(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var tag_ = sse_decode_i_32(deserializer);
+    switch (tag_) {
+      case 0:
+        var var_field0 = sse_decode_String(deserializer);
+        return ClientError_Network(var_field0);
+      case 1:
+        return const ClientError_AuthDeclined();
+      case 2:
+        return const ClientError_AuthExpired();
+      case 3:
+        var var_field0 = sse_decode_String(deserializer);
+        return ClientError_InvalidResponse(var_field0);
+      case 4:
+        var var_field0 = sse_decode_String(deserializer);
+        return ClientError_Storage(var_field0);
+      case 5:
+        var var_field0 = sse_decode_String(deserializer);
+        return ClientError_Sync(var_field0);
+      case 6:
+        var var_field0 = sse_decode_String(deserializer);
+        return ClientError_InvalidInput(var_field0);
+      case 7:
+        var var_field0 = sse_decode_String(deserializer);
+        return ClientError_Internal(var_field0);
+      default:
+        throw UnimplementedError('');
+    }
+  }
+
+  @protected
   Contact sse_decode_contact(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
@@ -5933,6 +7655,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_username = sse_decode_opt_String(deserializer);
     var var_expired = sse_decode_bool(deserializer);
     return JwtPayload(username: var_username, expired: var_expired);
+  }
+
+  @protected
+  List<Value>
+      sse_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Value>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(
+          sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+              deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -6033,6 +7771,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  (
+    List<Value>,
+    String,
+    bool
+  ) sse_decode_record_list_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_value_string_bool(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_field0 =
+        sse_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+            deserializer);
+    var var_field1 = sse_decode_String(deserializer);
+    var var_field2 = sse_decode_bool(deserializer);
+    return (var_field0, var_field1, var_field2);
   }
 
   @protected
@@ -6366,6 +8120,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_client_error(ClientError self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    switch (self) {
+      case ClientError_Network(field0: final field0):
+        sse_encode_i_32(0, serializer);
+        sse_encode_String(field0, serializer);
+      case ClientError_AuthDeclined():
+        sse_encode_i_32(1, serializer);
+      case ClientError_AuthExpired():
+        sse_encode_i_32(2, serializer);
+      case ClientError_InvalidResponse(field0: final field0):
+        sse_encode_i_32(3, serializer);
+        sse_encode_String(field0, serializer);
+      case ClientError_Storage(field0: final field0):
+        sse_encode_i_32(4, serializer);
+        sse_encode_String(field0, serializer);
+      case ClientError_Sync(field0: final field0):
+        sse_encode_i_32(5, serializer);
+        sse_encode_String(field0, serializer);
+      case ClientError_InvalidInput(field0: final field0):
+        sse_encode_i_32(6, serializer);
+        sse_encode_String(field0, serializer);
+      case ClientError_Internal(field0: final field0):
+        sse_encode_i_32(7, serializer);
+        sse_encode_String(field0, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_contact(Contact self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
@@ -6431,6 +8214,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_opt_String(self.username, serializer);
     sse_encode_bool(self.expired, serializer);
+  }
+
+  @protected
+  void
+      sse_encode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          List<Value> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          item, serializer);
+    }
   }
 
   @protected
@@ -6518,6 +8313,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_list_String(self, serializer);
     }
+  }
+
+  @protected
+  void
+      sse_encode_record_list_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_value_string_bool(
+          (List<Value>, String, bool) self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+        self.$1, serializer);
+    sse_encode_String(self.$2, serializer);
+    sse_encode_bool(self.$3, serializer);
   }
 
   @protected
@@ -6641,71 +8447,73 @@ class EventImpl extends RustOpaque implements Event {
   );
 
   String get aggregateId =>
-      RustLib.instance.api.crateModelsEventAutoAccessorGetAggregateId(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorGetAggregateId(
         that: this,
       );
 
   String get aggregateType =>
-      RustLib.instance.api.crateModelsEventAutoAccessorGetAggregateType(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorGetAggregateType(
         that: this,
       );
 
   Value get eventData =>
-      RustLib.instance.api.crateModelsEventAutoAccessorGetEventData(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorGetEventData(
         that: this,
       );
 
   String get eventType =>
-      RustLib.instance.api.crateModelsEventAutoAccessorGetEventType(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorGetEventType(
         that: this,
       );
 
-  String get id => RustLib.instance.api.crateModelsEventAutoAccessorGetId(
+  String get id => RustLib.instance.api.crateTypesModelsEventAutoAccessorGetId(
         that: this,
       );
 
-  bool get synced => RustLib.instance.api.crateModelsEventAutoAccessorGetSynced(
+  bool get synced =>
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorGetSynced(
         that: this,
       );
 
   String get timestamp =>
-      RustLib.instance.api.crateModelsEventAutoAccessorGetTimestamp(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorGetTimestamp(
         that: this,
       );
 
   int get version =>
-      RustLib.instance.api.crateModelsEventAutoAccessorGetVersion(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorGetVersion(
         that: this,
       );
 
   set aggregateId(String aggregateId) =>
-      RustLib.instance.api.crateModelsEventAutoAccessorSetAggregateId(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorSetAggregateId(
           that: this, aggregateId: aggregateId);
 
   set aggregateType(String aggregateType) =>
-      RustLib.instance.api.crateModelsEventAutoAccessorSetAggregateType(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorSetAggregateType(
           that: this, aggregateType: aggregateType);
 
   set eventData(Value eventData) =>
-      RustLib.instance.api.crateModelsEventAutoAccessorSetEventData(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorSetEventData(
           that: this, eventData: eventData);
 
   set eventType(String eventType) =>
-      RustLib.instance.api.crateModelsEventAutoAccessorSetEventType(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorSetEventType(
           that: this, eventType: eventType);
 
   set id(String id) => RustLib.instance.api
-      .crateModelsEventAutoAccessorSetId(that: this, id: id);
+      .crateTypesModelsEventAutoAccessorSetId(that: this, id: id);
 
   set synced(bool synced) => RustLib.instance.api
-      .crateModelsEventAutoAccessorSetSynced(that: this, synced: synced);
+      .crateTypesModelsEventAutoAccessorSetSynced(that: this, synced: synced);
 
   set timestamp(String timestamp) =>
-      RustLib.instance.api.crateModelsEventAutoAccessorSetTimestamp(
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorSetTimestamp(
           that: this, timestamp: timestamp);
 
-  set version(int version) => RustLib.instance.api
-      .crateModelsEventAutoAccessorSetVersion(that: this, version: version);
+  set version(int version) =>
+      RustLib.instance.api.crateTypesModelsEventAutoAccessorSetVersion(
+          that: this, version: version);
 }
 
 @sealed

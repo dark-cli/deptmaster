@@ -27,13 +27,14 @@ class ContactAdapter extends TypeAdapter<Contact> {
       updatedAt: fields[6] as DateTime,
       isSynced: fields[7] as bool,
       balance: fields[8] as int,
+      walletId: fields[10] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Contact obj) {
     writer
-      ..writeByte(10)
+      ..writeByte(11)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -53,7 +54,9 @@ class ContactAdapter extends TypeAdapter<Contact> {
       ..writeByte(7)
       ..write(obj.isSynced)
       ..writeByte(8)
-      ..write(obj.balance);
+      ..write(obj.balance)
+      ..writeByte(10)
+      ..write(obj.walletId);
   }
 
   @override

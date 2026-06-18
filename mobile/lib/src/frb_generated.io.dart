@@ -3,24 +3,34 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import 'api.dart';
-import 'crud.dart';
+import 'api/auth.dart';
+import 'api/sync.dart';
+import 'api/wallets.dart';
+import 'config.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
-import 'data_bus.dart';
+import 'database/models.dart';
+import 'database/repository.dart';
+import 'database/storage.dart';
 import 'frb_generated.dart';
-import 'ids.dart';
+import 'handlers/auth.dart';
+import 'handlers/sync.dart';
+import 'handlers/wallets.dart';
+import 'integration/data_bus.dart';
+import 'integration/sync_control.dart';
+import 'integration/ws.dart';
 import 'lib.dart';
-import 'log_bridge.dart';
-import 'models.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
-import 'sdk_projection.dart';
-import 'sdk_snapshot_store.dart';
-import 'sdk_store.dart';
-import 'storage.dart';
-import 'sync.dart';
-import 'ws.dart';
+import 'sdk/projection.dart';
+import 'sdk/snapshot_store.dart';
+import 'sdk/store.dart';
+import 'services/crud.dart';
+import 'services/sync.dart';
+import 'types/error.dart';
+import 'types/models.dart';
+import 'util/ids.dart';
+import 'util/logging.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RustLibApiImplPlatform({
@@ -143,6 +153,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WalletId dco_decode_box_autoadd_wallet_id(dynamic raw);
 
   @protected
+  ClientError dco_decode_client_error(dynamic raw);
+
+  @protected
   Contact dco_decode_contact(dynamic raw);
 
   @protected
@@ -170,6 +183,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   JwtPayload dco_decode_jwt_payload(dynamic raw);
 
   @protected
+  List<Value>
+      dco_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
@@ -195,6 +213,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String>? dco_decode_opt_list_String(dynamic raw);
+
+  @protected
+  (
+    List<Value>,
+    String,
+    bool
+  ) dco_decode_record_list_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_value_string_bool(
+      dynamic raw);
 
   @protected
   StoredEvent dco_decode_stored_event(dynamic raw);
@@ -328,6 +354,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WalletId sse_decode_box_autoadd_wallet_id(SseDeserializer deserializer);
 
   @protected
+  ClientError sse_decode_client_error(SseDeserializer deserializer);
+
+  @protected
   Contact sse_decode_contact(SseDeserializer deserializer);
 
   @protected
@@ -355,6 +384,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   JwtPayload sse_decode_jwt_payload(SseDeserializer deserializer);
 
   @protected
+  List<Value>
+      sse_decode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          SseDeserializer deserializer);
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
@@ -380,6 +414,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
+
+  @protected
+  (
+    List<Value>,
+    String,
+    bool
+  ) sse_decode_record_list_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_value_string_bool(
+      SseDeserializer deserializer);
 
   @protected
   StoredEvent sse_decode_stored_event(SseDeserializer deserializer);
@@ -518,6 +560,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       WalletId self, SseSerializer serializer);
 
   @protected
+  void sse_encode_client_error(ClientError self, SseSerializer serializer);
+
+  @protected
   void sse_encode_contact(Contact self, SseSerializer serializer);
 
   @protected
@@ -545,6 +590,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_jwt_payload(JwtPayload self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerValue(
+          List<Value> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
@@ -576,6 +626,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
+
+  @protected
+  void
+      sse_encode_record_list_auto_owned_rust_opaque_flutter_rust_bridgefor_generated_rust_auto_opaque_inner_value_string_bool(
+          (List<Value>, String, bool) self, SseSerializer serializer);
 
   @protected
   void sse_encode_stored_event(StoredEvent self, SseSerializer serializer);
