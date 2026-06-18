@@ -1,20 +1,16 @@
 #![allow(unexpected_cfgs)] // flutter_rust_bridge macro emits frb_expand cfg
 use flutter_rust_bridge::frb;
-use once_cell::sync::Lazy;
-use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
-use std::time::Instant;
 
 pub use serde_json::Value;
 
 mod api;
 mod backoff;
+mod config;
 mod data_bus;
 mod database;
 mod error;
 mod frb_generated;
+mod handlers;
 mod ids;
 mod log_bridge;
 mod models;
@@ -23,217 +19,21 @@ mod sdk_snapshot_store;
 mod sdk_store;
 mod services;
 mod storage;
+mod sync_control;
 mod ws;
 
+pub use config::{
+    get_base_url, get_ws_url, init_storage, is_network_offline, log_context, set_backend_config,
+    set_log_context, set_network_offline,
+};
 pub use data_bus::{data_change_stream, DataChangeEvent, DataChangeKind};
 pub use error::ClientError;
+pub use sync_control::manual_sync;
 pub use ws::{connect_realtime, disconnect_realtime};
-
-struct BackendConfig {
-    base_url: String,
-    ws_url: String,
-}
-
-// Thread-local: each thread has its own backend config (e.g. each integration test).
-// When a thread has no config, get_base_url falls back to this global so Flutter (which may
-// dispatch Rust calls to different threads) still sees the config set by set_backend_config.
-thread_local! {
-    static BACKEND_CONFIG: RefCell<Option<BackendConfig>> = RefCell::new(None);
-}
-static BACKEND_CONFIG_GLOBAL: Lazy<Mutex<Option<BackendConfig>>> = Lazy::new(|| Mutex::new(None));
-
-// Thread-local offline flag: when true, API calls return "Network offline" (see set_network_offline).
-thread_local! {
-    static NETWORK_OFFLINE: RefCell<bool> = RefCell::new(false);
-}
-
-// Thread-local so parallel integration tests (each on their own thread) don't block each other's sync.
-thread_local! {
-    static SYNC_BACKOFF: RefCell<backoff::Backoff> = RefCell::new(backoff::Backoff::new(vec![
-        Duration::from_millis(500),
-        Duration::from_millis(500),
-        Duration::from_secs(1),
-        Duration::from_secs(1),
-        Duration::from_secs(1),
-        Duration::from_secs(2),
-        Duration::from_secs(2),
-        Duration::from_secs(2),
-        Duration::from_secs(3),
-    ]));
-}
-// PROCESS-WIDE (not thread-local) — the WS worker spawns a fresh
-// std::thread per events_synced message, so each spawn would get a
-// fresh thread-local "not in flight" and bypass the guard entirely.
-// pull_and_merge then runs in parallel, racing on storage writes
-// (last_sync_timestamp + server_hash) and producing stale state for
-// the next sync to mis-diagnose as hash-divergence → wipe.
-static SYNC_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
-static SYNC_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
-static LAST_BACKOFF_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
-static LAST_INFLIGHT_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
-static LAST_NO_WALLET_SKIP_LOG: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
-
-#[flutter_rust_bridge::frb(opaque)]
-struct SyncGuard;
-
-impl SyncGuard {
-    fn try_acquire() -> Option<Self> {
-        // compare_exchange: only the first caller wins; subsequent
-        // calls see `true` and return None until the holder drops.
-        match SYNC_IN_FLIGHT.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => Some(Self),
-            Err(_) => None,
-        }
-    }
-}
-
-impl Drop for SyncGuard {
-    fn drop(&mut self) {
-        SYNC_IN_FLIGHT.store(false, Ordering::Release);
-    }
-}
-
-/// Sync is driven by WS notification (client pulls when server pushes). No background polling.
-/// Set to true only to re-enable a fallback sync loop (interval ~1s).
-const BACKGROUND_SYNC_LOOP_ENABLED: bool = false;
-
-fn start_sync_loop_if_ready() {
-    if !BACKGROUND_SYNC_LOOP_ENABLED {
-        return;
-    }
-    if !storage::is_ready() {
-        return;
-    }
-    let backend_ready = BACKEND_CONFIG.with(|c| c.borrow().is_some());
-    if !backend_ready {
-        return;
-    }
-    if SYNC_LOOP_STARTED.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    rust_log!("[debitum_rs] sync loop: started (interval=1000ms)");
-    std::thread::spawn(|| {
-        loop {
-            // Only attempt sync when storage and backend are ready on this thread (sync loop has its own thread-local state; when disabled this is never true).
-            if storage::is_ready() && BACKEND_CONFIG.with(|c| c.borrow().is_some()) {
-                let _ = manual_sync_with_source("background_loop");
-            }
-            let delay_ms = SYNC_BACKOFF.with(|b| {
-                b.borrow()
-                    .remaining()
-                    .map(|d| d.as_millis().clamp(100, 3000) as u64)
-                    .unwrap_or(1000)
-            });
-            std::thread::sleep(Duration::from_millis(delay_ms));
-        }
-    });
-}
-
-fn should_log_skip(last: &Lazy<Mutex<Option<Instant>>>, min_interval_ms: u64) -> bool {
-    let mut guard = last.lock().unwrap();
-    let now = Instant::now();
-    match *guard {
-        Some(t) if now.duration_since(t).as_millis() < min_interval_ms as u128 => false,
-        _ => {
-            *guard = Some(now);
-            true
-        }
-    }
-}
 
 #[frb(init)]
 pub fn init_app() {
     // Storage is initialized via init_storage(path) from Dart.
-}
-
-/// Call once at startup with the app documents directory path (e.g. from path_provider).
-/// Storage is process-wide; no need to call again from every thread.
-pub fn init_storage(storage_path: String) -> Result<(), String> {
-    let was_ready = storage::is_ready();
-    storage::init(&storage_path)?;
-    if !was_ready {
-        rust_log!("[debitum_rs] sync loop: storage ready");
-        start_sync_loop_if_ready();
-    }
-    Ok(())
-}
-
-pub fn set_backend_config(base_url: String, ws_url: String) {
-    let already_same = get_base_url().as_deref() == Ok(base_url.as_str())
-        && get_ws_url().as_deref() == Ok(ws_url.as_str());
-    if already_same {
-        return;
-    }
-    let cfg = BackendConfig { base_url, ws_url };
-    BACKEND_CONFIG.with(|cell| {
-        *cell.borrow_mut() = Some(BackendConfig {
-            base_url: cfg.base_url.clone(),
-            ws_url: cfg.ws_url.clone(),
-        })
-    });
-    *BACKEND_CONFIG_GLOBAL.lock().unwrap() = Some(cfg);
-    rust_log!("[debitum_rs] sync loop: backend config set");
-    start_sync_loop_if_ready();
-}
-
-pub fn get_base_url() -> Result<String, String> {
-    BACKEND_CONFIG
-        .with(|cell| cell.borrow().as_ref().map(|c| c.base_url.clone()))
-        .or_else(|| {
-            BACKEND_CONFIG_GLOBAL
-                .lock()
-                .unwrap()
-                .as_ref()
-                .map(|c| c.base_url.clone())
-        })
-        .ok_or_else(|| "Backend not configured".to_string())
-}
-
-pub fn get_ws_url() -> Result<String, String> {
-    BACKEND_CONFIG
-        .with(|cell| cell.borrow().as_ref().map(|c| c.ws_url.clone()))
-        .or_else(|| {
-            BACKEND_CONFIG_GLOBAL
-                .lock()
-                .unwrap()
-                .as_ref()
-                .map(|c| c.ws_url.clone())
-        })
-        .ok_or_else(|| "Backend not configured".to_string())
-}
-
-/// Set whether the client is in "offline" mode. When true, all API requests return an error without hitting the network.
-/// The app reconnects WS when going online; WS connection triggers sync (app logic, not here).
-/// Thread-local (per test / per app when using multiple instances).
-pub fn set_network_offline(offline: bool) {
-    NETWORK_OFFLINE.with(|cell| *cell.borrow_mut() = offline);
-}
-
-/// True if the client is in offline mode (network requests will fail).
-pub fn is_network_offline() -> bool {
-    NETWORK_OFFLINE.with(|cell| *cell.borrow())
-}
-
-// --- Log context (per-thread tag for multi-app integration tests) ---
-thread_local! {
-    static LOG_CONTEXT: RefCell<Option<String>> = RefCell::new(None);
-}
-
-/// Set or clear a per-thread log tag. When set, the multi-app log viewer can
-/// distinguish which simulated app produced each log line. Stub today — the
-/// log_bridge doesn't yet prepend it — but exposing the API unblocks the
-/// integration test setup (`AppInstance::activate`) that calls it on every
-/// app switch. If/when we want per-app prefixes, log_bridge::push can read
-/// LOG_CONTEXT and prepend it.
-pub fn set_log_context(ctx: String) {
-    LOG_CONTEXT.with(|cell| {
-        *cell.borrow_mut() = if ctx.is_empty() { None } else { Some(ctx) };
-    });
-}
-
-/// Read the current per-thread log tag. Empty string if not set.
-pub fn log_context() -> String {
-    LOG_CONTEXT.with(|cell| cell.borrow().clone().unwrap_or_default())
 }
 
 // --- Auth ---
@@ -639,95 +439,6 @@ pub fn get_events() -> Result<String, String> {
     serde_json::to_string(&list).map_err(|e| e.to_string())
 }
 
-// --- Sync ---
-/// Sync with server. If server responds with DEBITUM_AUTH_DECLINED, Rust clears session (logout) and returns that error; Dart only needs to react (e.g. show login).
-pub fn manual_sync() -> Result<(), String> {
-    manual_sync_with_source("ffi")
-}
-
-fn manual_sync_with_source(source: &str) -> Result<(), String> {
-    {
-        let skip = SYNC_BACKOFF.with(|b| {
-            let backoff = b.borrow();
-            if !backoff.can_attempt() {
-                backoff.remaining()
-            } else {
-                None
-            }
-        });
-        if let Some(wait) = skip {
-            if should_log_skip(&LAST_BACKOFF_SKIP_LOG, 1000) {
-                rust_log!(
-                    "[debitum_rs] manual_sync skipped (backoff active, remaining={}ms, source={})",
-                    wait.as_millis(),
-                    source
-                );
-            }
-            return Ok(());
-        }
-    }
-    if get_current_wallet_id().is_err() {
-        if should_log_skip(&LAST_NO_WALLET_SKIP_LOG, 5000) {
-            rust_log!(
-                "[debitum_rs] manual_sync skipped (no wallet selected, source={})",
-                source
-            );
-        }
-        return Ok(());
-    }
-    let _guard = match SyncGuard::try_acquire() {
-        Some(g) => g,
-        None => {
-            if should_log_skip(&LAST_INFLIGHT_SKIP_LOG, 1000) {
-                rust_log!(
-                    "[debitum_rs] manual_sync skipped (in-flight, source={})",
-                    source
-                );
-            }
-            return Ok(());
-        }
-    };
-
-    rust_log!("[debitum_rs] manual_sync start (source={})", source);
-    match services::sync::full_sync() {
-        Ok(()) => {
-            SYNC_BACKOFF.with(|b| b.borrow_mut().reset());
-            rust_log!("[debitum_rs] manual_sync success (source={})", source);
-            Ok(())
-        }
-        Err(e) => {
-            if e.contains("DEBITUM_AUTH_DECLINED") {
-                let _ = services::crud::logout();
-            }
-            if is_network_error(&e) || is_rate_limited(&e) {
-                let delay = SYNC_BACKOFF.with(|b| b.borrow_mut().on_failure());
-                rust_log!(
-                    "[debitum_rs] manual_sync backoff set={}ms (source={})",
-                    delay.as_millis(),
-                    source
-                );
-            }
-            rust_log!("[debitum_rs] manual_sync failed: {}", e);
-            Err(e)
-        }
-    }
-}
-
-fn is_network_error(err: &str) -> bool {
-    let s = err.to_lowercase();
-    s.contains("error sending request")
-        || s.contains("connection refused")
-        || s.contains("network is unreachable")
-        || s.contains("timed out")
-        || s.contains("connection timed out")
-        || s.contains("connection reset")
-        || s.contains("host is down")
-}
-
-fn is_rate_limited(err: &str) -> bool {
-    let s = err.to_lowercase();
-    s.contains("429") || s.contains("too many requests")
-}
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).
 pub fn drain_rust_logs() -> Vec<String> {

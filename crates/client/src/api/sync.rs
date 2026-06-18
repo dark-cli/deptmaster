@@ -76,7 +76,7 @@ pub fn post_sync_events(events_json: Vec<String>) -> Result<Vec<String>, ClientE
         let status = resp.status();
         let text = resp.text().await.map_err(|e| ClientError::Network(e.to_string()))?;
         if status.as_u16() == 403 && text.contains("DEBITUM_INSUFFICIENT_WALLET_PERMISSION") {
-            return Err(ClientError::InvalidInput("Insufficient permissions to push events".to_string()));
+            return Err(ClientError::InvalidInput(format!("Insufficient permissions to push events: {}", text)));
         }
         if status.as_u16() == 401 && text.contains("DEBITUM_AUTH_DECLINED") {
             return Err(ClientError::AuthDeclined);
