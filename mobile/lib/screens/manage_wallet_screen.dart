@@ -1349,7 +1349,6 @@ class _PermissionGridDisplay extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      letterSpacing: 1.5,
                     ),
               ),
               const SizedBox(width: 12),
@@ -1375,7 +1374,6 @@ class _PermissionGridDisplay extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      letterSpacing: 1.5,
                     ),
               ),
               const SizedBox(width: 12),
