@@ -63,31 +63,35 @@ class _CustomExpansionTileState extends State<CustomExpansionTile>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: GestureDetector(
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
             onTap: _toggle,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      widget.title,
-                      if (widget.subtitle != null) ...[
-                        const SizedBox(height: 4),
-                        widget.subtitle!,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        widget.title,
+                        if (widget.subtitle != null) ...[
+                          const SizedBox(height: 4),
+                          widget.subtitle!,
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                if (widget.trailing != null) widget.trailing!,
-                RotationTransition(
-                  turns: _iconController,
-                  child: const Icon(Icons.expand_more),
-                ),
-              ],
+                  if (widget.trailing != null) widget.trailing!,
+                  RotationTransition(
+                    turns: _iconController,
+                    child: const Icon(Icons.expand_more),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
