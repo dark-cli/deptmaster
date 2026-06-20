@@ -42,7 +42,6 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -111,11 +110,6 @@ pub struct SyncEventsQuery {
     /// Server looks it up in user_readable_events.hash; found → return
     /// events with greater id (incremental). Not found → full pull + flush.
     pub last_hash: Option<String>,
-
-    /// Legacy timestamp-based watermark from the pre-033 protocol. Ignored
-    /// by the new hash-lookup path but kept in the schema so older clients
-    /// don't get a 400 during the transition.
-    pub since: Option<String>,
 }
 
 // ============ PUBLIC ENDPOINTS ============
@@ -311,20 +305,6 @@ fn is_undo_event(event_data: &EventData) -> bool {
         event_data,
         EventData::ContactUndone { .. } | EventData::TransactionUndone { .. }
     )
-}
-
-fn parse_timestamp(
-    since_str: &str,
-) -> Result<DateTime<Utc>, (StatusCode, Json<serde_json::Value>)> {
-    DateTime::parse_from_rfc3339(since_str)
-        .ok()
-        .map(|dt| dt.with_timezone(&Utc))
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "Invalid timestamp format"})),
-            )
-        })
 }
 
 /// Accept and process sync events from client

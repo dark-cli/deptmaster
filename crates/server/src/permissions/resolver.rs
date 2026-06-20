@@ -2,7 +2,6 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use super::queries;
 use crate::database::error::DbError;
 use domain::Action;
 use domain::PermissionContext;

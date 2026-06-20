@@ -27,10 +27,9 @@ struct AppInstance {
 }
 
 impl AppInstance {
-    /// Call get_sync_events (no since = full pull). Returns events (owned).
-    async fn get_sync_events(&self, state: &AppState, since: Option<String>) -> Vec<SyncEvent> {
+    /// Call get_sync_events (no hash = full pull). Returns events (owned).
+    async fn get_sync_events(&self, state: &AppState, _since: Option<String>) -> Vec<SyncEvent> {
         let query = SyncEventsQuery {
-            since,
             last_hash: None,
         };
         let result = get_sync_events(

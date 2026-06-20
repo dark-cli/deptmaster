@@ -19,6 +19,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 #[async_trait]
+#[allow(dead_code)]
 pub trait DatabaseRepository: Send + Sync {
     // ============ EVENTS ============
     async fn get_events_since(

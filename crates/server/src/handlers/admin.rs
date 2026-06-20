@@ -23,11 +23,6 @@ pub struct EventQuery {
     date_to: Option<String>,   // ISO date string
 }
 
-#[derive(Deserialize)]
-pub struct AdminListQuery {
-    pub wallet_id: Option<String>,
-}
-
 #[derive(Serialize)]
 pub struct EventResponse {
     pub event_id: String,

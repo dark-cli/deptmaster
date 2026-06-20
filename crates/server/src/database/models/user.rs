@@ -43,6 +43,7 @@ impl Default for UserSettings {
 
 // Wallet-scoped default group selections for a user
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct WalletUserSettings {
     pub wallet_id: Uuid,
     pub user_id: Uuid,
