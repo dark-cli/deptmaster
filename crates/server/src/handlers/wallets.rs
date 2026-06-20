@@ -28,11 +28,6 @@ where
     })
 }
 
-/// Validate permission dependencies (Write implies Read on same resource,
-/// transaction:* implies contact:read). Exhaustive over `Action` — adding
-/// a variant fails compile here until you state its read-prerequisite (or
-/// declare it has none).
-
 /// Check user has required wallet role (type-safe)
 async fn check_wallet_role(
     state: &AppState,
