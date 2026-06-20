@@ -16,6 +16,7 @@ pub struct PermissionModel {
     pool: PgPool,
 }
 
+#[allow(dead_code)]
 impl PermissionModel {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

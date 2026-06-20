@@ -6,6 +6,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TransactionWithoutEvent {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -20,6 +21,7 @@ pub struct TransactionWithoutEvent {
     pub created_at: NaiveDateTime,
 }
 
+#[allow(dead_code)]
 impl Database {
     pub async fn get_all_contacts_group_impl(
         &self,

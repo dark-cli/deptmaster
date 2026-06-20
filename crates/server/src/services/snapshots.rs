@@ -15,6 +15,7 @@ pub struct ProjectionSnapshot {
 
 /// Lightweight snapshot metadata (no JSON data)
 #[derive(Debug, Clone, FromRow)]
+#[allow(dead_code)]
 pub struct SnapshotMetadata {
     pub id: i64,
     pub snapshot_index: i64,
@@ -104,6 +105,7 @@ pub async fn get_event_db_id(pool: &PgPool, event_id: Uuid) -> Result<Option<i64
 
 /// Get snapshot with event_count less than target_count
 /// Returns the most recent snapshot where event_count < target_count
+#[allow(dead_code)]
 pub async fn get_snapshot_before_event_count(
     pool: &PgPool,
     target_count: i64,

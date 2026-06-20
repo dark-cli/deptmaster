@@ -4,6 +4,7 @@ use crate::database::repository::{hash::UserEventHash, Database};
 use sqlx::Row;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 impl Database {
     pub async fn get_user_groups_impl(&self, wallet_id: Uuid) -> Result<Vec<UserGroup>, DbError> {
         let groups = sqlx::query_as::<_, UserGroup>(

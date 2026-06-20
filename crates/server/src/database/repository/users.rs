@@ -4,6 +4,7 @@ use crate::database::repository::Database;
 use chrono::NaiveDateTime;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 impl Database {
     pub async fn get_user_by_email_impl(&self, email: &str) -> Result<Option<User>, DbError> {
         let user = sqlx::query_as::<_, User>(

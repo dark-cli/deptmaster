@@ -44,6 +44,7 @@ impl From<EventRowDb> for EventRow {
     }
 }
 
+#[allow(dead_code)]
 impl Database {
     /// Convert database Event to domain DomainEvent.
     /// This is internal conversion logic - domain layer should not depend on storage types.

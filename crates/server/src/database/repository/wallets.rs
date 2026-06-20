@@ -5,6 +5,7 @@ use chrono::Utc;
 use sqlx::Row;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 impl Database {
     pub async fn get_wallet_impl(&self, wallet_id: Uuid) -> Result<Option<Wallet>, DbError> {
         let wallet = sqlx::query_as::<_, Wallet>(

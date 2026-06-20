@@ -6,6 +6,7 @@ use sqlx::Row;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 impl Database {
     pub async fn get_transactions_for_wallet_impl(
         &self,

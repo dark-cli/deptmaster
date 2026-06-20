@@ -45,6 +45,7 @@ impl std::fmt::Display for OwnerProtectionError {
 
 impl std::error::Error for OwnerProtectionError {}
 
+#[allow(dead_code)]
 impl OwnerPermissionValidator {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

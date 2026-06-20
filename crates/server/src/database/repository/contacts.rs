@@ -3,6 +3,7 @@ use crate::database::models::*;
 use crate::database::repository::Database;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 impl Database {
     pub async fn get_contacts_for_wallet_impl(
         &self,

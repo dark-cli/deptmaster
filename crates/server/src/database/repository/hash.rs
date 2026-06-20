@@ -7,6 +7,7 @@ use uuid::Uuid;
 /// Private API: calculate_and_store (update hash when readable events change)
 pub struct UserEventHash;
 
+#[allow(dead_code)]
 impl UserEventHash {
     /// PUBLIC: Get stored hash from database
     /// Called by sync handlers to retrieve pre-calculated hash

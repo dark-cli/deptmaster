@@ -21,6 +21,7 @@ pub struct WalletContext {
 }
 
 impl WalletContext {
+    #[allow(dead_code)]
     pub fn new(wallet_id: Uuid, user_role: WalletRole) -> Self {
         Self {
             wallet_id,

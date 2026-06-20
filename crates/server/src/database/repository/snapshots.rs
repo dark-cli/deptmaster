@@ -5,6 +5,7 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
+#[allow(dead_code)]
 impl Database {
     pub async fn create_projection_snapshot_impl(
         &self,

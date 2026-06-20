@@ -21,6 +21,7 @@ use uuid::Uuid;
 /// A freshly minted refresh token: the raw string the client must
 /// store (we'll never see it again) and the DB row id (handy for
 /// `replaced_by_id` linking on rotation).
+#[allow(dead_code)]
 pub struct MintedRefreshToken {
     pub raw: String,
     pub id: Uuid,
