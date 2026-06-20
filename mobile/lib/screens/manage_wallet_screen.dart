@@ -940,7 +940,7 @@ class _ContactGroupsTabState extends State<_ContactGroupsTab> {
           return GradientCard(
             margin: const EdgeInsets.only(bottom: 8),
             variationSeed: groupId.hashCode,
-            child: ExpansionTile(
+            child: CustomExpansionTile(
               title: Text(_formatGroupName(g['name'] as String? ?? '')),
               subtitle: const Text('Static'),
               trailing: IconButton(
