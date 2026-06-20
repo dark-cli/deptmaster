@@ -666,6 +666,8 @@ class _UserGroupsTabState extends State<_UserGroupsTab> {
                   icon: const Icon(Icons.delete_outline),
                   onPressed: () => _deleteGroup(g),
                 ),
+                tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                childrenPadding: EdgeInsets.zero,
                 children: [
                   _UserGroupMembers(
                     walletId: widget.walletId,
