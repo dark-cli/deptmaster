@@ -1333,67 +1333,43 @@ class _PermissionGridDisplay extends StatelessWidget {
     final redColor = Theme.of(context).colorScheme.error;
     final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Contact permissions: C: r c w d
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Table(
+        border: TableBorder.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+          width: 1,
+        ),
+        defaultColumnWidth: const FixedColumnWidth(35),
+        children: [
+          // Contact row
+          TableRow(
             children: [
-              Text(
-                'C',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-              ),
-              const SizedBox(width: 12),
-              _buildPermissionLetter(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
-              const SizedBox(width: 10),
-              _buildPermissionLetter(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor),
-              const SizedBox(width: 10),
-              _buildPermissionLetter(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor),
-              const SizedBox(width: 10),
-              _buildPermissionLetter(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'C', '', '', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor),
+              _buildEmptyCell(context),
             ],
           ),
-        ),
-        // Transaction permissions: T: r c w d x
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+          // Transaction row
+          TableRow(
             children: [
-              Text(
-                'T',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-              ),
-              const SizedBox(width: 12),
-              _buildPermissionLetter(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
-              const SizedBox(width: 10),
-              _buildPermissionLetter(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor),
-              const SizedBox(width: 10),
-              _buildPermissionLetter(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor),
-              const SizedBox(width: 10),
-              _buildPermissionLetter(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor),
-              const SizedBox(width: 10),
-              _buildPermissionLetter(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'T', '', '', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor),
+              _buildTableCell(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor),
             ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildPermissionLetter(
+  Widget _buildTableCell(
     BuildContext context,
     String letter,
     String permission,
@@ -1402,6 +1378,24 @@ class _PermissionGridDisplay extends StatelessWidget {
     Color denyColor,
     Color unsetColor,
   ) {
+    // For C and T labels (permission is empty)
+    if (permission.isEmpty) {
+      return SizedBox(
+        height: 35,
+        child: Center(
+          child: Text(
+            letter,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+      );
+    }
+
     late final String displayLetter;
     late final Color textColor;
     late final String state;
@@ -1420,16 +1414,31 @@ class _PermissionGridDisplay extends StatelessWidget {
       state = 'unset';
     }
 
-    return Tooltip(
-      message: '$label: $state',
-      child: Text(
-        displayLetter,
-        style: TextStyle(
-          color: textColor,
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.8,
+    return SizedBox(
+      height: 35,
+      child: Tooltip(
+        message: '$label: $state',
+        child: Center(
+          child: Text(
+            displayLetter,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.3,
+            ),
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyCell(BuildContext context) {
+    return SizedBox(
+      height: 35,
+      child: Center(
+        child: Container(),
       ),
     );
   }
