@@ -16,6 +16,7 @@ import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/gradient_card.dart';
+import '../widgets/custom_expansion_tile.dart';
 
 class ManageWalletScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -655,15 +656,13 @@ class _UserGroupsTabState extends State<_UserGroupsTab> {
           return GradientCard(
             margin: const EdgeInsets.only(bottom: 8),
             variationSeed: groupId.hashCode,
-            child: ExpansionTile(
+            child: CustomExpansionTile(
               title: Text(_formatGroupName(g['name'] as String? ?? '')),
               subtitle: const Text('Static'),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () => _deleteGroup(g),
               ),
-              tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              childrenPadding: EdgeInsets.zero,
               children: [
                 _UserGroupMembers(
                   walletId: widget.walletId,
@@ -1278,7 +1277,7 @@ class _RulesTabState extends State<_RulesTab> {
           return GradientCard(
             margin: const EdgeInsets.only(bottom: 12),
             variationSeed: ugId.hashCode,
-            child: ExpansionTile(
+            child: CustomExpansionTile(
               title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: const Text('User Group'),
               initiallyExpanded: index == 0,
@@ -1304,7 +1303,7 @@ class _RulesTabState extends State<_RulesTab> {
                     trailing: const Icon(Icons.edit, size: 20),
                     onTap: () => _openEditor(ugId, ugName, cgId, cgName),
                   );
-                }),
+                }).toList(),
                 const SizedBox(height: 8),
               ],
             ),
