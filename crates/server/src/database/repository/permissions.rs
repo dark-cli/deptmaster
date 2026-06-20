@@ -625,14 +625,12 @@ impl Database {
         let row: (String, i64, Option<chrono::NaiveDateTime>) = sqlx::query_as(
             r#"
             SELECT
-              COALESCE(ueh.hash, '') as hash,
+              COALESCE(MAX(ure.hash), '') as hash,
               COUNT(ure.event_id) as event_count,
               MAX(e.created_at) as last_timestamp
-            FROM user_event_hashes ueh
-            LEFT JOIN user_readable_events ure ON ueh.wallet_id = ure.wallet_id AND ueh.user_id = ure.user_id
+            FROM user_readable_events ure
             LEFT JOIN events e ON ure.event_id = e.event_id
-            WHERE ueh.wallet_id = $1 AND ueh.user_id = $2
-            GROUP BY ueh.hash
+            WHERE ure.wallet_id = $1 AND ure.user_id = $2
             "#,
         )
         .bind(wallet_id)

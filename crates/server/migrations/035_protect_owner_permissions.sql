@@ -54,6 +54,15 @@ EXECUTE FUNCTION check_owner_group_membership();
 CREATE OR REPLACE FUNCTION protect_system_user_groups()
 RETURNS TRIGGER AS $$
 BEGIN
+    -- Allow deletion if wallet is being deleted (cascade delete scenario)
+    IF TG_OP = 'DELETE' THEN
+        PERFORM 1 FROM wallets WHERE id = OLD.wallet_id;
+        IF NOT FOUND THEN
+            -- Wallet is gone, this is a cascade delete - allow it
+            RETURN OLD;
+        END IF;
+    END IF;
+
     IF OLD.is_system = true THEN
         RAISE EXCEPTION 'Cannot modify system groups (% in wallet %)',
             OLD.name, OLD.wallet_id;
@@ -76,6 +85,15 @@ EXECUTE FUNCTION protect_system_user_groups();
 CREATE OR REPLACE FUNCTION protect_system_contact_groups()
 RETURNS TRIGGER AS $$
 BEGIN
+    -- Allow deletion if wallet is being deleted (cascade delete scenario)
+    IF TG_OP = 'DELETE' THEN
+        PERFORM 1 FROM wallets WHERE id = OLD.wallet_id;
+        IF NOT FOUND THEN
+            -- Wallet is gone, this is a cascade delete - allow it
+            RETURN OLD;
+        END IF;
+    END IF;
+
     IF OLD.is_system = true THEN
         RAISE EXCEPTION 'Cannot modify system contact groups (% in wallet %)',
             OLD.name, OLD.wallet_id;
