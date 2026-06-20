@@ -180,73 +180,7 @@ pub async fn create_my_wallet(
     Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<CreateWalletRequest>,
 ) -> Result<(StatusCode, Json<CreateWalletResponse>), (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
-    let wallet_id = Uuid::new_v4();
-
-    let db = Database::new((*state.db_pool).clone());
-
-    db.create_wallet(
-        wallet_id,
-        payload.name.clone(),
-        payload.description.clone(),
-        Some(user_id),
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Error creating wallet: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to create wallet"})),
-        )
-    })?;
-
-    db.add_wallet_user(wallet_id, user_id, WalletRole::Owner.as_str().to_string())
-        .await
-        .map_err(|e| {
-            tracing::error!("Error adding user to wallet: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to add user to wallet"})),
-            )
-        })?;
-
-    let response = CreateWalletResponse {
-        id: wallet_id.to_string(),
-        name: payload.name.clone(),
-        message: "Wallet created successfully".to_string(),
-    };
-
-    websocket::broadcast_wallet_change(
-        &state.broadcast_tx,
-        wallet_id,
-        "wallet_created",
-        &serde_json::to_string(&response).unwrap_or_default(),
-    );
-
-    // Initialize owner in wallet_owners table and default permissions
-    db.add_wallet_owner(wallet_id, user_id).await.map_err(|e| {
-        tracing::error!("Failed to add wallet owner: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to initialize wallet ownership"})),
-        )
-    })?;
-
-    initialize_wallet_permissions(&db, wallet_id, user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                "Failed to initialize wallet permissions for {}: {:?}",
-                wallet_id,
-                e
-            );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Failed to initialize wallet permissions"})),
-            )
-        })?;
-
-    Ok((StatusCode::CREATED, Json(response)))
+    create_wallet_impl(&state, auth_user.user_id, payload).await
 }
 
 /// Helper to initialize default permissions for a new wallet
@@ -320,9 +254,15 @@ pub async fn create_wallet(
     Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<CreateWalletRequest>,
 ) -> Result<(StatusCode, Json<CreateWalletResponse>), (StatusCode, Json<serde_json::Value>)> {
-    let user_id = auth_user.user_id;
-    let wallet_id = Uuid::new_v4();
+    create_wallet_impl(&state, auth_user.user_id, payload).await
+}
 
+async fn create_wallet_impl(
+    state: &AppState,
+    user_id: Uuid,
+    payload: CreateWalletRequest,
+) -> Result<(StatusCode, Json<CreateWalletResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let wallet_id = Uuid::new_v4();
     let db = Database::new((*state.db_pool).clone());
 
     db.create_wallet(
@@ -356,7 +296,6 @@ pub async fn create_wallet(
         message: "Wallet created successfully".to_string(),
     };
 
-    // Broadcast change via WebSocket
     websocket::broadcast_wallet_change(
         &state.broadcast_tx,
         wallet_id,
@@ -364,7 +303,6 @@ pub async fn create_wallet(
         &serde_json::to_string(&response).unwrap_or_default(),
     );
 
-    // Initialize owner and default permissions (system groups and matrix)
     db.add_wallet_owner(wallet_id, user_id).await.map_err(|e| {
         tracing::error!("Failed to add wallet owner: {:?}", e);
         (
