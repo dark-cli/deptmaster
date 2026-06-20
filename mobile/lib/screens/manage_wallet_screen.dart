@@ -1315,7 +1315,9 @@ class _RulesTabState extends State<_RulesTab> {
 
 enum _PermissionState { allow, deny, unset }
 
-/// Display permissions as colored letters: C a v e d  T a v e d c  W r u d m
+/// Display permissions as colored letters using rwx-inspired format
+/// C: r:a c:- w:a d:-, T: r:a c:- w:- d:- x:-
+/// Green=allow, Red=deny, Gray=unset
 class _PermissionGridDisplay extends StatelessWidget {
   final Set<String> allowed;
   final Set<String> denied;
@@ -1329,69 +1331,88 @@ class _PermissionGridDisplay extends StatelessWidget {
   Widget build(BuildContext context) {
     const greenColor = Color(0xFF2E7D32);
     final redColor = Theme.of(context).colorScheme.error;
+    final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Contact permissions
+        // Contact permissions: C: r c w d
         Wrap(
-          spacing: 6,
+          spacing: 3,
           children: [
-            Text('C ', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
-            _buildLetter(context, 'a', 'contact:create', 'Add', greenColor, redColor),
-            _buildLetter(context, 'v', 'contact:read', 'View', greenColor, redColor),
-            _buildLetter(context, 'e', 'contact:update', 'Edit', greenColor, redColor),
-            _buildLetter(context, 'd', 'contact:delete', 'Delete', greenColor, redColor),
+            Text(
+              'C:',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+            ),
+            _buildPermissionLetter(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
+            _buildPermissionLetter(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor),
+            _buildPermissionLetter(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor),
+            _buildPermissionLetter(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor),
           ],
         ),
-        const SizedBox(height: 8),
-        // Transaction permissions
+        const SizedBox(height: 6),
+        // Transaction permissions: T: r c w d x
         Wrap(
-          spacing: 6,
+          spacing: 3,
           children: [
-            Text('T ', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
-            _buildLetter(context, 'a', 'transaction:create', 'Add', greenColor, redColor),
-            _buildLetter(context, 'v', 'transaction:read', 'View', greenColor, redColor),
-            _buildLetter(context, 'e', 'transaction:update', 'Edit', greenColor, redColor),
-            _buildLetter(context, 'd', 'transaction:delete', 'Delete', greenColor, redColor),
-            _buildLetter(context, 'c', 'transaction:close', 'Close', greenColor, redColor),
+            Text(
+              'T:',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+            ),
+            _buildPermissionLetter(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
+            _buildPermissionLetter(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor),
+            _buildPermissionLetter(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor),
+            _buildPermissionLetter(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor),
+            _buildPermissionLetter(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildLetter(
+  Widget _buildPermissionLetter(
     BuildContext context,
     String letter,
     String permission,
     String label,
-    Color greenColor,
-    Color redColor,
+    Color allowColor,
+    Color denyColor,
+    Color unsetColor,
   ) {
     late final String displayLetter;
     late final Color textColor;
+    late final String state;
 
     if (denied.contains(permission)) {
       displayLetter = letter;
-      textColor = redColor;
+      textColor = denyColor;
+      state = 'denied';
     } else if (allowed.contains(permission)) {
       displayLetter = letter;
-      textColor = greenColor;
+      textColor = allowColor;
+      state = 'allowed';
     } else {
       displayLetter = '-';
-      textColor = Theme.of(context).colorScheme.onSurfaceVariant;
+      textColor = unsetColor;
+      state = 'unset';
     }
 
     return Tooltip(
-      message: '$label (${denied.contains(permission) ? 'Denied' : allowed.contains(permission) ? 'Allowed' : 'No access'})',
+      message: '$label: $state',
       child: Text(
         displayLetter,
         style: TextStyle(
           color: textColor,
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.5,
         ),
       ),
     );
@@ -1470,16 +1491,17 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
   }
 
   String _formatActionName(String name) {
+    // rwx-inspired naming: r=read, c=create, w=write, d=delete, x=close
     const manualNames = {
-      'contact:create': 'Add',
-      'contact:read': 'View',
-      'contact:update': 'Edit',
-      'contact:delete': 'Delete',
-      'transaction:create': 'Add',
-      'transaction:read': 'View',
-      'transaction:update': 'Edit',
-      'transaction:delete': 'Delete',
-      'transaction:close': 'Close',
+      'contact:create': 'Create (c)',
+      'contact:read': 'Read (r)',
+      'contact:update': 'Write (w)',
+      'contact:delete': 'Delete (d)',
+      'transaction:create': 'Create (c)',
+      'transaction:read': 'Read (r)',
+      'transaction:update': 'Write (w)',
+      'transaction:delete': 'Delete (d)',
+      'transaction:close': 'Close (x)',
     };
 
     if (manualNames.containsKey(name)) {
@@ -1511,11 +1533,12 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
   }
 
   IconData _getActionIcon(String name) {
-    if (name.contains(':create')) return Icons.add_circle_outline;
-    if (name.contains(':read')) return Icons.visibility_outlined;
-    if (name.contains(':update')) return Icons.edit_outlined;
-    if (name.contains(':delete')) return Icons.delete_outline;
-    if (name.contains(':close')) return Icons.check_circle_outlined;
+    // Icons for rwx-inspired format actions
+    if (name.contains(':create')) return Icons.add_circle_outline;  // c - create
+    if (name.contains(':read')) return Icons.visibility_outlined;    // r - read
+    if (name.contains(':update')) return Icons.edit_outlined;        // w - write
+    if (name.contains(':delete')) return Icons.delete_outline;       // d - delete
+    if (name.contains(':close')) return Icons.check_circle_outlined; // x - close
     if (name.contains('manage')) return Icons.manage_accounts_outlined;
     return Icons.circle_outlined;
   }
@@ -1572,7 +1595,7 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
-                  '✓ = Allow  •  ✗ = Deny  •  unchecked = No access',
+                  'rwx format: r=read, c=create, w=write, d=delete, x=close • ✓=Allow, ✗=Deny, unchecked=Unset',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: ThemeColors.gray(context),
                     fontStyle: FontStyle.italic,
