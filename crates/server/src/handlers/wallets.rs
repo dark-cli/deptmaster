@@ -514,8 +514,35 @@ pub async fn delete_wallet(
         )
     })?;
 
-    // Enforce permissions: only wallet owners may delete a wallet.
-    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Owner).await?;
+    // Check wallet:delete permission (owners bypass via hardcoded check)
+    let can_delete = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletDelete,
+        &Resource::Wallet(wallet_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet:delete permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_delete {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to delete this wallet"
+            })),
+        ));
+    }
 
     let db = Database::new((*state.db_pool).clone());
 
@@ -556,8 +583,35 @@ pub async fn add_user_to_wallet(
         )
     })?;
 
-    // Enforce permissions: only wallet owners/admins may add members.
-    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Owner).await?;
+    // Check wallet:member_add permission (owners bypass via hardcoded check)
+    let can_add = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletMemberAdd,
+        &Resource::Wallet(wallet_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet:member_add permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_add {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to add members to this wallet"
+            })),
+        ));
+    }
 
     let username = payload.username.trim();
     if username.is_empty() {
@@ -568,8 +622,6 @@ pub async fn add_user_to_wallet(
     }
 
     let db = Database::new((*state.db_pool).clone());
-
-    // Look up user by username
     let user = db.get_user_by_username(username).await.map_err(|e| {
         tracing::error!("Error looking up user: {:?}", e);
         (
@@ -954,8 +1006,35 @@ pub async fn remove_user_from_wallet(
         )
     })?;
 
-    // Enforce permissions: only wallet admins/owners may manage members.
-    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Owner).await?;
+    // Check wallet:member_remove permission (owners bypass via hardcoded check)
+    let can_remove = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletMemberRemove,
+        &Resource::Wallet(wallet_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet:member_remove permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_remove {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to remove members from this wallet"
+            })),
+        ));
+    }
 
     let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
         (
