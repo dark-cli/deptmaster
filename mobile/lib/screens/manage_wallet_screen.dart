@@ -1340,33 +1340,39 @@ class _PermissionGridDisplay extends StatelessWidget {
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Table(
-        border: TableBorder.all(
-          color: Theme.of(context).colorScheme.outlineVariant,
-          width: 1,
-        ),
-        defaultColumnWidth: const FixedColumnWidth(35),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Contact row
-          TableRow(
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildTableCell(context, 'C', '', '', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor),
-              _buildEmptyCell(context),
+              _buildGridCell(context, 'C', '', '', greenColor, redColor, grayColor, true),
+              _buildGridCell(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor, false),
+              SizedBox(
+                width: 35,
+                height: 35,
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant, width: 1),
+                  ),
+                ),
+              ),
             ],
           ),
           // Transaction row
-          TableRow(
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildTableCell(context, 'T', '', '', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor),
-              _buildTableCell(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor),
+              _buildGridCell(context, 'T', '', '', greenColor, redColor, grayColor, true),
+              _buildGridCell(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor, false),
             ],
           ),
         ],
@@ -1374,7 +1380,7 @@ class _PermissionGridDisplay extends StatelessWidget {
     );
   }
 
-  Widget _buildTableCell(
+  Widget _buildGridCell(
     BuildContext context,
     String letter,
     String permission,
@@ -1382,30 +1388,18 @@ class _PermissionGridDisplay extends StatelessWidget {
     Color allowColor,
     Color denyColor,
     Color unsetColor,
+    bool isFirstColumn,
   ) {
-    // For C and T labels (permission is empty)
-    if (permission.isEmpty) {
-      return SizedBox(
-        height: 35,
-        child: Center(
-          child: Text(
-            letter,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.3,
-            ),
-          ),
-        ),
-      );
-    }
-
     late final String displayLetter;
     late final Color textColor;
     late final String state;
 
-    if (denied.contains(permission)) {
+    // For C and T labels (permission is empty)
+    if (permission.isEmpty) {
+      displayLetter = letter;
+      textColor = Theme.of(context).colorScheme.onSurface;
+      state = '';
+    } else if (denied.contains(permission)) {
       displayLetter = letter;
       textColor = denyColor;
       state = 'denied';
@@ -1419,32 +1413,39 @@ class _PermissionGridDisplay extends StatelessWidget {
       state = 'unset';
     }
 
-    return SizedBox(
+    final cell = SizedBox(
+      width: 35,
       height: 35,
-      child: Tooltip(
-        message: '$label: $state',
-        child: Center(
-          child: Text(
-            displayLetter,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: textColor,
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.3,
-            ),
+      child: Center(
+        child: Text(
+          displayLetter,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: textColor,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.3,
           ),
         ),
       ),
     );
-  }
 
-  Widget _buildEmptyCell(BuildContext context) {
-    return SizedBox(
+    // Add border and optional tooltip
+    return Container(
+      width: 35,
       height: 35,
-      child: Center(
-        child: Container(),
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+          width: 1,
+        ),
       ),
+      child: permission.isEmpty
+          ? cell
+          : Tooltip(
+              message: '$label: $state',
+              child: cell,
+            ),
     );
   }
 }
