@@ -209,7 +209,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                       ),
                       _UserGroupsTab(
                         walletId: widget.walletId,
-                        userGroups: _userGroups,
+                        userGroups: _userGroups.where((g) => g['name'] != '__owners__').toList(),
                         users: _users,
                         onReload: _loadAll,
                         onPermissionError: _onPermissionError,
@@ -229,7 +229,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                       ),
                       _RulesTab(
                         walletId: widget.walletId,
-                        userGroups: _userGroups,
+                        userGroups: _userGroups.where((g) => g['name'] != '__owners__').toList(),
                         contactGroups: _contactGroups,
                         permissionActions: _permissionActions,
                         matrix: _matrix,
