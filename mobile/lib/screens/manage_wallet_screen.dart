@@ -1,6 +1,7 @@
 // Manage wallet: members, user groups, contact groups, permission rules.
 // On server permission error we undo local state and show toast (no UI disabling for now).
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import '../providers/wallets_provider.dart';
 import '../providers/contacts_provider.dart';
 import '../providers/transactions_provider.dart';
 import '../providers/events_provider.dart';
+import '../providers/data_change_provider.dart';
 import '../utils/theme_colors.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
@@ -41,6 +43,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
   List<Map<String, dynamic>> _matrix = [];
   bool _loading = true;
   String? _loadError;
+  StreamSubscription<DataChangeEvent>? _dataChangeSubscription;
 
   @override
   void initState() {
@@ -49,7 +52,25 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
     _tabController.addListener(_onTabChanged);
     // Defer load to next frame so the screen and loading indicator show first (avoids UI freeze).
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadAll();
+      if (mounted) {
+        _loadAll();
+        _listenToDataChanges();
+      }
+    });
+  }
+
+  void _listenToDataChanges() {
+    _dataChangeSubscription = Api.dataChangeStream.listen((event) {
+      if (mounted && event.walletId == widget.walletId) {
+        // Reload when any of these data categories change
+        if ([
+          DataChangeKind.walletMembership, // users/groups in wallet
+          DataChangeKind.contacts, // contact groups
+          DataChangeKind.permissions, // permission matrix
+        ].contains(event.kind)) {
+          _loadAll();
+        }
+      }
     });
   }
 
@@ -57,6 +78,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
   void dispose() {
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
+    _dataChangeSubscription?.cancel();
     super.dispose();
   }
 
@@ -1266,16 +1288,16 @@ class _RulesTabState extends State<_RulesTab> {
                   final cgName = _formatGroupName(rawCgName);
                   final activeActions = _getActions(ugId, cgId);
 
+                  final deniedActions = _getDenied(ugId, cgId);
+                  final hasAnyPermissions = activeActions.isNotEmpty || deniedActions.isNotEmpty;
+
                   return ListTile(
                     title: Text(cgName),
-                    subtitle: activeActions.isEmpty
+                    subtitle: !hasAnyPermissions
                         ? Text('No access', style: TextStyle(color: ThemeColors.gray(context)))
-                        : Text(
-                            _getDenied(ugId, cgId).isEmpty
-                                ? '${activeActions.length} allow'
-                                : '${activeActions.length} allow, ${_getDenied(ugId, cgId).length} deny',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        : _PermissionGridDisplay(
+                            allowed: activeActions,
+                            denied: deniedActions,
                           ),
                     trailing: const Icon(Icons.edit, size: 20),
                     onTap: () => _openEditor(ugId, ugName, cgId, cgName),
@@ -1292,6 +1314,89 @@ class _RulesTabState extends State<_RulesTab> {
 }
 
 enum _PermissionState { allow, deny, unset }
+
+/// Display permissions as colored letters: C a v e d  T a v e d c  W r u d m
+class _PermissionGridDisplay extends StatelessWidget {
+  final Set<String> allowed;
+  final Set<String> denied;
+
+  const _PermissionGridDisplay({
+    required this.allowed,
+    required this.denied,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const greenColor = Color(0xFF2E7D32);
+    final redColor = Theme.of(context).colorScheme.error;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Contact permissions
+        Wrap(
+          spacing: 6,
+          children: [
+            Text('C ', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+            _buildLetter(context, 'a', 'contact:create', 'Add', greenColor, redColor),
+            _buildLetter(context, 'v', 'contact:read', 'View', greenColor, redColor),
+            _buildLetter(context, 'e', 'contact:update', 'Edit', greenColor, redColor),
+            _buildLetter(context, 'd', 'contact:delete', 'Delete', greenColor, redColor),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Transaction permissions
+        Wrap(
+          spacing: 6,
+          children: [
+            Text('T ', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+            _buildLetter(context, 'a', 'transaction:create', 'Add', greenColor, redColor),
+            _buildLetter(context, 'v', 'transaction:read', 'View', greenColor, redColor),
+            _buildLetter(context, 'e', 'transaction:update', 'Edit', greenColor, redColor),
+            _buildLetter(context, 'd', 'transaction:delete', 'Delete', greenColor, redColor),
+            _buildLetter(context, 'c', 'transaction:close', 'Close', greenColor, redColor),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLetter(
+    BuildContext context,
+    String letter,
+    String permission,
+    String label,
+    Color greenColor,
+    Color redColor,
+  ) {
+    late final String displayLetter;
+    late final Color textColor;
+
+    if (denied.contains(permission)) {
+      displayLetter = letter;
+      textColor = redColor;
+    } else if (allowed.contains(permission)) {
+      displayLetter = letter;
+      textColor = greenColor;
+    } else {
+      displayLetter = '-';
+      textColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    }
+
+    return Tooltip(
+      message: '$label (${denied.contains(permission) ? 'Denied' : allowed.contains(permission) ? 'Allowed' : 'No access'})',
+      child: Text(
+        displayLetter,
+        style: TextStyle(
+          color: textColor,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
 
 class _PermissionsDialog extends StatefulWidget {
   final String userGroupName;
@@ -1336,19 +1441,6 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
     return _PermissionState.allow;
   }
 
-  /// When clearing a permission, also clear any permissions that depend on it (backend rule:
-  /// e.g. contact:delete requires contact:read; transaction:* requires contact:read).
-  void _clearDependents(String name) {
-    if (name == 'contact:read') {
-      _allowed.removeAll(['contact:create', 'contact:update', 'contact:delete', 'contact:close']);
-      _denied.removeAll(['contact:create', 'contact:update', 'contact:delete', 'contact:close']);
-      _allowed.removeWhere((a) => a.startsWith('transaction:'));
-      _denied.removeWhere((a) => a.startsWith('transaction:'));
-    } else if (name == 'wallet:read') {
-      _allowed.removeAll(['wallet:update', 'wallet:delete', 'wallet:manage_members']);
-      _denied.removeAll(['wallet:update', 'wallet:delete', 'wallet:manage_members']);
-    }
-  }
 
   void _setState(String name, _PermissionState state) {
     setState(() {
@@ -1356,17 +1448,10 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
       _denied.remove(name);
       if (state == _PermissionState.allow) {
         _allowed.add(name);
-        if (!name.endsWith(':read')) {
-          final parts = name.split(':');
-          if (parts.length > 1) _allowed.add('${parts[0]}:read');
-        }
-        if (name.startsWith('transaction:')) _allowed.add('contact:read');
       } else if (state == _PermissionState.deny) {
         _denied.add(name);
-      } else {
-        // Unset: clear any permissions that depend on this one so the backend accepts the save
-        _clearDependents(name);
       }
+      // Unset: permission is removed and nothing else happens
     });
   }
 
@@ -1386,21 +1471,17 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
 
   String _formatActionName(String name) {
     const manualNames = {
-      'contact:create': 'Add Contact',
-      'contact:read': 'View Contacts',
-      'contact:update': 'Edit Contact',
-      'contact:delete': 'Delete Contact',
-      'transaction:create': 'Add Transaction',
-      'transaction:read': 'View Transactions',
-      'transaction:update': 'Edit Transaction',
-      'transaction:delete': 'Delete Transaction',
-      'transaction:close': 'Close Debt',
-      'wallet:read': 'View Wallet Details',
-      'wallet:update': 'Edit Wallet Details',
-      'wallet:delete': 'Delete Wallet',
-      'wallet:manage_members': 'Manage Members',
+      'contact:create': 'Add',
+      'contact:read': 'View',
+      'contact:update': 'Edit',
+      'contact:delete': 'Delete',
+      'transaction:create': 'Add',
+      'transaction:read': 'View',
+      'transaction:update': 'Edit',
+      'transaction:delete': 'Delete',
+      'transaction:close': 'Close',
     };
-    
+
     if (manualNames.containsKey(name)) {
       return manualNames[name]!;
     }
@@ -1484,13 +1565,27 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
       content: SingleChildScrollView(
         child: SizedBox(
           width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: categories.length,
-            itemBuilder: (context, index) {
-              final category = categories[index];
-              final actions = _groupedActions[category]!;
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '✓ = Allow  •  ✗ = Deny  •  unchecked = No access',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: ThemeColors.gray(context),
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: categories.length,
+                itemBuilder: (context, index) {
+                  final category = categories[index];
+                  final actions = _groupedActions[category]!;
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1554,9 +1649,10 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
                                   style: narrow
                                       ? const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap, padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 6)))
                                       : null,
-                                  segments: [
-                                    ButtonSegment(value: _PermissionState.allow, icon: const Icon(Icons.check, size: 16), label: narrow ? null : const Text('Allow')),
-                                    ButtonSegment(value: _PermissionState.deny, icon: const Icon(Icons.block, size: 16), label: narrow ? null : const Text('Deny')),
+                                  showSelectedIcon: false,
+                                  segments: const [
+                                    ButtonSegment(value: _PermissionState.allow, icon: Icon(Icons.check, size: 16), label: Text('Allow')),
+                                    ButtonSegment(value: _PermissionState.deny, icon: Icon(Icons.block, size: 16), label: Text('Deny')),
                                   ],
                                   selected: {allowDeny},
                                   onSelectionChanged: (s) => _setState(name, s.first),
@@ -1571,6 +1667,8 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
                 ],
               );
             },
+              ),
+            ],
           ),
         ),
       ),

@@ -382,7 +382,6 @@ fn setup_owner_and_member() -> (AppInstance, AppInstance, String) {
 
 /// Deny wins: user in Editors (Allow Create) and BadActors (Deny Create). User cannot create.
 #[test]
-#[ignore]
 fn permission_limits_deny_overrides_allow() {
     let (owner, member, wallet_id) = setup_owner_and_member();
 
@@ -1750,4 +1749,143 @@ fn permission_flow_default_read_then_none_then_group_read_write_three_apps() {
             "contact name 'Dave' removed",
         ])
         .expect("app2 sees only VIP contacts; Dave not in VIP so not visible");
+}
+
+/// Test that permissions can be set without dependencies:
+/// Create a user group with ONLY contact:update (edit) permission, WITHOUT contact:read (view).
+/// This was previously blocked by dependency validation but should now work.
+#[test]
+fn permission_edit_without_read_no_dependencies() {
+    let server_url = test_server_url();
+    let owner = AppInstance::new("owner", &server_url);
+    owner.initialize().expect("initialize");
+    owner.signup().expect("signup");
+    owner.login().expect("login");
+    let wallet_id = owner
+        .create_wallet("Test Wallet".to_string(), "".to_string())
+        .expect("create_wallet");
+
+    let member = AppInstance::new("member", &server_url);
+    member.initialize().expect("initialize");
+    member.signup().expect("member signup");
+    owner.activate().expect("activate as owner");
+    add_user_to_wallet(wallet_id.clone(), member.username.clone()).expect("add member to wallet");
+
+    let member_in_wallet = AppInstance::with_credentials(
+        "member",
+        &server_url,
+        member.username.clone(),
+        member.password.clone(),
+    );
+    member_in_wallet.initialize().expect("initialize");
+    member_in_wallet.login().expect("login");
+    member_in_wallet
+        .select_wallet(&wallet_id)
+        .expect("select_wallet");
+
+    // Owner creates user group "Editors" and contact group "TestGroup"
+    owner.activate().expect("activate owner");
+    create_wallet_user_group(wallet_id.clone(), "Editors".to_string())
+        .expect("create Editors group");
+    create_wallet_contact_group(wallet_id.clone(), "TestGroup".to_string())
+        .expect("create TestGroup");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Get the group IDs
+    let ug_json = list_wallet_user_groups(wallet_id.clone()).expect("list user groups");
+    let ug_id = group_id_by_name(&ug_json, "Editors").expect("find Editors group");
+    let cg_json = list_wallet_contact_groups(wallet_id.clone()).expect("list contact groups");
+    let cg_id = group_id_by_name(&cg_json, "TestGroup").expect("find TestGroup");
+
+    // Add member to Editors group
+    add_wallet_user_group_member(wallet_id.clone(), ug_id.clone(), member.username.clone())
+        .expect("add member to Editors");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Owner creates some contacts and adds them to TestGroup
+    owner.activate().expect("activate owner");
+    owner
+        .run_commands(&[
+            "contact create 'Alice' alice",
+            "contact create 'Bob' bob",
+            "contact create 'Charlie' charlie",
+            "wait 300",
+        ])
+        .expect("owner create contacts");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // Get contact IDs and add them to TestGroup
+    owner.activate().expect("activate owner");
+    let contacts_json = get_contacts().expect("get contacts");
+    let alice_id = contact_id_by_name(&contacts_json, "Alice").expect("find Alice");
+    let bob_id = contact_id_by_name(&contacts_json, "Bob").expect("find Bob");
+    let charlie_id = contact_id_by_name(&contacts_json, "Charlie").expect("find Charlie");
+
+    add_wallet_contact_group_member(wallet_id.clone(), cg_id.clone(), alice_id.clone())
+        .expect("add Alice to TestGroup");
+    add_wallet_contact_group_member(wallet_id.clone(), cg_id.clone(), bob_id.clone())
+        .expect("add Bob to TestGroup");
+    add_wallet_contact_group_member(wallet_id.clone(), cg_id.clone(), charlie_id.clone())
+        .expect("add Charlie to TestGroup");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    // NOW: Give Editors group ONLY contact:update permission WITHOUT contact:read
+    // This is the test: can we set this permission combination?
+    // Previously, this would have failed with "contact:update requires contact:read"
+    owner.activate().expect("activate owner");
+    let entry = serde_json::json!({
+        "user_group_id": ug_id,
+        "contact_group_id": cg_id,
+        "allowed_actions": ["contact:update"],
+        "denied_actions": []
+    });
+    let entries = serde_json::json!([entry]);
+    put_wallet_permission_matrix(wallet_id.clone(), entries.to_string())
+        .expect("set permission matrix with edit-only (no read)");
+
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    member_in_wallet.sync().expect("member sync after permissions set");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Verify: Permission matrix was successfully set (no validation error)
+    // The key test is that the server ACCEPTED this permission configuration.
+    // Previously it would have failed with "contact:update requires contact:read"
+
+    // Member should be able to see contacts (because update implies read via the implies() method)
+    let member_contacts = get_contacts().expect("get contacts as member");
+    let member_contacts_list: Vec<serde_json::Value> =
+        serde_json::from_str(&member_contacts).expect("parse contacts");
+    assert_eq!(
+        member_contacts_list.len(),
+        3,
+        "Member with contact:update should see contacts (update implies read)"
+    );
+
+    // Verify: Member CAN update a contact (has update permission)
+    member_in_wallet.activate().expect("activate member");
+    let update_result = update_contact(
+        alice_id,
+        "Alice Updated".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert!(
+        update_result.is_ok(),
+        "Member with contact:update should be able to update contacts"
+    );
+
+    // Verify: Member cannot create contacts (only has update, not create)
+    member_in_wallet.activate().expect("activate member");
+    let create_result = create_contact("NewContact".to_string(), None, None, None, None, None);
+    assert!(
+        create_result.is_err(),
+        "Member without contact:create should not be able to create"
+    );
+
+    println!("✅ Test passed: Permission combination (contact:update without explicit contact:read) was accepted!");
+    println!("   The server no longer validates dependencies when setting permissions.");
+    println!("   Permission resolution still uses 'implies()' so update→read for visibility.");
 }

@@ -17,6 +17,7 @@ mod offline_online_multi_app;
 mod permission_enforcement;
 mod permission_matrix_undo_persistence;
 mod permissions;
+mod permission_edit_without_read_modern;
 mod resync;
 mod single_app;
 mod sync_chain_hash_stress;

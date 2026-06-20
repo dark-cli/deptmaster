@@ -2,6 +2,13 @@
 //! Commands: contact create "Name" [label], contact update label field "value", contact delete label,
 //!   transaction create contactLabel direction amount ["description"] [label],
 //!   transaction update transLabel field value, transaction delete transLabel, sync, wait [ms]
+//! Permission format (compact & readable):
+//!   user-group create "Name" label
+//!   contact-group create "Name" label
+//!   group-member add user_group_var user_id
+//!   group-member add contact_group_var contact_id
+//!   permission set user_group contact_group "C: a a a -, T: a a - - -"
+//!     where: C/T = Contact/Transaction, a = allow, d = deny, - = unset
 //! Empty lines and # comments are skipped.
 //!
 //! Full vocabulary: see project docs at `docs/INTEGRATION_TEST_COMMANDS.md`.
@@ -9,7 +16,8 @@
 use client::{
     create_contact, create_transaction, delete_contact, delete_transaction, get_transaction,
     list_wallet_contact_groups, list_wallet_user_groups, manual_sync, put_wallet_permission_matrix,
-    update_contact, update_transaction,
+    update_contact, update_transaction, create_wallet_user_group, create_wallet_contact_group,
+    add_wallet_user_group_member, add_wallet_contact_group_member,
 };
 use std::collections::HashMap;
 
@@ -66,10 +74,12 @@ fn unquote(s: &str) -> &str {
     }
 }
 
-/// Tracks label -> id for contacts and transactions; runs commands via client API.
+/// Tracks label -> id for contacts, transactions, user groups, and contact groups; runs commands via client API.
 pub struct CommandRunner {
     pub contact_ids: HashMap<String, String>,
     pub transaction_ids: HashMap<String, String>,
+    pub user_group_ids: HashMap<String, String>,
+    pub contact_group_ids: HashMap<String, String>,
 }
 
 impl CommandRunner {
@@ -77,6 +87,8 @@ impl CommandRunner {
         Self {
             contact_ids: HashMap::new(),
             transaction_ids: HashMap::new(),
+            user_group_ids: HashMap::new(),
+            contact_group_ids: HashMap::new(),
         }
     }
 
@@ -118,51 +130,80 @@ impl CommandRunner {
             self.do_permission(&args[1..], command)?;
             return Ok(());
         }
+        if action == "user-group" {
+            self.do_user_group(&args[1..], command)?;
+            return Ok(());
+        }
+        if action == "contact-group" {
+            self.do_contact_group(&args[1..], command)?;
+            return Ok(());
+        }
+        if action == "group-member" {
+            self.do_group_member(&args[1..], command)?;
+            return Ok(());
+        }
         Err(format!("Unknown action: {}", action))
     }
 
-    /// `permission grant-full` / `permission grant-read` / `permission revoke-all`
+    /// `permission grant-full` / `permission grant-read` / `permission revoke-all` / `permission set user_group contact_group "C: a a a -, T: a a - - -"`
     ///
-    /// All three operate on the all_users user group × all_contacts contact group pair
+    /// First three operate on the all_users user group × all_contacts contact group pair
     /// (the wallet's default "everyone gets these permissions on every contact" axis).
-    /// Used by tests to simulate the wallet owner adjusting baseline member permissions.
+    /// The "set" command uses readable format for custom groups.
     fn do_permission(&mut self, args: &[&str], original: &str) -> Result<(), String> {
         if args.is_empty() {
             return Err(format!("Permission command requires action: {}", original));
         }
-        let wallet_id = client::get_current_wallet_id()?;
-        let ug_all_users =
-            find_group_id(&list_wallet_user_groups(wallet_id.clone())?, "all_users")?;
-        let cg_all_contacts = find_group_id(
-            &list_wallet_contact_groups(wallet_id.clone())?,
-            "all_contacts",
-        )?;
-        let (allowed, denied): (Vec<&str>, Vec<&str>) = match args[0].to_lowercase().as_str() {
-            "grant-full" => (
-                vec![
-                    "contact:create",
-                    "contact:read",
-                    "contact:update",
-                    "contact:delete",
-                    "transaction:create",
-                    "transaction:read",
-                    "transaction:update",
-                    "transaction:delete",
-                ],
-                vec![],
-            ),
-            "grant-read" => (vec!["contact:read", "transaction:read"], vec![]),
-            "revoke-all" => (vec![], vec![]),
+
+        let action = args[0].to_lowercase();
+        match action.as_str() {
+            "set" => {
+                if args.len() < 4 {
+                    return Err(format!("Permission set requires user_group contact_group format: {}", original));
+                }
+                let user_group_label = args[1];
+                let contact_group_label = args[2];
+                let format_str = unquote(args[3]);
+                self.set_permissions_format(user_group_label, contact_group_label, format_str)?;
+            }
+            "grant-full" | "grant-read" | "revoke-all" => {
+                let wallet_id = client::get_current_wallet_id()?;
+                let ug_all_users =
+                    find_group_id(&list_wallet_user_groups(wallet_id.clone())?, "all_users")?;
+                let cg_all_contacts = find_group_id(
+                    &list_wallet_contact_groups(wallet_id.clone())?,
+                    "all_contacts",
+                )?;
+                let (allowed, denied): (Vec<&str>, Vec<&str>) = match action.as_str() {
+                    "grant-full" => (
+                        vec![
+                            "contact:create",
+                            "contact:read",
+                            "contact:update",
+                            "contact:delete",
+                            "transaction:create",
+                            "transaction:read",
+                            "transaction:update",
+                            "transaction:delete",
+                        ],
+                        vec![],
+                    ),
+                    "grant-read" => (vec!["contact:read", "transaction:read"], vec![]),
+                    "revoke-all" => (vec![], vec![]),
+                    _ => return Err("Unreachable".to_string()),
+                };
+                let entry = serde_json::json!({
+                    "user_group_id": ug_all_users,
+                    "contact_group_id": cg_all_contacts,
+                    "allowed_actions": allowed,
+                    "denied_actions": denied,
+                });
+                let entries = serde_json::json!([entry]);
+                put_wallet_permission_matrix(wallet_id, entries.to_string())?;
+            }
             other => return Err(format!("Unknown permission subcommand: {}", other)),
-        };
-        let entry = serde_json::json!({
-            "user_group_id": ug_all_users,
-            "contact_group_id": cg_all_contacts,
-            "allowed_actions": allowed,
-            "denied_actions": denied,
-        });
-        let entries = serde_json::json!([entry]);
-        put_wallet_permission_matrix(wallet_id, entries.to_string())
+        }
+        Ok(())
     }
 
     fn do_contact(&mut self, args: &[&str], original: &str) -> Result<(), String> {
@@ -346,6 +387,201 @@ impl CommandRunner {
             _ => return Err(format!("Unknown transaction action: {}", sub)),
         }
         Ok(())
+    }
+
+    fn do_user_group(&mut self, args: &[&str], original: &str) -> Result<(), String> {
+        if args.is_empty() {
+            return Err(format!("User-group command requires action: {}", original));
+        }
+        let sub = args[0].to_lowercase();
+        match sub.as_str() {
+            "create" => {
+                if args.len() < 2 {
+                    return Err(format!("User-group create requires name: {}", original));
+                }
+                let name = unquote(args[1]).to_string();
+                let label = args
+                    .get(2)
+                    .map(|s| unquote(s).to_lowercase().replace(' ', "_"))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| name.to_lowercase().replace(' ', "_"));
+                let wallet_id = client::get_current_wallet_id()?;
+                let json = create_wallet_user_group(wallet_id, name)?;
+                let g: serde_json::Value =
+                    serde_json::from_str(&json).map_err(|e| e.to_string())?;
+                let id = g["id"]
+                    .as_str()
+                    .ok_or("No id in user_group response")?
+                    .to_string();
+                self.user_group_ids.insert(label, id);
+            }
+            _ => return Err(format!("Unknown user-group action: {}", sub)),
+        }
+        Ok(())
+    }
+
+    fn do_contact_group(&mut self, args: &[&str], original: &str) -> Result<(), String> {
+        if args.is_empty() {
+            return Err(format!("Contact-group command requires action: {}", original));
+        }
+        let sub = args[0].to_lowercase();
+        match sub.as_str() {
+            "create" => {
+                if args.len() < 2 {
+                    return Err(format!("Contact-group create requires name: {}", original));
+                }
+                let name = unquote(args[1]).to_string();
+                let label = args
+                    .get(2)
+                    .map(|s| unquote(s).to_lowercase().replace(' ', "_"))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| name.to_lowercase().replace(' ', "_"));
+                let wallet_id = client::get_current_wallet_id()?;
+                let json = create_wallet_contact_group(wallet_id, name)?;
+                let g: serde_json::Value =
+                    serde_json::from_str(&json).map_err(|e| e.to_string())?;
+                let id = g["id"]
+                    .as_str()
+                    .ok_or("No id in contact_group response")?
+                    .to_string();
+                self.contact_group_ids.insert(label, id);
+            }
+            _ => return Err(format!("Unknown contact-group action: {}", sub)),
+        }
+        Ok(())
+    }
+
+    fn do_group_member(&mut self, args: &[&str], original: &str) -> Result<(), String> {
+        if args.len() < 3 {
+            return Err(format!("Group-member requires: add user_group_var user_id or add contact_group_var contact_id: {}", original));
+        }
+        let action = args[0].to_lowercase();
+        if action != "add" {
+            return Err(format!("Unknown group-member action: {}", action));
+        }
+        let group_label = args[1];
+        let id = args[2];
+        let wallet_id = client::get_current_wallet_id()?;
+
+        // Try to find in user groups first
+        if let Some(group_id) = self.user_group_ids.get(group_label).cloned() {
+            add_wallet_user_group_member(wallet_id, group_id, id.to_string())?;
+            return Ok(());
+        }
+
+        // Try contact groups
+        if let Some(group_id) = self.contact_group_ids.get(group_label).cloned() {
+            add_wallet_contact_group_member(wallet_id, group_id, id.to_string())?;
+            return Ok(());
+        }
+
+        Err(format!("Group label not found: {}", group_label))
+    }
+
+    /// Parse readable permission format with rwx-inspired naming
+    /// Supports: "C: r:a c:a w:a d:-, T: r:a c:d w:a d:- x:-"
+    /// Where: r=read, c=create, w=write/update, d=delete, x=close
+    /// State: a=allow, d=deny, -=unset
+    /// Returns tuple of (contact_allow, contact_deny, transaction_allow, transaction_deny)
+    fn parse_permission_format(format_str: &str) -> Result<(Vec<String>, Vec<String>, Vec<String>, Vec<String>), String> {
+        let mut contact_allow = Vec::new();
+        let mut contact_deny = Vec::new();
+        let mut transaction_allow = Vec::new();
+        let mut transaction_deny = Vec::new();
+
+        for part in format_str.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+
+            if let Some(rest) = part.strip_prefix("C:") {
+                let (allow, deny) = Self::parse_permission_part(rest, "contact")?;
+                contact_allow = allow;
+                contact_deny = deny;
+            } else if let Some(rest) = part.strip_prefix("T:") {
+                let (allow, deny) = Self::parse_permission_part(rest, "transaction")?;
+                transaction_allow = allow;
+                transaction_deny = deny;
+            }
+        }
+
+        Ok((contact_allow, contact_deny, transaction_allow, transaction_deny))
+    }
+
+    /// Parse individual permission section like "r:a c:a w:a d:-"
+    /// Maps: r=read, c=create, w=write/update, d=delete, x=close (transaction only)
+    /// State: a=allow, d=deny, -=unset
+    /// Returns tuple of (allow_actions, deny_actions)
+    fn parse_permission_part(part: &str, resource: &str) -> Result<(Vec<String>, Vec<String>), String> {
+        let mut allow_result = Vec::new();
+        let mut deny_result = Vec::new();
+
+        // Parse "r:a c:a w:a d:-" format
+        for item in part.split_whitespace() {
+            let item = item.trim();
+            if item.is_empty() {
+                continue;
+            }
+
+            let parts: Vec<&str> = item.split(':').collect();
+            if parts.len() != 2 {
+                continue;
+            }
+
+            let permission_letter = parts[0];
+            let state = parts[1];
+
+            if state == "-" {
+                continue; // Unset, skip
+            }
+
+            let perm = match permission_letter {
+                "r" => format!("{}:read", resource),
+                "c" => format!("{}:create", resource),
+                "w" => format!("{}:update", resource),
+                "d" => format!("{}:delete", resource),
+                "x" => format!("{}:close", resource),
+                other => return Err(format!("Unknown permission letter: {}", other)),
+            };
+
+            match state {
+                "a" => allow_result.push(perm),
+                "d" => deny_result.push(perm),
+                _ => return Err(format!("Unknown permission state: {}", state)),
+            }
+        }
+
+        Ok((allow_result, deny_result))
+    }
+
+    /// Set permissions using readable format: "C: r:a c:a w:a d:-, T: r:a c:- w:- d:- x:-"
+    fn set_permissions_format(&self, user_group_label: &str, contact_group_label: &str, format_str: &str) -> Result<(), String> {
+        let user_group_id = self.user_group_ids.get(user_group_label)
+            .cloned()
+            .ok_or_else(|| format!("User group not found: {}", user_group_label))?;
+        let contact_group_id = self.contact_group_ids.get(contact_group_label)
+            .cloned()
+            .ok_or_else(|| format!("Contact group not found: {}", contact_group_label))?;
+
+        let (contact_allow, contact_deny, transaction_allow, transaction_deny)
+            = Self::parse_permission_format(format_str)?;
+
+        // Merge contact and transaction actions
+        let mut all_allow_actions = contact_allow;
+        all_allow_actions.extend(transaction_allow);
+        let mut all_deny_actions = contact_deny;
+        all_deny_actions.extend(transaction_deny);
+
+        let entry = serde_json::json!({
+            "user_group_id": user_group_id,
+            "contact_group_id": contact_group_id,
+            "allowed_actions": all_allow_actions,
+            "denied_actions": all_deny_actions
+        });
+        let entries = serde_json::json!([entry]);
+        let wallet_id = client::get_current_wallet_id()?;
+        put_wallet_permission_matrix(wallet_id, entries.to_string())
     }
 }
 
