@@ -28,7 +28,32 @@ where
     })
 }
 
-/// Check user has required wallet role (type-safe)
+/// Check if user is a wallet owner (hardcoded bypass)
+/// Owners have unrestricted access; this is checked via wallet_owners table
+async fn is_wallet_owner(
+    state: &AppState,
+    wallet_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, (StatusCode, Json<serde_json::Value>)> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM wallet_owners WHERE wallet_id = $1 AND user_id = $2)",
+    )
+    .bind(wallet_id)
+    .bind(user_id)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet owner: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })
+}
+
+/// Check user is wallet owner (old role-based check, deprecated)
+/// Kept for backward compatibility during transition period
+#[deprecated(since = "0.2.0", note = "Use is_wallet_owner() and permission matrix instead")]
 async fn check_wallet_role(
     state: &AppState,
     wallet_id: Uuid,
