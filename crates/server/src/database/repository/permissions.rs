@@ -1244,4 +1244,104 @@ impl Database {
             }
         }
     }
+
+    /// Get wallet-level permissions for a user's groups
+    /// Returns (action, is_deny) tuples from wallet_permission_matrix
+    pub async fn get_wallet_permissions_impl(
+        &self,
+        wallet_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<Vec<(String, bool)>, DbError> {
+        // Get user's groups (including implicit all_users)
+        let user_group_ids: Vec<Uuid> = sqlx::query_scalar(
+            r#"
+            SELECT id FROM user_groups
+            WHERE wallet_id = $1 AND (
+                name = 'all_users' OR
+                id IN (SELECT user_group_id FROM user_group_members WHERE user_id = $2)
+            )
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        if user_group_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Query wallet_permission_matrix for these groups
+        let perms: Vec<(String, bool)> = sqlx::query_as(
+            r#"
+            SELECT action, is_deny
+            FROM wallet_permission_matrix
+            WHERE user_group_id = ANY($1)
+            ORDER BY action
+            "#,
+        )
+        .bind(&user_group_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(perms)
+    }
+
+    /// Set a wallet-level permission for a user group
+    /// Inserts or updates (user_group_id, action) with allow/deny flag
+    pub async fn set_wallet_permission_impl(
+        &self,
+        user_group_id: Uuid,
+        action: &str,
+        is_deny: bool,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO wallet_permission_matrix (user_group_id, action, is_deny, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW())
+            ON CONFLICT (user_group_id, action) DO UPDATE SET
+                is_deny = $3,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(user_group_id)
+        .bind(action)
+        .bind(is_deny)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Revoke a wallet-level permission for a user group
+    pub async fn revoke_wallet_permission_impl(
+        &self,
+        user_group_id: Uuid,
+        action: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            "DELETE FROM wallet_permission_matrix WHERE user_group_id = $1 AND action = $2",
+        )
+        .bind(user_group_id)
+        .bind(action)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get all wallet-level permissions for a group
+    pub async fn get_group_wallet_permissions_impl(
+        &self,
+        user_group_id: Uuid,
+    ) -> Result<Vec<(String, bool)>, DbError> {
+        let perms: Vec<(String, bool)> = sqlx::query_as(
+            "SELECT action, is_deny FROM wallet_permission_matrix WHERE user_group_id = $1 ORDER BY action",
+        )
+        .bind(user_group_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(perms)
+    }
 }

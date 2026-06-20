@@ -466,4 +466,66 @@ impl Database {
 
         Ok(result.rows_affected() > 0)
     }
+
+    /// Soft delete a wallet (mark as deleted without removing data)
+    /// Sets deleted_at timestamp and tracks who deleted it
+    pub async fn soft_delete_wallet_impl(
+        &self,
+        wallet_id: Uuid,
+        deleted_by: Uuid,
+        reason: Option<&str>,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            UPDATE wallets
+            SET deleted_at = NOW(), deleted_by = $2, deletion_reason = $3
+            WHERE id = $1
+            "#,
+        )
+        .bind(wallet_id)
+        .bind(deleted_by)
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get soft-deleted wallets for a user (for archive/recovery view)
+    pub async fn get_deleted_user_wallets_impl(&self, user_id: Uuid) -> Result<Vec<Wallet>, DbError> {
+        let wallets = sqlx::query_as::<_, Wallet>(
+            r#"
+            SELECT w.id, w.name, w.description, w.created_by, w.is_active, w.created_at, w.updated_at
+            FROM wallets w
+            INNER JOIN wallet_users wu ON w.id = wu.wallet_id
+            WHERE wu.user_id = $1 AND w.deleted_at IS NOT NULL
+            ORDER BY w.deleted_at DESC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(wallets)
+    }
+
+    /// Hard delete wallets older than retention period (cleanup job)
+    /// Returns number of wallets deleted
+    pub async fn hard_delete_old_wallets_impl(
+        &self,
+        retention_days: i32,
+    ) -> Result<i64, DbError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM wallets
+            WHERE deleted_at IS NOT NULL
+            AND deleted_at < NOW() - INTERVAL '1 day' * $1
+            "#,
+        )
+        .bind(retention_days)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() as i64)
+    }
 }
