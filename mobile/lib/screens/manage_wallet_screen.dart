@@ -655,22 +655,27 @@ class _UserGroupsTabState extends State<_UserGroupsTab> {
           return GradientCard(
             margin: const EdgeInsets.only(bottom: 8),
             variationSeed: groupId.hashCode,
-            child: ExpansionTile(
-              title: Text(_formatGroupName(g['name'] as String? ?? '')),
-              subtitle: const Text('Static'),
-              trailing: IconButton(
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _deleteGroup(g),
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                dividerColor: Colors.transparent,
               ),
-              children: [
-                _UserGroupMembers(
-                  walletId: widget.walletId,
-                  groupId: g['id'] as String? ?? '',
-                  users: widget.users,
-                  onReload: widget.onReload,
-                  onPermissionError: widget.onPermissionError,
+              child: ExpansionTile(
+                title: Text(_formatGroupName(g['name'] as String? ?? '')),
+                subtitle: const Text('Static'),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _deleteGroup(g),
                 ),
-              ],
+                children: [
+                  _UserGroupMembers(
+                    walletId: widget.walletId,
+                    groupId: g['id'] as String? ?? '',
+                    users: widget.users,
+                    onReload: widget.onReload,
+                    onPermissionError: widget.onPermissionError,
+                  ),
+                ],
+              ),
             ),
           );
         }),
