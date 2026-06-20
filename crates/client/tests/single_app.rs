@@ -290,3 +290,37 @@ fn single_app_many_contacts_and_transactions() {
     ])
     .expect("assert_commands");
 }
+
+/// Regression test: new wallet must have all_contacts system group
+/// Verifies that wallet creation properly initializes system groups
+/// If all_contacts is missing, the permission system will fail when creating contacts
+#[test]
+#[ignore]
+fn wallet_creation_initializes_all_contacts_group() {
+    let server_url = test_server_url();
+    let app = AppInstance::new("app_test", &server_url);
+    app.initialize().expect("initialize");
+    app.signup().expect("signup");
+    app.login().expect("login");
+
+    // Create a wallet - this should initialize all_contacts system group
+    let _wallet_id = app
+        .create_wallet("Test Wallet".to_string(), "Testing".to_string())
+        .expect("create_wallet");
+
+    // Sync to fetch wallet data
+    app.sync().expect("sync");
+
+    // Create a contact - this would fail if all_contacts group is missing
+    // because the permission system needs it to exist
+    app.run_commands(&["contact create \"TestContact\" test", "wait 300"])
+        .expect("run_commands");
+
+    // Verify the contact exists
+    app.assert_commands(&[
+        "contacts count 1",
+        "contact name \"TestContact\"",
+        "events count >= 1",
+    ])
+    .expect("contact created successfully");
+}
