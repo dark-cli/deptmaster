@@ -696,15 +696,15 @@ cmd_start_server_docker() {
                 exit 1
             fi
         fi
-    elif [ ! -f "$ROOT_DIR/crates/server/target/release/server" ]; then
+    elif [ ! -f "$ROOT_DIR/target/release/server" ]; then
         print_error "Server binary not found and --skip-server-build was used. Build first: $0 build-server"
         exit 1
     fi
     
     # Start server
     print_info "Starting server..."
-    nohup "$ROOT_DIR/crates/server/target/release/server" > /tmp/api.log 2>&1 &
-    
+    nohup "$ROOT_DIR/target/release/server" > /tmp/api.log 2>&1 &
+
     wait_for_service "http://localhost:8000/health" "API Server" 30 1
     if [ "$VERBOSE" = true ]; then
         print_success "Server started! Logs: /tmp/api.log"
@@ -722,15 +722,15 @@ cmd_start_server_docker_no_build() {
     cmd_start_docker_services > /dev/null 2>&1 || cmd_start_docker_services
     
     # Check if binary exists
-    if [ ! -f "$ROOT_DIR/crates/server/target/release/server" ]; then
+    if [ ! -f "$ROOT_DIR/target/release/server" ]; then
         print_error "Server binary not found. Please build first: $0 build-server"
         exit 1
     fi
-    
+
     # Start server
     print_info "Starting server..."
-    nohup "$ROOT_DIR/crates/server/target/release/server" > /tmp/api.log 2>&1 &
-    
+    nohup "$ROOT_DIR/target/release/server" > /tmp/api.log 2>&1 &
+
     wait_for_service "http://localhost:8000/health" "API Server" 30 1 > /dev/null 2>&1
     if [ "$VERBOSE" = true ]; then
         print_success "Server started! Logs: /tmp/api.log"
