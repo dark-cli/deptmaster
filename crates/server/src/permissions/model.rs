@@ -228,9 +228,15 @@ impl PermissionModel {
                         return Err(format!("Permission {} requires transaction:read", action));
                     }
                 }
-                Action::WalletUpdate | Action::WalletDelete => {
-                    if !actions.contains(&Action::WalletRead) {
-                        return Err(format!("Permission {} requires wallet:read", action));
+                // Wallet-level permission implications
+                Action::WalletInfoUpdate | Action::WalletDelete => {
+                    if !actions.contains(&Action::WalletInfoRead) {
+                        return Err(format!("Permission {} requires wallet:info_read", action));
+                    }
+                }
+                Action::WalletMemberRemove | Action::WalletMemberAdd => {
+                    if !actions.contains(&Action::WalletMemberList) {
+                        return Err(format!("Permission {} requires wallet:member_list", action));
                     }
                 }
                 Action::UserGroupUpdate => {

@@ -35,13 +35,18 @@ pub enum Action {
     ContactGroupRead,
     ContactGroupUpdate,
 
-    // Wallet actions
-    WalletRead,
-    WalletUpdate,
-    WalletDelete,
-    WalletManageMembers,
+    // Wallet actions (granular, replaces WalletRead/Update/Delete/ManageMembers)
+    WalletInfoRead,       // Read wallet name, description, members count
+    WalletInfoUpdate,     // Modify wallet name, description
+    WalletMemberAdd,      // Invite/add users
+    WalletMemberRemove,   // Remove users
+    WalletMemberList,     // View all members
+    WalletOwnerTransfer,  // Transfer ownership (OWNER ONLY in code)
+    WalletDelete,         // Soft delete wallet (OWNER ONLY in code)
 
     /// Owner-only fallback: bypasses every other check when held.
+    /// Deprecated: kept for backward compatibility, not used in new code.
+    #[deprecated(since = "0.2.0", note = "Use wallet permission matrix instead")]
     WalletSuperPermission,
 
     // Event actions
@@ -67,10 +72,13 @@ impl Action {
             Action::ContactGroupCreate => "contact_group:create",
             Action::ContactGroupRead => "contact_group:read",
             Action::ContactGroupUpdate => "contact_group:update",
-            Action::WalletRead => "wallet:read",
-            Action::WalletUpdate => "wallet:update",
+            Action::WalletInfoRead => "wallet:info_read",
+            Action::WalletInfoUpdate => "wallet:info_update",
+            Action::WalletMemberAdd => "wallet:member_add",
+            Action::WalletMemberRemove => "wallet:member_remove",
+            Action::WalletMemberList => "wallet:member_list",
+            Action::WalletOwnerTransfer => "wallet:owner_transfer",
             Action::WalletDelete => "wallet:delete",
-            Action::WalletManageMembers => "wallet:manage_members",
             Action::WalletSuperPermission => "wallet:super_permission",
             Action::EventsRead => "events:read",
         }
@@ -97,10 +105,18 @@ impl Action {
             "contact_group:create" => Some(Action::ContactGroupCreate),
             "contact_group:read" => Some(Action::ContactGroupRead),
             "contact_group:update" => Some(Action::ContactGroupUpdate),
-            "wallet:read" => Some(Action::WalletRead),
-            "wallet:update" => Some(Action::WalletUpdate),
+            // New wallet actions (granular)
+            "wallet:info_read" => Some(Action::WalletInfoRead),
+            "wallet:info_update" => Some(Action::WalletInfoUpdate),
+            "wallet:member_add" => Some(Action::WalletMemberAdd),
+            "wallet:member_remove" => Some(Action::WalletMemberRemove),
+            "wallet:member_list" => Some(Action::WalletMemberList),
+            "wallet:owner_transfer" => Some(Action::WalletOwnerTransfer),
             "wallet:delete" => Some(Action::WalletDelete),
-            "wallet:manage_members" => Some(Action::WalletManageMembers),
+            // Old wallet actions (deprecated, for backward compat)
+            "wallet:read" => Some(Action::WalletInfoRead),        // Maps to info_read
+            "wallet:update" => Some(Action::WalletInfoUpdate),    // Maps to info_update
+            "wallet:manage_members" => Some(Action::WalletMemberAdd), // Maps to member_add
             "wallet:super_permission" => Some(Action::WalletSuperPermission),
             "events:read" => Some(Action::EventsRead),
             _ => None,
@@ -125,10 +141,13 @@ impl Action {
             Action::ContactGroupCreate,
             Action::ContactGroupRead,
             Action::ContactGroupUpdate,
-            Action::WalletRead,
-            Action::WalletUpdate,
+            Action::WalletInfoRead,
+            Action::WalletInfoUpdate,
+            Action::WalletMemberAdd,
+            Action::WalletMemberRemove,
+            Action::WalletMemberList,
+            Action::WalletOwnerTransfer,
             Action::WalletDelete,
-            Action::WalletManageMembers,
             Action::WalletSuperPermission,
             Action::EventsRead,
         ]
@@ -146,9 +165,11 @@ impl Action {
             (Action::TransactionClose, Action::TransactionRead) => true,
             (Action::UserGroupUpdate, Action::UserGroupRead) => true,
             (Action::ContactGroupUpdate, Action::ContactGroupRead) => true,
-            (Action::WalletUpdate, Action::WalletRead) => true,
-            (Action::WalletDelete, Action::WalletRead) => true,
-            (Action::WalletManageMembers, Action::WalletRead) => true,
+            // Wallet-level implications
+            (Action::WalletInfoUpdate, Action::WalletInfoRead) => true,
+            (Action::WalletDelete, Action::WalletInfoRead) => true,
+            (Action::WalletMemberRemove, Action::WalletMemberList) => true,
+            (Action::WalletMemberAdd, Action::WalletMemberList) => true,
             (Action::WalletSuperPermission, _) => true,
             _ if self == &other => true,
             _ => false,

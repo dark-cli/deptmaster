@@ -589,10 +589,17 @@ impl DomainEvent {
                     Resource::Transaction(self.aggregate_id),
                 )]
             }
-            EventData::WalletUserAdded { .. }
-            | EventData::WalletUserRemoved { .. }
-            | EventData::WalletUserRoleChanged { .. } => {
-                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
+            EventData::WalletUserAdded { .. } => {
+                // Changed: now uses specific WalletMemberAdd action
+                vec![(Action::WalletMemberAdd, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::WalletUserRemoved { .. } => {
+                // Changed: now uses specific WalletMemberRemove action
+                vec![(Action::WalletMemberRemove, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::WalletUserRoleChanged { .. } => {
+                // DEPRECATED: roles no longer exist; this event is no longer used
+                vec![]  // No permission check needed
             }
             EventData::UserGroupCreated { .. } => {
                 vec![(Action::UserGroupCreate, Resource::Wallet(self.wallet_id))]
@@ -604,9 +611,13 @@ impl DomainEvent {
                 vec![(Action::UserGroupUpdate, Resource::Wallet(self.wallet_id))]
             }
             EventData::UserGroupDeleted { .. }
-            | EventData::ContactGroupDeleted { .. }
-            | EventData::OwnershipTransferred { .. } => {
-                vec![(Action::WalletUpdate, Resource::Wallet(self.wallet_id))]
+            | EventData::ContactGroupDeleted { .. } => {
+                // Group deletion is a wallet-level operation
+                vec![(Action::WalletInfoUpdate, Resource::Wallet(self.wallet_id))]
+            }
+            EventData::OwnershipTransferred { .. } => {
+                // Changed: now uses specific WalletOwnerTransfer action
+                vec![(Action::WalletOwnerTransfer, Resource::Wallet(self.wallet_id))]
             }
             EventData::ContactGroupCreated { .. } => {
                 vec![(Action::ContactGroupCreate, Resource::Wallet(self.wallet_id))]
