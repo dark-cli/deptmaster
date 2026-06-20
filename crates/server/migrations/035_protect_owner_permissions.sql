@@ -15,14 +15,14 @@ RETURNS TRIGGER AS $$
 DECLARE
     is_owner BOOLEAN;
     is_system_group BOOLEAN;
-    wallet_id UUID;
+    owner_wallet_id UUID;
 BEGIN
     -- Check if the user being added is a wallet owner
     SELECT EXISTS(
         SELECT 1 FROM wallet_owners
         WHERE user_id = NEW.user_id
         AND wallet_id = (
-            SELECT wallet_id FROM user_groups WHERE id = NEW.user_group_id LIMIT 1
+            SELECT user_groups.wallet_id FROM user_groups WHERE id = NEW.user_group_id LIMIT 1
         )
     ) INTO is_owner;
 
