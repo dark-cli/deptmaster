@@ -21,6 +21,65 @@ async fn is_wallet_owner(pool: &PgPool, wallet_id: Uuid, user_id: Uuid) -> Resul
     Ok(is_owner)
 }
 
+/// Get wallet-level permissions for a user's groups (wallet_permission_matrix)
+/// Returns list of (action_name, is_deny) tuples
+async fn get_wallet_permissions(
+    pool: &PgPool,
+    wallet_id: Uuid,
+    user_id: Uuid,
+) -> Result<Vec<(String, bool)>, DbError> {
+    // Get user's groups (including implicit all_users)
+    let user_group_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND (name = 'all_users' OR id IN (
+            SELECT user_group_id FROM user_group_members WHERE user_id = $2
+        ))",
+    )
+    .bind(wallet_id)
+    .bind(user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    if user_group_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Query wallet_permission_matrix for these groups
+    let perms: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT action, is_deny FROM wallet_permission_matrix WHERE user_group_id = ANY($1)",
+    )
+    .bind(&user_group_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    Ok(perms)
+}
+
+/// Resolve allowed actions for wallet-level resources (Wallet resource)
+/// Uses wallet_permission_matrix (user_group, action) tuples
+async fn resolve_wallet_actions(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+) -> Result<HashSet<Action>, DbError> {
+    let perms = get_wallet_permissions(pool, ctx.wallet_id, ctx.user_id).await?;
+
+    let mut allowed = HashSet::new();
+    let mut denied = HashSet::new();
+
+    for (action_name, is_deny) in perms {
+        if let Some(action) = Action::from_str(&action_name) {
+            if is_deny {
+                denied.insert(action);
+            } else {
+                allowed.insert(action);
+            }
+        }
+    }
+
+    Ok(allowed.difference(&denied).copied().collect())
+}
+
 /// Resolve allowed actions for a user on a resource.
 ///
 /// Thin wrapper around the shared `resolver::resolve_actions`. The rules
@@ -40,6 +99,12 @@ pub async fn resolve_actions(
         .is_wallet_owner(ctx.wallet_id, ctx.user_id)
         .await?
     {
+        // Handle wallet-level resources (wallet-scoped permissions)
+        if matches!(resource, Resource::Wallet(_)) {
+            return resolve_wallet_actions(pool, ctx).await;
+        }
+
+        // Handle contact-group resources (resource-scoped permissions with cache)
         if let Resource::ContactGroup(group_id) = resource {
             let cached: Vec<(String, bool)> = sqlx::query_as(
                 r#"

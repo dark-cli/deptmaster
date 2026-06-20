@@ -42,11 +42,11 @@ fn test_permission_dependency_validation() {
         "Transaction close without read should be invalid"
     );
 
-    // Test: Wallet operations
-    let wallet_actions = [Action::WalletUpdate, Action::WalletRead];
+    // Test: Wallet operations (granular permissions)
+    let wallet_actions = [Action::WalletInfoUpdate, Action::WalletInfoRead];
     assert!(
         PermissionModel::validate_dependencies(&wallet_actions).is_ok(),
-        "Wallet update with read should be valid"
+        "Wallet info_update with info_read should be valid"
     );
 }
 
@@ -89,9 +89,9 @@ fn test_action_implication_chain() {
     assert!(Action::TransactionUpdate.implies(Action::TransactionRead));
     assert!(Action::TransactionDelete.implies(Action::TransactionRead));
 
-    // Wallet operations
-    assert!(Action::WalletUpdate.implies(Action::WalletRead));
-    assert!(Action::WalletDelete.implies(Action::WalletRead));
+    // Wallet operations (granular permissions)
+    assert!(Action::WalletInfoUpdate.implies(Action::WalletInfoRead));
+    assert!(Action::WalletDelete.implies(Action::WalletInfoRead));
 
     // User group operations
     assert!(Action::UserGroupUpdate.implies(Action::UserGroupRead));
@@ -138,8 +138,12 @@ fn test_action_enum_completeness() {
         Action::ContactGroupCreate,
         Action::ContactGroupRead,
         Action::ContactGroupUpdate,
-        Action::WalletRead,
-        Action::WalletUpdate,
+        Action::WalletInfoRead,
+        Action::WalletInfoUpdate,
+        Action::WalletMemberAdd,
+        Action::WalletMemberRemove,
+        Action::WalletMemberList,
+        Action::WalletOwnerTransfer,
         Action::WalletDelete,
         Action::WalletSuperPermission,
         Action::EventsRead,
@@ -147,8 +151,8 @@ fn test_action_enum_completeness() {
 
     assert_eq!(
         actions.len(),
-        19,
-        "Should have exactly 19 permission actions"
+        23,
+        "Should have exactly 23 permission actions (granular wallet permissions)"
     );
 
     // Verify all actions have string representations
