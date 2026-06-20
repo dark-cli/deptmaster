@@ -365,17 +365,27 @@ pub async fn create_wallet(
     );
 
     // Initialize owner and default permissions (system groups and matrix)
-    if let Err(e) = db.add_wallet_owner(wallet_id, user_id).await {
+    db.add_wallet_owner(wallet_id, user_id).await.map_err(|e| {
         tracing::error!("Failed to add wallet owner: {:?}", e);
-    }
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to initialize wallet ownership"})),
+        )
+    })?;
 
-    if let Err(e) = initialize_wallet_permissions(&db, wallet_id, user_id).await {
-        tracing::error!(
-            "Failed to initialize wallet permissions for {}: {:?}",
-            wallet_id,
-            e
-        );
-    }
+    initialize_wallet_permissions(&db, wallet_id, user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Failed to initialize wallet permissions for {}: {:?}",
+                wallet_id,
+                e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to initialize wallet permissions"})),
+            )
+        })?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
