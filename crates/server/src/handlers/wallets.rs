@@ -1,5 +1,6 @@
 use crate::database::error::DbError;
 use crate::database::repository::{Database, DatabaseRepository};
+use crate::handlers::permission_formatter;
 use crate::handlers::responses::insufficient_permission_response;
 use crate::handlers::sync;
 use crate::middleware::auth::AuthUser;
@@ -1332,6 +1333,8 @@ pub struct MatrixEntry {
     pub contact_group_id: String,
     pub allowed_actions: Vec<String>,
     pub denied_actions: Vec<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub rwx_format: String,
 }
 
 /// Request body for one (user_group, contact_group) entry on PUT /permission-matrix.
@@ -2368,11 +2371,15 @@ pub async fn get_permission_matrix(
                 // Filter out the deprecated `events:read` action both ways.
                 allowed.retain(|a| a != "events:read");
                 denied.retain(|a| a != "events:read");
+
+                let rwx_format = permission_formatter::format_permission_matrix(&allowed, &denied);
+
                 MatrixEntry {
                     user_group_id: user_group_id.to_string(),
                     contact_group_id: contact_group_id.to_string(),
                     allowed_actions: allowed,
                     denied_actions: denied,
+                    rwx_format,
                 }
             },
         )
