@@ -229,8 +229,8 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                       ),
                       _RulesTab(
                         walletId: widget.walletId,
-                        userGroups: _userGroups,
-                        contactGroups: _contactGroups,
+                        userGroups: _userGroups.where((g) => g['is_system'] != true).toList(),
+                        contactGroups: _contactGroups.where((g) => g['is_system'] != true).toList(),
                         permissionActions: _permissionActions,
                         matrix: _matrix,
                         onReload: _loadAll,
