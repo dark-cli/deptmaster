@@ -24,5 +24,7 @@ pub mod model;
 pub mod queries;
 pub mod resolver;
 pub mod server_store;
+pub mod owner_protection;
 
 pub use model::PermissionModel;
+pub use owner_protection::OwnerPermissionValidator;

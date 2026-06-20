@@ -1517,10 +1517,10 @@ pub async fn create_user_group(
             Json(serde_json::json!({"error": "Name is required"})),
         ));
     }
-    if name.eq_ignore_ascii_case("all_users") {
+    if name.eq_ignore_ascii_case("all_users") || name.eq_ignore_ascii_case("__owners__") {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Cannot create group named all_users"})),
+            Json(serde_json::json!({"error": "Cannot create group with reserved name"})),
         ));
     }
 
@@ -2494,6 +2494,22 @@ pub async fn put_permission_matrix(
                 ),
             ));
         }
+
+        // Validate owner permission protection: prevent modifications to owner permission vectors
+        let validator = crate::permissions::OwnerPermissionValidator::new((*state.db_pool).clone());
+        validator
+            .validate_permission_matrix_modification(wallet_uuid, ug_id, cg_id)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Owner permission protection: {}", e);
+                (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "code": "OWNER_PERMISSION_PROTECTED",
+                        "message": e.to_string()
+                    })),
+                )
+            })?;
 
         // Validate action names up front so a bad payload is rejected with
         // 400 before we write anything. The matrix mutation itself now flows

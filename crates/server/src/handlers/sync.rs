@@ -562,12 +562,12 @@ pub async fn insert_permission_event_and_apply(
     if !rows.is_empty() {
         let row_refs: Vec<_> = rows.iter().collect();
         let mut undone_set = std::collections::HashSet::new();
-        if let Err(e) = db
-            .apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set)
+        db.apply_event_batch(&row_refs, user_id, wallet_id, &mut undone_set)
             .await
-        {
-            tracing::error!("Error applying event: {:?}", e);
-        }
+            .map_err(|e| {
+                tracing::error!("Error applying event: {:?}", e);
+                e
+            })?;
     }
 
     // 3. Handle permission matrix cache invalidation + user_readable_events

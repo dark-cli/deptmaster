@@ -14,6 +14,7 @@ mod logout_clears_local_data;
 mod multi_app_realtime;
 mod multi_app_sync;
 mod offline_online_multi_app;
+mod owner_permission_security_test;
 mod permission_enforcement;
 mod permission_matrix_undo_persistence;
 mod permissions;
