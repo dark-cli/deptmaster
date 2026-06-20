@@ -730,10 +730,11 @@ class _UserGroupMembersState extends State<_UserGroupMembers> {
         walletId: widget.walletId,
         groupId: widget.groupId,
         existingUserIds: existingUserIds,
-        onAdd: (username) async {
-          Navigator.pop(context);
+        onAdd: (usernames) async {
           try {
-            await Api.addWalletUserGroupMember(widget.walletId, widget.groupId, username);
+            for (final username in usernames) {
+              await Api.addWalletUserGroupMember(widget.walletId, widget.groupId, username);
+            }
             await _load();
             widget.onReload();
           } catch (e) {
@@ -1024,10 +1025,11 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
         walletId: widget.walletId,
         groupId: widget.groupId,
         existingContactIds: existingIds,
-        onAdd: (contactId) async {
-          Navigator.pop(context);
+        onAdd: (contactIds) async {
           try {
-            await Api.addWalletContactGroupMember(widget.walletId, widget.groupId, contactId);
+            for (final contactId in contactIds) {
+              await Api.addWalletContactGroupMember(widget.walletId, widget.groupId, contactId);
+            }
             await _load();
             widget.onContactGroupMembersChanged?.call();
             widget.onReload();
@@ -1770,7 +1772,7 @@ class _AddMemberDialog extends StatefulWidget {
   final String walletId;
   final String groupId;
   final List<String> existingUserIds;
-  final Function(String) onAdd;
+  final Function(List<String>) onAdd;
 
   const _AddMemberDialog({
     required this.walletId,
@@ -1787,6 +1789,7 @@ class _AddMemberDialogState extends State<_AddMemberDialog> {
   final _searchController = TextEditingController();
   List<dynamic> _walletUsers = [];
   List<dynamic> _searchResults = [];
+  Set<String> _selectedUsernames = {};
   bool _loading = true;
   String? _error;
 
@@ -1861,9 +1864,19 @@ class _AddMemberDialogState extends State<_AddMemberDialog> {
                   itemBuilder: (context, index) {
                     final user = _searchResults[index];
                     final username = user['username'] as String? ?? 'Unknown';
-                    return ListTile(
+                    final isSelected = _selectedUsernames.contains(username);
+                    return CheckboxListTile(
                       title: Text(username),
-                      onTap: () => widget.onAdd(username),
+                      value: isSelected,
+                      onChanged: (value) {
+                        setState(() {
+                          if (value == true) {
+                            _selectedUsernames.add(username);
+                          } else {
+                            _selectedUsernames.remove(username);
+                          }
+                        });
+                      },
                     );
                   },
                 ),
@@ -1876,6 +1889,15 @@ class _AddMemberDialogState extends State<_AddMemberDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
+        FilledButton(
+          onPressed: _selectedUsernames.isEmpty
+              ? null
+              : () {
+                  Navigator.pop(context);
+                  widget.onAdd(_selectedUsernames.toList());
+                },
+          child: const Text('Add Selected'),
+        ),
       ],
     );
   }
@@ -1886,7 +1908,7 @@ class _AddContactDialog extends StatefulWidget {
   final String walletId;
   final String groupId;
   final List<String> existingContactIds;
-  final Function(String) onAdd;
+  final Function(List<String>) onAdd;
 
   const _AddContactDialog({
     required this.walletId,
@@ -1903,6 +1925,7 @@ class _AddContactDialogState extends State<_AddContactDialog> {
   final _searchController = TextEditingController();
   List<dynamic> _contacts = [];
   List<dynamic> _searchResults = [];
+  Set<String> _selectedContactIds = {};
   bool _loading = true;
   String? _error;
 
@@ -1981,10 +2004,20 @@ class _AddContactDialogState extends State<_AddContactDialog> {
                     final name = contact['name'] as String? ?? 'Unknown';
                     final username = contact['username'] as String?;
                     final id = contact['id'] as String? ?? '';
-                    return ListTile(
+                    final isSelected = _selectedContactIds.contains(id);
+                    return CheckboxListTile(
                       title: Text(name),
                       subtitle: username != null && username.isNotEmpty ? Text('@$username', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
-                      onTap: () => widget.onAdd(id),
+                      value: isSelected,
+                      onChanged: (value) {
+                        setState(() {
+                          if (value == true) {
+                            _selectedContactIds.add(id);
+                          } else {
+                            _selectedContactIds.remove(id);
+                          }
+                        });
+                      },
                     );
                   },
                 ),
@@ -1996,6 +2029,15 @@ class _AddContactDialogState extends State<_AddContactDialog> {
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _selectedContactIds.isEmpty
+              ? null
+              : () {
+                  Navigator.pop(context);
+                  widget.onAdd(_selectedContactIds.toList());
+                },
+          child: const Text('Add Selected'),
         ),
       ],
     );
