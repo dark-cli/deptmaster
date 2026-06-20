@@ -2609,3 +2609,151 @@ pub async fn put_permission_matrix(
         serde_json::json!({"message": "Permission matrix updated"}),
     ))
 }
+
+// ============================================================================
+// WALLET-LEVEL PERMISSIONS (new matrix-based system)
+// ============================================================================
+
+#[derive(Serialize, Deserialize)]
+pub struct WalletPermissionEntry {
+    pub user_group_id: String,
+    pub action: String,
+    pub is_deny: bool,
+}
+
+#[derive(Deserialize)]
+pub struct SetWalletPermissionsRequest {
+    pub entries: Vec<WalletPermissionEntry>,
+}
+
+/// GET /api/wallets/:wallet_id/wallet-permissions
+/// Returns wallet-level permissions for all groups
+pub async fn get_wallet_permissions(
+    Path(wallet_id): Path<String>,
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<Vec<WalletPermissionEntry>>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
+
+    // Only admins can view permissions
+    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Query wallet_permission_matrix directly
+    let perms: Vec<(Uuid, String, bool)> = sqlx::query_as(
+        "SELECT user_group_id, action, is_deny FROM wallet_permission_matrix WHERE user_group_id IN (SELECT id FROM user_groups WHERE wallet_id = $1) ORDER BY user_group_id, action"
+    )
+    .bind(wallet_uuid)
+    .fetch_all(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("get_wallet_permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch permissions"})),
+        )
+    })?;
+
+    let entries: Vec<WalletPermissionEntry> = perms
+        .into_iter()
+        .map(|(user_group_id, action, is_deny)| WalletPermissionEntry {
+            user_group_id: user_group_id.to_string(),
+            action,
+            is_deny,
+        })
+        .collect();
+
+    Ok(Json(entries))
+}
+
+/// PUT /api/wallets/:wallet_id/wallet-permissions
+/// Set wallet-level permissions (grant/revoke actions for groups)
+pub async fn set_wallet_permissions(
+    Path(wallet_id): Path<String>,
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(payload): Json<SetWalletPermissionsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
+
+    // Only admins can modify permissions
+    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    for entry in payload.entries {
+        let user_group_id = Uuid::parse_str(&entry.user_group_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid user_group_id: {}", e)})),
+            )
+        })?;
+
+        // Verify group belongs to this wallet
+        let group_wallet_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT wallet_id FROM user_groups WHERE id = $1"
+        )
+        .bind(user_group_id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching user group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "User group not found"})),
+            )
+        })?;
+
+        if group_wallet_id != wallet_uuid {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Group does not belong to this wallet"})),
+            ));
+        }
+
+        // Verify action is valid
+        if domain::Action::from_str(&entry.action).is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid action: {}", entry.action)})),
+            ));
+        }
+
+        // Set permission in database (insert or update)
+        sqlx::query(
+            r#"
+            INSERT INTO wallet_permission_matrix (user_group_id, action, is_deny)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_group_id, action) DO UPDATE
+            SET is_deny = $3
+            "#
+        )
+        .bind(user_group_id)
+        .bind(&entry.action)
+        .bind(entry.is_deny)
+        .execute(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error setting wallet permission: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to set permission"})),
+            )
+        })?;
+    }
+
+    Ok(Json(serde_json::json!({"message": "Wallet permissions updated"})))
+}
