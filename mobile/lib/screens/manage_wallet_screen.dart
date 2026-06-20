@@ -1345,11 +1345,20 @@ class _PermissionGridDisplay extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'C:',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
+                'C',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                ':',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(width: 12),
               _buildPermissionLetter(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
@@ -1370,11 +1379,20 @@ class _PermissionGridDisplay extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'T:',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
+                'T',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                ':',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(width: 12),
               _buildPermissionLetter(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
