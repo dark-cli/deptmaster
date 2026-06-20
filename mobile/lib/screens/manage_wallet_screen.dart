@@ -209,7 +209,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                       ),
                       _UserGroupsTab(
                         walletId: widget.walletId,
-                        userGroups: _userGroups.where((g) => g['is_system'] != true).toList(),
+                        userGroups: _userGroups,
                         users: _users,
                         onReload: _loadAll,
                         onPermissionError: _onPermissionError,
@@ -217,7 +217,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                       ),
                       _ContactGroupsTab(
                         walletId: widget.walletId,
-                        contactGroups: _contactGroups.where((g) => g['is_system'] != true).toList(),
+                        contactGroups: _contactGroups,
                         onReload: _loadAll,
                         onContactGroupMembersChanged: () {
                           ref.invalidate(contactsProvider);
@@ -229,8 +229,8 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                       ),
                       _RulesTab(
                         walletId: widget.walletId,
-                        userGroups: _userGroups.where((g) => g['is_system'] != true).toList(),
-                        contactGroups: _contactGroups.where((g) => g['is_system'] != true).toList(),
+                        userGroups: _userGroups,
+                        contactGroups: _contactGroups,
                         permissionActions: _permissionActions,
                         matrix: _matrix,
                         onReload: _loadAll,
