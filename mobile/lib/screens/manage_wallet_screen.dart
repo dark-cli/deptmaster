@@ -1334,44 +1334,62 @@ class _PermissionGridDisplay extends StatelessWidget {
     final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
         // Contact permissions: C: r c w d
-        Wrap(
-          spacing: 3,
-          children: [
-            Text(
-              'C:',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-            ),
-            _buildPermissionLetter(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
-            _buildPermissionLetter(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor),
-            _buildPermissionLetter(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor),
-            _buildPermissionLetter(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor),
-          ],
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'C:',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      letterSpacing: 1.5,
+                    ),
+              ),
+              const SizedBox(width: 12),
+              _buildPermissionLetter(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
+              const SizedBox(width: 10),
+              _buildPermissionLetter(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor),
+              const SizedBox(width: 10),
+              _buildPermissionLetter(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor),
+              const SizedBox(width: 10),
+              _buildPermissionLetter(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor),
+            ],
+          ),
         ),
-        const SizedBox(height: 6),
         // Transaction permissions: T: r c w d x
-        Wrap(
-          spacing: 3,
-          children: [
-            Text(
-              'T:',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-            ),
-            _buildPermissionLetter(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
-            _buildPermissionLetter(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor),
-            _buildPermissionLetter(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor),
-            _buildPermissionLetter(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor),
-            _buildPermissionLetter(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor),
-          ],
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'T:',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      letterSpacing: 1.5,
+                    ),
+              ),
+              const SizedBox(width: 12),
+              _buildPermissionLetter(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
+              const SizedBox(width: 10),
+              _buildPermissionLetter(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor),
+              const SizedBox(width: 10),
+              _buildPermissionLetter(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor),
+              const SizedBox(width: 10),
+              _buildPermissionLetter(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor),
+              const SizedBox(width: 10),
+              _buildPermissionLetter(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor),
+            ],
+          ),
         ),
       ],
     );
@@ -1410,9 +1428,9 @@ class _PermissionGridDisplay extends StatelessWidget {
         displayLetter,
         style: TextStyle(
           color: textColor,
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.5,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.8,
         ),
       ),
     );
