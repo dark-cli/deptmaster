@@ -936,7 +936,7 @@ class _ContactGroupsTabState extends State<_ContactGroupsTab> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
       children: [
-        ...widget.contactGroups.map((g) {
+        ...widget.contactGroups.where((g) => g['name'] != 'all_contacts').map((g) {
           final groupId = g['id'] as String? ?? '';
           return GradientCard(
             margin: const EdgeInsets.only(bottom: 8),
