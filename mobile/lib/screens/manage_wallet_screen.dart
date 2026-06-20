@@ -1500,12 +1500,31 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
       final name = action['name'] as String? ?? '';
       final parts = name.split(':');
       final category = parts.isNotEmpty ? parts[0] : 'other';
-      
+
       if (!_groupedActions.containsKey(category)) {
         _groupedActions[category] = [];
       }
       _groupedActions[category]!.add(action);
     }
+
+    // Sort actions within each category using rwx format order
+    for (final category in _groupedActions.keys) {
+      _groupedActions[category]!.sort((a, b) {
+        final aName = a['name'] as String? ?? '';
+        final bName = b['name'] as String? ?? '';
+        return _getPermissionSortOrder(aName).compareTo(_getPermissionSortOrder(bName));
+      });
+    }
+  }
+
+  // Get sort order for rwx format: r=0, c=1, w=2, d=3, x=4
+  int _getPermissionSortOrder(String actionName) {
+    if (actionName.contains(':read')) return 0;
+    if (actionName.contains(':create')) return 1;
+    if (actionName.contains(':update')) return 2;
+    if (actionName.contains(':delete')) return 3;
+    if (actionName.contains(':close')) return 4;
+    return 99; // Unknown permissions go to the end
   }
 
   String _formatActionName(String name) {
