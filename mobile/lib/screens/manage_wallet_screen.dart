@@ -1346,19 +1346,10 @@ class _PermissionGridDisplay extends StatelessWidget {
             children: [
               Text(
                 'C',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                ':',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
               ),
               const SizedBox(width: 12),
               _buildPermissionLetter(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor),
@@ -1380,19 +1371,10 @@ class _PermissionGridDisplay extends StatelessWidget {
             children: [
               Text(
                 'T',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                ':',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
               ),
               const SizedBox(width: 12),
               _buildPermissionLetter(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor),
