@@ -623,6 +623,7 @@ impl CommandRunner {
         let entries = serde_json::json!([entry]);
         set_wallet_permissions(wallet_id, entries.to_string())
     }
+}
 
 impl Default for CommandRunner {
     fn default() -> Self {
