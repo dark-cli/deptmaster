@@ -126,3 +126,11 @@ pub fn get_permission_matrix_api(wallet_id: &str) -> Result<String, String> {
 pub fn put_permission_matrix_api(wallet_id: &str, entries_json: &str) -> Result<(), String> {
     api::put_permission_matrix_api(wallet_id, entries_json).map_err(|e| e.to_string())
 }
+
+pub fn get_wallet_permissions_api(wallet_id: &str) -> Result<String, String> {
+    api::get_wallet_permissions_api(wallet_id).map_err(|e| e.to_string())
+}
+
+pub fn set_wallet_permissions_api(wallet_id: &str, entries_json: &str) -> Result<(), String> {
+    api::set_wallet_permissions_api(wallet_id, entries_json).map_err(|e| e.to_string())
+}

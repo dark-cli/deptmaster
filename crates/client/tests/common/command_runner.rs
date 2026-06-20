@@ -17,7 +17,7 @@ use client::{
     create_contact, create_transaction, delete_contact, delete_transaction, get_transaction,
     list_wallet_contact_groups, list_wallet_user_groups, manual_sync, put_wallet_permission_matrix,
     update_contact, update_transaction, create_wallet_user_group, create_wallet_contact_group,
-    add_wallet_user_group_member, add_wallet_contact_group_member,
+    add_wallet_user_group_member, add_wallet_contact_group_member, set_wallet_permissions,
 };
 use std::collections::HashMap;
 
@@ -140,6 +140,10 @@ impl CommandRunner {
         }
         if action == "group-member" {
             self.do_group_member(&args[1..], command)?;
+            return Ok(());
+        }
+        if action == "wallet-permission" {
+            self.do_wallet_permission(&args[1..], command)?;
             return Ok(());
         }
         Err(format!("Unknown action: {}", action))
@@ -583,7 +587,42 @@ impl CommandRunner {
         let wallet_id = client::get_current_wallet_id()?;
         put_wallet_permission_matrix(wallet_id, entries.to_string())
     }
-}
+
+    /// `wallet-permission grant user_group action` / `wallet-permission revoke user_group action`
+    /// Grant or revoke a wallet-level action for a user group
+    fn do_wallet_permission(&self, args: &[&str], original: &str) -> Result<(), String> {
+        if args.len() < 3 {
+            return Err(format!(
+                "Wallet-permission requires: grant|revoke user_group action: {}",
+                original
+            ));
+        }
+
+        let subcommand = args[0].to_lowercase();
+        let user_group_label = args[1];
+        let action = args[2];
+        let wallet_id = client::get_current_wallet_id()?;
+
+        let user_group_id = self
+            .user_group_ids
+            .get(user_group_label)
+            .cloned()
+            .ok_or_else(|| format!("User group not found: {}", user_group_label))?;
+
+        let is_deny = match subcommand.as_str() {
+            "grant" => false,
+            "revoke" => true,
+            other => return Err(format!("Unknown wallet-permission subcommand: {}", other)),
+        };
+
+        let entry = serde_json::json!({
+            "user_group_id": user_group_id,
+            "action": action,
+            "is_deny": is_deny
+        });
+        let entries = serde_json::json!([entry]);
+        set_wallet_permissions(wallet_id, entries.to_string())
+    }
 
 impl Default for CommandRunner {
     fn default() -> Self {

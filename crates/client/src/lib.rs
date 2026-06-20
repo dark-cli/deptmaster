@@ -396,6 +396,20 @@ pub fn put_wallet_permission_matrix(wallet_id: String, entries_json: String) -> 
     Ok(())
 }
 
+pub fn get_wallet_permissions(wallet_id: String) -> Result<String, String> {
+    api::get_wallet_permissions_api(&wallet_id).map_err(|e| e.to_string())
+}
+
+pub fn set_wallet_permissions(wallet_id: String, entries_json: String) -> Result<(), String> {
+    api::set_wallet_permissions_api(&wallet_id, &entries_json)?;
+    if let Ok(Some(current)) = database::storage::config_get("current_wallet_id") {
+        if current == wallet_id {
+            let _ = services::sync::clear_wallet_and_resync(&wallet_id);
+        }
+    }
+    Ok(())
+}
+
 // --- Events (for events log / EventStoreService) ---
 pub fn get_events() -> Result<String, String> {
     let wallet_id = match database::storage::config_get("current_wallet_id")? {

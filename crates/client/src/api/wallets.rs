@@ -472,3 +472,14 @@ pub fn put_permission_matrix_api(wallet_id: &str, entries_json: &str) -> Result<
     let body = serde_json::json!({ "entries": entries });
     wallet_management_put_json(wallet_id, "/permission-matrix", &body).map(|_| ())
 }
+
+pub fn get_wallet_permissions_api(wallet_id: &str) -> Result<String, ClientError> {
+    wallet_management_get(wallet_id, "/wallet-permissions")
+}
+
+pub fn set_wallet_permissions_api(wallet_id: &str, entries_json: &str) -> Result<(), ClientError> {
+    let entries: Vec<serde_json::Value> =
+        serde_json::from_str(entries_json)?;
+    let body = serde_json::json!({ "entries": entries });
+    wallet_management_put_json(wallet_id, "/wallet-permissions", &body).map(|_| ())
+}
