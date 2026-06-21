@@ -436,8 +436,35 @@ pub async fn update_wallet(
         )
     })?;
 
-    // Enforce permissions: only wallet admins/owners may edit wallet details.
-    let _role = check_wallet_role(&state, wallet_uuid, &auth_user, WalletRole::Owner).await?;
+    // Check wallet:info_update permission (owners bypass via hardcoded check)
+    let can_update = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletInfoUpdate,
+        &Resource::Wallet(wallet_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet:info_update permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_update {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to update this wallet"
+            })),
+        ));
+    }
 
     let db = Database::new((*state.db_pool).clone());
 
