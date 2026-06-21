@@ -713,6 +713,37 @@ class Api {
     await rust.putWalletPermissionMatrix(walletId: walletId, entriesJson: entriesJson);
   }
 
+  /// Get wallet-level permissions: (user_group, action, is_deny) matrix
+  /// Returns empty list if endpoint not available (graceful degradation for older backends)
+  static Future<List<Map<String, dynamic>>> getWalletPermissions(String walletId) async {
+    if (kIsWeb) return [];
+    try {
+      await _ensureRustReady();
+      final json = await rust.getWalletPermissions(walletId: walletId);
+      final list = jsonDecode(json) as List<dynamic>?;
+      return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+    } catch (e) {
+      // Graceful degradation: if endpoint doesn't exist, just return empty list
+      // This allows the UI to work even if backend doesn't support wallet permissions
+      debugPrint('[wallet-permissions] getWalletPermissions failed: $e');
+      return [];
+    }
+  }
+
+  /// Set wallet-level permissions: grant/revoke actions for user groups
+  static Future<void> setWalletPermissions(String walletId, List<Map<String, dynamic>> entries) async {
+    if (kIsWeb) return;
+    try {
+      await _ensureRustReady();
+      final entriesJson = jsonEncode(entries);
+      await rust.setWalletPermissions(walletId: walletId, entriesJson: entriesJson);
+    } catch (e) {
+      // If backend doesn't support wallet permissions, silently fail
+      debugPrint('[wallet-permissions] setWalletPermissions failed: $e');
+      throw Exception('Failed to set wallet permissions. Ensure backend supports wallet-level permissions.');
+    }
+  }
+
   static bool isPermissionDeniedError(dynamic e) {
     final s = e.toString().toLowerCase();
     return s.contains(_permissionDeniedCode);

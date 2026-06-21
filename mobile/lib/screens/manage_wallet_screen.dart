@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../providers/wallets_provider.dart';
@@ -42,6 +43,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
   List<Map<String, dynamic>> _contactGroups = [];
   List<Map<String, dynamic>> _permissionActions = [];
   List<Map<String, dynamic>> _matrix = [];
+  List<Map<String, dynamic>> _walletPermissions = [];
   bool _loading = true;
   String? _loadError;
   StreamSubscription<DataChangeEvent>? _dataChangeSubscription;
@@ -49,7 +51,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _tabController.addListener(_onTabChanged);
     // Defer load to next frame so the screen and loading indicator show first (avoids UI freeze).
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -107,6 +109,8 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
       _loadError = null;
     });
     try {
+      // Load core data (first 5 items) in parallel
+      // Wallet permissions is optional and handled gracefully
       final results = await Future.wait([
         Api.getWalletUsers(widget.walletId),
         Api.getWalletUserGroups(widget.walletId),
@@ -114,6 +118,16 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
         Api.getWalletPermissionActions(widget.walletId),
         Api.getWalletPermissionMatrix(widget.walletId),
       ]);
+
+      // Load wallet permissions separately with graceful error handling
+      List<Map<String, dynamic>> walletPerms = [];
+      try {
+        walletPerms = await Api.getWalletPermissions(widget.walletId);
+      } catch (e) {
+        // Wallet permissions may not be available on older backends - just log and continue
+        debugPrint('[manage-wallet] Failed to load wallet permissions: $e');
+      }
+
       if (mounted) {
         setState(() {
           _users = results[0] as List<Map<String, dynamic>>;
@@ -121,6 +135,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
           _contactGroups = results[2] as List<Map<String, dynamic>>;
           _permissionActions = results[3] as List<Map<String, dynamic>>;
           _matrix = results[4] as List<Map<String, dynamic>>;
+          _walletPermissions = walletPerms;
           _loading = false;
           _loadError = null;
         });
@@ -171,6 +186,7 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
             Tab(text: 'User groups', icon: Icon(Icons.group)),
             Tab(text: 'Contact groups', icon: Icon(Icons.contacts)),
             Tab(text: 'Rules', icon: Icon(Icons.rule)),
+            Tab(text: 'Wallet Perms', icon: Icon(Icons.security)),
           ],
         ),
       ),
@@ -236,6 +252,14 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                         onReload: _loadAll,
                         onPermissionError: _onPermissionError,
                         onRegisterFab: (action) => _registerFab(3, action),
+                      ),
+                      _WalletPermissionsTab(
+                        walletId: widget.walletId,
+                        userGroups: _userGroups.where((g) => g['name'] != '__owners__').toList(),
+                        walletPermissions: _walletPermissions,
+                        onReload: _loadAll,
+                        onPermissionError: _onPermissionError,
+                        onRegisterFab: (action) => _registerFab(4, action),
                       ),
                     ],
                   ),
@@ -2038,6 +2062,341 @@ class _AddContactDialogState extends State<_AddContactDialog> {
                   widget.onAdd(_selectedContactIds.toList());
                 },
           child: const Text('Add Selected'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Wallet-level permissions tab: manage which groups can perform wallet actions
+/// Actions: wallet:info_read, wallet:info_update, wallet:member_add, wallet:member_remove, wallet:member_list, wallet:owner_transfer, wallet:delete
+class _WalletPermissionsTab extends StatefulWidget {
+  final String walletId;
+  final List<Map<String, dynamic>> userGroups;
+  final List<Map<String, dynamic>> walletPermissions;
+  final VoidCallback onReload;
+  final VoidCallback onPermissionError;
+  final void Function(VoidCallback? action) onRegisterFab;
+
+  const _WalletPermissionsTab({
+    required this.walletId,
+    required this.userGroups,
+    required this.walletPermissions,
+    required this.onReload,
+    required this.onPermissionError,
+    required this.onRegisterFab,
+  });
+
+  @override
+  State<_WalletPermissionsTab> createState() => _WalletPermissionsTabState();
+}
+
+class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
+  late Map<String, Set<String>> _allowedActions;
+  late Map<String, Set<String>> _deniedActions;
+  static const List<String> _walletActions = [
+    'wallet:info_read',
+    'wallet:info_update',
+    'wallet:member_add',
+    'wallet:member_remove',
+    'wallet:member_list',
+    'wallet:owner_transfer',
+    'wallet:delete',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _allowedActions = {};
+    _deniedActions = {};
+    _buildPermissionMap();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onRegisterFab(null);
+    });
+  }
+
+  @override
+  void didUpdateWidget(_WalletPermissionsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _buildPermissionMap();
+  }
+
+  void _buildPermissionMap() {
+    _allowedActions.clear();
+    _deniedActions.clear();
+    for (final entry in widget.walletPermissions) {
+      final groupId = entry['user_group_id'] as String? ?? '';
+      final action = entry['action'] as String? ?? '';
+      final isDeny = entry['is_deny'] as bool? ?? false;
+
+      if (isDeny) {
+        _deniedActions.putIfAbsent(groupId, () => {}).add(action);
+      } else {
+        _allowedActions.putIfAbsent(groupId, () => {}).add(action);
+      }
+    }
+  }
+
+  Set<String> _getAllowedForGroup(String groupId) => _allowedActions[groupId] ?? {};
+  Set<String> _getDeniedForGroup(String groupId) => _deniedActions[groupId] ?? {};
+
+  Future<void> _savePermissions(String groupId, Set<String> allowed, Set<String> denied) async {
+    final prevAllowed = Map<String, Set<String>>.from(_allowedActions);
+    final prevDenied = Map<String, Set<String>>.from(_deniedActions);
+
+    setState(() {
+      if (allowed.isEmpty && denied.isEmpty) {
+        _allowedActions.remove(groupId);
+        _deniedActions.remove(groupId);
+      } else {
+        _allowedActions[groupId] = allowed;
+        _deniedActions[groupId] = denied;
+      }
+    });
+
+    final entries = <Map<String, dynamic>>[];
+    for (final action in _walletActions) {
+      final isAllowed = allowed.contains(action);
+      final isDenied = denied.contains(action);
+      if (isAllowed) {
+        entries.add({
+          'user_group_id': groupId,
+          'action': action,
+          'is_deny': false,
+        });
+      }
+      if (isDenied) {
+        entries.add({
+          'user_group_id': groupId,
+          'action': action,
+          'is_deny': true,
+        });
+      }
+    }
+
+    try {
+      await Api.setWalletPermissions(widget.walletId, entries);
+      widget.onReload();
+      if (mounted) {
+        ToastService.showSuccessFromContext(context, 'Wallet permissions saved');
+      }
+    } catch (e) {
+      if (mounted) {
+        if (Api.isPermissionDeniedError(e)) {
+          widget.onPermissionError();
+        } else {
+          ToastService.showErrorFromContext(
+            context,
+            e.toString().replaceFirst('Exception: ', ''),
+          );
+        }
+        setState(() {
+          _allowedActions.clear();
+          _allowedActions.addAll(prevAllowed);
+          _deniedActions.clear();
+          _deniedActions.addAll(prevDenied);
+        });
+      }
+    }
+  }
+
+  void _openEditor(String groupId, String groupName) {
+    showDialog(
+      context: context,
+      builder: (context) => _WalletPermissionsDialog(
+        groupName: groupName,
+        walletActions: _walletActions,
+        initialAllowed: _getAllowedForGroup(groupId).toList(),
+        initialDenied: _getDeniedForGroup(groupId).toList(),
+        onSave: (allowed, denied) => _savePermissions(groupId, Set.from(allowed), Set.from(denied)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.userGroups.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Create at least one user group to set wallet permissions.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      children: [
+        ...widget.userGroups.map((group) {
+          final groupId = group['id'] as String? ?? '';
+          final groupName = (group['name'] as String? ?? '').replaceAll('_', ' ');
+          final allowed = _getAllowedForGroup(groupId);
+          final denied = _getDeniedForGroup(groupId);
+
+          return GradientCard(
+            margin: const EdgeInsets.only(bottom: 12),
+            variationSeed: groupId.hashCode,
+            child: ListTile(
+              title: Text(groupName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: allowed.isEmpty && denied.isEmpty
+                  ? Text('No permissions', style: TextStyle(color: ThemeColors.gray(context)))
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (allowed.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Wrap(
+                              spacing: 4,
+                              children: allowed
+                                  .map((a) => Chip(
+                                        label: Text(a.replaceFirst('wallet:', ''), style: const TextStyle(fontSize: 11)),
+                                        backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                                        side: BorderSide.none,
+                                      ))
+                                  .toList(),
+                            ),
+                          ),
+                        if (denied.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Wrap(
+                              spacing: 4,
+                              children: denied
+                                  .map((a) => Chip(
+                                        label: Text(a.replaceFirst('wallet:', ''), style: const TextStyle(fontSize: 11)),
+                                        backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                                        side: BorderSide.none,
+                                      ))
+                                  .toList(),
+                            ),
+                          ),
+                      ],
+                    ),
+              trailing: const Icon(Icons.edit, size: 20),
+              onTap: () => _openEditor(groupId, groupName),
+            ),
+          );
+        }).toList(),
+      ],
+    );
+  }
+}
+
+class _WalletPermissionsDialog extends StatefulWidget {
+  final String groupName;
+  final List<String> walletActions;
+  final List<String> initialAllowed;
+  final List<String> initialDenied;
+  final Function(List<String> allowed, List<String> denied) onSave;
+
+  const _WalletPermissionsDialog({
+    required this.groupName,
+    required this.walletActions,
+    required this.initialAllowed,
+    required this.initialDenied,
+    required this.onSave,
+  });
+
+  @override
+  State<_WalletPermissionsDialog> createState() => _WalletPermissionsDialogState();
+}
+
+class _WalletPermissionsDialogState extends State<_WalletPermissionsDialog> {
+  late Set<String> _allowed;
+  late Set<String> _denied;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _allowed = Set.from(widget.initialAllowed);
+    _denied = Set.from(widget.initialDenied);
+  }
+
+  void _toggleAllow(String action) {
+    setState(() {
+      if (_allowed.contains(action)) {
+        _allowed.remove(action);
+      } else {
+        _allowed.add(action);
+        _denied.remove(action);
+      }
+    });
+  }
+
+  void _toggleDeny(String action) {
+    setState(() {
+      if (_denied.contains(action)) {
+        _denied.remove(action);
+      } else {
+        _denied.add(action);
+        _allowed.remove(action);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Permissions: ${widget.groupName}'),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: widget.walletActions
+              .map((action) {
+                final actionName = action.replaceFirst('wallet:', '');
+                final isAllowed = _allowed.contains(action);
+                final isDenied = _denied.contains(action);
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(actionName),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.check_circle,
+                          color: isAllowed ? Colors.green : Colors.grey,
+                        ),
+                        onPressed: () => _toggleAllow(action),
+                        tooltip: 'Allow',
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.cancel,
+                          color: isDenied ? Colors.red : Colors.grey,
+                        ),
+                        onPressed: () => _toggleDeny(action),
+                        tooltip: 'Deny',
+                      ),
+                    ],
+                  ),
+                );
+              })
+              .toList(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _saving
+              ? null
+              : () async {
+                  setState(() => _saving = true);
+                  widget.onSave(_allowed.toList(), _denied.toList());
+                  if (mounted) Navigator.pop(context);
+                },
+          child: _saving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),
         ),
       ],
     );

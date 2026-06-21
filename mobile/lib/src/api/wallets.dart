@@ -144,3 +144,12 @@ Future<void> putPermissionMatrixApi(
         {required String walletId, required String entriesJson}) =>
     RustLib.instance.api.crateApiWalletsPutPermissionMatrixApi(
         walletId: walletId, entriesJson: entriesJson);
+
+Future<String> getWalletPermissionsApi({required String walletId}) =>
+    RustLib.instance.api
+        .crateApiWalletsGetWalletPermissionsApi(walletId: walletId);
+
+Future<void> setWalletPermissionsApi(
+        {required String walletId, required String entriesJson}) =>
+    RustLib.instance.api.crateApiWalletsSetWalletPermissionsApi(
+        walletId: walletId, entriesJson: entriesJson);

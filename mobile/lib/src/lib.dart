@@ -274,6 +274,14 @@ Future<void> putWalletPermissionMatrix(
     RustLib.instance.api.cratePutWalletPermissionMatrix(
         walletId: walletId, entriesJson: entriesJson);
 
+Future<String> getWalletPermissions({required String walletId}) =>
+    RustLib.instance.api.crateGetWalletPermissions(walletId: walletId);
+
+Future<void> setWalletPermissions(
+        {required String walletId, required String entriesJson}) =>
+    RustLib.instance.api.crateSetWalletPermissions(
+        walletId: walletId, entriesJson: entriesJson);
+
 Future<String> getEvents() => RustLib.instance.api.crateGetEvents();
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).
