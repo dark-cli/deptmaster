@@ -1948,7 +1948,36 @@ pub async fn add_user_group_member(
         ));
     }
 
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    // Check vector permission: can user's groups add members to this specific group?
+    let can_add = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletMemberAdd,
+        &Resource::WalletGroup(group_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet member group add permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_add {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to add members to this group"
+            })),
+        ));
+    }
+
     reject_system_user_group(&state, wallet_uuid, group_uuid).await?;
 
     let db = Database::new((*state.db_pool).clone());
@@ -2059,7 +2088,37 @@ pub async fn remove_user_group_member(
             Json(serde_json::json!({"error": format!("Invalid user_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check vector permission: can user's groups remove members from this specific group?
+    let can_remove = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletMemberRemove,
+        &Resource::WalletGroup(group_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet member group remove permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_remove {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to remove members from this group"
+            })),
+        ));
+    }
+
     reject_system_user_group(&state, wallet_uuid, group_uuid).await?;
 
     let event_data = serde_json::json!({ "user_id": user_id });
