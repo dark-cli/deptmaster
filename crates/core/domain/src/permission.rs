@@ -36,13 +36,18 @@ pub enum Action {
     ContactGroupUpdate,
 
     // Wallet actions (granular, replaces WalletRead/Update/Delete/ManageMembers)
+    // Tier 1: Global wallet management
     WalletInfoRead,       // Read wallet name, description, members count
     WalletInfoUpdate,     // Modify wallet name, description
-    WalletMemberAdd,      // Invite/add users
-    WalletMemberRemove,   // Remove users
-    WalletMemberList,     // View all members
-    WalletOwnerTransfer,  // Transfer ownership (OWNER ONLY in code)
-    WalletDelete,         // Soft delete wallet (OWNER ONLY in code)
+    // Tier 2: Global member management
+    WalletMemberAdd,      // Invite/add users to wallet
+    WalletMemberRemove,   // Remove users from wallet
+    WalletMemberList,     // View all members in wallet
+    // Tier 2: Vector-based member management (scoped to target group)
+    WalletSetPermissionMatrix,  // Modify member group permissions
+    // Tier 3: Owner-only operations (hardcoded in handlers, no matrix check)
+    WalletOwnerTransfer,  // Transfer ownership (OWNER ONLY)
+    WalletDelete,         // Soft delete wallet (OWNER ONLY)
 
     /// Owner-only fallback: bypasses every other check when held.
     /// Deprecated: kept for backward compatibility, not used in new code.
@@ -77,6 +82,7 @@ impl Action {
             Action::WalletMemberAdd => "wallet:member_add",
             Action::WalletMemberRemove => "wallet:member_remove",
             Action::WalletMemberList => "wallet:member_list",
+            Action::WalletSetPermissionMatrix => "wallet:set_permission_matrix",
             Action::WalletOwnerTransfer => "wallet:owner_transfer",
             Action::WalletDelete => "wallet:delete",
             Action::WalletSuperPermission => "wallet:super_permission",
@@ -111,6 +117,7 @@ impl Action {
             "wallet:member_add" => Some(Action::WalletMemberAdd),
             "wallet:member_remove" => Some(Action::WalletMemberRemove),
             "wallet:member_list" => Some(Action::WalletMemberList),
+            "wallet:set_permission_matrix" => Some(Action::WalletSetPermissionMatrix),
             "wallet:owner_transfer" => Some(Action::WalletOwnerTransfer),
             "wallet:delete" => Some(Action::WalletDelete),
             // Old wallet actions (deprecated, for backward compat)
@@ -146,6 +153,7 @@ impl Action {
             Action::WalletMemberAdd,
             Action::WalletMemberRemove,
             Action::WalletMemberList,
+            Action::WalletSetPermissionMatrix,
             Action::WalletOwnerTransfer,
             Action::WalletDelete,
             Action::WalletSuperPermission,
