@@ -282,7 +282,7 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
                 "aggregate_id": contact_id,
                 "event_type": "CREATED",
                 "event_data": event_data,
-                "timestamp": contact_timestamp.isoformat() + "Z",
+                "created_at": contact_timestamp.isoformat() + "Z",
                 "version": 1,
                 "wallet_id": wallet_id,
                 "user_id": user_id
@@ -371,7 +371,7 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
                 "aggregate_id": transaction_id,
                 "event_type": "CREATED",
                 "event_data": event_data,
-                "timestamp": txn_timestamp.isoformat().replace('+00:00', 'Z'),
+                "created_at": txn_timestamp.isoformat().replace('+00:00', 'Z'),
                 "version": 1,
                 "wallet_id": wallet_id,
                 "user_id": user_id
