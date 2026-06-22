@@ -276,7 +276,7 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
         print("📤 Uploading contact events (batch)...")
         try:
             response = requests.post(
-                f"{API_BASE_URL}/api/sync/events",
+                f"{API_BASE_URL}/api/wallets/{wallet_id}/sync/events",
                 json=events,
                 headers=auth_headers,
                 timeout=60
@@ -366,7 +366,7 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
             print("📤 Uploading transaction events...")
             try:
                 response = requests.post(
-                    f"{API_BASE_URL}/api/sync/events",
+                    f"{API_BASE_URL}/api/wallets/{wallet_id}/sync/events",
                     json=transaction_events,
                     headers=auth_headers,
                     timeout=120

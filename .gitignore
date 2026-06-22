@@ -47,3 +47,4 @@ mobile/android/app/src/main/jniLibs/
 # Claude Code project-wide config lives in .claude/ (CLAUDE.md, settings.json).
 .mcp.json
 AGENTS.md
+debitum-backup.zip
