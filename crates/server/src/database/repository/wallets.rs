@@ -528,4 +528,106 @@ impl Database {
 
         Ok(result.rows_affected() as i64)
     }
+
+    // ============ VECTOR MEMBER PERMISSIONS ============
+
+    /// Get all vector (scoped) member permissions for a wallet
+    pub async fn get_wallet_member_permissions_impl(
+        &self,
+    ) -> Result<Vec<(Uuid, Uuid, String, bool)>, DbError> {
+        let perms: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
+            r#"
+            SELECT source_group_id, target_group_id, action, is_deny
+            FROM wallet_member_permission_matrix
+            ORDER BY source_group_id, target_group_id, action
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(perms)
+    }
+
+    /// Set vector permission: (source_group can/cannot perform action on target_group)
+    pub async fn set_wallet_member_permission_impl(
+        &self,
+        source_group_id: Uuid,
+        target_group_id: Uuid,
+        action: &str,
+        is_deny: bool,
+    ) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO wallet_member_permission_matrix (source_group_id, target_group_id, action, is_deny, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, NOW(), NOW())
+            ON CONFLICT (source_group_id, target_group_id, action)
+            DO UPDATE SET is_deny = $4, updated_at = NOW()
+            "#,
+        )
+        .bind(source_group_id)
+        .bind(target_group_id)
+        .bind(action)
+        .bind(is_deny)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Revoke vector permission for a specific (source, target, action) tuple
+    pub async fn revoke_wallet_member_permission_impl(
+        &self,
+        source_group_id: Uuid,
+        target_group_id: Uuid,
+        action: &str,
+    ) -> Result<bool, DbError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM wallet_member_permission_matrix
+            WHERE source_group_id = $1 AND target_group_id = $2 AND action = $3
+            "#,
+        )
+        .bind(source_group_id)
+        .bind(target_group_id)
+        .bind(action)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Bulk set vector permissions (used by API endpoints)
+    /// Clears all existing permissions for target group first, then sets new ones
+    pub async fn set_wallet_member_permissions_bulk_impl(
+        &self,
+        target_group_id: Uuid,
+        entries: &[(Uuid, String, bool)],
+    ) -> Result<(), DbError> {
+        let mut tx = self.pool.begin().await?;
+
+        // Delete all existing permissions for this target group
+        sqlx::query("DELETE FROM wallet_member_permission_matrix WHERE target_group_id = $1")
+            .bind(target_group_id)
+            .execute(&mut *tx)
+            .await?;
+
+        // Insert new permissions
+        for (source_group_id, action, is_deny) in entries {
+            sqlx::query(
+                r#"
+                INSERT INTO wallet_member_permission_matrix (source_group_id, target_group_id, action, is_deny, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, NOW(), NOW())
+                "#,
+            )
+            .bind(source_group_id)
+            .bind(target_group_id)
+            .bind(action)
+            .bind(is_deny)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
 }
