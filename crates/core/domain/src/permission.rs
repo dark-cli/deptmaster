@@ -203,6 +203,8 @@ pub enum Resource {
     Wallet(Uuid),
     ContactGroup(Uuid),
     UserGroup(Uuid),
+    // Wallet member groups for vector-based permission checks (which source can manage which target)
+    WalletGroup(Uuid),
     AllContacts,
     AllTransactions,
     AllUserGroups,
@@ -216,7 +218,8 @@ impl Resource {
             | Resource::Transaction(id)
             | Resource::Wallet(id)
             | Resource::ContactGroup(id)
-            | Resource::UserGroup(id) => Some(*id),
+            | Resource::UserGroup(id)
+            | Resource::WalletGroup(id) => Some(*id),
             Resource::AllContacts | Resource::AllTransactions | Resource::AllUserGroups => None,
         }
     }
@@ -230,6 +233,7 @@ impl fmt::Display for Resource {
             Resource::Wallet(id) => write!(f, "wallet:{}", id),
             Resource::ContactGroup(id) => write!(f, "contact_group:{}", id),
             Resource::UserGroup(id) => write!(f, "user_group:{}", id),
+            Resource::WalletGroup(id) => write!(f, "wallet_group:{}", id),
             Resource::AllContacts => write!(f, "all_contacts"),
             Resource::AllTransactions => write!(f, "all_transactions"),
             Resource::AllUserGroups => write!(f, "all_user_groups"),
