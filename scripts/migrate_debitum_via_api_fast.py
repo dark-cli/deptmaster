@@ -243,19 +243,19 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
             phone = person['linked_contact_uri'] if person['linked_contact_uri'] else None
             if phone and len(phone) > 50:
                 phone = None
-            
+
             # Use base timestamp with small increments to maintain order
             # Contacts are created before their transactions
             contact_timestamp = base_timestamp + timedelta(seconds=idx)
-            
+
             event_data = {
+                "type": "contact_created",
                 "name": contact_name,
                 "username": username,
                 "phone": phone,
                 "email": None,
                 "notes": person['note'] if person['note'] else '',
-                "comment": f"Migrated from Debitum backup - Person ID: {person['id_person']}",
-                "timestamp": contact_timestamp.isoformat() + "Z"
+                "group_ids": []
             }
             
             # Create CREATED event
@@ -335,15 +335,14 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
             # Prepare transaction event data
             transaction_id = str(uuid.uuid4())
             event_data = {
+                "type": "transaction_created",
                 "contact_id": contact_id,
-                "type": "money",
-                "direction": direction,
                 "amount": amount,
+                "direction": direction,
                 "currency": "IQD",  # Iraqi Dinar - default currency
                 "description": txn['description'] if txn['description'] else None,
                 "transaction_date": txn_date,
-                "comment": f"Migrated from Debitum backup - Transaction ID: {txn['id_transaction']}",
-                "timestamp": txn_timestamp.isoformat().replace('+00:00', 'Z')
+                "transaction_type": None
             }
             
             # Create CREATED event with actual timestamp from database
