@@ -80,6 +80,56 @@ async fn resolve_wallet_actions(
     Ok(allowed.difference(&denied).copied().collect())
 }
 
+/// Resolve allowed actions for a user managing a specific wallet member group (vector permissions)
+/// Uses wallet_member_permission_matrix (source_group, target_group, action) tuples
+async fn resolve_wallet_member_permissions(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+    target_group_id: Uuid,
+) -> Result<HashSet<Action>, DbError> {
+    // Get user's groups (including implicit all_users)
+    let user_group_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND (name = 'all_users' OR id IN (
+            SELECT user_group_id FROM user_group_members WHERE user_id = $2
+        ))",
+    )
+    .bind(ctx.wallet_id)
+    .bind(ctx.user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    if user_group_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    // Query wallet_member_permission_matrix for these source groups managing this target group
+    let perms: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT action, is_deny FROM wallet_member_permission_matrix
+         WHERE source_group_id = ANY($1) AND target_group_id = $2",
+    )
+    .bind(&user_group_ids)
+    .bind(target_group_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    let mut allowed = HashSet::new();
+    let mut denied = HashSet::new();
+
+    for (action_name, is_deny) in perms {
+        if let Some(action) = Action::from_str(&action_name) {
+            if is_deny {
+                denied.insert(action);
+            } else {
+                allowed.insert(action);
+            }
+        }
+    }
+
+    Ok(allowed.difference(&denied).copied().collect())
+}
+
 /// Resolve allowed actions for a user on a resource.
 ///
 /// Thin wrapper around the shared `resolver::resolve_actions`. The rules
@@ -99,9 +149,14 @@ pub async fn resolve_actions(
         .is_wallet_owner(ctx.wallet_id, ctx.user_id)
         .await?
     {
-        // Handle wallet-level resources (wallet-scoped permissions)
+        // Handle wallet-level resources (global wallet-scoped permissions)
         if matches!(resource, Resource::Wallet(_)) {
             return resolve_wallet_actions(pool, ctx).await;
+        }
+
+        // Handle wallet member group resources (vector-based member management permissions)
+        if let Resource::WalletGroup(target_group_id) = resource {
+            return resolve_wallet_member_permissions(pool, ctx, *target_group_id).await;
         }
 
         // Handle contact-group resources (resource-scoped permissions with cache)
