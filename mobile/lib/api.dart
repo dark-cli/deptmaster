@@ -744,6 +744,35 @@ class Api {
     }
   }
 
+  /// Get member-level permissions: (source_group, target_group, action, is_deny) matrix
+  /// Returns empty list if endpoint not available (graceful degradation for older backends)
+  static Future<List<Map<String, dynamic>>> getMemberPermissions(String walletId) async {
+    if (kIsWeb) return [];
+    try {
+      await _ensureRustReady();
+      final json = await rust.getMemberPermissions(walletId: walletId);
+      final list = jsonDecode(json) as List<dynamic>?;
+      return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+    } catch (e) {
+      // Graceful degradation: if endpoint doesn't exist, just return empty list
+      debugPrint('[member-permissions] getMemberPermissions failed: $e');
+      return [];
+    }
+  }
+
+  /// Set member-level permissions: grant/revoke actions for source→target group pairs
+  static Future<void> setMemberPermissions(String walletId, List<Map<String, dynamic>> entries) async {
+    if (kIsWeb) return;
+    try {
+      await _ensureRustReady();
+      final entriesJson = jsonEncode(entries);
+      await rust.setMemberPermissions(walletId: walletId, entriesJson: entriesJson);
+    } catch (e) {
+      debugPrint('[member-permissions] setMemberPermissions failed: $e');
+      throw Exception('Failed to set member permissions. Ensure backend supports member-level permissions.');
+    }
+  }
+
   static bool isPermissionDeniedError(dynamic e) {
     final s = e.toString().toLowerCase();
     return s.contains(_permissionDeniedCode);

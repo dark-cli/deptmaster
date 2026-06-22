@@ -225,6 +225,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/wallets/:wallet_id/wallet-permissions",
             get(handlers::get_wallet_permissions).put(handlers::set_wallet_permissions),
         )
+        .route(
+            "/api/wallets/:wallet_id/member-permissions",
+            get(handlers::get_member_permissions).put(handlers::set_member_permissions),
+        )
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             wallet_context_middleware,

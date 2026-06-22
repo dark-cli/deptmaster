@@ -3027,3 +3027,195 @@ pub async fn set_wallet_permissions(
 
     Ok(Json(serde_json::json!({"message": "Wallet permissions updated"})))
 }
+
+// ============================================================================
+// WALLET MEMBER PERMISSIONS (vector-based, scoped to target group)
+// ============================================================================
+
+#[derive(Serialize, Deserialize)]
+pub struct MemberPermissionEntry {
+    pub source_group_id: String,
+    pub target_group_id: String,
+    pub action: String,
+    pub is_deny: bool,
+}
+
+#[derive(Deserialize)]
+pub struct SetMemberPermissionsRequest {
+    pub entries: Vec<MemberPermissionEntry>,
+}
+
+/// GET /api/wallets/:wallet_id/member-permissions
+/// Returns vector-based member management permissions
+pub async fn get_member_permissions(
+    Path(wallet_id): Path<String>,
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<Vec<MemberPermissionEntry>>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
+
+    // Only admins can view member permissions
+    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Query wallet_member_permission_matrix for this wallet's groups
+    let perms: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
+        r#"
+        SELECT wmp.source_group_id, wmp.target_group_id, wmp.action, wmp.is_deny
+        FROM wallet_member_permission_matrix wmp
+        INNER JOIN user_groups ug ON ug.id IN (wmp.source_group_id, wmp.target_group_id)
+        WHERE ug.wallet_id = $1
+        ORDER BY wmp.source_group_id, wmp.target_group_id, wmp.action
+        "#
+    )
+    .bind(wallet_uuid)
+    .fetch_all(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("get_member_permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch permissions"})),
+        )
+    })?;
+
+    let entries: Vec<MemberPermissionEntry> = perms
+        .into_iter()
+        .map(|(source_id, target_id, action, is_deny)| MemberPermissionEntry {
+            source_group_id: source_id.to_string(),
+            target_group_id: target_id.to_string(),
+            action,
+            is_deny,
+        })
+        .collect();
+
+    Ok(Json(entries))
+}
+
+/// PUT /api/wallets/:wallet_id/member-permissions
+/// Set vector-based member management permissions
+pub async fn set_member_permissions(
+    Path(wallet_id): Path<String>,
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(payload): Json<SetMemberPermissionsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
+
+    // Only admins can modify member permissions
+    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    for entry in payload.entries {
+        let source_group_id = Uuid::parse_str(&entry.source_group_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid source_group_id: {}", e)})),
+            )
+        })?;
+
+        let target_group_id = Uuid::parse_str(&entry.target_group_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid target_group_id: {}", e)})),
+            )
+        })?;
+
+        // Prevent source == target
+        if source_group_id == target_group_id {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Source and target groups cannot be the same"})),
+            ));
+        }
+
+        // Verify both groups belong to this wallet
+        let source_wallet_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT wallet_id FROM user_groups WHERE id = $1"
+        )
+        .bind(source_group_id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching source group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Source group not found"})),
+            )
+        })?;
+
+        let target_wallet_id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT wallet_id FROM user_groups WHERE id = $1"
+        )
+        .bind(target_group_id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching target group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Target group not found"})),
+            )
+        })?;
+
+        if source_wallet_id != wallet_uuid || target_wallet_id != wallet_uuid {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Groups do not belong to this wallet"})),
+            ));
+        }
+
+        // Verify action is valid
+        if domain::Action::from_str(&entry.action).is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid action: {}", entry.action)})),
+            ));
+        }
+
+        // Set permission in database (insert or update)
+        sqlx::query(
+            r#"
+            INSERT INTO wallet_member_permission_matrix (source_group_id, target_group_id, action, is_deny)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (source_group_id, target_group_id, action) DO UPDATE
+            SET is_deny = $4
+            "#
+        )
+        .bind(source_group_id)
+        .bind(target_group_id)
+        .bind(&entry.action)
+        .bind(entry.is_deny)
+        .execute(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error setting member permission: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to set permission"})),
+            )
+        })?;
+    }
+
+    Ok(Json(serde_json::json!({"message": "Member permissions updated"})))
+}

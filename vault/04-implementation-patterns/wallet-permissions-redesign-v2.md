@@ -1,8 +1,9 @@
 # Wallet Permissions Redesign - V2 (Vector-Based Model)
 
-**Status:** Planning  
+**Status:** ✅ Implemented (Phases 1-10 Complete)  
 **Date:** 2026-06-22  
-**Model:** Three-tier permission system with global + vector + hardcoded owner
+**Model:** Three-tier permission system with global + vector + hardcoded owner  
+**Last Updated:** 2026-06-22 (Implementation Complete)
 
 ---
 
@@ -458,21 +459,121 @@ Result: Only owner can delete, regardless of admin status
 
 ---
 
-## Implementation Checklist
+## Implementation Status: ✅ Complete
 
-- [ ] Phase 1: Add `wallet_member_permission_matrix` table
-- [ ] Phase 2: Update Action enum + Resource enum with WalletGroup
-- [ ] Phase 3: Implement vector permission resolver
-- [ ] Phase 4: Update all member management handlers (add/remove/list)
-- [ ] Phase 5: Add API endpoints for vector permissions
-- [ ] Phase 6: Add Rust client functions
-- [ ] Phase 7: Add Dart wrappers
-- [ ] Phase 8: Implement UI tabs
-- [ ] Phase 9: Integration tests
-- [ ] Phase 10: Documentation & examples
+### Phase 1: Database Layer ✅
+- ✅ Migration 037: `wallet_member_permission_matrix` table
+- ✅ Schema with source_group_id, target_group_id, action, is_deny
+- ✅ Constraint: source ≠ target
+- ✅ Indexes for query performance
+
+### Phase 2: Domain Layer ✅
+- ✅ Action::WalletSetPermissionMatrix variant
+- ✅ Resource::WalletGroup(Uuid) variant
+- ✅ Updated Action::as_str(), from_str(), all(), implies()
+- ✅ Updated Resource::id() and Display trait
+
+### Phase 3: Permission Resolution ✅
+- ✅ resolve_wallet_member_permissions() function
+- ✅ Vector permission matrix lookup
+- ✅ Deny-wins semantics (allowed - denied)
+- ✅ Integration with resolve_actions()
+
+### Phase 4: Handler Enforcement ✅
+- ✅ add_user_group_member: checks Resource::WalletGroup
+- ✅ remove_user_group_member: checks Resource::WalletGroup
+- ✅ get_member_permissions handler (GET endpoint)
+- ✅ set_member_permissions handler (PUT endpoint)
+- ✅ MemberPermissionEntry + SetMemberPermissionsRequest types
+
+### Phase 5: API Endpoints ✅
+- ✅ GET /api/wallets/:wallet_id/member-permissions
+- ✅ PUT /api/wallets/:wallet_id/member-permissions
+- ✅ Routes registered in main.rs
+- ✅ Handlers exported in handlers/mod.rs
+
+### Phase 6: Rust Client API ✅
+- ✅ get_member_permissions_api() function
+- ✅ set_member_permissions_api() function
+- ✅ Public exports in api/mod.rs
+- ✅ Graceful error handling
+
+### Phase 7: Client Library Functions ✅
+- ✅ get_member_permissions() - public Dart interface
+- ✅ set_member_permissions() - public Dart interface
+- ✅ Cache invalidation on permission changes
+- ✅ Vault resync triggers
+
+### Phase 8: Flutter UI ✅
+- ✅ 6th tab in manage_wallet_screen.dart: "Member Perms"
+- ✅ _MemberPermissionsTab with source→target grid layout
+- ✅ _MemberPermissionsDialog for editing permissions
+- ✅ Visual UI: source group → target group matrix
+- ✅ Chip-based allow/deny visualization
+- ✅ API.getMemberPermissions() + setMemberPermissions() wrappers
+
+### Phase 9: Integration Tests ✅
+- ✅ member_permission_enforcement.rs test file
+- ✅ CommandRunner support: `member-permission grant|revoke source target action`
+- ✅ Test scenarios: grant, revoke, deny-wins, owner bypass
+- ✅ Setup helpers for multi-group wallet
+
+### Phase 10: Documentation & Vault ✅
+- ✅ This file updated with implementation status
+- ✅ Example scenarios documented (Scenario 1-3)
+- ✅ Security properties table completed
+- ✅ All phases marked complete
 
 ---
 
-## Next Step
+## Files Changed
 
-Start Phase 1: Database migration for `wallet_member_permission_matrix` table
+**Backend (Rust):**
+- `crates/server/migrations/037_wallet_member_permission_matrix.sql` - Database schema
+- `crates/core/domain/src/permission.rs` - Action & Resource enums
+- `crates/server/src/permissions/resolver.rs` - Permission resolution logic
+- `crates/server/src/database/repository/wallets.rs` - Database queries
+- `crates/server/src/handlers/wallets.rs` - API handlers
+- `crates/server/src/main.rs` - Route registration
+- `crates/server/src/handlers/mod.rs` - Handler exports
+
+**Client (Rust):**
+- `crates/client/src/api/wallets.rs` - API functions
+- `crates/client/src/api/mod.rs` - API exports
+- `crates/client/src/lib.rs` - Public client functions
+- `crates/client/tests/common/command_runner.rs` - Test commands
+- `crates/client/tests/member_permission_enforcement.rs` - Integration tests
+
+**Mobile (Dart/Flutter):**
+- `mobile/lib/screens/manage_wallet_screen.dart` - UI tabs & state
+- `mobile/lib/api.dart` - API wrappers
+
+---
+
+## How It Works: Quick Reference
+
+1. **User tries to add a member to a group:**
+   - Handler checks `Resource::WalletGroup(target_group_id)`
+   - Resolver queries `wallet_member_permission_matrix` for source groups
+   - Applies deny-wins rule
+   - Returns set of allowed actions
+   - Handler checks if `wallet:member_add` is in allowed set
+
+2. **Owner always bypasses:**
+   - Hardcoded check via `wallet_owners` table
+   - Happens BEFORE permission resolver
+   - No matrix lookup needed
+
+3. **No implicit permissions:**
+   - Default: group has no permissions on any target group
+   - Must explicitly grant via matrix
+   - Deny explicitly revokes
+
+---
+
+## Deployment Notes
+
+- ✅ Backward compatible: Old wallets keep working (default deny)
+- ✅ No data migration needed (table is new, orthogonal to existing schema)
+- ✅ Gradual adoption: UI and tests present, can enable/disable via feature flags if needed
+- ✅ All 10 phases implemented and tested
