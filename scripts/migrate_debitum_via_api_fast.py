@@ -193,28 +193,45 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
             shutil.rmtree(temp_dir)
         sys.exit(1)
     auth_headers["X-Wallet-Id"] = wallet_id
-    
+
+    # Get current user ID from auth token
+    # Extract user_id from JWT token claims
+    try:
+        import base64
+        import json
+        # JWT format: header.payload.signature
+        token_parts = auth_token.split('.')
+        if len(token_parts) >= 2:
+            # Add padding if needed
+            payload = token_parts[1]
+            payload += '=' * (4 - len(payload) % 4)
+            decoded = base64.urlsafe_b64decode(payload)
+            claims = json.loads(decoded)
+            user_id = claims.get('sub')  # 'sub' is typically the user ID in JWT
+            if not user_id:
+                # Fallback: try 'user_id' or 'id'
+                user_id = claims.get('user_id') or claims.get('id')
+        else:
+            user_id = None
+    except Exception as e:
+        print(f"⚠️  Failed to extract user_id from token: {e}")
+        user_id = None
+
+    if not user_id:
+        print("❌ Failed to determine user ID from auth token")
+        if temp_dir:
+            import shutil
+            shutil.rmtree(temp_dir)
+        sys.exit(1)
+
+    print(f"✅ Using wallet_id={wallet_id}, user_id={user_id}")
+
     debitum_conn = None
     try:
         # Connect to Debitum SQLite
         debitum_conn = sqlite3.connect(db_path)
         debitum_conn.row_factory = sqlite3.Row
         debitum_cur = debitum_conn.cursor()
-        
-        # Get user ID (needed for events)
-        try:
-            user_response = requests.get(f"{API_BASE_URL}/api/admin/contacts", timeout=5)
-            if user_response.status_code == 200:
-                contacts = user_response.json()
-                if contacts:
-                    # Extract user_id from first contact (all contacts have same user_id)
-                    user_id = contacts[0].get('user_id')
-                else:
-                    user_id = None
-            else:
-                user_id = None
-        except:
-            user_id = None
         
         # Prepare all events for batch upload
         print("📇 Preparing contacts...")
@@ -266,7 +283,9 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
                 "event_type": "CREATED",
                 "event_data": event_data,
                 "timestamp": contact_timestamp.isoformat() + "Z",
-                "version": 1
+                "version": 1,
+                "wallet_id": wallet_id,
+                "user_id": user_id
             }
             events.append(event)
         
@@ -353,7 +372,9 @@ def migrate_debitum(debitum_db_path, username, wallet_name, password):
                 "event_type": "CREATED",
                 "event_data": event_data,
                 "timestamp": txn_timestamp.isoformat().replace('+00:00', 'Z'),
-                "version": 1
+                "version": 1,
+                "wallet_id": wallet_id,
+                "user_id": user_id
             }
             transaction_events.append(event)
         
