@@ -19,6 +19,20 @@ pub fn insufficient_permission_response() -> (StatusCode, Json<serde_json::Value
 ///
 /// # Arguments
 /// * `missing_permissions` - List of permission action names that are missing (e.g., ["wallet:member_add", "wallet:info_read"])
+///
+/// # Example usage in a handler:
+/// ```ignore
+/// let perm_model = PermissionModel::new((*state.db_pool).clone());
+/// let missing = perm_model.get_missing_permissions(
+///     &ctx,
+///     vec![Action::WalletMemberAdd],
+///     &Resource::Wallet(wallet_id)
+/// ).await?;
+///
+/// if !missing.is_empty() {
+///     return Err(responses::insufficient_permission_with_details(missing));
+/// }
+/// ```
 pub fn insufficient_permission_with_details(
     missing_permissions: Vec<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
