@@ -1058,25 +1058,31 @@ pub async fn update_wallet_user(
         )
     })?;
 
-    // Only wallet owners can change member roles (including promotion to owner)
-    // This is a critical security function that cannot be delegated
-    let is_owner = is_wallet_owner(&state, wallet_uuid, auth_user.user_id).await?;
-    if !is_owner {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({
-                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
-                "message": "Only wallet owners can change member roles"
-            })),
-        ));
-    }
-
     let user_uuid = Uuid::parse_str(&user_id).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": format!("Invalid user_id: {}", e)})),
         )
     })?;
+
+    // Owner transfer is hardcoded: only owners can promote to owner
+    if payload.role.is_owner() {
+        let validator = crate::permissions::owner_protection::OwnerPermissionValidator::new(
+            (*state.db_pool).clone(),
+        );
+        validator
+            .check_owner_transfer_allowed(wallet_uuid, auth_user.user_id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                        "message": e.to_string()
+                    })),
+                )
+            })?;
+    }
 
     // Emit event and apply to projection (payload.role is already validated by deserializer)
     let event_data = serde_json::json!({ "user_id": user_id, "role": payload.role.as_str() });

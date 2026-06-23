@@ -23,6 +23,8 @@ pub enum OwnerProtectionError {
     CannotModifyOwnerPermissions,
     /// Cannot add permissions to __owners__ group for non-all_contacts groups
     CannotAddPermissionsToOwnerGroup,
+    /// Only wallet owners can transfer ownership (hardcoded, not delegable)
+    OnlyOwnersCanTransferOwnership,
     /// Database error
     DatabaseError(String),
 }
@@ -35,6 +37,9 @@ impl std::fmt::Display for OwnerProtectionError {
             }
             Self::CannotAddPermissionsToOwnerGroup => {
                 write!(f, "Cannot add permissions to __owners__ group")
+            }
+            Self::OnlyOwnersCanTransferOwnership => {
+                write!(f, "Only wallet owners can transfer ownership")
             }
             Self::DatabaseError(e) => {
                 write!(f, "Database error: {}", e)
@@ -189,6 +194,38 @@ impl OwnerPermissionValidator {
         }
 
         Ok(())
+    }
+
+    /// Hardcoded owner transfer check (cannot be delegated)
+    ///
+    /// Validates that only wallet owners can promote users to owner status.
+    /// This is hardcoded and cannot be delegated via the permission matrix.
+    ///
+    /// # Arguments
+    /// * `wallet_id` - The wallet
+    /// * `actor_id` - User attempting the promotion
+    ///
+    /// # Returns
+    /// Ok(()) if actor is a wallet owner, Err(...) otherwise
+    pub async fn check_owner_transfer_allowed(
+        &self,
+        wallet_id: Uuid,
+        actor_id: Uuid,
+    ) -> Result<(), OwnerProtectionError> {
+        let is_owner: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM wallet_owners WHERE user_id = $1 AND wallet_id = $2)"
+        )
+        .bind(actor_id)
+        .bind(wallet_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| OwnerProtectionError::DatabaseError(e.to_string()))?;
+
+        if is_owner {
+            Ok(())
+        } else {
+            Err(OwnerProtectionError::OnlyOwnersCanTransferOwnership)
+        }
     }
 }
 
