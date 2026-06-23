@@ -1689,7 +1689,36 @@ pub async fn list_user_groups(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check wallet:member_list permission (owners bypass via hardcoded check)
+    let can_list = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletMemberList,
+        &Resource::Wallet(wallet_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet:member_list permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_list {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to list wallet members"
+            })),
+        ));
+    }
 
     let db = Database::new((*state.db_pool).clone());
     let groups = db.list_user_groups(wallet_uuid).await.map_err(|e| {
@@ -2651,7 +2680,36 @@ pub async fn list_permission_actions(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check wallet:info_read permission (owners bypass via hardcoded check)
+    let can_read = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletInfoRead,
+        &Resource::Wallet(wallet_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet:info_read permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_read {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to view wallet details"
+            })),
+        ));
+    }
 
     let db = Database::new((*state.db_pool).clone());
     let actions = db.get_all_permission_actions().await.map_err(|e| {
@@ -2682,7 +2740,36 @@ pub async fn get_permission_matrix(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check wallet:info_read permission (owners bypass via hardcoded check)
+    let can_read = crate::permissions::resolver::can_perform(
+        &state.db_pool,
+        &PermissionContext {
+            wallet_id: wallet_uuid,
+            user_id: auth_user.user_id,
+            user_role: WalletRole::Member,
+        },
+        domain::Action::WalletInfoRead,
+        &Resource::Wallet(wallet_uuid),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet:info_read permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to check permissions"})),
+        )
+    })?;
+
+    if !can_read {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "You do not have permission to view wallet details"
+            })),
+        ));
+    }
 
     let db = Database::new((*state.db_pool).clone());
     let matrix = db.get_permission_matrix(wallet_uuid).await.map_err(|e| {
