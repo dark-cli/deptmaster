@@ -1551,7 +1551,13 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
 
   void _groupActions() {
     _groupedActions = {};
-    for (final action in widget.availableActions) {
+    // Only show contact and transaction actions, not wallet-level actions
+    final contactTransactionActions = widget.availableActions.where((a) {
+      final name = a['name'] as String? ?? '';
+      return name.startsWith('contact:') || name.startsWith('transaction:');
+    }).toList();
+
+    for (final action in contactTransactionActions) {
       final name = action['name'] as String? ?? '';
       final parts = name.split(':');
       final category = parts.isNotEmpty ? parts[0] : 'other';
@@ -2114,14 +2120,13 @@ class _WalletPermissionsTab extends StatefulWidget {
 class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
   late Map<String, Set<String>> _allowedActions;
   late Map<String, Set<String>> _deniedActions;
+  // Only matrix-grantable wallet actions. owner_transfer and delete are hardcoded to owners only.
   static const List<String> _walletActions = [
     'wallet:info_read',
     'wallet:info_update',
     'wallet:member_add',
     'wallet:member_remove',
     'wallet:member_list',
-    'wallet:owner_transfer',
-    'wallet:delete',
   ];
 
   @override
