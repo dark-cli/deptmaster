@@ -1058,32 +1058,15 @@ pub async fn update_wallet_user(
         )
     })?;
 
-    // Check wallet:member_add permission (managing member roles requires add permission)
-    let can_update = crate::permissions::resolver::can_perform(
-        &state.db_pool,
-        &PermissionContext {
-            wallet_id: wallet_uuid,
-            user_id: auth_user.user_id,
-            user_role: WalletRole::Member,
-        },
-        domain::Action::WalletMemberAdd,
-        &Resource::Wallet(wallet_uuid),
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking wallet:member_add permission: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
-
-    if !can_update {
+    // Only wallet owners can change member roles (including promotion to owner)
+    // This is a critical security function that cannot be delegated
+    let is_owner = is_wallet_owner(&state, wallet_uuid, auth_user.user_id).await?;
+    if !is_owner {
         return Err((
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({
                 "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
-                "message": "You do not have permission to update member roles"
+                "message": "Only wallet owners can change member roles"
             })),
         ));
     }
@@ -1182,6 +1165,18 @@ pub async fn remove_user_from_wallet(
             Json(serde_json::json!({"error": format!("Invalid user_id: {}", e)})),
         )
     })?;
+
+    // Prevent removing owners (even if user has member_remove permission)
+    let is_target_owner = is_wallet_owner(&state, wallet_uuid, user_uuid).await?;
+    if is_target_owner {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
+                "message": "Cannot remove wallet owners. Transfer ownership first."
+            })),
+        ));
+    }
 
     // Owner may remove themselves only if there is at least one other owner.
     if auth_user.user_id == user_uuid {
