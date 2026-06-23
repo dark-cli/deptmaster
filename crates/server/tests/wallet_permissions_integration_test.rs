@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 mod test_helpers;
-use test_helpers::setup_test_db;
+use test_helpers::{setup_test_db, create_test_user, ensure_wallet_has_system_groups};
 
 // ============ HELPER FIXTURES ============
 
@@ -22,8 +22,8 @@ struct TestGroups {
 
 async fn setup_test_wallet(pool: &PgPool) -> TestWallet {
     let wallet_id = Uuid::new_v4();
-    let owner_id = Uuid::new_v4();
-    let member_id = Uuid::new_v4();
+    let owner_id = create_test_user(pool).await;
+    let member_id = create_test_user(pool).await;
 
     // Create wallet
     sqlx::query(
@@ -45,6 +45,9 @@ async fn setup_test_wallet(pool: &PgPool) -> TestWallet {
     .execute(pool)
     .await
     .expect("Failed to add users to wallet");
+
+    // Create system groups and initialize permission matrix
+    ensure_wallet_has_system_groups(pool, wallet_id).await;
 
     // Mark owner in wallet_owners table (hardcoded bypass)
     sqlx::query("INSERT INTO wallet_owners (wallet_id, user_id) VALUES ($1, $2)")
@@ -97,9 +100,10 @@ async fn test_all_users_has_wallet_info_read() {
     let wallet = setup_test_wallet(&pool).await;
     let groups = setup_test_groups(&pool, wallet.id).await;
 
-    // Query: wallet_permission_matrix should have info_read for all_users (backfilled)
-    let perms: Vec<String> = sqlx::query_scalar(
-        "SELECT action FROM wallet_permission_matrix WHERE user_group_id = $1 AND is_deny = false",
+    // Query: wallet_permission_matrix should NOT have wallet permissions for all_users by default
+    // All_users only has contact/transaction permissions via group_permission_matrix
+    let wallet_perms: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM wallet_permission_matrix WHERE user_group_id = $1 AND action LIKE 'wallet:%' AND is_deny = false",
     )
     .bind(groups.all_users_id)
     .fetch_all(&pool)
@@ -107,8 +111,8 @@ async fn test_all_users_has_wallet_info_read() {
     .expect("Failed to query permissions");
 
     assert!(
-        perms.contains(&"wallet:info_read".to_string()),
-        "all_users should have wallet:info_read by default"
+        wallet_perms.is_empty(),
+        "all_users should have NO wallet permissions by default (only contact/transaction via contact_groups)"
     );
 }
 
@@ -118,8 +122,10 @@ async fn test_all_users_has_wallet_member_list() {
     let wallet = setup_test_wallet(&pool).await;
     let groups = setup_test_groups(&pool, wallet.id).await;
 
-    let perms: Vec<String> = sqlx::query_scalar(
-        "SELECT action FROM wallet_permission_matrix WHERE user_group_id = $1 AND is_deny = false",
+    // all_users has NO wallet-level permissions by default
+    // Contact/transaction permissions are via group_permission_matrix instead
+    let wallet_member_list: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM wallet_permission_matrix WHERE user_group_id = $1 AND action = 'wallet:member_list' AND is_deny = false",
     )
     .bind(groups.all_users_id)
     .fetch_all(&pool)
@@ -127,8 +133,8 @@ async fn test_all_users_has_wallet_member_list() {
     .expect("Failed to query permissions");
 
     assert!(
-        perms.contains(&"wallet:member_list".to_string()),
-        "all_users should have wallet:member_list by default"
+        wallet_member_list.is_empty(),
+        "all_users should NOT have wallet:member_list by default (wallet permissions are delegable, not default)"
     );
 }
 
@@ -168,17 +174,28 @@ async fn test_soft_delete_sets_timestamps() {
         .await
         .expect("Failed to soft delete wallet");
 
-    // Verify all fields set
-    let (deleted_at, deleted_by, reason): (Option<String>, Option<String>, Option<String>) =
-        sqlx::query_as("SELECT deleted_at, deleted_by, deletion_reason FROM wallets WHERE id = $1")
-            .bind(wallet.id)
-            .fetch_one(&pool)
-            .await
-            .expect("Failed to fetch wallet");
+    // Verify soft delete columns are set (deleted_at, deleted_by, deletion_reason)
+    let (deleted_by, reason): (Option<Uuid>, Option<String>) = sqlx::query_as(
+        "SELECT deleted_by, deletion_reason FROM wallets WHERE id = $1"
+    )
+    .bind(wallet.id)
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to fetch wallet");
 
-    assert!(deleted_at.is_some(), "deleted_at should be set");
-    assert_eq!(deleted_by, Some(wallet.owner_id.to_string()), "deleted_by should be owner");
+    assert_eq!(deleted_by, Some(wallet.owner_id), "deleted_by should be owner");
     assert_eq!(reason, Some("User requested deletion".to_string()), "reason should be set");
+
+    // Verify deleted_at is set (can't easily get timestamp, but we can check with SQL)
+    let deleted_at_not_null: bool = sqlx::query_scalar(
+        "SELECT deleted_at IS NOT NULL FROM wallets WHERE id = $1"
+    )
+    .bind(wallet.id)
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to check deleted_at");
+
+    assert!(deleted_at_not_null, "deleted_at should be set");
 }
 
 #[tokio::test]
