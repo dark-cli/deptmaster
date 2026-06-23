@@ -324,10 +324,22 @@ pub async fn post_sync_events(
     let denied_event_ids = perm_model
         .get_denied_event_ids(&perm_ctx, &events)
         .await
-        .map_err(|_| responses::insufficient_permission_response())?;
+        .map_err(|e| {
+            tracing::error!("Permission check error: {:?}", e);
+            responses::insufficient_permission_response()
+        })?;
 
     if !denied_event_ids.is_empty() {
-        return Err(responses::insufficient_permission_response());
+        // Get details about what permissions are missing
+        // For denied events, collect all required permissions
+        let mut missing_perms = std::collections::HashSet::new();
+        for event in events.iter().filter(|e| denied_event_ids.contains(&e.id)) {
+            for action in event.permission_metadata().iter().map(|(a, _)| a) {
+                missing_perms.insert(action.to_string());
+            }
+        }
+        let missing: Vec<String> = missing_perms.into_iter().collect();
+        return Err(responses::insufficient_permission_with_details(missing));
     }
 
     // Try to insert all events. Dedup is on (wallet_id, event_id); the client owns

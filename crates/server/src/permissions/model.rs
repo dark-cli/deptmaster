@@ -117,6 +117,36 @@ impl PermissionModel {
         resolver::filter_readable_events(&self.pool, ctx, events).await
     }
 
+    /// Get missing permissions for a given action and resource
+    ///
+    /// Returns a list of actions the user does NOT have for the given resource.
+    /// Useful for generating detailed error messages.
+    ///
+    /// # Arguments
+    /// * `ctx` - Permission context (who, what wallet, what role)
+    /// * `required_actions` - List of actions to check
+    /// * `resource` - The resource to check permissions for
+    ///
+    /// # Returns
+    /// Vec<String> of action names the user is missing (empty = has all permissions)
+    pub async fn get_missing_permissions(
+        &self,
+        ctx: &PermissionContext,
+        required_actions: Vec<Action>,
+        resource: &Resource,
+    ) -> Result<Vec<String>, DbError> {
+        let mut missing = Vec::new();
+
+        for action in required_actions {
+            let allowed = resolver::can_perform(&self.pool, ctx, action, resource).await?;
+            if !allowed {
+                missing.push(action.to_string());
+            }
+        }
+
+        Ok(missing)
+    }
+
     async fn check_permissions(
         &self,
         ctx: &PermissionContext,
