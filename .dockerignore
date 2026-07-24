@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Claude Code
+.claude/
+.codegraph/
+
+# Build artifacts
+target/
+**/target/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Mobile
+mobile/
+
+# Documentation & misc
+vault/
+README.md
+LICENSE
+*.md
+PERMISSION_TEST_MIGRATION_GUIDE.md
+
+# Backups
+*.zip
+*.tar.gz
+
+# Cache
+.cargo/
