@@ -469,6 +469,10 @@ fn _disabled_groups_complex_scoped_access_modern() {
         "owner: group-member add projectb charlie",
         "owner: wait 300",
 
+        // === FIRST: Deny the default all_users -> all_contacts read permission ===
+        "owner: permission set all_users all_contacts \"C: r:d c:- w:- d:-, T: r:d c:- w:- d:- x:-\"",
+        "owner: wait 300",
+
         // === Team1 can access ProjectA ===
         "owner: permission set team1 projecta \"C: r:a c:- w:- d:-, T: r:a c:- w:- d:- x:-\"",
         // === Team2 can access ProjectB ===
@@ -479,12 +483,12 @@ fn _disabled_groups_complex_scoped_access_modern() {
         "member2: sync",
         "owner: wait 300",
 
-        // === Member1 (Team1) should see ProjectA contacts only ===
+        // === Member1 (Team1) should see ProjectA contacts only (scoped to their team) ===
         "member1: assert contacts count 2",
         "member1: assert contact name \"Alice\"",
         "member1: assert contact name \"Bob\"",
 
-        // === Member2 (Team2) should see ProjectB contacts only ===
+        // === Member2 (Team2) should see ProjectB contacts only (scoped to their team) ===
         "member2: assert contacts count 1",
         "member2: assert contact name \"Charlie\"",
     ];
