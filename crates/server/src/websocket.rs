@@ -63,8 +63,19 @@ pub async fn websocket_handler(
         StatusCode::UNAUTHORIZED
     })?;
 
-    // WebSocket is only for regular users (admins must not create events / subscribe to realtime).
-    let user_exists = sqlx::query_scalar::<_, bool>(
+    // Determine if user is admin or regular user
+    let is_admin = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)",
+    )
+    .bind(user_id)
+    .fetch_one(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("WebSocket database error checking admin: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let is_regular_user = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)",
     )
     .bind(user_id)
@@ -75,15 +86,27 @@ pub async fn websocket_handler(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    if !user_exists {
+    if !is_admin && !is_regular_user {
         tracing::warn!("WebSocket connection attempt for invalid user: {}", user_id);
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    tracing::info!("WebSocket connection authenticated for user: {}", user_id);
+    tracing::info!("WebSocket connection authenticated for user: {} (admin={})", user_id, is_admin);
 
-    // Load wallets the user is a member of. We use this to filter wallet-scoped broadcasts.
-    let wallet_ids: Vec<Uuid> =
+    // Load accessible wallets based on user type
+    let allowed_wallet_ids: HashSet<Uuid> = if is_admin {
+        // Admins can access all wallets
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM wallets WHERE deleted_at IS NULL")
+            .fetch_all(&*state.db_pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("WebSocket database error loading wallets for admin: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .into_iter()
+            .collect()
+    } else {
+        // Regular users can only access their own wallets
         sqlx::query_scalar::<_, Uuid>("SELECT wallet_id FROM wallet_users WHERE user_id = $1")
             .bind(user_id)
             .fetch_all(&*state.db_pool)
@@ -91,45 +114,52 @@ pub async fn websocket_handler(
             .map_err(|e| {
                 tracing::error!("WebSocket database error loading user wallets: {:?}", e);
                 StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            })?
+            .into_iter()
+            .collect()
+    };
 
-    let allowed_wallet_ids: HashSet<Uuid> = wallet_ids.into_iter().collect();
-
-    // Stage 2: Client must tell us which wallet is currently open; we restrict realtime to that wallet only.
-    let active_wallet_id: Uuid = match query.wallet_id.as_deref() {
-        None => {
-            tracing::warn!(
-                "WebSocket connection attempt without wallet_id (user={})",
-                user_id
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        Some(s) if s.trim().is_empty() => {
-            tracing::warn!(
-                "WebSocket connection attempt with empty wallet_id (user={})",
-                user_id
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        Some(s) => {
-            let parsed = Uuid::parse_str(s).map_err(|_| {
-                tracing::warn!("WebSocket invalid wallet_id in query: {}", s);
-                StatusCode::BAD_REQUEST
-            })?;
-            if !allowed_wallet_ids.contains(&parsed) {
+    // Determine active wallet(s) to subscribe to
+    let active_wallet_ids: HashSet<Uuid> = if is_admin {
+        // Admins receive updates for all wallets they can access
+        allowed_wallet_ids.clone()
+    } else {
+        // Regular users must specify exactly one wallet
+        match query.wallet_id.as_deref() {
+            None => {
                 tracing::warn!(
-                    "WebSocket user {} tried to subscribe to wallet {} without access",
-                    user_id,
-                    parsed
+                    "WebSocket connection attempt without wallet_id (user={})",
+                    user_id
                 );
-                return Err(StatusCode::FORBIDDEN);
+                return Err(StatusCode::BAD_REQUEST);
             }
-            parsed
+            Some(s) if s.trim().is_empty() => {
+                tracing::warn!(
+                    "WebSocket connection attempt with empty wallet_id (user={})",
+                    user_id
+                );
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            Some(s) => {
+                let parsed = Uuid::parse_str(s).map_err(|_| {
+                    tracing::warn!("WebSocket invalid wallet_id in query: {}", s);
+                    StatusCode::BAD_REQUEST
+                })?;
+                if !allowed_wallet_ids.contains(&parsed) {
+                    tracing::warn!(
+                        "WebSocket user {} tried to subscribe to wallet {} without access",
+                        user_id,
+                        parsed
+                    );
+                    return Err(StatusCode::FORBIDDEN);
+                }
+                std::iter::once(parsed).collect()
+            }
         }
     };
 
     Ok(ws.on_upgrade(move |socket| {
-        handle_socket(socket, state, allowed_wallet_ids, active_wallet_id)
+        handle_socket(socket, state, allowed_wallet_ids, active_wallet_ids)
     }))
 }
 
@@ -137,7 +167,7 @@ async fn handle_socket(
     socket: WebSocket,
     state: AppState,
     allowed_wallet_ids: HashSet<Uuid>,
-    active_wallet_id: Uuid,
+    active_wallet_ids: HashSet<Uuid>,
 ) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.broadcast_tx.subscribe();
@@ -145,11 +175,11 @@ async fn handle_socket(
     // Spawn task to send messages from broadcast channel to client
     let mut send_task = tokio::spawn(async move {
         while let Ok((wallet_id, msg)) = rx.recv().await {
-            // Primary filter: only the wallet the client is currently viewing.
-            if wallet_id != active_wallet_id {
+            // Filter: only send messages for wallets the client is subscribed to
+            if !active_wallet_ids.contains(&wallet_id) {
                 continue;
             }
-            // Safety: wallet is still required to be a member wallet.
+            // Safety: wallet must still be in allowed list
             if !allowed_wallet_ids.contains(&wallet_id) {
                 continue;
             }
