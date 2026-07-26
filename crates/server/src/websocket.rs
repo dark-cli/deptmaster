@@ -1,3 +1,4 @@
+use crate::database::repository::{Database, DatabaseRepository};
 use crate::middleware::auth::Claims;
 use crate::AppState;
 use axum::{
@@ -63,26 +64,26 @@ pub async fn websocket_handler(
         StatusCode::UNAUTHORIZED
     })?;
 
-    // Determine if user is admin or regular user
+    let db = Database::new((*state.db_pool).clone());
+
+    // Check if user is admin or regular user
+    let is_regular_user = db
+        .get_user_by_id(user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("WebSocket database error checking user: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .is_some();
+
     let is_admin = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)",
     )
     .bind(user_id)
-    .fetch_one(&*state.db_pool)
+    .fetch_one(db.pool())
     .await
     .map_err(|e| {
         tracing::error!("WebSocket database error checking admin: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let is_regular_user = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM users_projection WHERE id = $1)",
-    )
-    .bind(user_id)
-    .fetch_one(&*state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("WebSocket database error checking user: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
@@ -96,26 +97,25 @@ pub async fn websocket_handler(
     // Load accessible wallets based on user type
     let allowed_wallet_ids: HashSet<Uuid> = if is_admin {
         // Admins can access all wallets
-        sqlx::query_scalar::<_, Uuid>("SELECT id FROM wallets WHERE deleted_at IS NULL")
-            .fetch_all(&*state.db_pool)
+        db.get_all_active_wallets()
             .await
             .map_err(|e| {
                 tracing::error!("WebSocket database error loading wallets for admin: {:?}", e);
                 StatusCode::INTERNAL_SERVER_ERROR
             })?
             .into_iter()
+            .map(|w| w.id)
             .collect()
     } else {
         // Regular users can only access their own wallets
-        sqlx::query_scalar::<_, Uuid>("SELECT wallet_id FROM wallet_users WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_all(&*state.db_pool)
+        db.get_user_wallets(user_id)
             .await
             .map_err(|e| {
                 tracing::error!("WebSocket database error loading user wallets: {:?}", e);
                 StatusCode::INTERNAL_SERVER_ERROR
             })?
             .into_iter()
+            .map(|w| w.id)
             .collect()
     };
 
