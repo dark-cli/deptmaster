@@ -469,8 +469,9 @@ fn _disabled_groups_complex_scoped_access_modern() {
         "owner: group-member add projectb charlie",
         "owner: wait 300",
 
-        // === FIRST: Deny the default all_users -> all_contacts read permission ===
-        "owner: permission set all_users all_contacts \"C: r:d c:- w:- d:-, T: r:d c:- w:- d:- x:-\"",
+        // === UNSET the default all_users -> all_contacts read permission ===
+        // This removes default access so teams can ONLY read their scoped contacts
+        "owner: permission set all_users all_contacts \"C: r:- c:- w:- d:-, T: r:- c:- w:- d:- x:-\"",
         "owner: wait 300",
 
         // === Team1 can access ProjectA ===
