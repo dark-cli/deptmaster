@@ -316,7 +316,7 @@ fn _disabled_permission_full_access_modern() {
         // Create user and contact groups
         "owner: user-group create \"Contributors\" contributors",
         "owner: contact-group create \"Public\" public",
-        "owner: group-member add contributors member_id",
+        "owner: group-member add contributors member",
         "owner: wait 300",
 
         // Owner creates contact
@@ -520,9 +520,9 @@ fn _disabled_groups_union_multiple_user_groups_modern() {
         "owner: wait 300",
 
         // Add member to multiple groups
-        "owner: group-member add developers member_id",
-        "owner: group-member add designers member_id",
-        "owner: group-member add allstaff member_id",
+        "owner: group-member add developers member",
+        "owner: group-member add designers member",
+        "owner: group-member add allstaff member",
         "owner: wait 300",
 
         // Create contacts
@@ -586,8 +586,8 @@ fn _disabled_permission_transaction_specific_modern() {
         "owner: wait 300",
 
         // Add members
-        "owner: group-member add accountants accountant_id",
-        "owner: group-member add viewers viewer_id",
+        "owner: group-member add accountants accountant",
+        "owner: group-member add viewers viewer",
         "owner: wait 300",
 
         // Create contact
@@ -649,7 +649,7 @@ fn _disabled_permission_scoped_denial_modern() {
         "owner: wait 300",
 
         // Add employee to Staff
-        "owner: group-member add staff employee_id",
+        "owner: group-member add staff employee",
         "owner: wait 300",
 
         // Create contacts
