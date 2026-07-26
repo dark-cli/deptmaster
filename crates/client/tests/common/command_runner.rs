@@ -15,6 +15,7 @@
 
 use client::{
     create_contact, create_transaction, delete_contact, delete_transaction, get_transaction,
+    get_contacts, get_transactions,
     list_wallet_contact_groups, list_wallet_user_groups, manual_sync, put_wallet_permission_matrix,
     update_contact, update_transaction, create_wallet_user_group, create_wallet_contact_group,
     add_wallet_user_group_member, add_wallet_contact_group_member, set_wallet_permissions,
@@ -82,6 +83,7 @@ pub struct CommandRunner {
     pub user_group_ids: HashMap<String, String>,
     pub contact_group_ids: HashMap<String, String>,
     pub user_ids: HashMap<String, String>,  // app_name -> user_id for resolving user labels
+    pub usernames: HashMap<String, String>,  // app_name -> username for API calls
 }
 
 impl CommandRunner {
@@ -92,6 +94,7 @@ impl CommandRunner {
             user_group_ids: HashMap::new(),
             contact_group_ids: HashMap::new(),
             user_ids: HashMap::new(),
+            usernames: HashMap::new(),
         }
     }
 
@@ -100,13 +103,15 @@ impl CommandRunner {
         self.user_ids = user_ids;
     }
 
+    /// Set usernames mapping (called by EventGenerator with app_name -> username for API calls)
+    pub fn set_usernames(&mut self, usernames: HashMap<String, String>) {
+        self.usernames = usernames;
+    }
+
     pub fn execute_command(&mut self, command: &str) -> Result<(), String> {
-        let parts: Vec<&str> = command.splitn(2, ':').collect();
-        let action_part = if parts.len() == 2 {
-            parts[1].trim()
-        } else {
-            command.trim()
-        };
+        // Note: EventGenerator has already extracted the action part (removed "app:" prefix),
+        // so we should NOT try to split on colons again. The command is already cleaned.
+        let action_part = command.trim();
         let args = parse_args(action_part);
         if args.is_empty() {
             return Err("Empty command".to_string());
@@ -124,6 +129,10 @@ impl CommandRunner {
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(100);
             std::thread::sleep(std::time::Duration::from_millis(ms));
+            return Ok(());
+        }
+        if action == "assert" {
+            self.do_assert(&args[1..], command)?;
             return Ok(());
         }
         if action == "contact" {
@@ -479,20 +488,24 @@ impl CommandRunner {
         let id = args[2];
         let wallet_id = client::get_current_wallet_id()?;
 
-        // Resolve user/contact ID: if it's a known user label, use their actual ID
-        let resolved_id = self.user_ids
-            .get(id)
-            .cloned()
-            .unwrap_or_else(|| id.to_string());
-
-        // Try to find in user groups first
+        // Try to find in user groups first (these take usernames)
         if let Some(group_id) = self.user_group_ids.get(group_label).cloned() {
-            add_wallet_user_group_member(wallet_id, group_id, resolved_id.clone())?;
+            // Resolve to username if it's a known user label
+            let resolved_username = self.usernames
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| id.to_string());
+            add_wallet_user_group_member(wallet_id, group_id, resolved_username)?;
             return Ok(());
         }
 
-        // Try contact groups
+        // Try contact groups (these take contact IDs)
         if let Some(group_id) = self.contact_group_ids.get(group_label).cloned() {
+            // Resolve to contact ID if it's a known contact label
+            let resolved_id = self.contact_ids
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| id.to_string());
             add_wallet_contact_group_member(wallet_id, group_id, resolved_id)?;
             return Ok(());
         }
@@ -682,6 +695,24 @@ impl CommandRunner {
         });
         let entries = serde_json::json!([entry]);
         set_member_permissions(wallet_id, entries.to_string())
+    }
+
+    fn do_assert(&self, args: &[&str], original: &str) -> Result<(), String> {
+        if args.is_empty() {
+            return Err(format!("Assert requires a command: {}", original));
+        }
+
+        // Get current state
+        let contacts_json = get_contacts()?;
+        let events_json = client::get_events()?;
+        let transactions_json = get_transactions()?;
+
+        // Reconstruct full command string from args (assert_runner expects full strings, not split args)
+        let command_str = args.join(" ");
+        let commands = [command_str.as_str()];
+
+        // Run the assertion
+        super::assert_runner::assert_commands(&contacts_json, &events_json, &transactions_json, &commands)
     }
 }
 
