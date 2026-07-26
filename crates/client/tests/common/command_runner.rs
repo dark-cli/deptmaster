@@ -721,9 +721,15 @@ impl CommandRunner {
         let events_json = client::get_events()?;
         let transactions_json = get_transactions()?;
 
-        // Reconstruct full command string from args (assert_runner expects full strings, not split args)
-        let command_str = args.join(" ");
-        let commands = [command_str.as_str()];
+        // Extract the assertion command from the original string (after "assert ")
+        // Use the original string to preserve quote handling, not reconstructed args
+        let assertion_cmd = if original.to_lowercase().starts_with("assert ") {
+            original[7..].trim()  // Skip "assert " prefix
+        } else {
+            // Fallback: reconstruct from args if original format is unexpected
+            &args.join(" ")
+        };
+        let commands = [assertion_cmd];
 
         // Run the assertion
         super::assert_runner::assert_commands(&contacts_json, &events_json, &transactions_json, &commands)
