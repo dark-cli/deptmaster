@@ -684,3 +684,50 @@ fn _disabled_permission_scoped_denial_modern() {
 
     println!("✅ Test passed: Scoped denial correctly restricts access!");
 }
+
+#[test]
+fn test_read_permission_filtering_simple() {
+    println!("\n=== Testing read permission filtering mechanism ===");
+
+    let server_url = test_server_url();
+    let (owner, member, _wallet_id) = setup_owner_and_member(&server_url);
+
+    let mut apps = HashMap::new();
+    apps.insert("owner".to_string(), owner);
+    apps.insert("member".to_string(), member);
+    let generator = EventGenerator::new(apps);
+
+    let commands = [
+        // Setup: Create contact visible to owner only
+        "owner: contact create \"Secret\" secret",
+        "owner: wait 200",
+
+        // Initial sync: member should see the contact (default permissions allow read)
+        "member: sync",
+        "owner: wait 200",
+        "member: assert contacts count 1",
+        "member: assert contact name \"Secret\"",
+
+        // Now owner changes permission to DENY read for member
+        "owner: user-group create \"ViewOnly\" viewers",
+        "owner: contact-group create \"Secrets\" secrets",
+        "owner: group-member add secrets secret",
+        "owner: wait 200",
+
+        // Add member to ViewOnly group and DENY read on Secrets
+        "owner: group-member add viewers member",
+        "owner: permission set viewers secrets \"C: r:d c:- w:- d:-, T: r:d c:- w:- d:- x:-\"",
+        "owner: wait 300",
+
+        // Member syncs - should trigger hash mismatch, flush, and resync
+        // After resync, member should NOT see the contact anymore
+        "member: sync",
+        "owner: wait 300",
+        "member: assert contacts count 0",
+    ];
+
+    generator.execute_commands(&commands)
+        .expect("execute commands");
+
+    println!("✅ Read permission filtering works: contact disappeared after permission denied");
+}
