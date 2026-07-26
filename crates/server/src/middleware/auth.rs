@@ -100,7 +100,7 @@ pub async fn auth_middleware(
 
     // Admin access rules:
     // - /api/admin/** requires an admin token
-    // - admin tokens must NOT be used to create events / sync / realtime
+    // - admin tokens must NOT be used to create events / sync
     if path.starts_with("/api/admin/") {
         if !is_admin {
             let body = serde_json::json!({
@@ -110,9 +110,8 @@ pub async fn auth_middleware(
             return Ok((StatusCode::FORBIDDEN, Json(body)).into_response());
         }
     } else if is_admin {
-        // Disallow admin tokens from using user-facing event/sync/realtime endpoints.
-        if path == "/ws"
-            || path.starts_with("/api/contacts")
+        // Disallow admin tokens from using user-facing event/sync endpoints.
+        if path.starts_with("/api/contacts")
             || path.starts_with("/api/transactions")
             || path.starts_with("/api/sync/")
         {

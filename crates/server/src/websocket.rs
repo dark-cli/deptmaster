@@ -1,16 +1,15 @@
 use crate::database::repository::{Database, DatabaseRepository};
-use crate::middleware::auth::Claims;
+use crate::middleware::auth::AuthUser;
 use crate::AppState;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
-        Query, State, WebSocketUpgrade,
+        Extension, Query, State, WebSocketUpgrade,
     },
-    http::{header::AUTHORIZATION, StatusCode},
+    http::StatusCode,
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
 use std::collections::HashSet;
 use tokio::sync::broadcast;
@@ -22,7 +21,6 @@ pub type BroadcastChannel = broadcast::Sender<(Uuid, String)>; // (wallet_id, me
 
 #[derive(Deserialize)]
 pub struct WebSocketQuery {
-    token: Option<String>,
     wallet_id: Option<String>,
 }
 
@@ -34,69 +32,17 @@ pub async fn websocket_handler(
     ws: WebSocketUpgrade,
     Query(query): Query<WebSocketQuery>,
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
+    Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Response, StatusCode> {
-    // Extract token from query parameter or Authorization header
-    let token = query.token.or_else(|| {
-        headers
-            .get(AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.strip_prefix("Bearer ").unwrap_or(s).to_string())
-    });
-
-    let token = token.ok_or_else(|| {
-        tracing::warn!("WebSocket connection attempt without token");
-        StatusCode::UNAUTHORIZED
-    })?;
-
-    // Validate JWT token
-    let decoding_key = DecodingKey::from_secret(state.config.jwt_secret.as_ref());
-    let validation = Validation::new(Algorithm::HS256);
-
-    let token_data = decode::<Claims>(&token, &decoding_key, &validation).map_err(|e| {
-        tracing::warn!("WebSocket token validation failed: {:?}", e);
-        StatusCode::UNAUTHORIZED
-    })?;
-
-    let claims = token_data.claims;
-    let user_id = Uuid::parse_str(&claims.user_id).map_err(|e| {
-        tracing::warn!("WebSocket invalid user_id in token: {:?}", e);
-        StatusCode::UNAUTHORIZED
-    })?;
+    let user_id = auth_user.user_id;
+    let is_admin = auth_user.is_admin;
 
     let db = Database::new((*state.db_pool).clone());
-
-    // Check if user is admin or regular user
-    let is_regular_user = db
-        .get_user_by_id(user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("WebSocket database error checking user: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .is_some();
-
-    let is_admin = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM admin_users WHERE id = $1 AND is_active = true)",
-    )
-    .bind(user_id)
-    .fetch_one(db.pool())
-    .await
-    .map_err(|e| {
-        tracing::error!("WebSocket database error checking admin: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    if !is_admin && !is_regular_user {
-        tracing::warn!("WebSocket connection attempt for invalid user: {}", user_id);
-        return Err(StatusCode::UNAUTHORIZED);
-    }
 
     tracing::info!("WebSocket connection authenticated for user: {} (admin={})", user_id, is_admin);
 
     // Load accessible wallets based on user type
     let allowed_wallet_ids: HashSet<Uuid> = if is_admin {
-        // Admins can access all wallets
         db.get_all_active_wallets()
             .await
             .map_err(|e| {
@@ -107,7 +53,6 @@ pub async fn websocket_handler(
             .map(|w| w.id)
             .collect()
     } else {
-        // Regular users can only access their own wallets
         db.get_user_wallets(user_id)
             .await
             .map_err(|e| {
@@ -121,10 +66,8 @@ pub async fn websocket_handler(
 
     // Determine active wallet(s) to subscribe to
     let active_wallet_ids: HashSet<Uuid> = if is_admin {
-        // Admins receive updates for all wallets they can access
         allowed_wallet_ids.clone()
     } else {
-        // Regular users must specify exactly one wallet
         match query.wallet_id.as_deref() {
             None => {
                 tracing::warn!(

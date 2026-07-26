@@ -337,8 +337,13 @@ async fn main() -> anyhow::Result<()> {
             auth_middleware,
         ));
 
-    // WebSocket route (will add auth later)
-    let ws_routes = Router::new().route("/ws", get(websocket::websocket_handler));
+    // WebSocket route (authenticated via middleware)
+    let ws_routes = Router::new()
+        .route("/ws", get(websocket::websocket_handler))
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ));
 
     // Build complete app
     let app = Router::new()
