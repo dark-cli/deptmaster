@@ -118,6 +118,12 @@ impl AppInstance {
         Ok(())
     }
 
+    /// Get the current user's ID (must be logged in). Used by tests to resolve user labels to IDs.
+    pub fn get_user_id(&self) -> Result<String, String> {
+        self.activate()?;
+        client::get_user_id()
+    }
+
     /// Create a wallet and set it as current. Must be logged in. Returns the new wallet id.
     pub fn create_wallet(&self, name: String, description: String) -> Result<String, String> {
         self.activate()?;

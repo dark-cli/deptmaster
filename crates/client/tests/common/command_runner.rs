@@ -81,6 +81,7 @@ pub struct CommandRunner {
     pub transaction_ids: HashMap<String, String>,
     pub user_group_ids: HashMap<String, String>,
     pub contact_group_ids: HashMap<String, String>,
+    pub user_ids: HashMap<String, String>,  // app_name -> user_id for resolving user labels
 }
 
 impl CommandRunner {
@@ -90,7 +91,13 @@ impl CommandRunner {
             transaction_ids: HashMap::new(),
             user_group_ids: HashMap::new(),
             contact_group_ids: HashMap::new(),
+            user_ids: HashMap::new(),
         }
+    }
+
+    /// Set user IDs mapping (called by EventGenerator with app_name -> user_id)
+    pub fn set_user_ids(&mut self, user_ids: HashMap<String, String>) {
+        self.user_ids = user_ids;
     }
 
     pub fn execute_command(&mut self, command: &str) -> Result<(), String> {
@@ -472,15 +479,21 @@ impl CommandRunner {
         let id = args[2];
         let wallet_id = client::get_current_wallet_id()?;
 
+        // Resolve user/contact ID: if it's a known user label, use their actual ID
+        let resolved_id = self.user_ids
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| id.to_string());
+
         // Try to find in user groups first
         if let Some(group_id) = self.user_group_ids.get(group_label).cloned() {
-            add_wallet_user_group_member(wallet_id, group_id, id.to_string())?;
+            add_wallet_user_group_member(wallet_id, group_id, resolved_id.clone())?;
             return Ok(());
         }
 
         // Try contact groups
         if let Some(group_id) = self.contact_group_ids.get(group_label).cloned() {
-            add_wallet_contact_group_member(wallet_id, group_id, id.to_string())?;
+            add_wallet_contact_group_member(wallet_id, group_id, resolved_id)?;
             return Ok(());
         }
 

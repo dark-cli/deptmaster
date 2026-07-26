@@ -12,16 +12,27 @@ use super::command_runner::CommandRunner;
 
 /// Runs text commands, dispatching "appName: action" to the corresponding AppInstance.
 /// Holds a single CommandRunner so contact/transaction labels persist across apps (e.g. app1 creates contact1, app2 uses contact1).
+/// Also maps app names to user IDs so commands like "group-member add group member" resolve correctly.
 pub struct EventGenerator {
     pub apps: HashMap<String, AppInstance>,
     runner: RefCell<CommandRunner>,
+    user_ids: HashMap<String, String>,  // app_name -> user_id for resolving user labels
 }
 
 impl EventGenerator {
     pub fn new(apps: HashMap<String, AppInstance>) -> Self {
+        // Build mapping of app names to their user IDs
+        let mut user_ids = HashMap::new();
+        for (app_name, app) in &apps {
+            if let Ok(uid) = app.get_user_id() {
+                user_ids.insert(app_name.clone(), uid);
+            }
+        }
+
         Self {
             apps,
             runner: RefCell::new(CommandRunner::new()),
+            user_ids,
         }
     }
 
@@ -68,6 +79,8 @@ impl EventGenerator {
             std::thread::sleep(std::time::Duration::from_millis(150));
             let _ = manual_sync();
         }
-        self.runner.borrow_mut().execute_command(action_part)
+        let mut runner = self.runner.borrow_mut();
+        runner.set_user_ids(self.user_ids.clone());
+        runner.execute_command(action_part)
     }
 }
