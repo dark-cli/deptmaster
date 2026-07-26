@@ -6,6 +6,73 @@ use super::common::test_helpers::test_server_url;
 use std::collections::HashMap;
 use super::common::event_generator::EventGenerator;
 
+/// Helper: Setup owner and member properly for tests
+fn setup_owner_and_member(server_url: &str) -> (AppInstance, AppInstance, String) {
+    use client::add_user_to_wallet;
+
+    // Create owner wallet
+    let (owner_user, owner_pass, wallet_id) =
+        create_unique_test_user_and_wallet(server_url).expect("create owner wallet");
+
+    let owner = AppInstance::with_credentials("owner", server_url, owner_user, owner_pass);
+    owner.initialize().expect("initialize owner");
+    owner.login().expect("login owner");
+    owner.select_wallet(&wallet_id).expect("select wallet owner");
+
+    // Create separate member user
+    let member_temp = AppInstance::new("member", server_url);
+    member_temp.initialize().expect("initialize member");
+    member_temp.signup().expect("signup member");
+    let member_username = member_temp.username.clone();
+    let member_password = member_temp.password.clone();
+
+    owner.activate().expect("activate owner");
+    add_user_to_wallet(wallet_id.clone(), member_username.clone()).expect("add member to wallet");
+
+    let member = AppInstance::with_credentials("member", server_url, member_username, member_password);
+    member.initialize().expect("initialize member");
+    member.login().expect("login member");
+    member.select_wallet(&wallet_id).expect("select wallet member");
+    member.sync().expect("member sync after joining wallet");
+
+    (owner, member, wallet_id)
+}
+
+/// Helper: Setup owner with multiple members
+fn setup_owner_and_members(server_url: &str, member_count: usize) -> (AppInstance, Vec<AppInstance>, String) {
+    use client::add_user_to_wallet;
+
+    // Create owner wallet
+    let (owner_user, owner_pass, wallet_id) =
+        create_unique_test_user_and_wallet(server_url).expect("create owner wallet");
+
+    let owner = AppInstance::with_credentials("owner", server_url, owner_user, owner_pass);
+    owner.initialize().expect("initialize owner");
+    owner.login().expect("login owner");
+    owner.select_wallet(&wallet_id).expect("select wallet owner");
+
+    let mut members = Vec::new();
+    for i in 0..member_count {
+        let member_temp = AppInstance::new(&format!("member{}", i + 1), server_url);
+        member_temp.initialize().expect("initialize member");
+        member_temp.signup().expect("signup member");
+        let member_username = member_temp.username.clone();
+        let member_password = member_temp.password.clone();
+
+        owner.activate().expect("activate owner");
+        add_user_to_wallet(wallet_id.clone(), member_username.clone()).expect("add member to wallet");
+
+        let member = AppInstance::with_credentials(&format!("member{}", i + 1), server_url, member_username, member_password);
+        member.initialize().expect("initialize member");
+        member.login().expect("login member");
+        member.select_wallet(&wallet_id).expect("select wallet member");
+        member.sync().expect("member sync after joining wallet");
+        members.push(member);
+    }
+
+    (owner, members, wallet_id)
+}
+
 #[test]
 #[ignore]
 fn permission_edit_without_read_no_dependencies_modern() {
@@ -136,18 +203,34 @@ fn permission_edit_without_read_no_dependencies_modern() {
 fn _disabled_permission_give_take_read_modern() {
     println!("\n=== Testing give/take read permissions (modern format) ===");
 
+    use client::add_user_to_wallet;
+
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create wallet");
 
-    let owner = AppInstance::with_credentials("owner", &server_url, username.clone(), password.clone());
-    let member = AppInstance::with_credentials("member", &server_url, username.clone(), password.clone());
+    // === Setup: Create owner wallet ===
+    let (owner_user, owner_pass, wallet_id) =
+        create_unique_test_user_and_wallet(&server_url).expect("create owner wallet");
 
+    let owner = AppInstance::with_credentials("owner", &server_url, owner_user, owner_pass);
     owner.initialize().expect("initialize owner");
-    member.initialize().expect("initialize member");
-
     owner.login().expect("login owner");
+    owner.select_wallet(&wallet_id).expect("select wallet owner");
+
+    // === Setup: Create separate member user ===
+    let member_temp = AppInstance::new("member", &server_url);
+    member_temp.initialize().expect("initialize member");
+    member_temp.signup().expect("signup member");
+    let member_username = member_temp.username.clone();
+    let member_password = member_temp.password.clone();
+
+    owner.activate().expect("activate owner");
+    add_user_to_wallet(wallet_id.clone(), member_username.clone()).expect("add member to wallet");
+
+    let member = AppInstance::with_credentials("member", &server_url, member_username.clone(), member_password);
+    member.initialize().expect("initialize member");
     member.login().expect("login member");
+    member.select_wallet(&wallet_id).expect("select wallet member");
+    member.sync().expect("member sync after joining wallet");
 
     owner.select_wallet(&wallet_id).expect("select owner wallet");
     member.select_wallet(&wallet_id).expect("select member wallet");
@@ -222,20 +305,7 @@ fn _disabled_permission_full_access_modern() {
     println!("\n=== Testing full permission access (modern format) ===");
 
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create wallet");
-
-    let owner = AppInstance::with_credentials("owner", &server_url, username.clone(), password.clone());
-    let member = AppInstance::with_credentials("member", &server_url, username.clone(), password.clone());
-
-    owner.initialize().expect("initialize");
-    member.initialize().expect("initialize");
-
-    owner.login().expect("login owner");
-    member.login().expect("login member");
-
-    owner.select_wallet(&wallet_id).expect("select wallet");
-    member.select_wallet(&wallet_id).expect("select wallet");
+    let (owner, member, _wallet_id) = setup_owner_and_member(&server_url);
 
     let mut apps = HashMap::new();
     apps.insert("owner".to_string(), owner);
@@ -305,20 +375,10 @@ fn _disabled_permission_limits_deny_overrides_allow_modern() {
     println!("\n=== Testing deny overrides allow (modern format) ===");
 
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create wallet");
+    let (owner, member, _wallet_id) = setup_owner_and_member(&server_url);
 
-    let app1 = AppInstance::with_credentials("app1", &server_url, username.clone(), password.clone());
-    let app2 = AppInstance::with_credentials("app2", &server_url, username.clone(), password.clone());
-
-    app1.initialize().expect("initialize");
-    app2.initialize().expect("initialize");
-
-    app1.login().expect("login");
-    app2.login().expect("login");
-
-    app1.select_wallet(&wallet_id).expect("select");
-    app2.select_wallet(&wallet_id).expect("select");
+    let app1 = owner;
+    let app2 = member;
 
     let mut apps = HashMap::new();
     apps.insert("app1".to_string(), app1);
@@ -373,24 +433,10 @@ fn _disabled_groups_complex_scoped_access_modern() {
     println!("\n=== Testing complex group scoping (modern format) ===");
 
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create wallet");
+    let (owner, mut members, _wallet_id) = setup_owner_and_members(&server_url, 2);
 
-    let owner = AppInstance::with_credentials("owner", &server_url, username.clone(), password.clone());
-    let member1 = AppInstance::with_credentials("member1", &server_url, username.clone(), password.clone());
-    let member2 = AppInstance::with_credentials("member2", &server_url, username.clone(), password.clone());
-
-    owner.initialize().expect("init");
-    member1.initialize().expect("init");
-    member2.initialize().expect("init");
-
-    owner.login().expect("login");
-    member1.login().expect("login");
-    member2.login().expect("login");
-
-    owner.select_wallet(&wallet_id).expect("select");
-    member1.select_wallet(&wallet_id).expect("select");
-    member2.select_wallet(&wallet_id).expect("select");
+    let member2 = members.pop().unwrap();
+    let member1 = members.pop().unwrap();
 
     let mut apps = HashMap::new();
     apps.insert("owner".to_string(), owner);
@@ -455,20 +501,7 @@ fn _disabled_groups_union_multiple_user_groups_modern() {
     println!("\n=== Testing union of multiple user groups (modern format) ===");
 
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create wallet");
-
-    let owner = AppInstance::with_credentials("owner", &server_url, username.clone(), password.clone());
-    let member = AppInstance::with_credentials("member", &server_url, username.clone(), password.clone());
-
-    owner.initialize().expect("init");
-    member.initialize().expect("init");
-
-    owner.login().expect("login");
-    member.login().expect("login");
-
-    owner.select_wallet(&wallet_id).expect("select");
-    member.select_wallet(&wallet_id).expect("select");
+    let (owner, member, _wallet_id) = setup_owner_and_member(&server_url);
 
     let mut apps = HashMap::new();
     apps.insert("owner".to_string(), owner);
@@ -534,24 +567,10 @@ fn _disabled_permission_transaction_specific_modern() {
     println!("\n=== Testing transaction-specific permissions (modern format) ===");
 
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create wallet");
+    let (owner, mut members, _wallet_id) = setup_owner_and_members(&server_url, 2);
 
-    let owner = AppInstance::with_credentials("owner", &server_url, username.clone(), password.clone());
-    let accountant = AppInstance::with_credentials("accountant", &server_url, username.clone(), password.clone());
-    let viewer = AppInstance::with_credentials("viewer", &server_url, username.clone(), password.clone());
-
-    owner.initialize().expect("init");
-    accountant.initialize().expect("init");
-    viewer.initialize().expect("init");
-
-    owner.login().expect("login");
-    accountant.login().expect("login");
-    viewer.login().expect("login");
-
-    owner.select_wallet(&wallet_id).expect("select");
-    accountant.select_wallet(&wallet_id).expect("select");
-    viewer.select_wallet(&wallet_id).expect("select");
+    let viewer = members.pop().unwrap();
+    let accountant = members.pop().unwrap();
 
     let mut apps = HashMap::new();
     apps.insert("owner".to_string(), owner);
@@ -613,20 +632,9 @@ fn _disabled_permission_scoped_denial_modern() {
     println!("\n=== Testing scoped denial (modern format) ===");
 
     let server_url = test_server_url();
-    let (username, password, wallet_id) =
-        create_unique_test_user_and_wallet(&server_url).expect("create wallet");
+    let (owner, member, _wallet_id) = setup_owner_and_member(&server_url);
 
-    let owner = AppInstance::with_credentials("owner", &server_url, username.clone(), password.clone());
-    let employee = AppInstance::with_credentials("employee", &server_url, username.clone(), password.clone());
-
-    owner.initialize().expect("init");
-    employee.initialize().expect("init");
-
-    owner.login().expect("login");
-    employee.login().expect("login");
-
-    owner.select_wallet(&wallet_id).expect("select");
-    employee.select_wallet(&wallet_id).expect("select");
+    let employee = member;
 
     let mut apps = HashMap::new();
     apps.insert("owner".to_string(), owner);
