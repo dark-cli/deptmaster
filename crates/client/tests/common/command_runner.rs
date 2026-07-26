@@ -592,11 +592,26 @@ impl CommandRunner {
 
     /// Set permissions using readable format: "C: r:a c:a w:a d:-, T: r:a c:- w:- d:- x:-"
     fn set_permissions_format(&self, user_group_label: &str, contact_group_label: &str, format_str: &str) -> Result<(), String> {
+        let wallet_id = client::get_current_wallet_id()?;
+
+        // Try local mapping first, then look up from server (for system groups like all_users)
         let user_group_id = self.user_group_ids.get(user_group_label)
             .cloned()
+            .or_else(|| {
+                list_wallet_user_groups(wallet_id.clone())
+                    .ok()
+                    .and_then(|json| find_group_id(&json, user_group_label).ok())
+            })
             .ok_or_else(|| format!("User group not found: {}", user_group_label))?;
+
+        // Try local mapping first, then look up from server (for system groups like all_contacts)
         let contact_group_id = self.contact_group_ids.get(contact_group_label)
             .cloned()
+            .or_else(|| {
+                list_wallet_contact_groups(wallet_id.clone())
+                    .ok()
+                    .and_then(|json| find_group_id(&json, contact_group_label).ok())
+            })
             .ok_or_else(|| format!("Contact group not found: {}", contact_group_label))?;
 
         let (contact_allow, contact_deny, transaction_allow, transaction_deny)
@@ -615,7 +630,6 @@ impl CommandRunner {
             "denied_actions": all_deny_actions
         });
         let entries = serde_json::json!([entry]);
-        let wallet_id = client::get_current_wallet_id()?;
         put_wallet_permission_matrix(wallet_id, entries.to_string())
     }
 
