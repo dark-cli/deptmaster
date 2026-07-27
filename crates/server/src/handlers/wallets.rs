@@ -2993,18 +2993,18 @@ pub enum PermissionState {
 }
 
 /// PUT request: full permission state per group
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PutWalletPermissionsRequest {
     pub entries: Vec<PutWalletPermissionsEntry>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PutWalletPermissionsEntry {
     pub user_group_id: String,
     pub permissions: Vec<WalletPermissionState>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WalletPermissionState {
     pub action: String,
     pub state: PermissionState,
