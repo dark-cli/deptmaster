@@ -2179,25 +2179,14 @@ class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
       }
     });
 
-    final entries = <Map<String, dynamic>>[];
-    for (final action in _walletActions) {
-      final isAllowed = allowed.contains(action);
-      final isDenied = denied.contains(action);
-      if (isAllowed) {
-        entries.add({
-          'user_group_id': groupId,
-          'action': action,
-          'is_deny': false,
-        });
+    // Send full matrix: complete list of allowed + denied actions (unset = not in either list)
+    final entries = <Map<String, dynamic>>[
+      {
+        'user_group_id': groupId,
+        'allowed_actions': allowed.toList(),
+        'denied_actions': denied.toList(),
       }
-      if (isDenied) {
-        entries.add({
-          'user_group_id': groupId,
-          'action': action,
-          'is_deny': true,
-        });
-      }
-    }
+    ];
 
     try {
       await Api.setWalletPermissions(widget.walletId, entries);
