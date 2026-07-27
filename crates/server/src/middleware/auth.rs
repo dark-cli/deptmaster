@@ -47,14 +47,9 @@ pub async fn auth_middleware(
     let token = if path == "/ws" {
         // WebSocket can pass token via query parameter
         let full_uri = req.uri().to_string();
-        tracing::debug!("WebSocket auth: full_uri={}", full_uri);
-
         let url = match Url::parse(&format!("http://localhost{}", full_uri)) {
             Ok(u) => u,
-            Err(e) => {
-                tracing::warn!("WebSocket auth: URL parse failed: {:?}", e);
-                return Ok(auth_declined_response());
-            }
+            Err(_) => return Ok(auth_declined_response()),
         };
 
         let token_from_query = url.query_pairs()
@@ -66,15 +61,9 @@ pub async fn auth_middleware(
             .and_then(|h| h.to_str().ok())
             .and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()));
 
-        tracing::debug!("WebSocket auth: token_from_query={}, token_from_header={}",
-            token_from_query.is_some(), token_from_header.is_some());
-
         match token_from_query.or(token_from_header) {
             Some(t) => t,
-            None => {
-                tracing::warn!("WebSocket auth: no token found");
-                return Ok(auth_declined_response());
-            }
+            None => return Ok(auth_declined_response()),
         }
     } else {
         // Regular endpoints require Authorization header
