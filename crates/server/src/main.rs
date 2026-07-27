@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    info!("Starting Debt Tracker API server...");
+    info!("Starting Debt Tracker API server... (Build number will auto-increment on rebuild)");
 
     // Load configuration
     let config = Arc::new(Config::from_env()?);
