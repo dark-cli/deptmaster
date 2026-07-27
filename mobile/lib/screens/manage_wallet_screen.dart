@@ -1339,16 +1339,13 @@ class _RulesTabState extends State<_RulesTab> {
                   final activeActions = _getActions(ugId, cgId);
 
                   final deniedActions = _getDenied(ugId, cgId);
-                  final hasAnyPermissions = activeActions.isNotEmpty || deniedActions.isNotEmpty;
 
                   return ListTile(
                     title: Text(cgName),
-                    subtitle: !hasAnyPermissions
-                        ? Text('No access', style: TextStyle(color: ThemeColors.gray(context)))
-                        : _PermissionGridDisplay(
-                            allowed: activeActions,
-                            denied: deniedActions,
-                          ),
+                    subtitle: _PermissionGridDisplay(
+                      allowed: activeActions,
+                      denied: deniedActions,
+                    ),
                     trailing: const Icon(Icons.edit, size: 20),
                     onTap: () => _openEditor(ugId, ugName, cgId, cgName),
                   );
