@@ -2189,7 +2189,7 @@ class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
               : 'unset';
       permissions.add({
         'action': action,
-        'state': state,
+        'state': state, // Server expects: "allow", "deny", or "unset"
       });
     }
 
