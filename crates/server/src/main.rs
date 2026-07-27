@@ -7,8 +7,9 @@ use axum::{
     Router,
 };
 use serde_json::json;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, Span};
@@ -40,6 +41,9 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub broadcast_tx: BroadcastChannel,
     pub rate_limiter: RateLimiter,
+    pub startup_time: Arc<SystemTime>,
+    pub request_count: Arc<AtomicU64>,
+    pub error_count: Arc<AtomicU64>,
 }
 
 #[tokio::main]
@@ -122,6 +126,9 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         broadcast_tx: broadcast_tx.clone(),
         rate_limiter: rate_limiter.clone(),
+        startup_time: Arc::new(SystemTime::now()),
+        request_count: Arc::new(AtomicU64::new(0)),
+        error_count: Arc::new(AtomicU64::new(0)),
     };
 
     // Public routes (no authentication required)
@@ -472,16 +479,44 @@ async fn health_check(State(state): State<AppState>) -> Json<serde_json::Value> 
     let build_number = std::env::var("BUILD_NUMBER")
         .unwrap_or_else(|_| "0".to_string());
 
+    // Calculate uptime
+    let uptime = state.startup_time
+        .elapsed()
+        .unwrap_or(Duration::from_secs(0))
+        .as_secs();
+
+    // Get request statistics
+    let request_count = state.request_count.load(Ordering::Relaxed);
+    let error_count = state.error_count.load(Ordering::Relaxed);
+
+    // Get environment variables that are in use
+    let env_config = json!({
+        "database_host": std::env::var("DB_HOST").unwrap_or_else(|_| "default".to_string()),
+        "database_port": std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string()),
+        "database_name": std::env::var("DB_NAME").unwrap_or_else(|_| "default".to_string()),
+        "rate_limit_enabled": std::env::var("RATE_LIMIT_REQUESTS").unwrap_or_else(|_| "0".to_string()) != "0",
+        "log_level": std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+    });
+
     Json(json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
+        "uptime_seconds": uptime,
         "database": {
             "connected": db_connected,
             "pool_size": state.db_pool.num_idle()
         },
+        "requests": {
+            "total": request_count,
+            "errors": error_count
+        },
+        "websocket": {
+            "active_connections": state.broadcast_tx.receiver_count()
+        },
         "build": {
             "number": build_number
-        }
+        },
+        "environment": env_config
     }))
 }
 
