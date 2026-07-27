@@ -48,6 +48,7 @@ declare -A VALID_FLAGS=(
     ["stop-server"]="verbose"
     ["restart-server"]="verbose,skip-server-build"
     ["build-server"]="verbose"
+    ["clean-builds"]="verbose"
     ["run-flutter-app"]="verbose,clear-app-data,window-size,separate-instance,instances"
     ["run-flutter-web"]="verbose"
     ["test-integration"]="verbose"
@@ -873,12 +874,65 @@ cmd_start_server_direct() {
 
 cmd_build_server() {
     validate_flags "build-server"
-    
+
     print_info "Building server..."
-    
+
     (cd "$ROOT_DIR/crates/server" && cargo build --release)
-    
+
     print_success "Build complete"
+
+    # Clean debug artifacts to save space (~150MB)
+    if [ -d "$ROOT_DIR/target/debug" ]; then
+        print_info "Cleaning debug artifacts..."
+        rm -rf "$ROOT_DIR/target/debug"
+    fi
+}
+
+cmd_clean_builds() {
+    validate_flags "clean-builds"
+
+    print_step "Cleaning build artifacts..."
+
+    local freed=0
+
+    # Remove debug directory (saves ~150-200MB)
+    if [ -d "$ROOT_DIR/target/debug" ]; then
+        freed=$(du -s "$ROOT_DIR/target/debug" 2>/dev/null | awk '{print $1}')
+        print_info "Removing debug artifacts ($(numfmt --to=iec-i --suffix=B $((freed * 1024)) 2>/dev/null || echo "$freed KB"))..."
+        rm -rf "$ROOT_DIR/target/debug"
+    fi
+
+    # Remove intermediate build cache but keep release binaries
+    # Keep: target/release/ (final binaries)
+    # Remove: target/.*/debug, target/.*/release (intermediate cross-compilation)
+    # Remove: target/*/build, target/*/deps (dependency builds)
+
+    if [ -d "$ROOT_DIR/target" ]; then
+        # Clean Android debug builds (saves ~500MB-1GB)
+        for android_target in "$ROOT_DIR/target"/aarch64-linux-android "$ROOT_DIR/target"/armv7-linux-androideabi "$ROOT_DIR/target"/x86_64-linux-android "$ROOT_DIR/target"/i686-linux-android; do
+            if [ -d "$android_target/debug" ]; then
+                freed_android=$(du -s "$android_target/debug" 2>/dev/null | awk '{print $1}')
+                freed=$((freed + freed_android))
+                rm -rf "$android_target/debug"
+            fi
+        done
+
+        # Clean build cache (intermediate artifacts)
+        # Note: This keeps release binaries intact
+        if [ -d "$ROOT_DIR/target/release/deps" ]; then
+            # Only remove .rlib and .rmeta files (dependencies), keep binaries
+            find "$ROOT_DIR/target/release/deps" -type f \( -name "*.rlib" -o -name "*.rmeta" \) -delete 2>/dev/null || true
+        fi
+    fi
+
+    # Final size check
+    local current_size=$(du -sh "$ROOT_DIR/target" 2>/dev/null | awk '{print $1}')
+    print_success "Build artifacts cleaned!"
+    echo ""
+    echo "Target directory size: $current_size"
+    echo "Release binaries preserved:"
+    [ -f "$ROOT_DIR/target/release/server" ] && echo "  ✓ server ($(ls -lh "$ROOT_DIR/target/release/server" | awk '{print $5}'))"
+    [ -f "$ROOT_DIR/target/release/libclient.so" ] && echo "  ✓ libclient.so ($(ls -lh "$ROOT_DIR/target/release/libclient.so" | awk '{print $5}'))"
 }
 
 cmd_status() {
@@ -2420,6 +2474,7 @@ Server Commands:
   restart-server                   Restart API server
                                   Use --skip-server-build to skip build if binary exists
   build-server                     Build the server (cargo build --release)
+  clean-builds                     Clean build artifacts (removes debug, Android, dependency cache)
 
 Flutter App Commands:
   run-flutter-app [platform] [mode] [device]
@@ -2477,6 +2532,8 @@ Examples:
   $0 start-server-direct                          # Start development (Rust directly, faster, auto-reload)
   $0 start-server-docker                          # Start server (runs on system, uses Docker for DB)
   $0 restart-server                               # Restart server
+  $0 build-server                                  # Build release server binary
+  $0 clean-builds                                  # Clean build artifacts (frees ~20+ GB)
   $0 status                                        # Check what's running
   $0 run-flutter-app android                      # Run Android app (dev mode)
   $0 run-flutter-app android release              # Run Android app in release mode
@@ -2550,6 +2607,9 @@ case "$COMMAND" in
         ;;
     build-server)
         cmd_build_server
+        ;;
+    clean-builds)
+        cmd_clean_builds
         ;;
     status)
         cmd_status
