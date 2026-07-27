@@ -237,7 +237,10 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen>
                       ),
                       _UserGroupsTab(
                         walletId: widget.walletId,
-                        userGroups: _userGroups.where((g) => g['name'] != '__owners__').toList(),
+                        userGroups: _userGroups.where((g) {
+                          final name = g['name'] as String? ?? '';
+                          return name != '__owners__' && name != 'all_users';
+                        }).toList(),
                         users: _users,
                         onReload: _loadAll,
                         onPermissionError: _onPermissionError,
