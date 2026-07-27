@@ -2993,18 +2993,18 @@ pub enum PermissionState {
 }
 
 /// PUT request: full permission state per group
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PutWalletPermissionsRequest {
     pub entries: Vec<PutWalletPermissionsEntry>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PutWalletPermissionsEntry {
     pub user_group_id: String,
     pub permissions: Vec<WalletPermissionState>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct WalletPermissionState {
     pub action: String,
     pub state: PermissionState,
@@ -3071,6 +3071,8 @@ pub async fn set_wallet_permissions(
 
     // Only admins can modify permissions
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    tracing::debug!("set_wallet_permissions received: {:?}", serde_json::to_string(&payload).unwrap_or_default());
 
     let db = Database::new((*state.db_pool).clone());
 
