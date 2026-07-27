@@ -64,9 +64,9 @@ impl Config {
             tls_cert_path: env::var("TLS_CERT_PATH").ok(),
             tls_key_path: env::var("TLS_KEY_PATH").ok(),
             rate_limit_requests: env::var("RATE_LIMIT_REQUESTS")
-                .unwrap_or_else(|_| "100".to_string())
+                .unwrap_or_else(|_| "0".to_string())
                 .parse()
-                .unwrap_or(100),
+                .unwrap_or(0),
             rate_limit_window: env::var("RATE_LIMIT_WINDOW")
                 .unwrap_or_else(|_| "60".to_string())
                 .parse()

@@ -32,6 +32,8 @@ services:
       DATABASE_URL: postgresql://debt_tracker:${DB_PASSWORD:-dev_password}@postgres:5432/debt_tracker
       PORT: 8000
       RUST_LOG: info
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-0}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-60}
     ports:
       - "8000:8000"
     depends_on:
