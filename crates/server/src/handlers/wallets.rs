@@ -3046,7 +3046,9 @@ pub async fn set_wallet_permissions(
     // Only admins can modify permissions
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
-    for entry in payload.entries {
+    // Collect unique user_group_ids to validate and delete all their permissions first
+    let mut group_ids = Vec::new();
+    for entry in &payload.entries {
         let user_group_id = Uuid::parse_str(&entry.user_group_id).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
@@ -3082,6 +3084,35 @@ pub async fn set_wallet_permissions(
             ));
         }
 
+        if !group_ids.contains(&user_group_id) {
+            group_ids.push(user_group_id);
+        }
+    }
+
+    // Delete all existing permissions for these groups (supports unsetting)
+    for group_id in &group_ids {
+        sqlx::query("DELETE FROM wallet_permission_matrix WHERE user_group_id = $1")
+            .bind(group_id)
+            .execute(&*state.db_pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error deleting wallet permissions: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Database error"})),
+                )
+            })?;
+    }
+
+    // Insert new permissions
+    for entry in payload.entries {
+        let user_group_id = Uuid::parse_str(&entry.user_group_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid user_group_id: {}", e)})),
+            )
+        })?;
+
         // Verify action is valid
         if domain::Action::from_str(&entry.action).is_none() {
             return Err((
@@ -3090,13 +3121,11 @@ pub async fn set_wallet_permissions(
             ));
         }
 
-        // Set permission in database (insert or update)
+        // Insert permission in database
         sqlx::query(
             r#"
             INSERT INTO wallet_permission_matrix (user_group_id, action, is_deny)
             VALUES ($1, $2, $3)
-            ON CONFLICT (user_group_id, action) DO UPDATE
-            SET is_deny = $3
             "#
         )
         .bind(user_group_id)
