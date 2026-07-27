@@ -1,9 +1,12 @@
 use axum::{
     body::Body,
+    extract::State,
     http::{Request, Response},
+    response::Json,
     routing::{get, post},
     Router,
 };
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -458,8 +461,27 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn health_check() -> &'static str {
-    "OK"
+async fn health_check(State(state): State<AppState>) -> Json<serde_json::Value> {
+    // Check database connectivity
+    let db_connected = sqlx::query("SELECT 1")
+        .execute(&*state.db_pool)
+        .await
+        .is_ok();
+
+    // Get build number from environment or use 0
+    let build_number = std::env::var("BUILD_NUMBER")
+        .unwrap_or_else(|_| "0".to_string());
+
+    Json(json!({
+        "status": "ok",
+        "database": {
+            "connected": db_connected,
+            "pool_size": state.db_pool.num_idle()
+        },
+        "build": {
+            "number": build_number
+        }
+    }))
 }
 
 /// One compact log line per request: method, path (no query), status, latency.
