@@ -2179,12 +2179,24 @@ class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
       }
     });
 
-    // Send full matrix: complete list of allowed + denied actions (unset = not in either list)
+    // Send full permission state vector for this group
+    final permissions = <Map<String, dynamic>>[];
+    for (final action in _walletActions) {
+      final state = allowed.contains(action)
+          ? 'allow'
+          : denied.contains(action)
+              ? 'deny'
+              : 'unset';
+      permissions.add({
+        'action': action,
+        'state': state,
+      });
+    }
+
     final entries = <Map<String, dynamic>>[
       {
         'user_group_id': groupId,
-        'allowed_actions': allowed.toList(),
-        'denied_actions': denied.toList(),
+        'permissions': permissions,
       }
     ];
 
