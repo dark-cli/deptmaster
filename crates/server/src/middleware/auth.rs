@@ -9,6 +9,7 @@ use axum::{
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use url::Url;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -42,27 +43,62 @@ pub async fn auth_middleware(
         (StatusCode::UNAUTHORIZED, Json(body)).into_response()
     }
 
-    // Extract token from Authorization header
-    let auth_header = match req
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-    {
-        Some(h) => h,
-        None => return Ok(auth_declined_response()),
+    // Extract token from Authorization header or query parameter (for WebSocket)
+    let token = if path == "/ws" {
+        // WebSocket can pass token via query parameter
+        let full_uri = req.uri().to_string();
+        tracing::debug!("WebSocket auth: full_uri={}", full_uri);
+
+        let url = match Url::parse(&format!("http://localhost{}", full_uri)) {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::warn!("WebSocket auth: URL parse failed: {:?}", e);
+                return Ok(auth_declined_response());
+            }
+        };
+
+        let token_from_query = url.query_pairs()
+            .find(|(k, _)| k == "token")
+            .map(|(_, v)| v.to_string());
+
+        let token_from_header = req.headers()
+            .get(AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.strip_prefix("Bearer ").map(|s| s.to_string()));
+
+        tracing::debug!("WebSocket auth: token_from_query={}, token_from_header={}",
+            token_from_query.is_some(), token_from_header.is_some());
+
+        match token_from_query.or(token_from_header) {
+            Some(t) => t,
+            None => {
+                tracing::warn!("WebSocket auth: no token found");
+                return Ok(auth_declined_response());
+            }
+        }
+    } else {
+        // Regular endpoints require Authorization header
+        let auth_header = match req
+            .headers()
+            .get(AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+        {
+            Some(h) => h,
+            None => return Ok(auth_declined_response()),
+        };
+
+        if !auth_header.starts_with("Bearer ") {
+            return Ok(auth_declined_response());
+        }
+
+        auth_header[7..].to_string()
     };
-
-    if !auth_header.starts_with("Bearer ") {
-        return Ok(auth_declined_response());
-    }
-
-    let token = &auth_header[7..]; // Skip "Bearer "
 
     // Decode and validate JWT
     let decoding_key = DecodingKey::from_secret(state.config.jwt_secret.as_ref());
     let validation = Validation::new(Algorithm::HS256);
 
-    let token_data = match decode::<Claims>(token, &decoding_key, &validation) {
+    let token_data = match decode::<Claims>(&token, &decoding_key, &validation) {
         Ok(d) => d,
         Err(_) => return Ok(auth_declined_response()),
     };

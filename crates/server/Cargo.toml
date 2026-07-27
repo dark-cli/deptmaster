@@ -90,6 +90,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Time handling
 chrono = { version = "0.4.38", features = ["serde"] }
 
+# URL parsing
+url = "2"
+
 # Error handling
 anyhow = "1"
 thiserror = "1"
