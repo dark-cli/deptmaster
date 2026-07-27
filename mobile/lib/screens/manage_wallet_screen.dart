@@ -2129,6 +2129,14 @@ class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
     'wallet:member_list',
   ];
 
+  static const Map<String, String> _actionDescriptions = {
+    'wallet:info_read': 'View wallet details (name, description)',
+    'wallet:info_update': 'Edit wallet details',
+    'wallet:member_add': 'Add members to wallet',
+    'wallet:member_remove': 'Remove members from wallet',
+    'wallet:member_list': 'View wallet member list',
+  };
+
   @override
   void initState() {
     super.initState();
@@ -2231,6 +2239,7 @@ class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
       builder: (context) => _WalletPermissionsDialog(
         groupName: groupName,
         walletActions: _walletActions,
+        actionDescriptions: _actionDescriptions,
         initialAllowed: _getAllowedForGroup(groupId).toList(),
         initialDenied: _getDeniedForGroup(groupId).toList(),
         onSave: (allowed, denied) => _savePermissions(groupId, Set.from(allowed), Set.from(denied)),
@@ -2314,6 +2323,7 @@ class _WalletPermissionsTabState extends State<_WalletPermissionsTab> {
 class _WalletPermissionsDialog extends StatefulWidget {
   final String groupName;
   final List<String> walletActions;
+  final Map<String, String> actionDescriptions;
   final List<String> initialAllowed;
   final List<String> initialDenied;
   final Function(List<String> allowed, List<String> denied) onSave;
@@ -2321,6 +2331,7 @@ class _WalletPermissionsDialog extends StatefulWidget {
   const _WalletPermissionsDialog({
     required this.groupName,
     required this.walletActions,
+    required this.actionDescriptions,
     required this.initialAllowed,
     required this.initialDenied,
     required this.onSave,
@@ -2342,24 +2353,21 @@ class _WalletPermissionsDialogState extends State<_WalletPermissionsDialog> {
     _denied = Set.from(widget.initialDenied);
   }
 
-  void _toggleAllow(String action) {
+  void _toggleState(String action) {
     setState(() {
-      if (_allowed.contains(action)) {
-        _allowed.remove(action);
-      } else {
-        _allowed.add(action);
-        _denied.remove(action);
-      }
-    });
-  }
+      final isAllowed = _allowed.contains(action);
+      final isDenied = _denied.contains(action);
 
-  void _toggleDeny(String action) {
-    setState(() {
-      if (_denied.contains(action)) {
+      if (isAllowed) {
+        // Allowed → Denied
+        _allowed.remove(action);
+        _denied.add(action);
+      } else if (isDenied) {
+        // Denied → Unset
         _denied.remove(action);
       } else {
-        _denied.add(action);
-        _allowed.remove(action);
+        // Unset → Allowed
+        _allowed.add(action);
       }
     });
   }
@@ -2375,31 +2383,39 @@ class _WalletPermissionsDialogState extends State<_WalletPermissionsDialog> {
           children: widget.walletActions
               .map((action) {
                 final actionName = action.replaceFirst('wallet:', '');
+                final description = widget.actionDescriptions[action] ?? actionName;
                 final isAllowed = _allowed.contains(action);
                 final isDenied = _denied.contains(action);
 
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(actionName),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.check_circle,
-                          color: isAllowed ? Colors.green : Colors.grey,
-                        ),
-                        onPressed: () => _toggleAllow(action),
-                        tooltip: 'Allow',
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.cancel,
-                          color: isDenied ? Colors.red : Colors.grey,
-                        ),
-                        onPressed: () => _toggleDeny(action),
-                        tooltip: 'Deny',
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(actionName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                Text(description, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              Icons.circle,
+                              color: isAllowed
+                                  ? Colors.green
+                                  : isDenied
+                                      ? Colors.red
+                                      : Colors.grey,
+                            ),
+                            onPressed: () => _toggleState(action),
+                            tooltip: isAllowed ? 'Allowed (tap to deny)' : isDenied ? 'Denied (tap to unset)' : 'Unset (tap to allow)',
+                          ),
+                        ],
                       ),
                     ],
                   ),
