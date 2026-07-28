@@ -468,6 +468,30 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Format seconds into readable uptime format: "1d 2h 3m 4s"
+fn format_uptime(total_secs: u64) -> String {
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{}d", days));
+    }
+    if hours > 0 {
+        parts.push(format!("{}h", hours));
+    }
+    if minutes > 0 {
+        parts.push(format!("{}m", minutes));
+    }
+    if seconds > 0 || parts.is_empty() {
+        parts.push(format!("{}s", seconds));
+    }
+
+    parts.join(" ")
+}
+
 async fn health_check(State(state): State<AppState>) -> Json<serde_json::Value> {
     // Check database connectivity
     let db_connected = sqlx::query("SELECT 1")
@@ -480,10 +504,11 @@ async fn health_check(State(state): State<AppState>) -> Json<serde_json::Value> 
         .unwrap_or_else(|_| "0".to_string());
 
     // Calculate uptime
-    let uptime = state.startup_time
+    let uptime_secs = state.startup_time
         .elapsed()
         .unwrap_or(Duration::from_secs(0))
         .as_secs();
+    let uptime_formatted = format_uptime(uptime_secs);
 
     // Get request statistics
     let request_count = state.request_count.load(Ordering::Relaxed);
@@ -501,7 +526,8 @@ async fn health_check(State(state): State<AppState>) -> Json<serde_json::Value> 
     Json(json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
-        "uptime_seconds": uptime,
+        "uptime": uptime_formatted,
+        "uptime_seconds": uptime_secs,
         "database": {
             "connected": db_connected,
             "pool_size": state.db_pool.num_idle()
