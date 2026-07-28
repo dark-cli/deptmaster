@@ -527,7 +527,6 @@ async fn health_check(State(state): State<AppState>) -> Json<serde_json::Value> 
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "uptime": uptime_formatted,
-        "uptime_seconds": uptime_secs,
         "database": {
             "connected": db_connected,
             "pool_size": state.db_pool.num_idle()
