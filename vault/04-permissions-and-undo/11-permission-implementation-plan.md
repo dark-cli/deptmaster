@@ -352,21 +352,37 @@ if !is_wallet_owner(..., user_id).await? {
 
 ### Layer 3 (Contact/Transaction Permission Matrix) - Modify
 
-**Who Can Modify:** Owner OR anyone with `wallet:permissions_edit` permission
+**Who Can Modify:** 
+1. **Owner** (hardcoded bypass)
+2. OR anyone with **`wallet:permissions_edit`** (global Layer 3 admin for all member_groups)
+3. OR anyone with **`member_group:permissions_edit`** scoped to the specific member_group being modified (granular delegation)
 
 ```rust
 if !is_wallet_owner(..., user_id).await? {
-  // Non-owner: must have wallet:permissions_edit permission
-  can_perform(
+  // Non-owner: check either global or scoped permission edit permission
+  
+  // Try global permission: can edit Layer 3 for ANY member_group
+  let has_global = can_perform(
     &pool,
     &PermissionContext { wallet_id, user_id, user_role: WalletRole::Member },
-    Action::WalletPermissionsEdit,  // THE ONLY DELEGABLE PERMISSION ADMIN ROLE
+    Action::WalletPermissionsEdit,
     &Resource::Wallet(wallet_id)
   ).await?;
+  
+  if !has_global {
+    // Try scoped permission: can edit Layer 3 for THIS specific member_group only
+    let has_scoped = can_perform(
+      &pool,
+      &PermissionContext { wallet_id, user_id, user_role: WalletRole::Member },
+      Action::MemberGroupPermissionsEdit,
+      &Resource::WalletGroup(user_group_id)  // Scoped to specific group
+    ).await?;
+    
+    if !has_scoped {
+      return Err("Insufficient permission to modify Layer 3 for this group");
+    }
+  }
 }
-
-// Additional: verify not trying to modify owner permission vectors
-validate_owner_permission_protection(wallet_id, user_group_id, contact_group_id).await?;
 ```
 
 **What can be modified:**
@@ -673,7 +689,7 @@ Response:
 | **Layer 1** (wallet-wide perms) | Owner ONLY | ❌ NO | Too structural/administrative |
 | **Layer 2** (group-to-group perms) | Owner ONLY | ❌ NO | Too administrative (group management) |
 | **Layer 2.5** (contact-group perms) | Owner ONLY | ❌ NO | Too administrative (resource management) |
-| **Layer 3** (data access perms) | Owner + `wallet:permissions_edit` | ✅ YES | Operational (who works with what data) |
+| **Layer 3** (data access perms) | Owner + `wallet:permissions_edit` (global) OR `member_group:permissions_edit` (scoped) | ✅ YES | Operational (who works with what data) |
 
 ---
 
@@ -691,20 +707,32 @@ Response:
 
 ---
 
-### Tier 2: The ONLY Delegable Permission Admin Role
-- **`wallet:permissions_edit`** — Control Layer 3 (Contact/Transaction) matrix for entire wallet
+### Tier 2: Delegable Layer 3 Permission Management Roles
 
-**Who can grant:** Owner only  
-**Can be delegated to:** Yes, to trusted operators (finance managers, team leads, compliance)  
-**Risk:** HIGH - Controls all data access for all users  
-**Mitigation:** Owner must verify trustworthiness before granting
+**Option A: Global (`wallet:permissions_edit`)**
+- **`wallet:permissions_edit`** — Control Layer 3 for ALL member_groups
+- **Who can grant:** Owner only  
+- **Can be delegated to:** Yes, to one highly trusted operator (finance manager, compliance officer)  
+- **Risk:** VERY HIGH - Controls all data access for all users on all groups  
+- **Mitigation:** Owner must verify trustworthiness; grant only to most senior operators
+
+**Option B: Scoped (`member_group:permissions_edit`)**
+- **`member_group:permissions_edit`** — Control Layer 3 for ONE specific member_group (scoped)
+- **Who can grant:** Owner only  
+- **Can be delegated to:** Yes, to team leads or managers (safer than global)  
+- **Risk:** MEDIUM - Controls data access for one team only  
+- **Mitigation:** Safer delegation; owner can grant per-team without full wallet-wide access
+
+**Key Difference:**
+- `wallet:permissions_edit`: "Can modify Layer 3 for ANY member_group" (dangerous)
+- `member_group:permissions_edit`: "Can modify Layer 3 only for MY team" (safer)
 
 ---
 
 ### Tier 3: Owner (Ultimate Authority)
 - Owner bypass → Can modify ANY layer
-- Can grant `wallet:permissions_edit` (the only delegable admin role)
-- Can grant/revoke ALL Layer 1/2/2.5 permissions
+- Can grant `wallet:permissions_edit` (global Layer 3 admin) or `member_group:permissions_edit` (scoped to specific team)
+- Can grant/revoke ALL Layer 1/2/2.5 permissions (structural)
 - Cannot be revoked (except by removing from wallet_owners)
 
 **Only:** Wallet creator, other owners
@@ -715,16 +743,18 @@ Response:
 
 ```
 Layer 1/2/2.5 Modifications:
-  Only Owner
+  Only Owner (NON-DELEGABLE)
     ↓
-    Can set who has operational permissions
-    (but cannot delegate this responsibility)
+    Can set structural permissions
+    (wallets, groups, contact groups)
 
 Layer 3 Modifications:
-  Owner OR wallet:permissions_edit holder
+  Owner 
+    OR wallet:permissions_edit holder (global Layer 3 admin for ANY group)
+    OR member_group:permissions_edit holder (scoped to ONE group)
     ↓
     Can control who reads/writes data
-    (CAN delegate to one trusted person/team)
+    (CAN delegate: globally or per-team)
 ```
 
 ---
