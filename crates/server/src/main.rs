@@ -239,6 +239,10 @@ async fn main() -> anyhow::Result<()> {
             "/api/wallets/:wallet_id/member-permissions",
             get(handlers::get_member_permissions).put(handlers::set_member_permissions),
         )
+        .route(
+            "/api/wallets/:wallet_id/contact-group-permissions/:contact_group_id",
+            get(handlers::get_contact_group_permissions).put(handlers::set_contact_group_permissions),
+        )
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             wallet_context_middleware,

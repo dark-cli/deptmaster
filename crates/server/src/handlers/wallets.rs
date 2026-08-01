@@ -3368,3 +3368,269 @@ pub async fn set_member_permissions(
 
     Ok(Json(serde_json::json!({"message": "Member permissions updated"})))
 }
+
+// ============================================================================
+// LAYER 2.5: CONTACT GROUP PERMISSIONS (vector-based, scoped to contact group)
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContactGroupPermissionState {
+    pub action: String,
+    pub state: PermissionState,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutContactGroupPermissionsEntry {
+    pub member_group_id: String,
+    pub permissions: Vec<ContactGroupPermissionState>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutContactGroupPermissionsRequest {
+    pub contact_group_id: String,
+    pub entries: Vec<PutContactGroupPermissionsEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContactGroupPermissionEntry {
+    pub member_group_id: String,
+    pub contact_group_id: String,
+    pub action: String,
+    pub is_deny: bool,
+}
+
+/// GET /api/wallets/:wallet_id/contact-group-permissions/:contact_group_id
+/// Returns contact-group management permissions for a specific contact_group
+pub async fn get_contact_group_permissions(
+    Path((wallet_id, contact_group_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<Vec<ContactGroupPermissionEntry>>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
+
+    let contact_group_uuid = Uuid::parse_str(&contact_group_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid contact_group_id: {}", e)})),
+        )
+    })?;
+
+    // Only admins can view contact-group permissions
+    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Verify contact_group belongs to this wallet
+    let cg_wallet_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT wallet_id FROM contact_groups WHERE id = $1"
+    )
+    .bind(contact_group_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching contact_group: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
+
+    if cg_wallet_id != Some(wallet_uuid) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Contact group not found in this wallet"})),
+        ));
+    }
+
+    // Query wallet_contact_group_permission_matrix
+    let perms: Vec<(Uuid, String, bool)> = sqlx::query_as(
+        r#"
+        SELECT source_group_id, action, is_deny
+        FROM wallet_contact_group_permission_matrix
+        WHERE target_contact_group_id = $1
+        ORDER BY source_group_id, action
+        "#
+    )
+    .bind(contact_group_uuid)
+    .fetch_all(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("get_contact_group_permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Failed to fetch permissions"})),
+        )
+    })?;
+
+    let entries: Vec<ContactGroupPermissionEntry> = perms
+        .into_iter()
+        .map(|(source_id, action, is_deny)| ContactGroupPermissionEntry {
+            member_group_id: source_id.to_string(),
+            contact_group_id: contact_group_uuid.to_string(),
+            action,
+            is_deny,
+        })
+        .collect();
+
+    Ok(Json(entries))
+}
+
+/// PUT /api/wallets/:wallet_id/contact-group-permissions/:contact_group_id
+/// Set contact-group management permissions (full vector replacement)
+pub async fn set_contact_group_permissions(
+    Path((wallet_id, contact_group_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(payload): Json<PutContactGroupPermissionsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let wallet_uuid = Uuid::parse_str(&wallet_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
+        )
+    })?;
+
+    let contact_group_uuid = Uuid::parse_str(&contact_group_id).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": format!("Invalid contact_group_id: {}", e)})),
+        )
+    })?;
+
+    // Only owners can modify contact-group permissions
+    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Verify contact_group belongs to this wallet
+    let cg_wallet_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT wallet_id FROM contact_groups WHERE id = $1"
+    )
+    .bind(contact_group_uuid)
+    .fetch_optional(&*state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Error fetching contact_group: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
+
+    if cg_wallet_id != Some(wallet_uuid) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Contact group not found in this wallet"})),
+        ));
+    }
+
+    // Validate all entries first
+    for entry in &payload.entries {
+        let member_group_id = Uuid::parse_str(&entry.member_group_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid member_group_id: {}", e)})),
+            )
+        })?;
+
+        // Verify group belongs to this wallet
+        let mg_wallet_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT wallet_id FROM user_groups WHERE id = $1"
+        )
+        .bind(member_group_id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching member_group: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+        if mg_wallet_id != Some(wallet_uuid) {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Member group not found in this wallet"})),
+            ));
+        }
+
+        // Validate all action names
+        for perm in &entry.permissions {
+            if domain::Action::from_str(&perm.action).is_none() {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": format!("Invalid action: {}", perm.action)})),
+                ));
+            }
+        }
+    }
+
+    // Delete all existing permissions for this contact_group (full replacement)
+    sqlx::query("DELETE FROM wallet_contact_group_permission_matrix WHERE target_contact_group_id = $1")
+        .bind(contact_group_uuid)
+        .execute(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error deleting contact_group permissions: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+    // Insert new permissions based on state
+    for entry in payload.entries {
+        let member_group_id = Uuid::parse_str(&entry.member_group_id).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid member_group_id: {}", e)})),
+            )
+        })?;
+
+        for perm in &entry.permissions {
+            match perm.state {
+                PermissionState::Allow => {
+                    sqlx::query(
+                        "INSERT INTO wallet_contact_group_permission_matrix (source_group_id, target_contact_group_id, action, is_deny) VALUES ($1, $2, $3, false)"
+                    )
+                    .bind(member_group_id)
+                    .bind(contact_group_uuid)
+                    .bind(&perm.action)
+                    .execute(&*state.db_pool)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error setting contact_group permission: {:?}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({"error": "Failed to set permission"})),
+                        )
+                    })?;
+                }
+                PermissionState::Deny => {
+                    sqlx::query(
+                        "INSERT INTO wallet_contact_group_permission_matrix (source_group_id, target_contact_group_id, action, is_deny) VALUES ($1, $2, $3, true)"
+                    )
+                    .bind(member_group_id)
+                    .bind(contact_group_uuid)
+                    .bind(&perm.action)
+                    .execute(&*state.db_pool)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error setting contact_group permission: {:?}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({"error": "Failed to set permission"})),
+                        )
+                    })?;
+                }
+                PermissionState::Unset => {
+                    // Don't insert anything for unset (already deleted above)
+                }
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({"message": "Contact group permissions updated"})))
+}
