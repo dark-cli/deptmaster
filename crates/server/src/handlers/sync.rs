@@ -604,7 +604,10 @@ pub async fn insert_permission_event_and_apply(
                 }
             }
         }
-        E::PermissionMatrixSet => {
+        E::PermissionMatrixSet
+        | E::WalletPermissionsSet
+        | E::GroupPermissionsSet
+        | E::ContactGroupPermissionsSet => {
             let _ = db
                 .invalidate_permission_matrix_cache_for_wallet(wallet_id)
                 .await;
@@ -636,7 +639,9 @@ pub async fn insert_permission_event_and_apply(
         | E::ContactGroupMemberAdded
         | E::ContactGroupMemberRemoved
         | E::WalletDeleted
-        | E::OwnershipTransferred => {}
+        | E::OwnershipTransferred => {
+            // These don't require cache invalidation for sync handler
+        }
     }
 
     // Broadcast permission change

@@ -1200,6 +1200,21 @@ impl Database {
                 }
             }
 
+            // Layer 1/2/2.5 permission changes - invalidate wallet-wide cache as they may affect all users
+            domain::EventType::WalletPermissionsSet
+            | domain::EventType::GroupPermissionsSet
+            | domain::EventType::ContactGroupPermissionsSet => {
+                if let Err(e) = self
+                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to invalidate permission cache for wallet {} due to permission change: {:?}",
+                        wallet_id, e
+                    );
+                }
+            }
+
             // No-op for cache invalidation. Exhaustive list — adding a
             // new EventType variant forces a deliberate choice between
             // "invalidate" and "not relevant" here.

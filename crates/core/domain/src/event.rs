@@ -70,6 +70,13 @@ pub enum EventType {
     ContactGroupDeleted,
     ContactGroupMemberAdded,
     ContactGroupMemberRemoved,
+    // Layer 1: Wallet-wide permission changes
+    WalletPermissionsSet,
+    // Layer 2: Member-group-to-member-group permission changes
+    GroupPermissionsSet,
+    // Layer 2.5: Contact-group management permission changes
+    ContactGroupPermissionsSet,
+    // Layer 3: Contact/transaction operational permissions
     PermissionMatrixSet,
     WalletDeleted,
     OwnershipTransferred,
@@ -98,6 +105,9 @@ impl EventType {
             EventType::ContactGroupDeleted => "CONTACT_GROUP_DELETED",
             EventType::ContactGroupMemberAdded => "CONTACT_GROUP_MEMBER_ADDED",
             EventType::ContactGroupMemberRemoved => "CONTACT_GROUP_MEMBER_REMOVED",
+            EventType::WalletPermissionsSet => "WALLET_PERMISSIONS_SET",
+            EventType::GroupPermissionsSet => "GROUP_PERMISSIONS_SET",
+            EventType::ContactGroupPermissionsSet => "CONTACT_GROUP_PERMISSIONS_SET",
             EventType::PermissionMatrixSet => "PERMISSION_MATRIX_SET",
             EventType::WalletDeleted => "WALLET_DELETED",
             EventType::OwnershipTransferred => "OWNERSHIP_TRANSFERRED",
@@ -127,6 +137,9 @@ impl EventType {
             "CONTACT_GROUP_DELETED" => Some(EventType::ContactGroupDeleted),
             "CONTACT_GROUP_MEMBER_ADDED" => Some(EventType::ContactGroupMemberAdded),
             "CONTACT_GROUP_MEMBER_REMOVED" => Some(EventType::ContactGroupMemberRemoved),
+            "WALLET_PERMISSIONS_SET" => Some(EventType::WalletPermissionsSet),
+            "GROUP_PERMISSIONS_SET" => Some(EventType::GroupPermissionsSet),
+            "CONTACT_GROUP_PERMISSIONS_SET" => Some(EventType::ContactGroupPermissionsSet),
             "PERMISSION_MATRIX_SET" => Some(EventType::PermissionMatrixSet),
             "WALLET_DELETED" => Some(EventType::WalletDeleted),
             "OWNERSHIP_TRANSFERRED" => Some(EventType::OwnershipTransferred),
@@ -441,6 +454,18 @@ impl EventData {
             },
             E::ContactGroupMemberRemoved => match aggregate {
                 A::Permission => Some("contact_group_member_removed"),
+                A::Contact | A::Transaction => None,
+            },
+            E::WalletPermissionsSet => match aggregate {
+                A::Permission => Some("wallet_permissions_set"),
+                A::Contact | A::Transaction => None,
+            },
+            E::GroupPermissionsSet => match aggregate {
+                A::Permission => Some("group_permissions_set"),
+                A::Contact | A::Transaction => None,
+            },
+            E::ContactGroupPermissionsSet => match aggregate {
+                A::Permission => Some("contact_group_permissions_set"),
                 A::Contact | A::Transaction => None,
             },
             E::PermissionMatrixSet => match aggregate {

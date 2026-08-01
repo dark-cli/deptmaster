@@ -35,19 +35,39 @@ pub enum Action {
     ContactGroupRead,
     ContactGroupUpdate,
 
-    // Wallet actions (granular, replaces WalletRead/Update/Delete/ManageMembers)
-    // Tier 1: Global wallet management
-    WalletInfoRead,       // Read wallet name, description, members count
-    WalletInfoUpdate,     // Modify wallet name, description
-    // Tier 2: Global member management
-    WalletMemberAdd,      // Invite/add users to wallet
-    WalletMemberRemove,   // Remove users from wallet
-    WalletMemberList,     // View all members in wallet
-    // Tier 2: Vector-based member management (scoped to target group)
-    WalletSetPermissionMatrix,  // Modify member group permissions
-    // Tier 3: Owner-only operations (hardcoded in handlers, no matrix check)
-    WalletOwnerTransfer,  // Transfer ownership (OWNER ONLY)
-    WalletDelete,         // Soft delete wallet (OWNER ONLY)
+    // Wallet actions (Layer 1: Wallet-wide permissions)
+    WalletInfoRead,              // wallet:info_read
+    WalletInfoUpdate,            // wallet:info_update
+    WalletMembersRead,           // wallet:members_read - View all members in wallet
+    WalletMembersAdd,            // wallet:members_add - Add users to wallet
+    WalletMembersRemove,         // wallet:members_remove - Remove users from wallet
+    WalletGroupsCreate,          // wallet:groups_create - Create member_groups
+    WalletGroupsUpdate,          // wallet:groups_update - Update member_groups and manage members
+    WalletGroupsDelete,          // wallet:groups_delete - Delete member_groups
+    WalletContactGroupsCreate,   // wallet:contact_groups_create - Create contact_groups
+    WalletContactGroupsUpdate,   // wallet:contact_groups_update - Update contact_groups
+    WalletContactGroupsDelete,   // wallet:contact_groups_delete - Delete contact_groups
+    WalletMetadataRead,          // wallet:metadata_read - View wallet structure
+    WalletPermissionsEdit,       // wallet:permissions_edit - Modify permission matrix (Layer 3 only)
+    WalletDelete,                // wallet:delete - Soft delete wallet (OWNER ONLY)
+    WalletOwnerTransfer,         // wallet:owner_transfer - Transfer ownership (OWNER ONLY)
+
+    // Layer 2: Member-group-to-member-group permissions (vector-based, scoped to target group)
+    MemberGroupMembersRead,      // member_group:members_read
+    MemberGroupMembersAdd,       // member_group:members_add
+    MemberGroupMembersRemove,    // member_group:members_remove
+    MemberGroupPermissionsEdit,  // member_group:permissions_edit
+
+    // Layer 2.5: Contact-group management permissions (vector-based, scoped to target contact_group)
+    ContactGroupContactsRead,    // contact_group:contacts_read
+    ContactGroupContactsAdd,     // contact_group:contacts_add
+    ContactGroupContactsRemove,  // contact_group:contacts_remove
+
+    // Legacy/deprecated actions (kept for backward compatibility)
+    WalletMemberAdd,      // DEPRECATED: Use WalletMembersAdd
+    WalletMemberRemove,   // DEPRECATED: Use WalletMembersRemove
+    WalletMemberList,     // DEPRECATED: Use WalletMembersRead
+    WalletSetPermissionMatrix,  // DEPRECATED: Use WalletPermissionsEdit
 
     /// Owner-only fallback: bypasses every other check when held.
     /// Deprecated: kept for backward compatibility, not used in new code.
@@ -77,14 +97,36 @@ impl Action {
             Action::ContactGroupCreate => "contact_group:create",
             Action::ContactGroupRead => "contact_group:read",
             Action::ContactGroupUpdate => "contact_group:update",
+            // Layer 1: Wallet-wide permissions
             Action::WalletInfoRead => "wallet:info_read",
             Action::WalletInfoUpdate => "wallet:info_update",
-            Action::WalletMemberAdd => "wallet:member_add",
-            Action::WalletMemberRemove => "wallet:member_remove",
-            Action::WalletMemberList => "wallet:member_list",
-            Action::WalletSetPermissionMatrix => "wallet:set_permission_matrix",
-            Action::WalletOwnerTransfer => "wallet:owner_transfer",
+            Action::WalletMembersRead => "wallet:members_read",
+            Action::WalletMembersAdd => "wallet:members_add",
+            Action::WalletMembersRemove => "wallet:members_remove",
+            Action::WalletGroupsCreate => "wallet:groups_create",
+            Action::WalletGroupsUpdate => "wallet:groups_update",
+            Action::WalletGroupsDelete => "wallet:groups_delete",
+            Action::WalletContactGroupsCreate => "wallet:contact_groups_create",
+            Action::WalletContactGroupsUpdate => "wallet:contact_groups_update",
+            Action::WalletContactGroupsDelete => "wallet:contact_groups_delete",
+            Action::WalletMetadataRead => "wallet:metadata_read",
+            Action::WalletPermissionsEdit => "wallet:permissions_edit",
             Action::WalletDelete => "wallet:delete",
+            Action::WalletOwnerTransfer => "wallet:owner_transfer",
+            // Layer 2: Member-group-to-member-group permissions
+            Action::MemberGroupMembersRead => "member_group:members_read",
+            Action::MemberGroupMembersAdd => "member_group:members_add",
+            Action::MemberGroupMembersRemove => "member_group:members_remove",
+            Action::MemberGroupPermissionsEdit => "member_group:permissions_edit",
+            // Layer 2.5: Contact-group management permissions
+            Action::ContactGroupContactsRead => "contact_group:contacts_read",
+            Action::ContactGroupContactsAdd => "contact_group:contacts_add",
+            Action::ContactGroupContactsRemove => "contact_group:contacts_remove",
+            // Legacy/deprecated
+            Action::WalletMemberAdd => "wallet:member_add",       // Deprecated alias
+            Action::WalletMemberRemove => "wallet:member_remove", // Deprecated alias
+            Action::WalletMemberList => "wallet:member_list",     // Deprecated alias
+            Action::WalletSetPermissionMatrix => "wallet:set_permission_matrix", // Deprecated
             Action::WalletSuperPermission => "wallet:super_permission",
             Action::EventsRead => "events:read",
         }
@@ -111,19 +153,40 @@ impl Action {
             "contact_group:create" => Some(Action::ContactGroupCreate),
             "contact_group:read" => Some(Action::ContactGroupRead),
             "contact_group:update" => Some(Action::ContactGroupUpdate),
-            // New wallet actions (granular)
+            // Layer 1: Wallet-wide permissions
             "wallet:info_read" => Some(Action::WalletInfoRead),
             "wallet:info_update" => Some(Action::WalletInfoUpdate),
+            "wallet:members_read" => Some(Action::WalletMembersRead),
+            "wallet:members_add" => Some(Action::WalletMembersAdd),
+            "wallet:members_remove" => Some(Action::WalletMembersRemove),
+            "wallet:groups_create" => Some(Action::WalletGroupsCreate),
+            "wallet:groups_update" => Some(Action::WalletGroupsUpdate),
+            "wallet:groups_delete" => Some(Action::WalletGroupsDelete),
+            "wallet:contact_groups_create" => Some(Action::WalletContactGroupsCreate),
+            "wallet:contact_groups_update" => Some(Action::WalletContactGroupsUpdate),
+            "wallet:contact_groups_delete" => Some(Action::WalletContactGroupsDelete),
+            "wallet:metadata_read" => Some(Action::WalletMetadataRead),
+            "wallet:permissions_edit" => Some(Action::WalletPermissionsEdit),
+            "wallet:delete" => Some(Action::WalletDelete),
+            "wallet:owner_transfer" => Some(Action::WalletOwnerTransfer),
+            // Layer 2: Member-group-to-member-group permissions
+            "member_group:members_read" => Some(Action::MemberGroupMembersRead),
+            "member_group:members_add" => Some(Action::MemberGroupMembersAdd),
+            "member_group:members_remove" => Some(Action::MemberGroupMembersRemove),
+            "member_group:permissions_edit" => Some(Action::MemberGroupPermissionsEdit),
+            // Layer 2.5: Contact-group management permissions
+            "contact_group:contacts_read" => Some(Action::ContactGroupContactsRead),
+            "contact_group:contacts_add" => Some(Action::ContactGroupContactsAdd),
+            "contact_group:contacts_remove" => Some(Action::ContactGroupContactsRemove),
+            // Deprecated wallet actions (for backward compatibility)
             "wallet:member_add" => Some(Action::WalletMemberAdd),
             "wallet:member_remove" => Some(Action::WalletMemberRemove),
             "wallet:member_list" => Some(Action::WalletMemberList),
             "wallet:set_permission_matrix" => Some(Action::WalletSetPermissionMatrix),
-            "wallet:owner_transfer" => Some(Action::WalletOwnerTransfer),
-            "wallet:delete" => Some(Action::WalletDelete),
-            // Old wallet actions (deprecated, for backward compat)
+            // Old deprecated wallet actions (map to new ones)
             "wallet:read" => Some(Action::WalletInfoRead),        // Maps to info_read
             "wallet:update" => Some(Action::WalletInfoUpdate),    // Maps to info_update
-            "wallet:manage_members" => Some(Action::WalletMemberAdd), // Maps to member_add
+            "wallet:manage_members" => Some(Action::WalletMembersAdd), // Maps to members_add
             "wallet:super_permission" => Some(Action::WalletSuperPermission),
             "events:read" => Some(Action::EventsRead),
             _ => None,
@@ -133,52 +196,91 @@ impl Action {
     /// Every defined action. Useful for initialization and tests.
     pub fn all() -> &'static [Action] {
         &[
+            // Contact actions
             Action::ContactCreate,
             Action::ContactRead,
             Action::ContactUpdate,
             Action::ContactDelete,
+            // Transaction actions
             Action::TransactionCreate,
             Action::TransactionRead,
             Action::TransactionUpdate,
             Action::TransactionDelete,
             Action::TransactionClose,
+            // User group actions
             Action::UserGroupCreate,
             Action::UserGroupRead,
             Action::UserGroupUpdate,
+            // Contact group actions
             Action::ContactGroupCreate,
             Action::ContactGroupRead,
             Action::ContactGroupUpdate,
+            // Layer 1: Wallet-wide permissions
             Action::WalletInfoRead,
             Action::WalletInfoUpdate,
-            Action::WalletMemberAdd,
-            Action::WalletMemberRemove,
-            Action::WalletMemberList,
-            Action::WalletSetPermissionMatrix,
-            Action::WalletOwnerTransfer,
+            Action::WalletMembersRead,
+            Action::WalletMembersAdd,
+            Action::WalletMembersRemove,
+            Action::WalletGroupsCreate,
+            Action::WalletGroupsUpdate,
+            Action::WalletGroupsDelete,
+            Action::WalletContactGroupsCreate,
+            Action::WalletContactGroupsUpdate,
+            Action::WalletContactGroupsDelete,
+            Action::WalletMetadataRead,
+            Action::WalletPermissionsEdit,
             Action::WalletDelete,
-            Action::WalletSuperPermission,
+            Action::WalletOwnerTransfer,
+            // Layer 2: Member-group-to-member-group permissions
+            Action::MemberGroupMembersRead,
+            Action::MemberGroupMembersAdd,
+            Action::MemberGroupMembersRemove,
+            Action::MemberGroupPermissionsEdit,
+            // Layer 2.5: Contact-group management permissions
+            Action::ContactGroupContactsRead,
+            Action::ContactGroupContactsAdd,
+            Action::ContactGroupContactsRemove,
+            // Legacy/deprecated (not included - for backward compat only)
+            // Events
             Action::EventsRead,
+            // Deprecated (kept for backward compat)
+            Action::WalletSuperPermission,
         ]
     }
 
     /// Does holding `self` imply being allowed to perform `other`?
-    /// Update/Delete imply Read on the same resource type;
+    /// Update/Delete/Add/Remove operations imply Read on the same resource;
     /// `WalletSuperPermission` implies everything.
     pub fn implies(&self, other: Action) -> bool {
         match (self, other) {
+            // Contact implications
             (Action::ContactUpdate, Action::ContactRead) => true,
             (Action::ContactDelete, Action::ContactRead) => true,
+            // Transaction implications
             (Action::TransactionUpdate, Action::TransactionRead) => true,
             (Action::TransactionDelete, Action::TransactionRead) => true,
             (Action::TransactionClose, Action::TransactionRead) => true,
+            // User group implications
             (Action::UserGroupUpdate, Action::UserGroupRead) => true,
+            // Contact group implications
             (Action::ContactGroupUpdate, Action::ContactGroupRead) => true,
             // Wallet-level implications
             (Action::WalletInfoUpdate, Action::WalletInfoRead) => true,
             (Action::WalletDelete, Action::WalletInfoRead) => true,
-            (Action::WalletMemberRemove, Action::WalletMemberList) => true,
+            (Action::WalletMembersRemove, Action::WalletMembersRead) => true,
+            (Action::WalletMembersAdd, Action::WalletMembersRead) => true,
+            // Layer 2: Member-group-to-member-group implications
+            (Action::MemberGroupMembersAdd, Action::MemberGroupMembersRead) => true,
+            (Action::MemberGroupMembersRemove, Action::MemberGroupMembersRead) => true,
+            // Layer 2.5: Contact-group management implications
+            (Action::ContactGroupContactsAdd, Action::ContactGroupContactsRead) => true,
+            (Action::ContactGroupContactsRemove, Action::ContactGroupContactsRead) => true,
+            // Legacy/deprecated actions (map to new ones)
             (Action::WalletMemberAdd, Action::WalletMemberList) => true,
+            (Action::WalletMemberRemove, Action::WalletMemberList) => true,
+            // Super permission implies everything
             (Action::WalletSuperPermission, _) => true,
+            // Self-implication
             _ if self == &other => true,
             _ => false,
         }
