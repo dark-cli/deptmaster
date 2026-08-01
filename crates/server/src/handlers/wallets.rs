@@ -60,10 +60,8 @@ async fn check_wallet_role(
     auth_user: &AuthUser,
     required_role: WalletRole,
 ) -> Result<WalletRole, (StatusCode, Json<serde_json::Value>)> {
-    // System admins bypass all checks
-    if auth_user.is_admin {
-        return Ok(WalletRole::Owner);
-    }
+    // Admin bypass removed: permission checks apply to all users equally.
+    // Admin role is separate from wallet permissions.
 
     let db = Database::new((*state.db_pool).clone());
     let role_str = db
@@ -1572,10 +1570,8 @@ async fn require_wallet_admin(
     wallet_id: Uuid,
     auth_user: &AuthUser,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    // System admins bypass all checks
-    if auth_user.is_admin {
-        return Ok(());
-    }
+    // Admin bypass removed: only wallet owners can perform admin actions.
+    // Admin role is separate from wallet permissions and does not grant wallet access.
 
     let is_owner = is_wallet_owner(state, wallet_id, auth_user.user_id).await?;
     if is_owner {
@@ -1592,14 +1588,13 @@ async fn require_wallet_admin(
 }
 
 /// Returns the user's role in the wallet (type-safe enum)
+/// Admin role does not grant wallet permissions; all checks apply equally.
 async fn get_wallet_role(
     state: &AppState,
     wallet_id: Uuid,
     auth_user: &AuthUser,
 ) -> Result<WalletRole, (StatusCode, Json<serde_json::Value>)> {
-    if auth_user.is_admin {
-        return Ok(WalletRole::Owner);
-    }
+    // Admin bypass removed: check actual wallet role for all users.
     let db = Database::new((*state.db_pool).clone());
     let role_str = db
         .get_wallet_user_role(wallet_id, auth_user.user_id)
