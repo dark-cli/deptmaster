@@ -3559,10 +3559,7 @@ pub async fn set_contact_group_permissions(
         )
     })?;
 
-    // Only owners can modify contact-group permissions
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
-
-    // Verify contact_group belongs to this wallet
+    // Verify contact_group belongs to this wallet first (before auth check)
     let cg_wallet_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT wallet_id FROM contact_groups WHERE id = $1"
     )
@@ -3582,6 +3579,32 @@ pub async fn set_contact_group_permissions(
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "Contact group not found in this wallet"})),
         ));
+    }
+
+    // Check authorization: owner bypass OR contact_group:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_manage = crate::permissions::resolver::can_manage_contact_group(
+        &state.db_pool,
+        &ctx,
+        domain::Action::ContactGroupPermissionsEdit,
+        contact_group_uuid,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking contact-group management permission: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_manage {
+        return Err(insufficient_permission_response());
     }
 
     // Validate all entries first
