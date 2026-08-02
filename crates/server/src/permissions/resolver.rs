@@ -130,6 +130,53 @@ async fn resolve_wallet_member_permissions(
     Ok(allowed.difference(&denied).copied().collect())
 }
 
+/// Resolve allowed actions for wallet-level operations (delegable Layer 1 permissions)
+/// Uses wallet_permission_matrix for user's groups and wallet-level actions
+async fn resolve_wallet_level_permissions(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+) -> Result<HashSet<Action>, DbError> {
+    // Get user's groups (including implicit all_users)
+    let user_group_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND (name = 'all_users' OR id IN (
+            SELECT user_group_id FROM user_group_members WHERE user_id = $2
+        ))",
+    )
+    .bind(ctx.wallet_id)
+    .bind(ctx.user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    if user_group_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    // Query wallet_permission_matrix for wallet-level permissions
+    let perms: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT action, is_deny FROM wallet_permission_matrix WHERE user_group_id = ANY($1)",
+    )
+    .bind(&user_group_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    let mut allowed = HashSet::new();
+    let mut denied = HashSet::new();
+
+    for (action_name, is_deny) in perms {
+        if let Some(action) = Action::from_str(&action_name) {
+            if is_deny {
+                denied.insert(action);
+            } else {
+                allowed.insert(action);
+            }
+        }
+    }
+
+    Ok(allowed.difference(&denied).copied().collect())
+}
+
 /// Resolve allowed actions for a user managing a specific contact group (vector permissions)
 /// Uses wallet_contact_group_permission_matrix (member_group, target_contact_group, action) tuples
 async fn resolve_contact_group_management_permissions(
@@ -259,6 +306,23 @@ pub async fn can_perform(
     }
 
     let allowed = resolve_actions(pool, ctx, resource).await?;
+
+    // Check if action is allowed directly or via dependency
+    Ok(allowed.iter().any(|a| a.implies(action)))
+}
+
+/// Check if user can perform a wallet-level delegable action (Layer 1 permissions)
+pub async fn can_edit_wallet_permissions(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+    action: Action,
+) -> Result<bool, DbError> {
+    // Owners can perform any action
+    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
+        return Ok(true);
+    }
+
+    let allowed = resolve_wallet_level_permissions(pool, ctx).await?;
 
     // Check if action is allowed directly or via dependency
     Ok(allowed.iter().any(|a| a.implies(action)))
