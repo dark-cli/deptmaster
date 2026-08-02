@@ -130,6 +130,56 @@ async fn resolve_wallet_member_permissions(
     Ok(allowed.difference(&denied).copied().collect())
 }
 
+/// Resolve allowed actions for a user managing a specific contact group (vector permissions)
+/// Uses wallet_contact_group_permission_matrix (member_group, target_contact_group, action) tuples
+async fn resolve_contact_group_management_permissions(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+    target_contact_group_id: Uuid,
+) -> Result<HashSet<Action>, DbError> {
+    // Get user's groups (including implicit all_users)
+    let user_group_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM user_groups WHERE wallet_id = $1 AND (name = 'all_users' OR id IN (
+            SELECT user_group_id FROM user_group_members WHERE user_id = $2
+        ))",
+    )
+    .bind(ctx.wallet_id)
+    .bind(ctx.user_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    if user_group_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    // Query wallet_contact_group_permission_matrix for these groups managing this contact_group
+    let perms: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT action, is_deny FROM wallet_contact_group_permission_matrix
+         WHERE source_group_id = ANY($1) AND target_contact_group_id = $2",
+    )
+    .bind(&user_group_ids)
+    .bind(target_contact_group_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| DbError::PermissionResolution(e.to_string()))?;
+
+    let mut allowed = HashSet::new();
+    let mut denied = HashSet::new();
+
+    for (action_name, is_deny) in perms {
+        if let Some(action) = Action::from_str(&action_name) {
+            if is_deny {
+                denied.insert(action);
+            } else {
+                allowed.insert(action);
+            }
+        }
+    }
+
+    Ok(allowed.difference(&denied).copied().collect())
+}
+
 /// Resolve allowed actions for a user on a resource.
 ///
 /// Thin wrapper around the shared `resolver::resolve_actions`. The rules
@@ -209,6 +259,24 @@ pub async fn can_perform(
     }
 
     let allowed = resolve_actions(pool, ctx, resource).await?;
+
+    // Check if action is allowed directly or via dependency
+    Ok(allowed.iter().any(|a| a.implies(action)))
+}
+
+/// Check if user can manage (add/remove/read contacts in) a specific contact group
+pub async fn can_manage_contact_group(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+    action: Action,
+    contact_group_id: Uuid,
+) -> Result<bool, DbError> {
+    // Owners can perform any action
+    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
+        return Ok(true);
+    }
+
+    let allowed = resolve_contact_group_management_permissions(pool, ctx, contact_group_id).await?;
 
     // Check if action is allowed directly or via dependency
     Ok(allowed.iter().any(|a| a.implies(action)))
