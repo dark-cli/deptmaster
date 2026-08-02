@@ -155,9 +155,9 @@ async fn test_layer2_member_permission_event_emission() {
 
     // Verify event was recorded
     let event_count_after: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM events WHERE event_type = 'GroupPermissionsSet' AND aggregate_id = $1::uuid",
+        "SELECT COUNT(*) FROM events WHERE event_type = 'GroupPermissionsSet' AND aggregate_id = $1",
     )
-    .bind(setup.wallet_id.to_string())
+    .bind(setup.wallet_id)
     .fetch_one(&pool)
     .await
     .expect("Failed to count events");
