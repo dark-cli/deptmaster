@@ -3067,8 +3067,30 @@ pub async fn set_wallet_permissions(
         )
     })?;
 
-    // Only admins can modify permissions
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletPermissionsEdit,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
 
     tracing::debug!("set_wallet_permissions received: {:?}", serde_json::to_string(&payload).unwrap_or_default());
 
@@ -3287,8 +3309,30 @@ pub async fn set_member_permissions(
         )
     })?;
 
-    // Only admins can modify member permissions
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    // Check authorization: owner bypass OR wallet:permissions_edit permission (Layer 1 admin)
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletPermissionsEdit,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
 
     for entry in &payload.entries {
         let source_group_id = Uuid::parse_str(&entry.source_group_id).map_err(|e| {
