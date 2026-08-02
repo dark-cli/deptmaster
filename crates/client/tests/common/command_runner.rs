@@ -661,16 +661,19 @@ impl CommandRunner {
             .cloned()
             .ok_or_else(|| format!("User group not found: {}", user_group_label))?;
 
-        let is_deny = match subcommand.as_str() {
-            "grant" => false,
-            "revoke" => true,
+        let state = match subcommand.as_str() {
+            "grant" => "allow",
+            "revoke" => "unset",
             other => return Err(format!("Unknown wallet-permission subcommand: {}", other)),
         };
 
+        let perm = serde_json::json!({
+            "action": action,
+            "state": state
+        });
         let entry = serde_json::json!({
             "user_group_id": user_group_id,
-            "action": action,
-            "is_deny": is_deny
+            "permissions": [perm]
         });
         let entries = serde_json::json!([entry]);
         set_wallet_permissions(wallet_id, entries.to_string())
@@ -744,17 +747,19 @@ impl CommandRunner {
             .cloned()
             .ok_or_else(|| format!("Target contact group not found: {}", target_contact_group_label))?;
 
-        let is_deny = match subcommand.as_str() {
-            "grant" => false,
-            "revoke" => true,
+        let state = match subcommand.as_str() {
+            "grant" => "allow",
+            "revoke" => "unset",
             other => return Err(format!("Unknown contact-group-permission subcommand: {}", other)),
         };
 
-        let entry = serde_json::json!({
-            "source_group_id": source_group_id,
-            "target_contact_group_id": target_contact_group_id,
+        let perm = serde_json::json!({
             "action": action,
-            "is_deny": is_deny
+            "state": state
+        });
+        let entry = serde_json::json!({
+            "member_group_id": source_group_id,
+            "permissions": [perm]
         });
         let entries = serde_json::json!([entry]);
         set_contact_group_permissions(wallet_id, target_contact_group_id, entries.to_string())

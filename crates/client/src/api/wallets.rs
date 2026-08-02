@@ -510,12 +510,12 @@ pub fn set_member_permissions_api(wallet_id: &str, entries_json: &str) -> Result
 
 // Contact group permissions (Layer 2.5)
 pub fn get_contact_group_permissions_api(wallet_id: &str, contact_group_id: &str) -> Result<String, ClientError> {
-    wallet_management_get(wallet_id, &format!("/contact-groups/{}/permissions", contact_group_id))
+    wallet_management_get(wallet_id, &format!("/contact-group-permissions/{}", contact_group_id))
 }
 
 pub fn set_contact_group_permissions_api(wallet_id: &str, contact_group_id: &str, entries_json: &str) -> Result<(), ClientError> {
     let entries: Vec<serde_json::Value> =
         serde_json::from_str(entries_json)?;
-    let body = serde_json::json!({ "entries": entries });
-    wallet_management_put_json(wallet_id, &format!("/contact-groups/{}/permissions", contact_group_id), &body).map(|_| ())
+    let body = serde_json::json!({ "contact_group_id": contact_group_id, "entries": entries });
+    wallet_management_put_json(wallet_id, &format!("/contact-group-permissions/{}", contact_group_id), &body).map(|_| ())
 }
