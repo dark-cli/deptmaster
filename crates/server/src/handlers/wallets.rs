@@ -1750,7 +1750,31 @@ pub async fn create_user_group(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletGroupsCreate,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
 
     let name = payload.name.trim();
     if name.is_empty() {
@@ -1815,7 +1839,32 @@ pub async fn update_user_group(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletGroupsUpdate,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
+
     reject_system_user_group(&state, wallet_uuid, group_uuid).await?;
 
     let name = payload.name.trim();
@@ -1870,7 +1919,32 @@ pub async fn delete_user_group(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletGroupsDelete,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
+
     reject_system_user_group(&state, wallet_uuid, group_uuid).await?;
 
     let event_data = serde_json::json!({});
@@ -2247,7 +2321,31 @@ pub async fn create_contact_group(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletContactGroupsCreate,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
 
     let name = payload.name.trim();
     if name.is_empty() {
@@ -2313,7 +2411,32 @@ pub async fn update_contact_group(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletContactGroupsUpdate,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
+
     reject_system_contact_group(&state, wallet_uuid, group_uuid).await?;
 
     let name = payload.name.trim();
@@ -2369,7 +2492,32 @@ pub async fn delete_contact_group(
             Json(serde_json::json!({"error": format!("Invalid group_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletContactGroupsDelete,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
+
     reject_system_contact_group(&state, wallet_uuid, group_uuid).await?;
 
     let event_data = serde_json::json!({});
