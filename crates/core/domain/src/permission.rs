@@ -290,6 +290,10 @@ impl Action {
             // Layer 2: Member-group-to-member-group implications
             (Action::MemberGroupMembersAdd, Action::MemberGroupMembersRead) => true,
             (Action::MemberGroupMembersRemove, Action::MemberGroupMembersRead) => true,
+            // MemberGroupPermissionsEdit is admin for Layer 2 - implies all member-group management actions
+            (Action::MemberGroupPermissionsEdit, Action::MemberGroupMembersRead) => true,
+            (Action::MemberGroupPermissionsEdit, Action::MemberGroupMembersAdd) => true,
+            (Action::MemberGroupPermissionsEdit, Action::MemberGroupMembersRemove) => true,
             // Layer 2.5: Contact-group management implications
             (Action::ContactGroupContactsAdd, Action::ContactGroupContactsRead) => true,
             (Action::ContactGroupContactsRemove, Action::ContactGroupContactsRead) => true,
