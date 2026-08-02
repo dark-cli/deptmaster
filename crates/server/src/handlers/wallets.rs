@@ -3290,7 +3290,7 @@ pub async fn set_member_permissions(
     // Only admins can modify member permissions
     require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
 
-    for entry in payload.entries {
+    for entry in &payload.entries {
         let source_group_id = Uuid::parse_str(&entry.source_group_id).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
@@ -3391,6 +3391,35 @@ pub async fn set_member_permissions(
                 Json(serde_json::json!({"error": "Failed to set permission"})),
             )
         })?;
+    }
+
+    // Emit GroupPermissionsSet events for event sourcing
+    for entry in &payload.entries {
+        if let (Ok(source_group_id), Ok(target_group_id)) = (
+            Uuid::parse_str(&entry.source_group_id),
+            Uuid::parse_str(&entry.target_group_id),
+        ) {
+            let perm_state = if entry.is_deny {
+                PermissionState::Deny
+            } else {
+                PermissionState::Allow
+            };
+            let event_data = serde_json::json!({
+                "source_group_id": source_group_id.to_string(),
+                "target_group_id": target_group_id.to_string(),
+                "action": &entry.action,
+                "state": perm_state
+            });
+            let _ = sync::insert_permission_event_and_apply(
+                &state,
+                auth_user.user_id,
+                wallet_uuid,
+                wallet_uuid,
+                domain::EventType::GroupPermissionsSet,
+                event_data,
+            )
+            .await;
+        }
     }
 
     Ok(Json(serde_json::json!({"message": "Member permissions updated"})))
@@ -3611,7 +3640,7 @@ pub async fn set_contact_group_permissions(
         })?;
 
     // Insert new permissions based on state
-    for entry in payload.entries {
+    for entry in &payload.entries {
         let member_group_id = Uuid::parse_str(&entry.member_group_id).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
@@ -3659,6 +3688,26 @@ pub async fn set_contact_group_permissions(
                     // Don't insert anything for unset (already deleted above)
                 }
             }
+        }
+    }
+
+    // Emit ContactGroupPermissionsSet events for event sourcing
+    for entry in &payload.entries {
+        if let Ok(member_group_id) = Uuid::parse_str(&entry.member_group_id) {
+            let event_data = serde_json::json!({
+                "contact_group_id": contact_group_uuid.to_string(),
+                "member_group_id": member_group_id.to_string(),
+                "permissions": &entry.permissions
+            });
+            let _ = sync::insert_permission_event_and_apply(
+                &state,
+                auth_user.user_id,
+                wallet_uuid,
+                wallet_uuid,
+                domain::EventType::ContactGroupPermissionsSet,
+                event_data,
+            )
+            .await;
         }
     }
 
