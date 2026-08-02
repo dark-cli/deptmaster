@@ -62,6 +62,7 @@ pub enum Action {
     ContactGroupContactsRead,    // contact_group:contacts_read
     ContactGroupContactsAdd,     // contact_group:contacts_add
     ContactGroupContactsRemove,  // contact_group:contacts_remove
+    ContactGroupPermissionsEdit, // contact_group:permissions_edit - Modify Layer 2.5 permissions for this group
 
     // Legacy/deprecated actions (kept for backward compatibility)
     WalletMemberAdd,      // DEPRECATED: Use WalletMembersAdd
@@ -122,6 +123,7 @@ impl Action {
             Action::ContactGroupContactsRead => "contact_group:contacts_read",
             Action::ContactGroupContactsAdd => "contact_group:contacts_add",
             Action::ContactGroupContactsRemove => "contact_group:contacts_remove",
+            Action::ContactGroupPermissionsEdit => "contact_group:permissions_edit",
             // Legacy/deprecated
             Action::WalletMemberAdd => "wallet:member_add",       // Deprecated alias
             Action::WalletMemberRemove => "wallet:member_remove", // Deprecated alias
@@ -178,6 +180,7 @@ impl Action {
             "contact_group:contacts_read" => Some(Action::ContactGroupContactsRead),
             "contact_group:contacts_add" => Some(Action::ContactGroupContactsAdd),
             "contact_group:contacts_remove" => Some(Action::ContactGroupContactsRemove),
+            "contact_group:permissions_edit" => Some(Action::ContactGroupPermissionsEdit),
             // Deprecated wallet actions (for backward compatibility)
             "wallet:member_add" => Some(Action::WalletMemberAdd),
             "wallet:member_remove" => Some(Action::WalletMemberRemove),
@@ -240,6 +243,7 @@ impl Action {
             Action::ContactGroupContactsRead,
             Action::ContactGroupContactsAdd,
             Action::ContactGroupContactsRemove,
+            Action::ContactGroupPermissionsEdit,
             // Legacy/deprecated (not included - for backward compat only)
             // Events
             Action::EventsRead,
@@ -275,6 +279,10 @@ impl Action {
             // Layer 2.5: Contact-group management implications
             (Action::ContactGroupContactsAdd, Action::ContactGroupContactsRead) => true,
             (Action::ContactGroupContactsRemove, Action::ContactGroupContactsRead) => true,
+            // ContactGroupPermissionsEdit is admin - implies all contact-group management actions
+            (Action::ContactGroupPermissionsEdit, Action::ContactGroupContactsRead) => true,
+            (Action::ContactGroupPermissionsEdit, Action::ContactGroupContactsAdd) => true,
+            (Action::ContactGroupPermissionsEdit, Action::ContactGroupContactsRemove) => true,
             // Legacy/deprecated actions (map to new ones)
             (Action::WalletMemberAdd, Action::WalletMemberList) => true,
             (Action::WalletMemberRemove, Action::WalletMemberList) => true,
