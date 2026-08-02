@@ -3007,6 +3007,7 @@ pub struct WalletPermissionState {
 
 /// GET /api/wallets/:wallet_id/wallet-permissions
 /// Returns wallet-level permissions for all groups
+/// Accessible by: system admins (monitoring) OR wallet owners
 pub async fn get_wallet_permissions(
     Path(wallet_id): Path<String>,
     State(state): State<AppState>,
@@ -3019,8 +3020,10 @@ pub async fn get_wallet_permissions(
         )
     })?;
 
-    // Only admins can view permissions
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    // Allow system admins (monitoring) OR wallet owners to read permissions
+    if !auth_user.is_admin {
+        require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    }
 
     // Query wallet_permission_matrix directly
     let perms: Vec<(Uuid, String, bool)> = sqlx::query_as(
@@ -3196,6 +3199,7 @@ pub struct SetMemberPermissionsRequest {
 
 /// GET /api/wallets/:wallet_id/member-permissions
 /// Returns vector-based member management permissions
+/// Accessible by: system admins (monitoring) OR wallet owners
 pub async fn get_member_permissions(
     Path(wallet_id): Path<String>,
     State(state): State<AppState>,
@@ -3208,8 +3212,10 @@ pub async fn get_member_permissions(
         )
     })?;
 
-    // Only admins can view member permissions
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    // Allow system admins (monitoring) OR wallet owners to read permissions
+    if !auth_user.is_admin {
+        require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    }
 
     // Query wallet_member_permission_matrix for this wallet's groups
     let perms: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
@@ -3401,6 +3407,7 @@ pub struct ContactGroupPermissionEntry {
 
 /// GET /api/wallets/:wallet_id/contact-group-permissions/:contact_group_id
 /// Returns contact-group management permissions for a specific contact_group
+/// Accessible by: system admins (monitoring) OR wallet owners
 pub async fn get_contact_group_permissions(
     Path((wallet_id, contact_group_id)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -3420,8 +3427,10 @@ pub async fn get_contact_group_permissions(
         )
     })?;
 
-    // Only admins can view contact-group permissions
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    // Allow system admins (monitoring) OR wallet owners to read permissions
+    if !auth_user.is_admin {
+        require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+    }
 
     // Verify contact_group belongs to this wallet
     let cg_wallet_id: Option<Uuid> = sqlx::query_scalar(
