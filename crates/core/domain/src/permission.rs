@@ -48,7 +48,8 @@ pub enum Action {
     WalletContactGroupsUpdate,   // wallet:contact_groups_update - Update contact_groups
     WalletContactGroupsDelete,   // wallet:contact_groups_delete - Delete contact_groups
     WalletMetadataRead,          // wallet:metadata_read - View wallet structure
-    WalletPermissionsEdit,       // wallet:permissions_edit - Modify permission matrix (Layer 3 only)
+    WalletPermissionsEdit,       // wallet:permissions_edit - Modify Layer 1 wallet-wide permissions
+    WalletPermissionsMatrixEdit, // wallet:permissions_matrix_edit - Modify Layer 3 permission matrix
     WalletDelete,                // wallet:delete - Soft delete wallet (OWNER ONLY)
     WalletOwnerTransfer,         // wallet:owner_transfer - Transfer ownership (OWNER ONLY)
 
@@ -112,6 +113,7 @@ impl Action {
             Action::WalletContactGroupsDelete => "wallet:contact_groups_delete",
             Action::WalletMetadataRead => "wallet:metadata_read",
             Action::WalletPermissionsEdit => "wallet:permissions_edit",
+            Action::WalletPermissionsMatrixEdit => "wallet:permissions_matrix_edit",
             Action::WalletDelete => "wallet:delete",
             Action::WalletOwnerTransfer => "wallet:owner_transfer",
             // Layer 2: Member-group-to-member-group permissions
@@ -169,6 +171,7 @@ impl Action {
             "wallet:contact_groups_delete" => Some(Action::WalletContactGroupsDelete),
             "wallet:metadata_read" => Some(Action::WalletMetadataRead),
             "wallet:permissions_edit" => Some(Action::WalletPermissionsEdit),
+            "wallet:permissions_matrix_edit" => Some(Action::WalletPermissionsMatrixEdit),
             "wallet:delete" => Some(Action::WalletDelete),
             "wallet:owner_transfer" => Some(Action::WalletOwnerTransfer),
             // Layer 2: Member-group-to-member-group permissions
@@ -232,6 +235,7 @@ impl Action {
             Action::WalletContactGroupsDelete,
             Action::WalletMetadataRead,
             Action::WalletPermissionsEdit,
+            Action::WalletPermissionsMatrixEdit,
             Action::WalletDelete,
             Action::WalletOwnerTransfer,
             // Layer 2: Member-group-to-member-group permissions
@@ -273,6 +277,16 @@ impl Action {
             (Action::WalletDelete, Action::WalletInfoRead) => true,
             (Action::WalletMembersRemove, Action::WalletMembersRead) => true,
             (Action::WalletMembersAdd, Action::WalletMembersRead) => true,
+            // WalletPermissionsEdit is admin for Layer 1 - implies all wallet-level management actions
+            (Action::WalletPermissionsEdit, Action::WalletMembersRead) => true,
+            (Action::WalletPermissionsEdit, Action::WalletMembersAdd) => true,
+            (Action::WalletPermissionsEdit, Action::WalletMembersRemove) => true,
+            (Action::WalletPermissionsEdit, Action::WalletGroupsCreate) => true,
+            (Action::WalletPermissionsEdit, Action::WalletGroupsUpdate) => true,
+            (Action::WalletPermissionsEdit, Action::WalletGroupsDelete) => true,
+            (Action::WalletPermissionsEdit, Action::WalletContactGroupsCreate) => true,
+            (Action::WalletPermissionsEdit, Action::WalletContactGroupsUpdate) => true,
+            (Action::WalletPermissionsEdit, Action::WalletContactGroupsDelete) => true,
             // Layer 2: Member-group-to-member-group implications
             (Action::MemberGroupMembersAdd, Action::MemberGroupMembersRead) => true,
             (Action::MemberGroupMembersRemove, Action::MemberGroupMembersRead) => true,
