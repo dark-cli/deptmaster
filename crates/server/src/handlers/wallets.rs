@@ -2993,7 +2993,31 @@ pub async fn put_permission_matrix(
             Json(serde_json::json!({"error": format!("Invalid wallet_id: {}", e)})),
         )
     })?;
-    require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
+
+    // Check authorization: owner bypass OR wallet:permissions_matrix_edit permission (Layer 3 admin)
+    let ctx = domain::PermissionContext {
+        wallet_id: wallet_uuid,
+        user_id: auth_user.user_id,
+        user_role: domain::WalletRole::Member,
+    };
+
+    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
+        &state.db_pool,
+        &ctx,
+        domain::Action::WalletPermissionsMatrixEdit,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Error checking wallet permissions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Permission check failed"})),
+        )
+    })?;
+
+    if !can_edit {
+        return Err(insufficient_permission_response());
+    }
 
     let db = Database::new((*state.db_pool).clone());
     for entry in &payload.entries {
