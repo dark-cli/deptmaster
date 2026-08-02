@@ -3114,7 +3114,7 @@ pub async fn set_wallet_permissions(
     }
 
     // Process all entries: delete old matrix and insert new state
-    for entry in payload.entries {
+    for entry in &payload.entries {
         let user_group_id = Uuid::parse_str(&entry.user_group_id).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
@@ -3174,6 +3174,27 @@ pub async fn set_wallet_permissions(
                     // Don't insert anything for unset (already deleted above)
                 }
             }
+        }
+    }
+
+    // Emit event for audit trail and event-sourcing (iterate over references since payload was already moved)
+    for entry in &payload.entries {
+        let user_group_id = Uuid::parse_str(&entry.user_group_id).ok();
+        if let Some(group_id) = user_group_id {
+            let event_data = serde_json::json!({
+                "member_group_id": group_id.to_string(),
+                "permissions": &entry.permissions
+            });
+
+            let _ = sync::insert_permission_event_and_apply(
+                &state,
+                auth_user.user_id,
+                wallet_uuid,
+                wallet_uuid,
+                domain::EventType::WalletPermissionsSet,
+                event_data,
+            )
+            .await;
         }
     }
 
