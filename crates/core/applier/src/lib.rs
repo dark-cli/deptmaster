@@ -664,6 +664,14 @@ pub async fn apply<P: Projection + Send>(
             Ok(())
         }
 
+        // WalletPermissionsSet / GroupPermissionsSet / ContactGroupPermissionsSet:
+        // Layer 1/2/2.5 permission events. Mutations handled directly in DB
+        // by handlers; applier just tracks them for audit trail.
+        // TODO: add projection mutations if we need to rebuild these from events
+        E::WalletPermissionsSet { .. }
+        | E::GroupPermissionsSet { .. }
+        | E::ContactGroupPermissionsSet { .. } => Ok(()),
+
         // WalletDeleted / OwnershipTransferred: no projection rows are
         // mutated by these in the current model.
         E::WalletDeleted { .. } | E::OwnershipTransferred { .. } => Ok(()),

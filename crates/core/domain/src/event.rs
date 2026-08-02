@@ -290,6 +290,18 @@ pub enum EventData {
         #[serde(default)]
         data: serde_json::Value,
     },
+    WalletPermissionsSet {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    GroupPermissionsSet {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    ContactGroupPermissionsSet {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
     PermissionMatrixSet {
         #[serde(default)]
         data: serde_json::Value,
@@ -332,6 +344,9 @@ impl EventData {
             | EventData::ContactGroupDeleted { .. }
             | EventData::ContactGroupMemberAdded { .. }
             | EventData::ContactGroupMemberRemoved { .. }
+            | EventData::WalletPermissionsSet { .. }
+            | EventData::GroupPermissionsSet { .. }
+            | EventData::ContactGroupPermissionsSet { .. }
             | EventData::PermissionMatrixSet { .. }
             | EventData::WalletDeleted { .. }
             | EventData::OwnershipTransferred { .. } => AggregateType::Permission,
@@ -365,6 +380,9 @@ impl EventData {
             EventData::ContactGroupDeleted { .. } => "contact_group_deleted",
             EventData::ContactGroupMemberAdded { .. } => "contact_group_member_added",
             EventData::ContactGroupMemberRemoved { .. } => "contact_group_member_removed",
+            EventData::WalletPermissionsSet { .. } => "wallet_permissions_set",
+            EventData::GroupPermissionsSet { .. } => "group_permissions_set",
+            EventData::ContactGroupPermissionsSet { .. } => "contact_group_permissions_set",
             EventData::PermissionMatrixSet { .. } => "permission_matrix_set",
             EventData::WalletDeleted { .. } => "wallet_deleted",
             EventData::OwnershipTransferred { .. } => "ownership_transferred",
@@ -511,6 +529,9 @@ impl EventData {
             EventData::ContactGroupDeleted { .. } => EventType::ContactGroupDeleted,
             EventData::ContactGroupMemberAdded { .. } => EventType::ContactGroupMemberAdded,
             EventData::ContactGroupMemberRemoved { .. } => EventType::ContactGroupMemberRemoved,
+            EventData::WalletPermissionsSet { .. } => EventType::WalletPermissionsSet,
+            EventData::GroupPermissionsSet { .. } => EventType::GroupPermissionsSet,
+            EventData::ContactGroupPermissionsSet { .. } => EventType::ContactGroupPermissionsSet,
             EventData::PermissionMatrixSet { .. } => EventType::PermissionMatrixSet,
             EventData::WalletDeleted { .. } => EventType::WalletDeleted,
             EventData::OwnershipTransferred { .. } => EventType::OwnershipTransferred,
@@ -632,6 +653,9 @@ impl DomainEvent {
             EventData::UserGroupUpdated { .. }
             | EventData::UserGroupMemberAdded { .. }
             | EventData::UserGroupMemberRemoved { .. }
+            | EventData::WalletPermissionsSet { .. }
+            | EventData::GroupPermissionsSet { .. }
+            | EventData::ContactGroupPermissionsSet { .. }
             | EventData::PermissionMatrixSet { .. } => {
                 vec![(Action::UserGroupUpdate, Resource::Wallet(self.wallet_id))]
             }

@@ -948,6 +948,21 @@ impl Database {
                 }
             }
 
+            // Layer 1/2/2.5 permission changes - invalidate wallet-wide cache
+            EventData::WalletPermissionsSet { .. }
+            | EventData::GroupPermissionsSet { .. }
+            | EventData::ContactGroupPermissionsSet { .. } => {
+                if let Err(e) = self
+                    .invalidate_permission_matrix_cache_for_wallet(wallet_id)
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to invalidate permission cache for wallet {} due to Layer 1/2/2.5 permission change: {:?}",
+                        wallet_id, e
+                    );
+                }
+            }
+
             // New user added to wallet - populate matrix cache AND backfill the
             // readable-events cache. The matrix cache covers future permission
             // CHECKS; the readable-events cache holds the per-user view of
