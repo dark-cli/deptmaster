@@ -9,13 +9,15 @@ pub use sync::{get_sync_events, post_sync_events};
 pub use wallets::{
     add_contact_group_member_api, add_user_group_member_api, add_user_to_wallet_api,
     create_contact_group_api, create_user_group_api, create_wallet_api, create_wallet_invite_api,
-    delete_contact_group_api, delete_user_group_api, get_member_permissions_api, get_my_permissions_api,
-    get_permission_matrix_api, get_wallet_permissions_api, get_wallets_api, join_wallet_by_code_api,
+    delete_contact_group_api, delete_user_group_api, get_contact_group_permissions_api,
+    get_member_permissions_api, get_my_permissions_api, get_permission_matrix_api,
+    get_wallet_permissions_api, get_wallets_api, join_wallet_by_code_api,
     list_contact_group_members_api, list_contact_groups_api, list_permission_actions_api,
     list_user_group_members_api, list_user_groups_api, list_wallet_users_api,
     put_permission_matrix_api, remove_contact_group_member_api, remove_user_group_member_api,
-    remove_wallet_user_api, search_wallet_users_api, set_member_permissions_api, set_wallet_permissions_api,
-    update_contact_group_api, update_user_group_api, update_wallet_user_api,
+    remove_wallet_user_api, search_wallet_users_api, set_contact_group_permissions_api,
+    set_member_permissions_api, set_wallet_permissions_api, update_contact_group_api,
+    update_user_group_api, update_wallet_user_api,
 };
 
 use crate::types::error::ClientError;

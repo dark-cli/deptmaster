@@ -9,6 +9,9 @@
 //!   group-member add contact_group_var contact_id
 //!   permission set user_group contact_group "C: a a a -, T: a a - - -"
 //!     where: C/T = Contact/Transaction, a = allow, d = deny, - = unset
+//!   wallet-permission grant|revoke user_group action (Layer 1 delegable)
+//!   member-permission grant|revoke source_group target_group action (Layer 2 delegable)
+//!   contact-group-permission grant|revoke source_group target_contact_group action (Layer 2.5 delegable)
 //! Empty lines and # comments are skipped.
 //!
 //! Full vocabulary: see project docs at `docs/INTEGRATION_TEST_COMMANDS.md`.
@@ -19,7 +22,7 @@ use client::{
     list_wallet_contact_groups, list_wallet_user_groups, manual_sync, put_wallet_permission_matrix,
     update_contact, update_transaction, create_wallet_user_group, create_wallet_contact_group,
     add_wallet_user_group_member, add_wallet_contact_group_member, set_wallet_permissions,
-    set_member_permissions,
+    set_member_permissions, set_contact_group_permissions,
 };
 use std::collections::HashMap;
 
@@ -165,6 +168,10 @@ impl CommandRunner {
         }
         if action == "member-permission" {
             self.do_member_permission(&args[1..], command)?;
+            return Ok(());
+        }
+        if action == "contact-group-permission" {
+            self.do_contact_group_permission(&args[1..], command)?;
             return Ok(());
         }
         Err(format!("Unknown action: {}", action))
@@ -709,6 +716,48 @@ impl CommandRunner {
         });
         let entries = serde_json::json!([entry]);
         set_member_permissions(wallet_id, entries.to_string())
+    }
+
+    fn do_contact_group_permission(&self, args: &[&str], original: &str) -> Result<(), String> {
+        if args.len() < 4 {
+            return Err(format!(
+                "Contact-group-permission requires: grant|revoke source_group target_contact_group action: {}",
+                original
+            ));
+        }
+
+        let subcommand = args[0].to_lowercase();
+        let source_group_label = args[1];
+        let target_contact_group_label = args[2];
+        let action = args[3];
+        let wallet_id = client::get_current_wallet_id()?;
+
+        let source_group_id = self
+            .user_group_ids
+            .get(source_group_label)
+            .cloned()
+            .ok_or_else(|| format!("Source user group not found: {}", source_group_label))?;
+
+        let target_contact_group_id = self
+            .contact_group_ids
+            .get(target_contact_group_label)
+            .cloned()
+            .ok_or_else(|| format!("Target contact group not found: {}", target_contact_group_label))?;
+
+        let is_deny = match subcommand.as_str() {
+            "grant" => false,
+            "revoke" => true,
+            other => return Err(format!("Unknown contact-group-permission subcommand: {}", other)),
+        };
+
+        let entry = serde_json::json!({
+            "source_group_id": source_group_id,
+            "target_contact_group_id": target_contact_group_id,
+            "action": action,
+            "is_deny": is_deny
+        });
+        let entries = serde_json::json!([entry]);
+        set_contact_group_permissions(wallet_id, target_contact_group_id, entries.to_string())
     }
 
     fn do_assert(&self, args: &[&str], original: &str) -> Result<(), String> {

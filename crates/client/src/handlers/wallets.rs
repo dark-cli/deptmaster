@@ -134,3 +134,11 @@ pub fn get_wallet_permissions_api(wallet_id: &str) -> Result<String, String> {
 pub fn set_wallet_permissions_api(wallet_id: &str, entries_json: &str) -> Result<(), String> {
     api::set_wallet_permissions_api(wallet_id, entries_json).map_err(|e| e.to_string())
 }
+
+pub fn get_contact_group_permissions_api(wallet_id: &str, contact_group_id: &str) -> Result<String, String> {
+    api::get_contact_group_permissions_api(wallet_id, contact_group_id).map_err(|e| e.to_string())
+}
+
+pub fn set_contact_group_permissions_api(wallet_id: &str, contact_group_id: &str, entries_json: &str) -> Result<(), String> {
+    api::set_contact_group_permissions_api(wallet_id, contact_group_id, entries_json).map_err(|e| e.to_string())
+}
