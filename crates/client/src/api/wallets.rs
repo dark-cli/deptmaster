@@ -118,6 +118,9 @@ fn wallet_management_get(wallet_id: &str, path: &str) -> Result<String, ClientEr
         let status = resp.status();
         let text = resp.text().await.map_err(|e| ClientError::Network(e.to_string()))?;
         if !status.is_success() {
+            if status.as_u16() == 403 {
+                return Err(ClientError::InsufficientPermission(text));
+            }
             return Err(ClientError::Sync(format!("{} {}", status, text)));
         }
         Ok::<_, ClientError>(text)
@@ -142,6 +145,9 @@ fn wallet_management_post_json(
         let status = resp.status();
         let text = resp.text().await.map_err(|e| ClientError::Network(e.to_string()))?;
         if !status.is_success() {
+            if status.as_u16() == 403 {
+                return Err(ClientError::InsufficientPermission(text));
+            }
             return Err(ClientError::Sync(format!("{} {}", status, text)));
         }
         Ok::<_, ClientError>(text)
@@ -166,6 +172,9 @@ fn wallet_management_put_json(
         let status = resp.status();
         let text = resp.text().await.map_err(|e| ClientError::Network(e.to_string()))?;
         if !status.is_success() {
+            if status.as_u16() == 403 {
+                return Err(ClientError::InsufficientPermission(text));
+            }
             return Err(ClientError::Sync(format!("{} {}", status, text)));
         }
         Ok::<_, ClientError>(text)
@@ -185,6 +194,9 @@ fn wallet_management_delete(wallet_id: &str, path: &str) -> Result<String, Clien
         let status = resp.status();
         let text = resp.text().await.map_err(|e| ClientError::Network(e.to_string()))?;
         if !status.is_success() {
+            if status.as_u16() == 403 {
+                return Err(ClientError::InsufficientPermission(text));
+            }
             return Err(ClientError::Sync(format!("{} {}", status, text)));
         }
         Ok::<_, ClientError>(text)

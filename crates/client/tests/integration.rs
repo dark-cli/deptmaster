@@ -9,6 +9,7 @@ mod clear_wallet_anchor_regression;
 mod common;
 mod comprehensive_events;
 mod conflict;
+mod delegable_permissions_client_test;
 mod hash_divergence;
 mod logout_clears_local_data;
 mod multi_app_realtime;

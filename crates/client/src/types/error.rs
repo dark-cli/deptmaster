@@ -28,6 +28,9 @@ pub enum ClientError {
     /// Invalid input to a public API
     InvalidInput(String),
 
+    /// Authorization failed: insufficient permissions for the requested operation
+    InsufficientPermission(String),
+
     /// Internal error (should never happen in production)
     Internal(String),
 }
@@ -42,6 +45,7 @@ impl fmt::Display for ClientError {
             Self::Storage(msg) => write!(f, "Storage error: {}", msg),
             Self::Sync(msg) => write!(f, "Sync error: {}", msg),
             Self::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
+            Self::InsufficientPermission(msg) => write!(f, "Insufficient permission: {}", msg),
             Self::Internal(msg) => write!(f, "Internal error: {}", msg),
         }
     }
