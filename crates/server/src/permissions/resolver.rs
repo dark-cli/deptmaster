@@ -328,6 +328,24 @@ pub async fn can_edit_wallet_permissions(
     Ok(allowed.iter().any(|a| a.implies(action)))
 }
 
+/// Check if user can manage (add/remove/edit members in) a specific member group
+pub async fn can_manage_member_group(
+    pool: &PgPool,
+    ctx: &PermissionContext,
+    action: Action,
+    target_group_id: Uuid,
+) -> Result<bool, DbError> {
+    // Owners can perform any action
+    if is_wallet_owner(pool, ctx.wallet_id, ctx.user_id).await? {
+        return Ok(true);
+    }
+
+    let allowed = resolve_wallet_member_permissions(pool, ctx, target_group_id).await?;
+
+    // Check if action is allowed directly or via dependency
+    Ok(allowed.iter().any(|a| a.implies(action)))
+}
+
 /// Check if user can manage (add/remove/read contacts in) a specific contact group
 pub async fn can_manage_contact_group(
     pool: &PgPool,
