@@ -509,16 +509,55 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
                       ),
                       ...actions.map((action) {
                         final name = action['name'] as String? ?? '';
-                        final state = _getAllowDeny(name);
-                        final isActive = _isActive(name);
-                        final currentState = isActive ? state : _PermissionState.unset;
-
-                        return ListTile(
-                          dense: true,
-                          title: Text(name.split(':').last),
-                          trailing: _ThreeStateToggle(
-                            currentState: currentState,
-                            onChanged: (newState) => _setState(name, newState),
+                        final displayName = name.split(':').last;
+                        final active = _isActive(name);
+                        final allowDeny = _getAllowDeny(name);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                children: [
+                                  Checkbox(
+                                    value: active,
+                                    onChanged: (checked) {
+                                      if (checked == true) {
+                                        _setState(name, _PermissionState.allow);
+                                      } else {
+                                        _setState(name, _PermissionState.unset);
+                                      }
+                                    },
+                                  ),
+                                  Expanded(
+                                    child: Text(displayName),
+                                  ),
+                                ],
+                              ),
+                              if (active) ...[
+                                const SizedBox(height: 6),
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final narrow = constraints.maxWidth < 280;
+                                    return SegmentedButton<_PermissionState>(
+                                      style: narrow
+                                          ? const ButtonStyle(
+                                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 6)))
+                                          : null,
+                                      showSelectedIcon: false,
+                                      segments: const [
+                                        ButtonSegment(value: _PermissionState.allow, icon: Icon(Icons.check, size: 16), label: Text('Allow')),
+                                        ButtonSegment(value: _PermissionState.deny, icon: Icon(Icons.block, size: 16), label: Text('Deny')),
+                                      ],
+                                      selected: {allowDeny},
+                                      onSelectionChanged: (s) => _setState(name, s.first),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ],
                           ),
                         );
                       }).toList(),
@@ -543,75 +582,6 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
           child: const Text('Save'),
         ),
       ],
-    );
-  }
-}
-
-class _ThreeStateToggle extends StatelessWidget {
-  final _PermissionState currentState;
-  final Function(_PermissionState) onChanged;
-
-  const _ThreeStateToggle({
-    required this.currentState,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const allowColor = Color(0xFF2E7D32);
-    final denyColor = Theme.of(context).colorScheme.error;
-    final unsetColor = Theme.of(context).colorScheme.outlineVariant;
-
-    return GestureDetector(
-      onTap: () {
-        _PermissionState nextState;
-        if (currentState == _PermissionState.allow) {
-          nextState = _PermissionState.unset;
-        } else if (currentState == _PermissionState.unset) {
-          nextState = _PermissionState.deny;
-        } else {
-          nextState = _PermissionState.allow;
-        }
-        onChanged(nextState);
-      },
-      child: Container(
-        width: 90,
-        height: 40,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: currentState == _PermissionState.allow
-                ? allowColor
-                : currentState == _PermissionState.deny
-                    ? denyColor
-                    : unsetColor,
-            width: 2,
-          ),
-          color: currentState == _PermissionState.allow
-              ? allowColor.withOpacity(0.1)
-              : currentState == _PermissionState.deny
-                  ? denyColor.withOpacity(0.1)
-                  : unsetColor.withOpacity(0.1),
-        ),
-        child: Center(
-          child: Text(
-            currentState == _PermissionState.allow
-                ? '✓ Allow'
-                : currentState == _PermissionState.deny
-                    ? '✗ Deny'
-                    : '- Unset',
-            style: TextStyle(
-              color: currentState == _PermissionState.allow
-                  ? allowColor
-                  : currentState == _PermissionState.deny
-                      ? denyColor
-                      : unsetColor,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
