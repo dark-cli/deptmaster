@@ -99,8 +99,8 @@ class ManageWalletScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final userGroupsAsync = ref.watch(userGroupsProvider);
-    final contactGroupsAsync = ref.watch(contactGroupsProvider);
+    final userGroupsAsync = ref.watch(userGroupsProvider(walletId));
+    final contactGroupsAsync = ref.watch(contactGroupsProvider(walletId));
 
     return GradientBackground(
       child: Scaffold(
@@ -119,7 +119,7 @@ class ManageWalletScreen extends ConsumerWidget {
                   Text(err.toString(), textAlign: TextAlign.center),
                   const SizedBox(height: 16),
                   FilledButton(
-                    onPressed: () => _refreshWallet(ref),
+                    onPressed: () => refreshWalletManagement(ref),
                     child: const Text('Retry'),
                   ),
                 ],
@@ -130,7 +130,7 @@ class ManageWalletScreen extends ConsumerWidget {
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (err, st) => Center(child: Text(err.toString())),
             data: (contactGroups) => RefreshIndicator(
-              onRefresh: () async => _refreshWallet(ref),
+              onRefresh: () async => refreshWalletManagement(ref),
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 children: [
@@ -150,7 +150,7 @@ class ManageWalletScreen extends ConsumerWidget {
                               builder: (context) => MembersScreen(
                                 walletId: walletId,
                                 users: const [],
-                                onReload: () => _refreshWallet(ref),
+                                onReload: () => refreshWalletManagement(ref),
                               ),
                             ),
                           );
@@ -189,7 +189,7 @@ class ManageWalletScreen extends ConsumerWidget {
                                   return name != '__owners__' && name != 'all_users';
                                 }).toList(),
                                 users: const [],
-                                onReload: () => _refreshWallet(ref),
+                                onReload: () => refreshWalletManagement(ref),
                               ),
                             ),
                           );
@@ -206,7 +206,7 @@ class ManageWalletScreen extends ConsumerWidget {
                               builder: (context) => ContactGroupsScreen(
                                 walletId: walletId,
                                 contactGroups: contactGroups,
-                                onReload: () => _refreshWallet(ref),
+                                onReload: () => refreshWalletManagement(ref),
                               ),
                             ),
                           );

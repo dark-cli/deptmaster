@@ -6,12 +6,9 @@ import '../api.dart';
 final walletManagementRefreshTrigger = StateProvider<int>((ref) => 0);
 
 /// Provides list of user groups for the current wallet.
-final userGroupsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final userGroupsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   // Watch the refresh trigger to refetch when invalidated
   ref.watch(walletManagementRefreshTrigger);
-
-  final walletId = ref.watch(currentWalletIdProvider);
-  if (walletId == null) return [];
 
   try {
     final json = await Api.getWalletUserGroups(walletId);
@@ -22,11 +19,8 @@ final userGroupsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) asyn
 });
 
 /// Provides list of contact groups for the current wallet.
-final contactGroupsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final contactGroupsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   ref.watch(walletManagementRefreshTrigger);
-
-  final walletId = ref.watch(currentWalletIdProvider);
-  if (walletId == null) return [];
 
   try {
     final json = await Api.getWalletContactGroups(walletId);
@@ -37,11 +31,8 @@ final contactGroupsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) a
 });
 
 /// Provides wallet-level permissions.
-final walletPermissionsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final walletPermissionsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   ref.watch(walletManagementRefreshTrigger);
-
-  final walletId = ref.watch(currentWalletIdProvider);
-  if (walletId == null) return [];
 
   try {
     final json = await Api.getWalletPermissions(walletId);
@@ -52,11 +43,8 @@ final walletPermissionsProvider = FutureProvider<List<Map<String, dynamic>>>((re
 });
 
 /// Provides member-scoped permissions.
-final memberPermissionsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final memberPermissionsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   ref.watch(walletManagementRefreshTrigger);
-
-  final walletId = ref.watch(currentWalletIdProvider);
-  if (walletId == null) return [];
 
   try {
     final json = await Api.getMemberPermissions(walletId);
@@ -71,12 +59,3 @@ final memberPermissionsProvider = FutureProvider<List<Map<String, dynamic>>>((re
 void refreshWalletManagement(WidgetRef ref) {
   ref.read(walletManagementRefreshTrigger.notifier).state += 1;
 }
-
-/// Provider for current wallet ID (assumes it exists from somewhere).
-final currentWalletIdProvider = FutureProvider<String?>((ref) async {
-  try {
-    return await Api.getCurrentWalletId();
-  } catch (_) {
-    return null;
-  }
-});
