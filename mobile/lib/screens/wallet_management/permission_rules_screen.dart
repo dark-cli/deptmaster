@@ -512,33 +512,40 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
                         final state = _getAllowDeny(name);
                         final isActive = _isActive(name);
 
+                        String stateLabel;
+                        Color stateColor;
+                        if (isActive) {
+                          stateLabel = state == _PermissionState.allow ? 'Allow' : 'Deny';
+                          stateColor = state == _PermissionState.allow
+                              ? const Color(0xFF2E7D32)
+                              : Theme.of(context).colorScheme.error;
+                        } else {
+                          stateLabel = 'Unset';
+                          stateColor = Theme.of(context).colorScheme.outlineVariant;
+                        }
+
                         return ListTile(
                           dense: true,
                           title: Text(name.split(':').last),
-                          trailing: SizedBox(
-                            width: 140,
-                            child: SegmentedButton<_PermissionState>(
-                              onSelectionChanged: (Set<_PermissionState> newSelection) {
-                                _setState(name, newSelection.first);
-                              },
-                              selected: <_PermissionState>{isActive ? state : _PermissionState.unset},
-                              segments: [
-                                ButtonSegment<_PermissionState>(
-                                  value: _PermissionState.allow,
-                                  label: const Text('Allow'),
-                                  icon: const Icon(Icons.check),
-                                ),
-                                ButtonSegment<_PermissionState>(
-                                  value: _PermissionState.unset,
-                                  label: const Text('Unset'),
-                                  icon: const Icon(Icons.remove),
-                                ),
-                                ButtonSegment<_PermissionState>(
-                                  value: _PermissionState.deny,
-                                  label: const Text('Deny'),
-                                  icon: const Icon(Icons.close),
-                                ),
-                              ],
+                          trailing: PopupMenuButton<_PermissionState>(
+                            onSelected: (value) => _setState(name, value),
+                            itemBuilder: (context) => [
+                              PopupMenuItem(
+                                value: _PermissionState.allow,
+                                child: const Text('✓ Allow'),
+                              ),
+                              PopupMenuItem(
+                                value: _PermissionState.unset,
+                                child: const Text('- Unset'),
+                              ),
+                              PopupMenuItem(
+                                value: _PermissionState.deny,
+                                child: const Text('✗ Deny'),
+                              ),
+                            ],
+                            child: Chip(
+                              label: Text(stateLabel, style: TextStyle(color: stateColor, fontWeight: FontWeight.bold)),
+                              backgroundColor: stateColor.withOpacity(0.1),
                             ),
                           ),
                         );
