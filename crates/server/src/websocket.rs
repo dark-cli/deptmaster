@@ -172,3 +172,15 @@ pub fn broadcast_events_synced(channel: &BroadcastChannel, wallet_id: Uuid, sour
     let data = serde_json::json!({ "source": source }).to_string();
     broadcast_wallet_change(channel, wallet_id, "events_synced", &data);
 }
+
+/// Broadcast wallet UI update for permission-related changes (groups, members, permissions).
+/// Call this after successful wallet management operations (create/delete groups, add/remove members, etc.)
+/// to notify clients to refresh their wallet management UI.
+pub fn broadcast_wallet_ui_update(
+    channel: &BroadcastChannel,
+    wallet_id: Uuid,
+    update_type: &str,
+) {
+    let data = serde_json::json!({ "type": update_type }).to_string();
+    broadcast_wallet_change(channel, wallet_id, "wallet_ui_update", &data);
+}

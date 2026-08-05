@@ -1774,6 +1774,8 @@ pub async fn create_user_group(
         )
     })?;
 
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "user_groups_changed");
+
     Ok((
         StatusCode::CREATED,
         Json(UserGroupResponse {
@@ -1929,6 +1931,8 @@ pub async fn delete_user_group(
             Json(serde_json::json!({"error": "Failed to delete user group"})),
         )
     })?;
+
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "user_groups_changed");
 
     Ok((
         StatusCode::OK,
@@ -2122,6 +2126,8 @@ pub async fn add_user_group_member(
         )
     })?;
 
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "user_groups_changed");
+
     Ok((
         StatusCode::CREATED,
         Json(serde_json::json!({"message": "Member added"})),
@@ -2202,6 +2208,8 @@ pub async fn remove_user_group_member(
             Json(serde_json::json!({"error": "Failed to remove member"})),
         )
     })?;
+
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "user_groups_changed");
 
     Ok((
         StatusCode::OK,
@@ -2344,6 +2352,8 @@ pub async fn create_contact_group(
             Json(serde_json::json!({"error": "Failed to create contact group"})),
         )
     })?;
+
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "contact_groups_changed");
 
     Ok((
         StatusCode::CREATED,
@@ -2502,6 +2512,8 @@ pub async fn delete_contact_group(
             Json(serde_json::json!({"error": "Failed to delete contact group"})),
         )
     })?;
+
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "contact_groups_changed");
 
     Ok((
         StatusCode::OK,
@@ -2684,6 +2696,8 @@ pub async fn add_contact_group_member(
         "contact group member added: contact added to group"
     );
 
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "contact_groups_changed");
+
     Ok((
         StatusCode::CREATED,
         Json(serde_json::json!({"message": "Member added"})),
@@ -2770,6 +2784,8 @@ pub async fn remove_contact_group_member(
         group_id = %group_id,
         "contact group member removed: contact removed from group"
     );
+
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "contact_groups_changed");
 
     Ok((
         StatusCode::OK,
@@ -3357,6 +3373,8 @@ pub async fn set_wallet_permissions(
         }
     }
 
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "wallet_permissions_changed");
+
     Ok(Json(serde_json::json!({"message": "Wallet permissions updated"})))
 }
 
@@ -3602,6 +3620,8 @@ pub async fn set_member_permissions(
             .await;
         }
     }
+
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "member_permissions_changed");
 
     Ok(Json(serde_json::json!({"message": "Member permissions updated"})))
 }
@@ -3914,6 +3934,8 @@ pub async fn set_contact_group_permissions(
             .await;
         }
     }
+
+    crate::websocket::broadcast_wallet_ui_update(&state.broadcast_tx, wallet_uuid, "contact_group_permissions_changed");
 
     Ok(Json(serde_json::json!({"message": "Contact group permissions updated"})))
 }
