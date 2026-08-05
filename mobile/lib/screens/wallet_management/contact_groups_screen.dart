@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
+import '../../providers/wallet_management_provider.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
@@ -9,13 +10,11 @@ import '../../widgets/gradient_background.dart';
 
 class ContactGroupsScreen extends ConsumerStatefulWidget {
   final String walletId;
-  final List<Map<String, dynamic>> contactGroups;
   final VoidCallback onReload;
 
   const ContactGroupsScreen({
     super.key,
     required this.walletId,
-    required this.contactGroups,
     required this.onReload,
   });
 
@@ -24,20 +23,6 @@ class ContactGroupsScreen extends ConsumerStatefulWidget {
 }
 
 class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
-  late List<Map<String, dynamic>> _contactGroups;
-
-  @override
-  void initState() {
-    super.initState();
-    _contactGroups = List.from(widget.contactGroups);
-  }
-
-  @override
-  void didUpdateWidget(ContactGroupsScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _contactGroups = List.from(widget.contactGroups);
-  }
-
   Future<void> _createGroup() async {
     final nameController = TextEditingController();
     final ok = await showDialog<bool>(
@@ -131,7 +116,7 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = _contactGroups.where((g) => g['name'] != 'all_contacts').toList();
+    final contactGroupsAsync = ref.watch(contactGroupsProvider(widget.walletId));
     return GradientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -146,40 +131,48 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
             child: const Icon(Icons.add),
           ),
         ),
-        body: groups.isEmpty
-            ? Center(
+        body: contactGroupsAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (err, _) => Center(child: Text(err.toString())),
+          data: (allGroups) {
+            final groups = allGroups.where((g) => g['name'] != 'all_contacts').toList();
+            if (groups.isEmpty) {
+              return Center(
                 child: Text(
                   'No contact groups yet',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
-              )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                children: [
-                  ...groups.map((g) {
-                    final groupId = g['id'] as String? ?? '';
-                    return GradientCard(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      variationSeed: groupId.hashCode,
-                      child: CustomExpansionTile(
-                        title: Text(g['name'] as String? ?? ''),
-                        subtitle: const Text('Static'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _deleteGroup(g),
-                        ),
-                        children: [
-                          _ContactGroupMembers(
-                            walletId: widget.walletId,
-                            groupId: groupId,
-                            onReload: widget.onReload,
-                          ),
-                        ],
+              );
+            }
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              children: [
+                ...groups.map((g) {
+                  final groupId = g['id'] as String? ?? '';
+                  return GradientCard(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    variationSeed: groupId.hashCode,
+                    child: CustomExpansionTile(
+                      title: Text(g['name'] as String? ?? ''),
+                      subtitle: const Text('Static'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => _deleteGroup(g),
                       ),
-                    );
-                  }),
-                ],
-              ),
+                      children: [
+                        _ContactGroupMembers(
+                          walletId: widget.walletId,
+                          groupId: groupId,
+                          onReload: widget.onReload,
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

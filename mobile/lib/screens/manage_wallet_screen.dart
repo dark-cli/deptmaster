@@ -184,10 +184,6 @@ class ManageWalletScreen extends ConsumerWidget {
                             MaterialPageRoute(
                               builder: (context) => UserGroupsScreen(
                                 walletId: walletId,
-                                userGroups: userGroups.where((g) {
-                                  final name = g['name'] as String? ?? '';
-                                  return name != '__owners__' && name != 'all_users';
-                                }).toList(),
                                 users: const [],
                                 onReload: () => refreshWalletManagement(ref, walletId),
                               ),
@@ -205,7 +201,6 @@ class ManageWalletScreen extends ConsumerWidget {
                             MaterialPageRoute(
                               builder: (context) => ContactGroupsScreen(
                                 walletId: walletId,
-                                contactGroups: contactGroups,
                                 onReload: () => refreshWalletManagement(ref, walletId),
                               ),
                             ),

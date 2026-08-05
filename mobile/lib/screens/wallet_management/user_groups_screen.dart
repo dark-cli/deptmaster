@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
+import '../../providers/wallet_management_provider.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
@@ -8,14 +9,12 @@ import '../../widgets/gradient_background.dart';
 
 class UserGroupsScreen extends ConsumerStatefulWidget {
   final String walletId;
-  final List<Map<String, dynamic>> userGroups;
   final List<Map<String, dynamic>> users;
   final VoidCallback onReload;
 
   const UserGroupsScreen({
     super.key,
     required this.walletId,
-    required this.userGroups,
     required this.users,
     required this.onReload,
   });
@@ -25,20 +24,6 @@ class UserGroupsScreen extends ConsumerStatefulWidget {
 }
 
 class _UserGroupsScreenState extends ConsumerState<UserGroupsScreen> {
-  late List<Map<String, dynamic>> _userGroups;
-
-  @override
-  void initState() {
-    super.initState();
-    _userGroups = List.from(widget.userGroups);
-  }
-
-  @override
-  void didUpdateWidget(UserGroupsScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _userGroups = List.from(widget.userGroups);
-  }
-
   Future<void> _createGroup() async {
     final nameController = TextEditingController();
     final ok = await showDialog<bool>(
@@ -132,6 +117,7 @@ class _UserGroupsScreenState extends ConsumerState<UserGroupsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final userGroupsAsync = ref.watch(userGroupsProvider(widget.walletId));
     return GradientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -146,41 +132,51 @@ class _UserGroupsScreenState extends ConsumerState<UserGroupsScreen> {
             child: const Icon(Icons.add),
           ),
         ),
-        body: _userGroups.isEmpty
-            ? Center(
+        body: userGroupsAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (err, _) => Center(child: Text(err.toString())),
+          data: (allGroups) {
+            final userGroups = allGroups
+                .where((g) => g['name'] != '__owners__' && g['name'] != 'all_users')
+                .toList();
+            if (userGroups.isEmpty) {
+              return Center(
                 child: Text(
                   'No user groups yet',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
-              )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                children: [
-                  ..._userGroups.map((g) {
-                    final groupId = g['id'] as String? ?? '';
-                    return GradientCard(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      variationSeed: groupId.hashCode,
-                      child: CustomExpansionTile(
-                        title: Text(_formatGroupName(g['name'] as String? ?? '')),
-                        subtitle: const Text('Static'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _deleteGroup(g),
-                        ),
-                        children: [
-                          _UserGroupMembers(
-                            walletId: widget.walletId,
-                            groupId: g['id'] as String? ?? '',
-                            users: widget.users,
-                            onReload: widget.onReload,
-                          ),
-                        ],
+              );
+            }
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              children: [
+                ...userGroups.map((g) {
+                  final groupId = g['id'] as String? ?? '';
+                  return GradientCard(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    variationSeed: groupId.hashCode,
+                    child: CustomExpansionTile(
+                      title: Text(_formatGroupName(g['name'] as String? ?? '')),
+                      subtitle: const Text('Static'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => _deleteGroup(g),
                       ),
-                    );
-                  }),
-                ],
-              ),
+                      children: [
+                        _UserGroupMembers(
+                          walletId: widget.walletId,
+                          groupId: g['id'] as String? ?? '',
+                          users: widget.users,
+                          onReload: widget.onReload,
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
