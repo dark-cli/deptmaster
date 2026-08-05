@@ -10,6 +10,12 @@ import '../providers/data_change_provider.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/management_section_card.dart';
+import 'wallet_management/members_screen.dart';
+import 'wallet_management/user_groups_screen.dart';
+import 'wallet_management/contact_groups_screen.dart';
+import 'wallet_management/permission_rules_screen.dart';
+import 'wallet_management/wallet_permissions_screen.dart';
+import 'wallet_management/member_permissions_screen.dart';
 
 class ManageWalletScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -176,8 +182,16 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               subtitle: '${_users.length} member${_users.length == 1 ? '' : 's'}',
                               leadingIcon: Icons.person,
                               onTap: () {
-                                // TODO: Navigate to members screen
-                                ToastService.showInfoFromContext(context, 'Members screen (coming soon)');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => MembersScreen(
+                                      walletId: widget.walletId,
+                                      users: _users,
+                                      onReload: _loadAll,
+                                    ),
+                                  ),
+                                );
                               },
                             ),
                             ManagementTile(
@@ -201,8 +215,20 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               subtitle: '${_userGroups.length} group${_userGroups.length == 1 ? '' : 's'}',
                               leadingIcon: Icons.group,
                               onTap: () {
-                                // TODO: Navigate to user groups screen
-                                ToastService.showInfoFromContext(context, 'User Groups screen (coming soon)');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => UserGroupsScreen(
+                                      walletId: widget.walletId,
+                                      userGroups: _userGroups.where((g) {
+                                        final name = g['name'] as String? ?? '';
+                                        return name != '__owners__' && name != 'all_users';
+                                      }).toList(),
+                                      users: _users,
+                                      onReload: _loadAll,
+                                    ),
+                                  ),
+                                );
                               },
                             ),
                             ManagementTile(
@@ -210,8 +236,16 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               subtitle: '${_contactGroups.length} group${_contactGroups.length == 1 ? '' : 's'}',
                               leadingIcon: Icons.contacts,
                               onTap: () {
-                                // TODO: Navigate to contact groups screen
-                                ToastService.showInfoFromContext(context, 'Contact Groups screen (coming soon)');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ContactGroupsScreen(
+                                      walletId: widget.walletId,
+                                      contactGroups: _contactGroups,
+                                      onReload: _loadAll,
+                                    ),
+                                  ),
+                                );
                               },
                             ),
                           ],
@@ -226,8 +260,14 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               subtitle: 'Access matrix',
                               leadingIcon: Icons.rule,
                               onTap: () {
-                                // TODO: Navigate to rules/matrix screen
-                                ToastService.showInfoFromContext(context, 'Rules screen (coming soon)');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => PermissionRulesScreen(
+                                      walletId: widget.walletId,
+                                    ),
+                                  ),
+                                );
                               },
                             ),
                             ManagementTile(
@@ -235,8 +275,14 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               subtitle: 'Delegable permissions',
                               leadingIcon: Icons.manage_accounts,
                               onTap: () {
-                                // TODO: Navigate to member permissions screen
-                                ToastService.showInfoFromContext(context, 'Member Permissions screen (coming soon)');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => MemberPermissionsScreen(
+                                      walletId: widget.walletId,
+                                    ),
+                                  ),
+                                );
                               },
                             ),
                             if (_contactGroups.isNotEmpty)
@@ -261,8 +307,14 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               subtitle: 'Who can manage wallet',
                               leadingIcon: Icons.admin_panel_settings,
                               onTap: () {
-                                // TODO: Navigate to wallet permissions screen
-                                ToastService.showInfoFromContext(context, 'Wallet Permissions screen (coming soon)');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => WalletPermissionsScreen(
+                                      walletId: widget.walletId,
+                                    ),
+                                  ),
+                                );
                               },
                             ),
                             ManagementTile(
