@@ -321,6 +321,8 @@ class _PermissionGridDisplay extends StatelessWidget {
   }
 }
 
+enum _PermissionState { allow, deny, unset }
+
 class _PermissionsDialog extends StatefulWidget {
   final String userGroupName;
   final String contactGroupName;
@@ -345,100 +347,180 @@ class _PermissionsDialog extends StatefulWidget {
 class _PermissionsDialogState extends State<_PermissionsDialog> {
   late Set<String> _allowed;
   late Set<String> _denied;
+  late Map<String, List<Map<String, dynamic>>> _groupedActions;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _allowed = Set<String>.from(widget.initialAllowed);
-    _denied = Set<String>.from(widget.initialDenied);
+    _allowed = Set.from(widget.initialAllowed);
+    _denied = Set.from(widget.initialDenied);
+    _groupActions();
   }
 
-  void _toggle(String action) {
-    setState(() {
-      if (_allowed.contains(action)) {
-        _allowed.remove(action);
-      } else if (_denied.contains(action)) {
-        _denied.remove(action);
-      } else {
-        _allowed.add(action);
+  void _groupActions() {
+    _groupedActions = {};
+    final contactTransactionActions = widget.availableActions.where((a) {
+      final name = a['name'] as String? ?? '';
+      return name.startsWith('contact:') || name.startsWith('transaction:');
+    }).toList();
+
+    for (final action in contactTransactionActions) {
+      final name = action['name'] as String? ?? '';
+      final parts = name.split(':');
+      final category = parts.isNotEmpty ? parts[0] : 'other';
+
+      if (!_groupedActions.containsKey(category)) {
+        _groupedActions[category] = [];
       }
-    });
+      _groupedActions[category]!.add(action);
+    }
+
+    for (final category in _groupedActions.keys) {
+      _groupedActions[category]!.sort((a, b) {
+        final aName = a['name'] as String? ?? '';
+        final bName = b['name'] as String? ?? '';
+        return _getPermissionSortOrder(aName).compareTo(_getPermissionSortOrder(bName));
+      });
+    }
   }
 
-  void _setAllow(String action) {
-    setState(() {
-      _allowed.add(action);
-      _denied.remove(action);
-    });
+  int _getPermissionSortOrder(String actionName) {
+    if (actionName.contains(':read')) return 0;
+    if (actionName.contains(':create')) return 1;
+    if (actionName.contains(':update')) return 2;
+    if (actionName.contains(':delete')) return 3;
+    if (actionName.contains(':close')) return 4;
+    return 99;
   }
 
-  void _setDeny(String action) {
-    setState(() {
-      _denied.add(action);
-      _allowed.remove(action);
-    });
+  String _formatActionName(String name) {
+    const manualNames = {
+      'contact:create': 'Create (c)',
+      'contact:read': 'Read (r)',
+      'contact:update': 'Write (w)',
+      'contact:delete': 'Delete (d)',
+      'transaction:create': 'Create (c)',
+      'transaction:read': 'Read (r)',
+      'transaction:update': 'Write (w)',
+      'transaction:delete': 'Delete (d)',
+      'transaction:close': 'Close (x)',
+    };
+    return manualNames[name] ?? name;
   }
 
-  void _unset(String action) {
+  String _getCategoryLabel(String category) {
+    if (category == 'contact') return 'Contacts';
+    if (category == 'transaction') return 'Transactions';
+    return category;
+  }
+
+  void _setState(String name, _PermissionState state) {
     setState(() {
-      _allowed.remove(action);
-      _denied.remove(action);
+      _allowed.remove(name);
+      _denied.remove(name);
+      if (state == _PermissionState.allow) {
+        _allowed.add(name);
+      } else if (state == _PermissionState.deny) {
+        _denied.add(name);
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('${widget.userGroupName} → ${widget.contactGroupName}'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: ListView(
-          shrinkWrap: true,
-          children: widget.availableActions.map((action) {
-            final actionName = action['name'] as String? ?? '';
-            final isAllowed = _allowed.contains(actionName);
-            final isDenied = _denied.contains(actionName);
+    if (widget.availableActions.isEmpty) {
+      return AlertDialog(
+        title: const Text('Edit Permissions'),
+        content: const Text('No permission actions loaded. Pull down to refresh.', textAlign: TextAlign.center),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+        ],
+      );
+    }
 
-            return ListTile(
-              dense: true,
-              title: Text(actionName),
-              trailing: PopupMenuButton<String>(
-                onSelected: (value) {
-                  if (value == 'allow') {
-                    _setAllow(actionName);
-                  } else if (value == 'deny') {
-                    _setDeny(actionName);
-                  } else if (value == 'unset') {
-                    _unset(actionName);
-                  }
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'allow',
-                    child: Text('Allow', style: TextStyle(color: const Color(0xFF2E7D32))),
-                  ),
-                  PopupMenuItem(
-                    value: 'deny',
-                    child: Text('Deny', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                  ),
-                  PopupMenuItem(
-                    value: 'unset',
-                    child: const Text('Unset'),
-                  ),
-                ],
-                child: Chip(
-                  label: Text(isAllowed ? 'Allow' : (isDenied ? 'Deny' : 'Unset')),
-                  backgroundColor: isAllowed
-                      ? const Color(0xFF2E7D32)
-                      : (isDenied ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.surfaceVariant),
-                  labelStyle: TextStyle(
-                    color: isAllowed || isDenied ? Colors.white : Theme.of(context).colorScheme.onSurfaceVariant,
+    final categories = _groupedActions.keys.toList()..sort();
+    final screenWidth = MediaQuery.sizeOf(context).width;
+
+    return AlertDialog(
+      insetPadding: EdgeInsets.symmetric(horizontal: (screenWidth < 400) ? 8.0 : 40.0, vertical: 24),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Edit Permissions'),
+          const SizedBox(height: 4),
+          Text(
+            '${widget.userGroupName} → ${widget.contactGroupName}',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'rwx format: r=read, c=create, w=write, d=delete, x=close • ✓=Allow, ✗=Deny, unchecked=Unset',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
               ),
-            );
-          }).toList(),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: categories.length,
+                itemBuilder: (context, index) {
+                  final category = categories[index];
+                  final actions = _groupedActions[category]!;
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (index > 0) const Divider(height: 24),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          _getCategoryLabel(category),
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      ...actions.map((action) {
+                        final name = action['name'] as String? ?? '';
+                        final isAllowed = _allowed.contains(name);
+                        final isDenied = _denied.contains(name);
+
+                        return CheckboxListTile(
+                          dense: true,
+                          title: Text(_formatActionName(name)),
+                          tristate: true,
+                          value: isDenied ? false : (isAllowed ? true : null),
+                          onChanged: (value) {
+                            if (value == null) {
+                              _setState(name, _PermissionState.unset);
+                            } else if (value == true) {
+                              _setState(name, _PermissionState.allow);
+                            } else {
+                              _setState(name, _PermissionState.deny);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -447,14 +529,14 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _saving
-              ? null
-              : () async {
-                  setState(() => _saving = true);
-                  widget.onSave(_allowed.toList(), _denied.toList());
-                  if (mounted) Navigator.pop(context);
-                },
-          child: _saving ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),
+          onPressed: _saving ? null : () async {
+            setState(() => _saving = true);
+            widget.onSave(_allowed.toList(), _denied.toList());
+            if (mounted) Navigator.pop(context);
+          },
+          child: _saving
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Save'),
         ),
       ],
     );
