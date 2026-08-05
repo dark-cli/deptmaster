@@ -9,8 +9,8 @@ final walletManagementRefreshTrigger = StateProvider<int>((ref) => 0);
 /// when Permissions events arrive for the current wallet.
 final _dataChangeListener = StreamProvider.family<void, String>((ref, walletId) {
   return Api.dataChangeStream.where((event) {
-    return event.kind == DataChangeKind.Permissions &&
-        (event.wallet_id == null || event.wallet_id == walletId);
+    return event.kind == DataChangeKind.permissions &&
+        (event.walletId == null || event.walletId == walletId);
   }).map((_) {
     ref.read(walletManagementRefreshTrigger.notifier).state += 1;
   });
