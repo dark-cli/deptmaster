@@ -16,6 +16,8 @@ import 'wallet_management/contact_groups_screen.dart';
 import 'wallet_management/permission_rules_screen.dart';
 import 'wallet_management/wallet_permissions_screen.dart';
 import 'wallet_management/member_permissions_screen.dart';
+import 'wallet_management/contact_permissions_screen.dart';
+import '../widgets/invite_code_dialog.dart';
 
 class ManageWalletScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -140,6 +142,79 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
     );
   }
 
+  Future<void> _showRenameWalletDialog() async {
+    final nameController = TextEditingController(text: widget.walletName);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename wallet'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(labelText: 'Wallet name'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    ToastService.showInfoFromContext(context, 'Rename wallet (coming soon - API not yet available)');
+  }
+
+  Future<void> _showLeaveWalletDialog() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Leave wallet'),
+        content: const Text('You will no longer have access to this wallet. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    ToastService.showInfoFromContext(context, 'Leave wallet (coming soon - API not yet available)');
+  }
+
+  Future<void> _showDeleteWalletDialog() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete wallet'),
+        content: const Text('This will permanently delete the wallet and all its data. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    ToastService.showInfoFromContext(context, 'Delete wallet (coming soon - API not yet available)');
+  }
+
   @override
   Widget build(BuildContext context) {
     return GradientBackground(
@@ -199,8 +274,10 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               subtitle: 'Share 4-digit code',
                               leadingIcon: Icons.share,
                               onTap: () {
-                                // TODO: Show invite code dialog
-                                ToastService.showInfoFromContext(context, 'Invite dialog (coming soon)');
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => InviteCodeDialog(walletId: widget.walletId),
+                                );
                               },
                             ),
                           ],
@@ -291,8 +368,14 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                                 subtitle: 'Group-scoped access',
                                 leadingIcon: Icons.lock,
                                 onTap: () {
-                                  // TODO: Navigate to contact permissions screen
-                                  ToastService.showInfoFromContext(context, 'Contact Permissions screen (coming soon)');
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ContactPermissionsScreen(
+                                        walletId: widget.walletId,
+                                      ),
+                                    ),
+                                  );
                                 },
                               ),
                           ],
@@ -321,24 +404,21 @@ class _ManageWalletScreenState extends ConsumerState<ManageWalletScreen> {
                               title: 'Rename Wallet',
                               leadingIcon: Icons.edit,
                               onTap: () {
-                                // TODO: Show rename dialog
-                                ToastService.showInfoFromContext(context, 'Rename wallet (coming soon)');
+                                _showRenameWalletDialog();
                               },
                             ),
                             ManagementTile(
                               title: 'Leave Wallet',
                               leadingIcon: Icons.exit_to_app,
                               onTap: () {
-                                // TODO: Show leave confirmation
-                                ToastService.showInfoFromContext(context, 'Leave wallet (coming soon)');
+                                _showLeaveWalletDialog();
                               },
                             ),
                             ManagementTile(
                               title: 'Delete Wallet',
                               leadingIcon: Icons.delete,
                               onTap: () {
-                                // TODO: Show delete confirmation
-                                ToastService.showInfoFromContext(context, 'Delete wallet (coming soon)');
+                                _showDeleteWalletDialog();
                               },
                             ),
                           ],

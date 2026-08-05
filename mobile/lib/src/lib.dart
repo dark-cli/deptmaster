@@ -290,6 +290,20 @@ Future<void> setMemberPermissions(
     RustLib.instance.api.crateSetMemberPermissions(
         walletId: walletId, entriesJson: entriesJson);
 
+Future<String> getContactGroupPermissions(
+        {required String walletId, required String contactGroupId}) =>
+    RustLib.instance.api.crateGetContactGroupPermissions(
+        walletId: walletId, contactGroupId: contactGroupId);
+
+Future<void> setContactGroupPermissions(
+        {required String walletId,
+        required String contactGroupId,
+        required String entriesJson}) =>
+    RustLib.instance.api.crateSetContactGroupPermissions(
+        walletId: walletId,
+        contactGroupId: contactGroupId,
+        entriesJson: entriesJson);
+
 Future<String> getEvents() => RustLib.instance.api.crateGetEvents();
 
 /// Drain buffered Rust log lines so Dart can show them (e.g. via debugPrint).

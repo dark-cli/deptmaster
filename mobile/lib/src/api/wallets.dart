@@ -162,3 +162,17 @@ Future<void> setMemberPermissionsApi(
         {required String walletId, required String entriesJson}) =>
     RustLib.instance.api.crateApiWalletsSetMemberPermissionsApi(
         walletId: walletId, entriesJson: entriesJson);
+
+Future<String> getContactGroupPermissionsApi(
+        {required String walletId, required String contactGroupId}) =>
+    RustLib.instance.api.crateApiWalletsGetContactGroupPermissionsApi(
+        walletId: walletId, contactGroupId: contactGroupId);
+
+Future<void> setContactGroupPermissionsApi(
+        {required String walletId,
+        required String contactGroupId,
+        required String entriesJson}) =>
+    RustLib.instance.api.crateApiWalletsSetContactGroupPermissionsApi(
+        walletId: walletId,
+        contactGroupId: contactGroupId,
+        entriesJson: entriesJson);

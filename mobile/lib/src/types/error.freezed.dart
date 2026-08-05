@@ -25,6 +25,7 @@ mixin _$ClientError {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) =>
       throw _privateConstructorUsedError;
@@ -37,6 +38,7 @@ mixin _$ClientError {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) =>
       throw _privateConstructorUsedError;
@@ -49,6 +51,7 @@ mixin _$ClientError {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) =>
@@ -63,6 +66,8 @@ mixin _$ClientError {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) =>
       throw _privateConstructorUsedError;
@@ -75,6 +80,8 @@ mixin _$ClientError {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) =>
       throw _privateConstructorUsedError;
@@ -87,6 +94,8 @@ mixin _$ClientError {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) =>
@@ -183,6 +192,7 @@ class _$ClientError_NetworkImpl extends ClientError_Network {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return network(field0);
@@ -198,6 +208,7 @@ class _$ClientError_NetworkImpl extends ClientError_Network {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return network?.call(field0);
@@ -213,6 +224,7 @@ class _$ClientError_NetworkImpl extends ClientError_Network {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -233,6 +245,8 @@ class _$ClientError_NetworkImpl extends ClientError_Network {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return network(this);
@@ -248,6 +262,8 @@ class _$ClientError_NetworkImpl extends ClientError_Network {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return network?.call(this);
@@ -263,6 +279,8 @@ class _$ClientError_NetworkImpl extends ClientError_Network {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {
@@ -332,6 +350,7 @@ class _$ClientError_AuthDeclinedImpl extends ClientError_AuthDeclined {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return authDeclined();
@@ -347,6 +366,7 @@ class _$ClientError_AuthDeclinedImpl extends ClientError_AuthDeclined {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return authDeclined?.call();
@@ -362,6 +382,7 @@ class _$ClientError_AuthDeclinedImpl extends ClientError_AuthDeclined {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -382,6 +403,8 @@ class _$ClientError_AuthDeclinedImpl extends ClientError_AuthDeclined {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return authDeclined(this);
@@ -397,6 +420,8 @@ class _$ClientError_AuthDeclinedImpl extends ClientError_AuthDeclined {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return authDeclined?.call(this);
@@ -412,6 +437,8 @@ class _$ClientError_AuthDeclinedImpl extends ClientError_AuthDeclined {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {
@@ -475,6 +502,7 @@ class _$ClientError_AuthExpiredImpl extends ClientError_AuthExpired {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return authExpired();
@@ -490,6 +518,7 @@ class _$ClientError_AuthExpiredImpl extends ClientError_AuthExpired {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return authExpired?.call();
@@ -505,6 +534,7 @@ class _$ClientError_AuthExpiredImpl extends ClientError_AuthExpired {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -525,6 +555,8 @@ class _$ClientError_AuthExpiredImpl extends ClientError_AuthExpired {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return authExpired(this);
@@ -540,6 +572,8 @@ class _$ClientError_AuthExpiredImpl extends ClientError_AuthExpired {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return authExpired?.call(this);
@@ -555,6 +589,8 @@ class _$ClientError_AuthExpiredImpl extends ClientError_AuthExpired {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {
@@ -644,6 +680,7 @@ class _$ClientError_InvalidResponseImpl extends ClientError_InvalidResponse {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return invalidResponse(field0);
@@ -659,6 +696,7 @@ class _$ClientError_InvalidResponseImpl extends ClientError_InvalidResponse {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return invalidResponse?.call(field0);
@@ -674,6 +712,7 @@ class _$ClientError_InvalidResponseImpl extends ClientError_InvalidResponse {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -694,6 +733,8 @@ class _$ClientError_InvalidResponseImpl extends ClientError_InvalidResponse {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return invalidResponse(this);
@@ -709,6 +750,8 @@ class _$ClientError_InvalidResponseImpl extends ClientError_InvalidResponse {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return invalidResponse?.call(this);
@@ -724,6 +767,8 @@ class _$ClientError_InvalidResponseImpl extends ClientError_InvalidResponse {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {
@@ -817,6 +862,7 @@ class _$ClientError_StorageImpl extends ClientError_Storage {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return storage(field0);
@@ -832,6 +878,7 @@ class _$ClientError_StorageImpl extends ClientError_Storage {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return storage?.call(field0);
@@ -847,6 +894,7 @@ class _$ClientError_StorageImpl extends ClientError_Storage {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -867,6 +915,8 @@ class _$ClientError_StorageImpl extends ClientError_Storage {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return storage(this);
@@ -882,6 +932,8 @@ class _$ClientError_StorageImpl extends ClientError_Storage {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return storage?.call(this);
@@ -897,6 +949,8 @@ class _$ClientError_StorageImpl extends ClientError_Storage {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {
@@ -990,6 +1044,7 @@ class _$ClientError_SyncImpl extends ClientError_Sync {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return sync_(field0);
@@ -1005,6 +1060,7 @@ class _$ClientError_SyncImpl extends ClientError_Sync {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return sync_?.call(field0);
@@ -1020,6 +1076,7 @@ class _$ClientError_SyncImpl extends ClientError_Sync {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -1040,6 +1097,8 @@ class _$ClientError_SyncImpl extends ClientError_Sync {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return sync_(this);
@@ -1055,6 +1114,8 @@ class _$ClientError_SyncImpl extends ClientError_Sync {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return sync_?.call(this);
@@ -1070,6 +1131,8 @@ class _$ClientError_SyncImpl extends ClientError_Sync {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {
@@ -1164,6 +1227,7 @@ class _$ClientError_InvalidInputImpl extends ClientError_InvalidInput {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return invalidInput(field0);
@@ -1179,6 +1243,7 @@ class _$ClientError_InvalidInputImpl extends ClientError_InvalidInput {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return invalidInput?.call(field0);
@@ -1194,6 +1259,7 @@ class _$ClientError_InvalidInputImpl extends ClientError_InvalidInput {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -1214,6 +1280,8 @@ class _$ClientError_InvalidInputImpl extends ClientError_InvalidInput {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return invalidInput(this);
@@ -1229,6 +1297,8 @@ class _$ClientError_InvalidInputImpl extends ClientError_InvalidInput {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return invalidInput?.call(this);
@@ -1244,6 +1314,8 @@ class _$ClientError_InvalidInputImpl extends ClientError_InvalidInput {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {
@@ -1262,6 +1334,194 @@ abstract class ClientError_InvalidInput extends ClientError {
   String get field0;
   @JsonKey(ignore: true)
   _$$ClientError_InvalidInputImplCopyWith<_$ClientError_InvalidInputImpl>
+      get copyWith => throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class _$$ClientError_InsufficientPermissionImplCopyWith<$Res> {
+  factory _$$ClientError_InsufficientPermissionImplCopyWith(
+          _$ClientError_InsufficientPermissionImpl value,
+          $Res Function(_$ClientError_InsufficientPermissionImpl) then) =
+      __$$ClientError_InsufficientPermissionImplCopyWithImpl<$Res>;
+  @useResult
+  $Res call({String field0});
+}
+
+/// @nodoc
+class __$$ClientError_InsufficientPermissionImplCopyWithImpl<$Res>
+    extends _$ClientErrorCopyWithImpl<$Res,
+        _$ClientError_InsufficientPermissionImpl>
+    implements _$$ClientError_InsufficientPermissionImplCopyWith<$Res> {
+  __$$ClientError_InsufficientPermissionImplCopyWithImpl(
+      _$ClientError_InsufficientPermissionImpl _value,
+      $Res Function(_$ClientError_InsufficientPermissionImpl) _then)
+      : super(_value, _then);
+
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? field0 = null,
+  }) {
+    return _then(_$ClientError_InsufficientPermissionImpl(
+      null == field0
+          ? _value.field0
+          : field0 // ignore: cast_nullable_to_non_nullable
+              as String,
+    ));
+  }
+}
+
+/// @nodoc
+
+class _$ClientError_InsufficientPermissionImpl
+    extends ClientError_InsufficientPermission {
+  const _$ClientError_InsufficientPermissionImpl(this.field0) : super._();
+
+  @override
+  final String field0;
+
+  @override
+  String toString() {
+    return 'ClientError.insufficientPermission(field0: $field0)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$ClientError_InsufficientPermissionImpl &&
+            (identical(other.field0, field0) || other.field0 == field0));
+  }
+
+  @override
+  int get hashCode => Object.hash(runtimeType, field0);
+
+  @JsonKey(ignore: true)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$ClientError_InsufficientPermissionImplCopyWith<
+          _$ClientError_InsufficientPermissionImpl>
+      get copyWith => __$$ClientError_InsufficientPermissionImplCopyWithImpl<
+          _$ClientError_InsufficientPermissionImpl>(this, _$identity);
+
+  @override
+  @optionalTypeArgs
+  TResult when<TResult extends Object?>({
+    required TResult Function(String field0) network,
+    required TResult Function() authDeclined,
+    required TResult Function() authExpired,
+    required TResult Function(String field0) invalidResponse,
+    required TResult Function(String field0) storage,
+    required TResult Function(String field0) sync_,
+    required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
+    required TResult Function(String field0) internal,
+  }) {
+    return insufficientPermission(field0);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? whenOrNull<TResult extends Object?>({
+    TResult? Function(String field0)? network,
+    TResult? Function()? authDeclined,
+    TResult? Function()? authExpired,
+    TResult? Function(String field0)? invalidResponse,
+    TResult? Function(String field0)? storage,
+    TResult? Function(String field0)? sync_,
+    TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
+    TResult? Function(String field0)? internal,
+  }) {
+    return insufficientPermission?.call(field0);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeWhen<TResult extends Object?>({
+    TResult Function(String field0)? network,
+    TResult Function()? authDeclined,
+    TResult Function()? authExpired,
+    TResult Function(String field0)? invalidResponse,
+    TResult Function(String field0)? storage,
+    TResult Function(String field0)? sync_,
+    TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
+    TResult Function(String field0)? internal,
+    required TResult orElse(),
+  }) {
+    if (insufficientPermission != null) {
+      return insufficientPermission(field0);
+    }
+    return orElse();
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult map<TResult extends Object?>({
+    required TResult Function(ClientError_Network value) network,
+    required TResult Function(ClientError_AuthDeclined value) authDeclined,
+    required TResult Function(ClientError_AuthExpired value) authExpired,
+    required TResult Function(ClientError_InvalidResponse value)
+        invalidResponse,
+    required TResult Function(ClientError_Storage value) storage,
+    required TResult Function(ClientError_Sync value) sync_,
+    required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
+    required TResult Function(ClientError_Internal value) internal,
+  }) {
+    return insufficientPermission(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult? mapOrNull<TResult extends Object?>({
+    TResult? Function(ClientError_Network value)? network,
+    TResult? Function(ClientError_AuthDeclined value)? authDeclined,
+    TResult? Function(ClientError_AuthExpired value)? authExpired,
+    TResult? Function(ClientError_InvalidResponse value)? invalidResponse,
+    TResult? Function(ClientError_Storage value)? storage,
+    TResult? Function(ClientError_Sync value)? sync_,
+    TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
+    TResult? Function(ClientError_Internal value)? internal,
+  }) {
+    return insufficientPermission?.call(this);
+  }
+
+  @override
+  @optionalTypeArgs
+  TResult maybeMap<TResult extends Object?>({
+    TResult Function(ClientError_Network value)? network,
+    TResult Function(ClientError_AuthDeclined value)? authDeclined,
+    TResult Function(ClientError_AuthExpired value)? authExpired,
+    TResult Function(ClientError_InvalidResponse value)? invalidResponse,
+    TResult Function(ClientError_Storage value)? storage,
+    TResult Function(ClientError_Sync value)? sync_,
+    TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
+    TResult Function(ClientError_Internal value)? internal,
+    required TResult orElse(),
+  }) {
+    if (insufficientPermission != null) {
+      return insufficientPermission(this);
+    }
+    return orElse();
+  }
+}
+
+abstract class ClientError_InsufficientPermission extends ClientError {
+  const factory ClientError_InsufficientPermission(final String field0) =
+      _$ClientError_InsufficientPermissionImpl;
+  const ClientError_InsufficientPermission._() : super._();
+
+  String get field0;
+  @JsonKey(ignore: true)
+  _$$ClientError_InsufficientPermissionImplCopyWith<
+          _$ClientError_InsufficientPermissionImpl>
       get copyWith => throw _privateConstructorUsedError;
 }
 
@@ -1338,6 +1598,7 @@ class _$ClientError_InternalImpl extends ClientError_Internal {
     required TResult Function(String field0) storage,
     required TResult Function(String field0) sync_,
     required TResult Function(String field0) invalidInput,
+    required TResult Function(String field0) insufficientPermission,
     required TResult Function(String field0) internal,
   }) {
     return internal(field0);
@@ -1353,6 +1614,7 @@ class _$ClientError_InternalImpl extends ClientError_Internal {
     TResult? Function(String field0)? storage,
     TResult? Function(String field0)? sync_,
     TResult? Function(String field0)? invalidInput,
+    TResult? Function(String field0)? insufficientPermission,
     TResult? Function(String field0)? internal,
   }) {
     return internal?.call(field0);
@@ -1368,6 +1630,7 @@ class _$ClientError_InternalImpl extends ClientError_Internal {
     TResult Function(String field0)? storage,
     TResult Function(String field0)? sync_,
     TResult Function(String field0)? invalidInput,
+    TResult Function(String field0)? insufficientPermission,
     TResult Function(String field0)? internal,
     required TResult orElse(),
   }) {
@@ -1388,6 +1651,8 @@ class _$ClientError_InternalImpl extends ClientError_Internal {
     required TResult Function(ClientError_Storage value) storage,
     required TResult Function(ClientError_Sync value) sync_,
     required TResult Function(ClientError_InvalidInput value) invalidInput,
+    required TResult Function(ClientError_InsufficientPermission value)
+        insufficientPermission,
     required TResult Function(ClientError_Internal value) internal,
   }) {
     return internal(this);
@@ -1403,6 +1668,8 @@ class _$ClientError_InternalImpl extends ClientError_Internal {
     TResult? Function(ClientError_Storage value)? storage,
     TResult? Function(ClientError_Sync value)? sync_,
     TResult? Function(ClientError_InvalidInput value)? invalidInput,
+    TResult? Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult? Function(ClientError_Internal value)? internal,
   }) {
     return internal?.call(this);
@@ -1418,6 +1685,8 @@ class _$ClientError_InternalImpl extends ClientError_Internal {
     TResult Function(ClientError_Storage value)? storage,
     TResult Function(ClientError_Sync value)? sync_,
     TResult Function(ClientError_InvalidInput value)? invalidInput,
+    TResult Function(ClientError_InsufficientPermission value)?
+        insufficientPermission,
     TResult Function(ClientError_Internal value)? internal,
     required TResult orElse(),
   }) {

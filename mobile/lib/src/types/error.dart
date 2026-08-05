@@ -45,6 +45,11 @@ sealed class ClientError with _$ClientError implements FrbException {
     String field0,
   ) = ClientError_InvalidInput;
 
+  /// Authorization failed: insufficient permissions for the requested operation
+  const factory ClientError.insufficientPermission(
+    String field0,
+  ) = ClientError_InsufficientPermission;
+
   /// Internal error (should never happen in production)
   const factory ClientError.internal(
     String field0,
