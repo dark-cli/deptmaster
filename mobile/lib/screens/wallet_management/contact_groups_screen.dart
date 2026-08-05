@@ -138,10 +138,13 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
         appBar: AppBar(
           title: const Text('Contact Groups'),
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: _createGroup,
-          tooltip: 'Create new group',
-          child: const Icon(Icons.add),
+        floatingActionButton: Padding(
+          padding: const EdgeInsets.only(bottom: 24.0),
+          child: FloatingActionButton(
+            onPressed: _createGroup,
+            tooltip: 'Create new group',
+            child: const Icon(Icons.add),
+          ),
         ),
         body: groups.isEmpty
             ? Center(
