@@ -44,9 +44,7 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
       if (mounted) {
         setState(() {
           _userGroups = results[0] as List<Map<String, dynamic>>;
-          _contactGroups = (results[1] as List<Map<String, dynamic>>)
-              .where((g) => g['name'] != 'all_contacts')
-              .toList();
+          _contactGroups = results[1] as List<Map<String, dynamic>>;
           _permissionActions = results[2] as List<Map<String, dynamic>>;
           _matrix = results[3] as List<Map<String, dynamic>>;
           _loading = false;
@@ -134,6 +132,7 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
   String _formatGroupName(String name) {
     if (name == '__owners__') return 'Owners (system)';
     if (name == 'all_users') return 'All Users (system)';
+    if (name == 'all_contacts') return 'All Contacts (default)';
     return name;
   }
 
