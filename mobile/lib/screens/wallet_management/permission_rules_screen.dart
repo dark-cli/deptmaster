@@ -43,7 +43,9 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
 
       if (mounted) {
         setState(() {
-          _userGroups = results[0] as List<Map<String, dynamic>>;
+          _userGroups = (results[0] as List<Map<String, dynamic>>)
+              .where((g) => g['name'] != '__owners__')
+              .toList();
           _contactGroups = results[1] as List<Map<String, dynamic>>;
           _permissionActions = results[2] as List<Map<String, dynamic>>;
           _matrix = results[3] as List<Map<String, dynamic>>;
