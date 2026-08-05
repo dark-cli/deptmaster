@@ -90,6 +90,56 @@ pub fn disconnect_realtime() -> Result<(), String> {
     Ok(())
 }
 
+/// Refresh wallet UI state: fetch user groups, contact groups, and permissions.
+/// Called when wallet_ui_update WebSocket message is received.
+/// Spawns in a separate thread to avoid blocking the WS event loop.
+pub fn refresh_wallet_ui_state() -> Result<(), String> {
+    rust_log!("[debitum_rs] refresh_wallet_ui_state called");
+    std::thread::spawn(|| {
+        // Fetch wallet groups and permissions data
+        let wallet_id = match crate::get_current_wallet_id() {
+            Ok(id) => id,
+            Err(e) => {
+                rust_log!("[debitum_rs] refresh_wallet_ui_state: no wallet: {}", e);
+                return;
+            }
+        };
+
+        rust_log!("[debitum_rs] refreshing wallet UI state for wallet: {}", wallet_id);
+
+        // Fetch user groups
+        if let Err(e) = crate::api::list_user_groups_api(&wallet_id) {
+            rust_log!("[debitum_rs] failed to refresh user groups: {}", e);
+        } else {
+            rust_log!("[debitum_rs] user groups refreshed");
+        }
+
+        // Fetch contact groups
+        if let Err(e) = crate::api::list_contact_groups_api(&wallet_id) {
+            rust_log!("[debitum_rs] failed to refresh contact groups: {}", e);
+        } else {
+            rust_log!("[debitum_rs] contact groups refreshed");
+        }
+
+        // Fetch wallet permissions
+        if let Err(e) = crate::api::get_wallet_permissions_api(&wallet_id) {
+            rust_log!("[debitum_rs] failed to refresh wallet permissions: {}", e);
+        } else {
+            rust_log!("[debitum_rs] wallet permissions refreshed");
+        }
+
+        // Fetch member permissions
+        if let Err(e) = crate::api::get_member_permissions_api(&wallet_id) {
+            rust_log!("[debitum_rs] failed to refresh member permissions: {}", e);
+        } else {
+            rust_log!("[debitum_rs] member permissions refreshed");
+        }
+
+        rust_log!("[debitum_rs] wallet UI state refresh complete");
+    });
+    Ok(())
+}
+
 async fn ws_loop(token: String, wallet_id: String, ws_url: String, cancel: Arc<Notify>) {
     loop {
         // Did we get cancelled between iterations? Check before
@@ -145,12 +195,8 @@ async fn ws_loop(token: String, wallet_id: String, ws_url: String, cancel: Arc<N
                                             .and_then(|t| t.as_str())
                                             .unwrap_or("unknown");
                                         rust_log!("[debitum_rs] ws got wallet_ui_update: {}", update_type);
-                                        // Trigger sync to refresh wallet data and notify UI
-                                        std::thread::spawn(|| {
-                                            if let Err(e) = crate::manual_sync() {
-                                                rust_log!("[debitum_rs] ws wallet_ui_update sync failed: {}", e);
-                                            }
-                                        });
+                                        // Refresh wallet UI state (groups, permissions)
+                                        let _ = refresh_wallet_ui_state();
                                     }
                                 }
                                 _ => {
