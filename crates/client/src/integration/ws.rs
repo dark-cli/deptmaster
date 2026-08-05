@@ -194,13 +194,17 @@ async fn ws_loop(token: String, wallet_id: String, ws_url: String, cancel: Arc<N
                                     });
                                 }
                                 "wallet_ui_update" => {
+                                    rust_log!("[debitum_rs] wallet_ui_update match arm entered");
                                     if let Some(data) = v.get("data") {
                                         let update_type = data.get("type")
                                             .and_then(|t| t.as_str())
                                             .unwrap_or("unknown");
                                         rust_log!("[debitum_rs] ws got wallet_ui_update: {}", update_type);
-                                        // Refresh wallet UI state (groups, permissions)
-                                        let _ = refresh_wallet_ui_state();
+                                        rust_log!("[debitum_rs] about to call refresh_wallet_ui_state");
+                                        let result = refresh_wallet_ui_state();
+                                        rust_log!("[debitum_rs] refresh_wallet_ui_state returned: {:?}", result);
+                                    } else {
+                                        rust_log!("[debitum_rs] wallet_ui_update: no data field");
                                     }
                                 }
                                 _ => {
