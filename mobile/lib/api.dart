@@ -773,13 +773,13 @@ class Api {
     }
   }
 
-  /// Get contact-group-level permissions: (source_group, contact_group, action, is_deny) matrix
+  /// Get contact-group-level permissions for a specific contact group
   /// Returns empty list if endpoint not available (graceful degradation for older backends)
-  static Future<List<Map<String, dynamic>>> getContactGroupPermissions(String walletId) async {
+  static Future<List<Map<String, dynamic>>> getContactGroupPermissions(String walletId, String contactGroupId) async {
     if (kIsWeb) return [];
     try {
       await _ensureRustReady();
-      final json = await rust.getContactGroupPermissions(walletId: walletId);
+      final json = await rust.getContactGroupPermissions(walletId: walletId, contactGroupId: contactGroupId);
       final list = jsonDecode(json) as List<dynamic>?;
       return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
     } catch (e) {
@@ -789,13 +789,13 @@ class Api {
     }
   }
 
-  /// Set contact-group-level permissions: grant/revoke actions for source→contact group pairs
-  static Future<void> setContactGroupPermissions(String walletId, List<Map<String, dynamic>> entries) async {
+  /// Set contact-group-level permissions for a specific contact group
+  static Future<void> setContactGroupPermissions(String walletId, String contactGroupId, List<Map<String, dynamic>> entries) async {
     if (kIsWeb) return;
     try {
       await _ensureRustReady();
       final entriesJson = jsonEncode(entries);
-      await rust.setContactGroupPermissions(walletId: walletId, entriesJson: entriesJson);
+      await rust.setContactGroupPermissions(walletId: walletId, contactGroupId: contactGroupId, entriesJson: entriesJson);
     } catch (e) {
       debugPrint('[contact-group-permissions] setContactGroupPermissions failed: $e');
       throw Exception('Failed to set contact group permissions. Ensure backend supports contact-group-level permissions.');
