@@ -32,15 +32,19 @@ final _dataChangeSetupProvider = FutureProvider.family<void, String>((ref, walle
 
 /// Provides list of user groups for the current wallet.
 final userGroupsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
+  debugPrint('[userGroupsProvider] fetching for wallet=$walletId');
   // Watch the refresh trigger to refetch when invalidated
-  ref.watch(walletManagementRefreshTrigger);
+  final trigger = ref.watch(walletManagementRefreshTrigger);
+  debugPrint('[userGroupsProvider] trigger=$trigger, refetching...');
   // Set up the data change listener
   ref.watch(_dataChangeSetupProvider(walletId));
 
   try {
     final json = await Api.getWalletUserGroups(walletId);
+    debugPrint('[userGroupsProvider] fetched ${json.length} groups');
     return json.cast<Map<String, dynamic>>();
   } catch (e) {
+    debugPrint('[userGroupsProvider] error: $e');
     throw Exception('Failed to load user groups: $e');
   }
 });
