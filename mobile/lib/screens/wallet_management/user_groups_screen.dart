@@ -4,6 +4,7 @@ import '../../api.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
+import '../../widgets/gradient_background.dart';
 
 class UserGroupsScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -131,52 +132,55 @@ class _UserGroupsScreenState extends ConsumerState<UserGroupsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('User Groups'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _createGroup,
-            tooltip: 'Create new group',
-          ),
-        ],
-      ),
-      body: _userGroups.isEmpty
-          ? Center(
-              child: Text(
-                'No user groups yet',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              children: [
-                ..._userGroups.map((g) {
-                  final groupId = g['id'] as String? ?? '';
-                  return GradientCard(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    variationSeed: groupId.hashCode,
-                    child: CustomExpansionTile(
-                      title: Text(_formatGroupName(g['name'] as String? ?? '')),
-                      subtitle: const Text('Static'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _deleteGroup(g),
-                      ),
-                      children: [
-                        _UserGroupMembers(
-                          walletId: widget.walletId,
-                          groupId: g['id'] as String? ?? '',
-                          users: widget.users,
-                          onReload: widget.onReload,
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('User Groups'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: _createGroup,
+              tooltip: 'Create new group',
             ),
+          ],
+        ),
+        body: _userGroups.isEmpty
+            ? Center(
+                child: Text(
+                  'No user groups yet',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                children: [
+                  ..._userGroups.map((g) {
+                    final groupId = g['id'] as String? ?? '';
+                    return GradientCard(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      variationSeed: groupId.hashCode,
+                      child: CustomExpansionTile(
+                        title: Text(_formatGroupName(g['name'] as String? ?? '')),
+                        subtitle: const Text('Static'),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _deleteGroup(g),
+                        ),
+                        children: [
+                          _UserGroupMembers(
+                            walletId: widget.walletId,
+                            groupId: g['id'] as String? ?? '',
+                            users: widget.users,
+                            onReload: widget.onReload,
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+      ),
     );
   }
 

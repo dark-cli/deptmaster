@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
 import '../../utils/toast_service.dart';
+import '../../widgets/gradient_background.dart';
 
 class WalletPermissionsScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -77,39 +78,45 @@ class _WalletPermissionsScreenState extends ConsumerState<WalletPermissionsScree
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Wallet Permissions')),
-        body: const Center(child: CircularProgressIndicator()),
+      return GradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('Wallet Permissions')),
+          body: const Center(child: CircularProgressIndicator()),
+        ),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Wallet Permissions')),
-      body: _permissions.isEmpty
-          ? Center(
-              child: Text(
-                'No wallet permissions configured',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              children: _permissions.map((perm) {
-                final sourceGroupId = perm['source_group_id'] as String? ?? '';
-                final action = perm['action'] as String? ?? '';
-                final isDeny = perm['is_deny'] as bool? ?? false;
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(title: const Text('Wallet Permissions')),
+        body: _permissions.isEmpty
+            ? Center(
+                child: Text(
+                  'No wallet permissions configured',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                children: _permissions.map((perm) {
+                  final sourceGroupId = perm['source_group_id'] as String? ?? '';
+                  final action = perm['action'] as String? ?? '';
+                  final isDeny = perm['is_deny'] as bool? ?? false;
 
-                return ListTile(
-                  title: Text(action),
-                  subtitle: Text(sourceGroupId, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  trailing: Chip(
-                    label: Text(isDeny ? 'Deny' : 'Allow'),
-                    backgroundColor: isDeny ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.primary,
-                  ),
-                  onTap: () => _togglePermission(perm, action),
-                );
-              }).toList(),
-            ),
+                  return ListTile(
+                    title: Text(action),
+                    subtitle: Text(sourceGroupId, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    trailing: Chip(
+                      label: Text(isDeny ? 'Deny' : 'Allow'),
+                      backgroundColor: isDeny ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.primary,
+                    ),
+                    onTap: () => _togglePermission(perm, action),
+                  );
+                }).toList(),
+              ),
+      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import '../../api.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
+import '../../widgets/gradient_background.dart';
 
 class ContactGroupsScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -131,51 +132,54 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
   @override
   Widget build(BuildContext context) {
     final groups = _contactGroups.where((g) => g['name'] != 'all_contacts').toList();
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Contact Groups'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _createGroup,
-            tooltip: 'Create new group',
-          ),
-        ],
-      ),
-      body: groups.isEmpty
-          ? Center(
-              child: Text(
-                'No contact groups yet',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              children: [
-                ...groups.map((g) {
-                  final groupId = g['id'] as String? ?? '';
-                  return GradientCard(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    variationSeed: groupId.hashCode,
-                    child: CustomExpansionTile(
-                      title: Text(g['name'] as String? ?? ''),
-                      subtitle: const Text('Static'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _deleteGroup(g),
-                      ),
-                      children: [
-                        _ContactGroupMembers(
-                          walletId: widget.walletId,
-                          groupId: groupId,
-                          onReload: widget.onReload,
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Contact Groups'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: _createGroup,
+              tooltip: 'Create new group',
             ),
+          ],
+        ),
+        body: groups.isEmpty
+            ? Center(
+                child: Text(
+                  'No contact groups yet',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                children: [
+                  ...groups.map((g) {
+                    final groupId = g['id'] as String? ?? '';
+                    return GradientCard(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      variationSeed: groupId.hashCode,
+                      child: CustomExpansionTile(
+                        title: Text(g['name'] as String? ?? ''),
+                        subtitle: const Text('Static'),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _deleteGroup(g),
+                        ),
+                        children: [
+                          _ContactGroupMembers(
+                            walletId: widget.walletId,
+                            groupId: groupId,
+                            onReload: widget.onReload,
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+      ),
     );
   }
 }

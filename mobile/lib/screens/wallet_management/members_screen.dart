@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
+import '../../widgets/gradient_background.dart';
 
 class MembersScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -136,46 +137,49 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Members'),
-        elevation: 0,
-      ),
-      body: _users.isEmpty
-          ? Center(
-              child: Text(
-                'No members yet',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              children: [
-                ..._users.map((u) {
-                  final role = u['role'] as String? ?? '';
-                  final userId = u['user_id'] as String? ?? '';
-                  final displayName = u['username'] as String? ?? userId;
-                  return GradientCard(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    variationSeed: userId.hashCode,
-                    child: ListTile(
-                      title: Text(displayName),
-                      subtitle: Text('Role: $role'),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (v) {
-                          if (v == 'change_role') _updateRole(u);
-                          if (v == 'remove') _removeUser(u);
-                        },
-                        itemBuilder: (_) => [
-                          const PopupMenuItem(value: 'change_role', child: Text('Change role')),
-                          const PopupMenuItem(value: 'remove', child: Text('Remove')),
-                        ],
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text('Members'),
+          elevation: 0,
+        ),
+        body: _users.isEmpty
+            ? Center(
+                child: Text(
+                  'No members yet',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                children: [
+                  ..._users.map((u) {
+                    final role = u['role'] as String? ?? '';
+                    final userId = u['user_id'] as String? ?? '';
+                    final displayName = u['username'] as String? ?? userId;
+                    return GradientCard(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      variationSeed: userId.hashCode,
+                      child: ListTile(
+                        title: Text(displayName),
+                        subtitle: Text('Role: $role'),
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (v) {
+                            if (v == 'change_role') _updateRole(u);
+                            if (v == 'remove') _removeUser(u);
+                          },
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(value: 'change_role', child: Text('Change role')),
+                            const PopupMenuItem(value: 'remove', child: Text('Remove')),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                }),
-              ],
-            ),
+                    );
+                  }),
+                ],
+              ),
+      ),
     );
   }
 }

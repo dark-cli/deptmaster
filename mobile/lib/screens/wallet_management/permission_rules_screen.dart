@@ -5,6 +5,7 @@ import '../../api.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
+import '../../widgets/gradient_background.dart';
 
 class PermissionRulesScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -141,30 +142,38 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Permission Rules')),
-        body: const Center(child: CircularProgressIndicator()),
+      return GradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('Permission Rules')),
+          body: const Center(child: CircularProgressIndicator()),
+        ),
       );
     }
 
     if (_userGroups.isEmpty || _contactGroups.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Permission Rules')),
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Create at least one user group and one contact group to set rules.',
-              textAlign: TextAlign.center,
+      return GradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('Permission Rules')),
+          body: const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Create at least one user group and one contact group to set rules.',
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
         ),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Permission Rules')),
-      body: ListView(
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(title: const Text('Permission Rules')),
+        body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
         children: [
           ...List.generate(_userGroups.length, (index) {
@@ -205,6 +214,7 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
             );
           }),
         ],
+      ),
       ),
     );
   }

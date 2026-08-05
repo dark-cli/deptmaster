@@ -4,6 +4,7 @@ import '../../api.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
+import '../../widgets/gradient_background.dart';
 
 class ContactPermissionsScreen extends ConsumerStatefulWidget {
   final String walletId;
@@ -51,29 +52,37 @@ class _ContactPermissionsScreenState extends ConsumerState<ContactPermissionsScr
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Contact Permissions')),
-        body: const Center(child: CircularProgressIndicator()),
+      return GradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('Contact Permissions')),
+          body: const Center(child: CircularProgressIndicator()),
+        ),
       );
     }
 
     if (_contactGroups.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Contact Permissions')),
-        body: Center(
-          child: Text(
-            'No contact groups available',
-            style: Theme.of(context).textTheme.bodyLarge,
+      return GradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('Contact Permissions')),
+          body: Center(
+            child: Text(
+              'No contact groups available',
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
           ),
         ),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Contact Permissions')),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        children: _contactGroups.map((group) {
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(title: const Text('Contact Permissions')),
+        body: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          children: _contactGroups.map((group) {
           final groupId = group['id'] as String? ?? '';
           final groupName = group['name'] as String? ?? '';
 
@@ -93,6 +102,7 @@ class _ContactPermissionsScreenState extends ConsumerState<ContactPermissionsScr
             ),
           );
         }).toList(),
+      ),
       ),
     );
   }
