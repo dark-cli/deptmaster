@@ -509,40 +509,37 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
                       ),
                       ...actions.map((action) {
                         final name = action['name'] as String? ?? '';
-                        final isActive = _isActive(name);
                         final state = _getAllowDeny(name);
+                        final isActive = _isActive(name);
 
                         return ListTile(
                           dense: true,
                           title: Text(name.split(':').last),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: Icon(
-                                  Icons.check_circle,
-                                  color: state == _PermissionState.allow ? const Color(0xFF2E7D32) : Colors.grey,
-                                  size: 24,
+                          trailing: SizedBox(
+                            width: 140,
+                            child: SegmentedButton<_PermissionState>(
+                              onSelectionChanged: (Set<_PermissionState> newSelection) {
+                                _setState(name, newSelection.first);
+                              },
+                              selected: <_PermissionState>{isActive ? state : _PermissionState.unset},
+                              segments: [
+                                ButtonSegment<_PermissionState>(
+                                  value: _PermissionState.allow,
+                                  label: const Text('Allow'),
+                                  icon: const Icon(Icons.check),
                                 ),
-                                onPressed: () => _setState(name, _PermissionState.allow),
-                              ),
-                              IconButton(
-                                icon: Icon(
-                                  Icons.cancel,
-                                  color: state == _PermissionState.deny ? Theme.of(context).colorScheme.error : Colors.grey,
-                                  size: 24,
+                                ButtonSegment<_PermissionState>(
+                                  value: _PermissionState.unset,
+                                  label: const Text('Unset'),
+                                  icon: const Icon(Icons.remove),
                                 ),
-                                onPressed: () => _setState(name, _PermissionState.deny),
-                              ),
-                              IconButton(
-                                icon: Icon(
-                                  Icons.remove_circle_outline,
-                                  color: !isActive ? Colors.grey : Colors.grey,
-                                  size: 24,
+                                ButtonSegment<_PermissionState>(
+                                  value: _PermissionState.deny,
+                                  label: const Text('Deny'),
+                                  icon: const Icon(Icons.close),
                                 ),
-                                onPressed: () => _setState(name, _PermissionState.unset),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         );
                       }).toList(),
