@@ -137,13 +137,11 @@ class _UserGroupsScreenState extends ConsumerState<UserGroupsScreen> {
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: const Text('User Groups'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: _createGroup,
-              tooltip: 'Create new group',
-            ),
-          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _createGroup,
+          tooltip: 'Create new group',
+          child: const Icon(Icons.add),
         ),
         body: _userGroups.isEmpty
             ? Center(
