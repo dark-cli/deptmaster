@@ -124,21 +124,39 @@ async fn ws_loop(token: String, wallet_id: String, ws_url: String, cancel: Arc<N
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                             let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                            if kind == "events_synced" {
-                                rust_log!("[debitum_rs] ws got events_synced, syncing");
-                                // manual_sync calls the api.rs static
-                                // multi-thread RUNTIME.block_on, which
-                                // panics if invoked from inside another
-                                // runtime (this WS loop runs in one).
-                                // Detach to a fresh OS thread that has no
-                                // tokio context.
-                                std::thread::spawn(|| {
-                                    if let Err(e) = crate::manual_sync() {
-                                        rust_log!("[debitum_rs] ws-triggered sync failed: {}", e);
+                            match kind {
+                                "events_synced" => {
+                                    rust_log!("[debitum_rs] ws got events_synced, syncing");
+                                    // manual_sync calls the api.rs static
+                                    // multi-thread RUNTIME.block_on, which
+                                    // panics if invoked from inside another
+                                    // runtime (this WS loop runs in one).
+                                    // Detach to a fresh OS thread that has no
+                                    // tokio context.
+                                    std::thread::spawn(|| {
+                                        if let Err(e) = crate::manual_sync() {
+                                            rust_log!("[debitum_rs] ws-triggered sync failed: {}", e);
+                                        }
+                                    });
+                                }
+                                "wallet_ui_update" => {
+                                    if let Some(data) = v.get("data") {
+                                        let update_type = data.get("type")
+                                            .and_then(|t| t.as_str())
+                                            .unwrap_or("unknown");
+                                        rust_log!("[debitum_rs] ws got wallet_ui_update: {}", update_type);
+                                        // Trigger sync to refresh wallet data and notify UI
+                                        std::thread::spawn(|| {
+                                            if let Err(e) = crate::manual_sync() {
+                                                rust_log!("[debitum_rs] ws wallet_ui_update sync failed: {}", e);
+                                            }
+                                        });
                                     }
-                                });
+                                }
+                                _ => {
+                                    // Other broadcast types (heartbeats etc) are ignored.
+                                }
                             }
-                            // Other broadcast types (heartbeats etc) are ignored.
                         }
                     }
                     Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_) | Message::Frame(_))) => {
