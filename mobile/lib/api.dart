@@ -773,6 +773,35 @@ class Api {
     }
   }
 
+  /// Get contact-group-level permissions: (source_group, contact_group, action, is_deny) matrix
+  /// Returns empty list if endpoint not available (graceful degradation for older backends)
+  static Future<List<Map<String, dynamic>>> getContactGroupPermissions(String walletId) async {
+    if (kIsWeb) return [];
+    try {
+      await _ensureRustReady();
+      final json = await rust.getContactGroupPermissions(walletId: walletId);
+      final list = jsonDecode(json) as List<dynamic>?;
+      return list?.map((e) => e as Map<String, dynamic>).toList() ?? [];
+    } catch (e) {
+      // Graceful degradation: if endpoint doesn't exist, just return empty list
+      debugPrint('[contact-group-permissions] getContactGroupPermissions failed: $e');
+      return [];
+    }
+  }
+
+  /// Set contact-group-level permissions: grant/revoke actions for source→contact group pairs
+  static Future<void> setContactGroupPermissions(String walletId, List<Map<String, dynamic>> entries) async {
+    if (kIsWeb) return;
+    try {
+      await _ensureRustReady();
+      final entriesJson = jsonEncode(entries);
+      await rust.setContactGroupPermissions(walletId: walletId, entriesJson: entriesJson);
+    } catch (e) {
+      debugPrint('[contact-group-permissions] setContactGroupPermissions failed: $e');
+      throw Exception('Failed to set contact group permissions. Ensure backend supports contact-group-level permissions.');
+    }
+  }
+
   static bool isPermissionDeniedError(dynamic e) {
     final s = e.toString().toLowerCase();
     return s.contains(_permissionDeniedCode);

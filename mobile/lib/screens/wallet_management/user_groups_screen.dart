@@ -246,6 +246,77 @@ class _UserGroupMembersState extends State<_UserGroupMembers> {
     }
   }
 
+  Future<void> _showAddMemberDialog() async {
+    final memberIds = _members.map((m) => m['user_id'] as String).toSet();
+    final availableUsers = widget.users
+        .where((u) => !memberIds.contains(u['id']))
+        .toList();
+
+    if (availableUsers.isEmpty) {
+      if (mounted) {
+        ToastService.showInfoFromContext(context, 'All users are already in this group.');
+      }
+      return;
+    }
+
+    String? selectedUserId;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add member'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: availableUsers.length,
+            itemBuilder: (context, index) {
+              final user = availableUsers[index];
+              final userId = user['id'] as String? ?? '';
+              final username = user['username'] as String? ?? 'Unknown';
+              final email = user['email'] as String?;
+
+              return RadioListTile<String>(
+                value: userId,
+                groupValue: selectedUserId,
+                onChanged: (value) {
+                  selectedUserId = value;
+                  Navigator.pop(ctx, true);
+                },
+                title: Text(username),
+                subtitle: email != null ? Text(email) : null,
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true && selectedUserId != null && mounted) {
+      try {
+        await Api.addWalletUserGroupMember(widget.walletId, widget.groupId, selectedUserId!);
+        await _load();
+        widget.onReload();
+      } catch (e) {
+        if (Api.isPermissionDeniedError(e)) {
+          if (mounted) {
+            ToastService.showErrorFromContext(context, 'You don\'t have permission.');
+          }
+        } else if (mounted) {
+          ToastService.showErrorFromContext(
+            context,
+            e.toString().replaceFirst('Exception: ', ''),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -267,9 +338,7 @@ class _UserGroupMembersState extends State<_UserGroupMembers> {
             dense: true,
             leading: const Icon(Icons.add, size: 20),
             title: const Text('Add member'),
-            onTap: () {
-              ToastService.showInfoFromContext(context, 'Add member dialog (coming soon)');
-            },
+            onTap: _showAddMemberDialog,
           ),
           ..._members.map((m) {
             final userId = m['user_id'] as String? ?? '';
