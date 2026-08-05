@@ -27,6 +27,7 @@ use tokio::sync::Notify;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::rust_log;
+use crate::integration::data_bus;
 
 /// `Some(Notify)` while a worker is running. `disconnect_realtime`
 /// takes() and signals; the worker observes the notify and exits.
@@ -136,6 +137,9 @@ pub fn refresh_wallet_ui_state() -> Result<(), String> {
         }
 
         rust_log!("[debitum_rs] wallet UI state refresh complete");
+
+        // Emit data change event to notify Dart providers to refetch
+        data_bus::emit(data_bus::DataChangeKind::Permissions, Some(wallet_id.clone()));
     });
     Ok(())
 }
