@@ -208,63 +208,28 @@ pub async fn create_my_wallet(
 
 /// Helper to initialize default permissions for a new wallet
 /// - Creates all_users group for members (default: contact:read, transaction:read)
-/// - Creates __owners__ system group for owners (all permissions)
-/// - Adds creator as owner to both wallet_owners table and __owners__ group
+/// - Owners bypass all permission checks via hardcoded is_wallet_owner() check
 async fn initialize_wallet_permissions(
     db: &Database,
     wallet_id: Uuid,
-    owner_user_id: Uuid,
+    _owner_user_id: Uuid,
 ) -> Result<(), DbError> {
     use crate::database::repository::DatabaseRepository;
 
     // 1. Create all_users system user group (for members)
     let all_users_group = db.create_user_group(wallet_id, "all_users", true).await?;
 
-    // 2. Create __owners__ system user group (cannot be modified by admins)
-    let owners_group = db.create_user_group(wallet_id, "__owners__", true).await?;
-
-    // 3. Add owner to owners group
-    db.add_user_group_member(owners_group, owner_user_id)
-        .await?;
-
-    // 4. Create all_contacts system contact group
+    // 2. Create all_contacts system contact group
     let all_contacts = db
         .create_contact_group(wallet_id, "all_contacts", "static", true)
         .await?;
 
-    // 5. Grant default permissions: all_users (members) get READ only
+    // 3. Grant default permissions: all_users (members) get READ only
     let member_actions = ["contact:read", "transaction:read"];
     for action in member_actions {
         if let Some(aid) = db.get_permission_action_id(action).await? {
             db.grant_permission(all_users_group, all_contacts, aid)
                 .await?;
-        }
-    }
-
-    // 6. Grant full permissions to owners group (all actions on all_contacts)
-    let owner_actions = [
-        "contact:create",
-        "contact:read",
-        "contact:update",
-        "contact:delete",
-        "contact:edit",
-        "transaction:create",
-        "transaction:read",
-        "transaction:update",
-        "transaction:delete",
-        "user_group:create",
-        "user_group:read",
-        "user_group:update",
-        "user_group:delete",
-        "contact_group:create",
-        "contact_group:read",
-        "contact_group:update",
-        "contact_group:delete",
-    ];
-
-    for action in owner_actions {
-        if let Some(aid) = db.get_permission_action_id(action).await? {
-            db.grant_permission(owners_group, all_contacts, aid).await?;
         }
     }
 
