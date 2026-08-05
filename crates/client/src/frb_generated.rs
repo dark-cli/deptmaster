@@ -42,7 +42,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1038626031;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 730181222;
 
 // Section: executor
 
@@ -6803,6 +6803,38 @@ fn wire__crate__put_wallet_permission_matrix_impl(
         },
     )
 }
+fn wire__crate__integration__ws__refresh_wallet_ui_state_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "refresh_wallet_ui_state",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::integration::ws::refresh_wallet_ui_state()?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__register_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -9829,161 +9861,167 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         191 => wire__crate__put_wallet_permission_matrix_impl(port, ptr, rust_vec_len, data_len),
-        192 => wire__crate__register_impl(port, ptr, rust_vec_len, data_len),
-        193 => wire__crate__api__auth__register_impl(port, ptr, rust_vec_len, data_len),
-        194 => wire__crate__handlers__auth__register_impl(port, ptr, rust_vec_len, data_len),
-        195 => wire__crate__api__wallets__remove_contact_group_member_api_impl(
+        192 => wire__crate__integration__ws__refresh_wallet_ui_state_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        196 => wire__crate__handlers__wallets__remove_contact_group_member_api_impl(
+        193 => wire__crate__register_impl(port, ptr, rust_vec_len, data_len),
+        194 => wire__crate__api__auth__register_impl(port, ptr, rust_vec_len, data_len),
+        195 => wire__crate__handlers__auth__register_impl(port, ptr, rust_vec_len, data_len),
+        196 => wire__crate__api__wallets__remove_contact_group_member_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        197 => wire__crate__api__wallets__remove_user_group_member_api_impl(
+        197 => wire__crate__handlers__wallets__remove_contact_group_member_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        198 => wire__crate__handlers__wallets__remove_user_group_member_api_impl(
+        198 => wire__crate__api__wallets__remove_user_group_member_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        199 => {
+        199 => wire__crate__handlers__wallets__remove_user_group_member_api_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        200 => {
             wire__crate__remove_wallet_contact_group_member_impl(port, ptr, rust_vec_len, data_len)
         }
-        200 => wire__crate__remove_wallet_user_impl(port, ptr, rust_vec_len, data_len),
-        201 => wire__crate__api__wallets__remove_wallet_user_api_impl(
+        201 => wire__crate__remove_wallet_user_impl(port, ptr, rust_vec_len, data_len),
+        202 => wire__crate__api__wallets__remove_wallet_user_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        202 => wire__crate__handlers__wallets__remove_wallet_user_api_impl(
+        203 => wire__crate__handlers__wallets__remove_wallet_user_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        203 => wire__crate__remove_wallet_user_group_member_impl(port, ptr, rust_vec_len, data_len),
-        204 => wire__crate__search_wallet_users_impl(port, ptr, rust_vec_len, data_len),
-        205 => wire__crate__api__wallets__search_wallet_users_api_impl(
+        204 => wire__crate__remove_wallet_user_group_member_impl(port, ptr, rust_vec_len, data_len),
+        205 => wire__crate__search_wallet_users_impl(port, ptr, rust_vec_len, data_len),
+        206 => wire__crate__api__wallets__search_wallet_users_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        206 => wire__crate__handlers__wallets__search_wallet_users_api_impl(
+        207 => wire__crate__handlers__wallets__search_wallet_users_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        207 => wire__crate__api__auth__server_logout_impl(port, ptr, rust_vec_len, data_len),
-        208 => wire__crate__config__set_backend_config_impl(port, ptr, rust_vec_len, data_len),
-        209 => wire__crate__set_contact_group_permissions_impl(port, ptr, rust_vec_len, data_len),
-        210 => wire__crate__api__wallets__set_contact_group_permissions_api_impl(
+        208 => wire__crate__api__auth__server_logout_impl(port, ptr, rust_vec_len, data_len),
+        209 => wire__crate__config__set_backend_config_impl(port, ptr, rust_vec_len, data_len),
+        210 => wire__crate__set_contact_group_permissions_impl(port, ptr, rust_vec_len, data_len),
+        211 => wire__crate__api__wallets__set_contact_group_permissions_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        211 => wire__crate__handlers__wallets__set_contact_group_permissions_api_impl(
+        212 => wire__crate__handlers__wallets__set_contact_group_permissions_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        212 => wire__crate__set_current_wallet_id_impl(port, ptr, rust_vec_len, data_len),
-        213 => wire__crate__config__set_log_context_impl(port, ptr, rust_vec_len, data_len),
-        214 => wire__crate__set_member_permissions_impl(port, ptr, rust_vec_len, data_len),
-        215 => wire__crate__api__wallets__set_member_permissions_api_impl(
+        213 => wire__crate__set_current_wallet_id_impl(port, ptr, rust_vec_len, data_len),
+        214 => wire__crate__config__set_log_context_impl(port, ptr, rust_vec_len, data_len),
+        215 => wire__crate__set_member_permissions_impl(port, ptr, rust_vec_len, data_len),
+        216 => wire__crate__api__wallets__set_member_permissions_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        216 => wire__crate__config__set_network_offline_impl(port, ptr, rust_vec_len, data_len),
-        217 => wire__crate__set_preference_impl(port, ptr, rust_vec_len, data_len),
-        218 => wire__crate__set_wallet_permissions_impl(port, ptr, rust_vec_len, data_len),
-        219 => wire__crate__api__wallets__set_wallet_permissions_api_impl(
+        217 => wire__crate__config__set_network_offline_impl(port, ptr, rust_vec_len, data_len),
+        218 => wire__crate__set_preference_impl(port, ptr, rust_vec_len, data_len),
+        219 => wire__crate__set_wallet_permissions_impl(port, ptr, rust_vec_len, data_len),
+        220 => wire__crate__api__wallets__set_wallet_permissions_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        220 => wire__crate__handlers__wallets__set_wallet_permissions_api_impl(
+        221 => wire__crate__handlers__wallets__set_wallet_permissions_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        221 => {
+        222 => {
             wire__crate__util__ids__transaction_id_as_str_impl(port, ptr, rust_vec_len, data_len)
         }
-        222 => wire__crate__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),
-        223 => {
+        223 => wire__crate__undo_contact_action_impl(port, ptr, rust_vec_len, data_len),
+        224 => {
             wire__crate__services__crud__undo_contact_action_impl(port, ptr, rust_vec_len, data_len)
         }
-        224 => wire__crate__undo_transaction_action_impl(port, ptr, rust_vec_len, data_len),
-        225 => wire__crate__services__crud__undo_transaction_action_impl(
+        225 => wire__crate__undo_transaction_action_impl(port, ptr, rust_vec_len, data_len),
+        226 => wire__crate__services__crud__undo_transaction_action_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        226 => wire__crate__update_contact_impl(port, ptr, rust_vec_len, data_len),
-        227 => wire__crate__services__crud__update_contact_impl(port, ptr, rust_vec_len, data_len),
-        228 => wire__crate__api__wallets__update_contact_group_api_impl(
+        227 => wire__crate__update_contact_impl(port, ptr, rust_vec_len, data_len),
+        228 => wire__crate__services__crud__update_contact_impl(port, ptr, rust_vec_len, data_len),
+        229 => wire__crate__api__wallets__update_contact_group_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        229 => wire__crate__handlers__wallets__update_contact_group_api_impl(
+        230 => wire__crate__handlers__wallets__update_contact_group_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        230 => wire__crate__update_transaction_impl(port, ptr, rust_vec_len, data_len),
-        231 => {
+        231 => wire__crate__update_transaction_impl(port, ptr, rust_vec_len, data_len),
+        232 => {
             wire__crate__services__crud__update_transaction_impl(port, ptr, rust_vec_len, data_len)
         }
-        232 => {
+        233 => {
             wire__crate__api__wallets__update_user_group_api_impl(port, ptr, rust_vec_len, data_len)
         }
-        233 => wire__crate__handlers__wallets__update_user_group_api_impl(
+        234 => wire__crate__handlers__wallets__update_user_group_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        234 => wire__crate__update_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
-        235 => wire__crate__api__wallets__update_wallet_user_api_impl(
+        235 => wire__crate__update_wallet_contact_group_impl(port, ptr, rust_vec_len, data_len),
+        236 => wire__crate__api__wallets__update_wallet_user_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        236 => wire__crate__handlers__wallets__update_wallet_user_api_impl(
+        237 => wire__crate__handlers__wallets__update_wallet_user_api_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        237 => wire__crate__update_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
-        238 => wire__crate__update_wallet_user_role_impl(port, ptr, rust_vec_len, data_len),
-        239 => wire__crate__util__ids__user_id_as_str_impl(port, ptr, rust_vec_len, data_len),
-        240 => wire__crate__util__ids__wallet_id_as_str_impl(port, ptr, rust_vec_len, data_len),
-        241 => {
+        238 => wire__crate__update_wallet_user_group_impl(port, ptr, rust_vec_len, data_len),
+        239 => wire__crate__update_wallet_user_role_impl(port, ptr, rust_vec_len, data_len),
+        240 => wire__crate__util__ids__user_id_as_str_impl(port, ptr, rust_vec_len, data_len),
+        241 => wire__crate__util__ids__wallet_id_as_str_impl(port, ptr, rust_vec_len, data_len),
+        242 => {
             wire__crate__services__crud__wallet_total_debt_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),

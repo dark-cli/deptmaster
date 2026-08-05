@@ -17,3 +17,9 @@ Future<void> connectRealtime() =>
 /// Stop the realtime WS worker. Idempotent.
 Future<void> disconnectRealtime() =>
     RustLib.instance.api.crateIntegrationWsDisconnectRealtime();
+
+/// Refresh wallet UI state: fetch user groups, contact groups, and permissions.
+/// Called when wallet_ui_update WebSocket message is received.
+/// Spawns in a separate thread to avoid blocking the WS event loop.
+Future<void> refreshWalletUiState() =>
+    RustLib.instance.api.crateIntegrationWsRefreshWalletUiState();
