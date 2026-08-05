@@ -323,13 +323,143 @@ class _PermissionGridDisplay extends StatelessWidget {
 
 enum _PermissionState { allow, deny, unset }
 
+/// Display permissions as colored letters using rwx-inspired format
+/// C: r:a c:- w:a d:-, T: r:a c:- w:- d:- x:-
+/// Green=allow, Red=deny, Gray=unset
+class _PermissionGridDisplay extends StatelessWidget {
+  final Set<String> allowed;
+  final Set<String> denied;
+
+  const _PermissionGridDisplay({
+    required this.allowed,
+    required this.denied,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const greenColor = Color(0xFF2E7D32);
+    final redColor = Theme.of(context).colorScheme.error;
+    final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Contact row
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildGridCell(context, 'C', '', '', greenColor, redColor, grayColor, true),
+              _buildGridCell(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor, false),
+              SizedBox(
+                width: 35,
+                height: 35,
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant, width: 1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // Transaction row
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildGridCell(context, 'T', '', '', greenColor, redColor, grayColor, true),
+              _buildGridCell(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor, false),
+              _buildGridCell(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor, false),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGridCell(
+    BuildContext context,
+    String letter,
+    String permission,
+    String label,
+    Color allowColor,
+    Color denyColor,
+    Color unsetColor,
+    bool isFirstColumn,
+  ) {
+    late final String displayLetter;
+    late final Color textColor;
+    late final String state;
+
+    // For C and T labels (permission is empty)
+    if (permission.isEmpty) {
+      displayLetter = letter;
+      textColor = Theme.of(context).colorScheme.onSurface;
+      state = '';
+    } else if (denied.contains(permission)) {
+      displayLetter = letter;
+      textColor = denyColor;
+      state = 'denied';
+    } else if (allowed.contains(permission)) {
+      displayLetter = letter;
+      textColor = allowColor;
+      state = 'allowed';
+    } else {
+      displayLetter = '-';
+      textColor = unsetColor;
+      state = 'unset';
+    }
+
+    final cell = SizedBox(
+      width: 35,
+      height: 35,
+      child: Center(
+        child: Text(
+          displayLetter,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: textColor,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.3,
+          ),
+        ),
+      ),
+    );
+
+    // Add border and optional tooltip
+    return Container(
+      width: 35,
+      height: 35,
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant,
+          width: 1,
+        ),
+      ),
+      child: permission.isEmpty
+          ? cell
+          : Tooltip(
+              message: '$label: $state',
+              child: cell,
+            ),
+    );
+  }
+}
+
 class _PermissionsDialog extends StatefulWidget {
   final String userGroupName;
   final String contactGroupName;
   final List<Map<String, dynamic>> availableActions;
   final List<String> initialAllowed;
   final List<String> initialDenied;
-  final Function(List<String>, List<String>) onSave;
+  final void Function(List<String> allowed, List<String> denied) onSave;
 
   const _PermissionsDialog({
     required this.userGroupName,
@@ -348,7 +478,6 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
   late Set<String> _allowed;
   late Set<String> _denied;
   late Map<String, List<Map<String, dynamic>>> _groupedActions;
-  bool _saving = false;
 
   @override
   void initState() {
@@ -356,6 +485,27 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
     _allowed = Set.from(widget.initialAllowed);
     _denied = Set.from(widget.initialDenied);
     _groupActions();
+  }
+
+  bool _isActive(String name) {
+    return _allowed.contains(name) || _denied.contains(name);
+  }
+
+  _PermissionState _getAllowDeny(String name) {
+    if (_denied.contains(name)) return _PermissionState.deny;
+    return _PermissionState.allow;
+  }
+
+  void _setState(String name, _PermissionState state) {
+    setState(() {
+      _allowed.remove(name);
+      _denied.remove(name);
+      if (state == _PermissionState.allow) {
+        _allowed.add(name);
+      } else if (state == _PermissionState.deny) {
+        _denied.add(name);
+      }
+    });
   }
 
   void _groupActions() {
@@ -394,47 +544,20 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
     return 99;
   }
 
-  String _formatActionName(String name) {
-    const manualNames = {
-      'contact:create': 'Create (c)',
-      'contact:read': 'Read (r)',
-      'contact:update': 'Write (w)',
-      'contact:delete': 'Delete (d)',
-      'transaction:create': 'Create (c)',
-      'transaction:read': 'Read (r)',
-      'transaction:update': 'Write (w)',
-      'transaction:delete': 'Delete (d)',
-      'transaction:close': 'Close (x)',
-    };
-    return manualNames[name] ?? name;
-  }
-
-  String _getCategoryLabel(String category) {
-    if (category == 'contact') return 'Contacts';
-    if (category == 'transaction') return 'Transactions';
-    return category;
-  }
-
-  void _setState(String name, _PermissionState state) {
-    setState(() {
-      _allowed.remove(name);
-      _denied.remove(name);
-      if (state == _PermissionState.allow) {
-        _allowed.add(name);
-      } else if (state == _PermissionState.deny) {
-        _denied.add(name);
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     if (widget.availableActions.isEmpty) {
       return AlertDialog(
         title: const Text('Edit Permissions'),
-        content: const Text('No permission actions loaded. Pull down to refresh.', textAlign: TextAlign.center),
+        content: const Text(
+          'No permission actions loaded. Pull down to refresh the page.',
+          textAlign: TextAlign.center,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
         ],
       );
     }
@@ -443,7 +566,10 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
     final screenWidth = MediaQuery.sizeOf(context).width;
 
     return AlertDialog(
-      insetPadding: EdgeInsets.symmetric(horizontal: (screenWidth < 400) ? 8.0 : 40.0, vertical: 24),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: (screenWidth < 400) ? 8.0 : 40.0,
+        vertical: 24,
+      ),
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -468,7 +594,7 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
-                  'rwx format: r=read, c=create, w=write, d=delete, x=close • ✓=Allow, ✗=Deny, unchecked=Unset',
+                  'rwx format: r=read, c=create, w=write, d=delete, x=close',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontStyle: FontStyle.italic,
@@ -490,29 +616,47 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Text(
-                          _getCategoryLabel(category),
+                          category == 'contact' ? 'Contacts' : 'Transactions',
                           style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       ...actions.map((action) {
                         final name = action['name'] as String? ?? '';
-                        final isAllowed = _allowed.contains(name);
-                        final isDenied = _denied.contains(name);
+                        final isActive = _isActive(name);
+                        final state = _getAllowDeny(name);
 
-                        return CheckboxListTile(
+                        return ListTile(
                           dense: true,
-                          title: Text(_formatActionName(name)),
-                          tristate: true,
-                          value: isDenied ? false : (isAllowed ? true : null),
-                          onChanged: (value) {
-                            if (value == null) {
-                              _setState(name, _PermissionState.unset);
-                            } else if (value == true) {
-                              _setState(name, _PermissionState.allow);
-                            } else {
-                              _setState(name, _PermissionState.deny);
-                            }
-                          },
+                          title: Text(name.split(':').last),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(
+                                  Icons.check_circle,
+                                  color: state == _PermissionState.allow ? const Color(0xFF2E7D32) : Colors.grey,
+                                  size: 24,
+                                ),
+                                onPressed: () => _setState(name, _PermissionState.allow),
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.cancel,
+                                  color: state == _PermissionState.deny ? Theme.of(context).colorScheme.error : Colors.grey,
+                                  size: 24,
+                                ),
+                                onPressed: () => _setState(name, _PermissionState.deny),
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.remove_circle_outline,
+                                  color: !isActive ? Colors.grey : Colors.grey,
+                                  size: 24,
+                                ),
+                                onPressed: () => _setState(name, _PermissionState.unset),
+                              ),
+                            ],
+                          ),
                         );
                       }).toList(),
                     ],
@@ -529,14 +673,11 @@ class _PermissionsDialogState extends State<_PermissionsDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _saving ? null : () async {
-            setState(() => _saving = true);
+          onPressed: () {
             widget.onSave(_allowed.toList(), _denied.toList());
-            if (mounted) Navigator.pop(context);
+            Navigator.pop(context);
           },
-          child: _saving
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Save'),
+          child: const Text('Save'),
         ),
       ],
     );
