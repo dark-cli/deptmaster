@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 
@@ -9,8 +10,12 @@ final walletManagementRefreshTrigger = StateProvider<int>((ref) => 0);
 /// when Permissions events arrive for the current wallet.
 final _dataChangeListener = StreamProvider.family<void, String>((ref, walletId) {
   return Api.dataChangeStream.where((event) {
-    return event.kind == DataChangeKind.permissions &&
+    final matches = event.kind == DataChangeKind.permissions &&
         (event.walletId == null || event.walletId == walletId);
+    if (matches) {
+      debugPrint('[wallet_management] got permissions event for wallet=$walletId, incrementing refresh trigger');
+    }
+    return matches;
   }).map((_) {
     ref.read(walletManagementRefreshTrigger.notifier).state += 1;
   });
