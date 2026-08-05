@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
@@ -6,27 +8,34 @@ import '../api.dart';
 /// Invalidate this provider to force all wallet data to refetch.
 final walletManagementRefreshTrigger = StateProvider<int>((ref) => 0);
 
-/// Watch the data change stream and invalidate wallet management providers
-/// when Permissions events arrive for the current wallet.
-final _dataChangeListener = StreamProvider.family<void, String>((ref, walletId) {
-  return Api.dataChangeStream.where((event) {
-    final matches = event.kind == DataChangeKind.permissions &&
-        (event.walletId == null || event.walletId == walletId);
-    if (matches) {
-      debugPrint('[wallet_management] got permissions event for wallet=$walletId, incrementing refresh trigger');
-    }
-    return matches;
-  }).map((_) {
-    ref.read(walletManagementRefreshTrigger.notifier).state += 1;
-  });
+/// Listen to data change stream and increment refresh trigger when permissions change.
+final _dataChangeSetupProvider = FutureProvider.family<void, String>((ref, walletId) async {
+  // This provider sets up the listener and returns a future that never completes,
+  // ensuring the listener stays active for the lifetime of this provider instance.
+  final completer = Completer<void>();
+
+  final subscription = Api.dataChangeStream
+      .where((event) {
+        return event.kind == DataChangeKind.permissions &&
+            (event.walletId == null || event.walletId == walletId);
+      })
+      .listen((_) {
+        debugPrint('[wallet_management] got permissions event, incrementing trigger for wallet=$walletId');
+        ref.read(walletManagementRefreshTrigger.notifier).state += 1;
+      });
+
+  // Keep the listener alive
+  ref.onDispose(() => subscription.cancel());
+
+  return completer.future;
 });
 
 /// Provides list of user groups for the current wallet.
 final userGroupsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   // Watch the refresh trigger to refetch when invalidated
   ref.watch(walletManagementRefreshTrigger);
-  // Also watch the data change stream to auto-refresh when permissions change
-  ref.watch(_dataChangeListener(walletId));
+  // Set up the data change listener
+  ref.watch(_dataChangeSetupProvider(walletId));
 
   try {
     final json = await Api.getWalletUserGroups(walletId);
@@ -39,7 +48,7 @@ final userGroupsProvider = FutureProvider.family<List<Map<String, dynamic>>, Str
 /// Provides list of contact groups for the current wallet.
 final contactGroupsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   ref.watch(walletManagementRefreshTrigger);
-  ref.watch(_dataChangeListener(walletId));
+  ref.watch(_dataChangeSetupProvider(walletId));
 
   try {
     final json = await Api.getWalletContactGroups(walletId);
@@ -52,7 +61,7 @@ final contactGroupsProvider = FutureProvider.family<List<Map<String, dynamic>>, 
 /// Provides wallet-level permissions.
 final walletPermissionsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   ref.watch(walletManagementRefreshTrigger);
-  ref.watch(_dataChangeListener(walletId));
+  ref.watch(_dataChangeSetupProvider(walletId));
 
   try {
     final json = await Api.getWalletPermissions(walletId);
@@ -65,7 +74,7 @@ final walletPermissionsProvider = FutureProvider.family<List<Map<String, dynamic
 /// Provides member-scoped permissions.
 final memberPermissionsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   ref.watch(walletManagementRefreshTrigger);
-  ref.watch(_dataChangeListener(walletId));
+  ref.watch(_dataChangeSetupProvider(walletId));
 
   try {
     final json = await Api.getMemberPermissions(walletId);
