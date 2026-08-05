@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
+import '../../providers/contacts_provider.dart';
 import '../../providers/wallet_management_provider.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
@@ -10,12 +10,10 @@ import '../../widgets/gradient_background.dart';
 
 class ContactGroupsScreen extends ConsumerStatefulWidget {
   final String walletId;
-  final VoidCallback onReload;
 
   const ContactGroupsScreen({
     super.key,
     required this.walletId,
-    required this.onReload,
   });
 
   @override
@@ -56,7 +54,6 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
     final name = nameController.text.trim();
     try {
       await Api.createWalletContactGroup(widget.walletId, name);
-      widget.onReload();
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
         if (mounted) {
@@ -99,7 +96,6 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
     final groupId = group['id'] as String? ?? '';
     try {
       await Api.deleteWalletContactGroup(widget.walletId, groupId);
-      widget.onReload();
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
         if (mounted) {
@@ -163,7 +159,6 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
                         _ContactGroupMembers(
                           walletId: widget.walletId,
                           groupId: groupId,
-                          onReload: widget.onReload,
                         ),
                       ],
                     ),
@@ -178,65 +173,24 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
   }
 }
 
-class _ContactGroupMembers extends StatefulWidget {
+class _ContactGroupMembers extends ConsumerWidget {
   final String walletId;
   final String groupId;
-  final VoidCallback onReload;
 
   const _ContactGroupMembers({
     required this.walletId,
     required this.groupId,
-    required this.onReload,
   });
 
-  @override
-  State<_ContactGroupMembers> createState() => _ContactGroupMembersState();
-}
-
-class _ContactGroupMembersState extends State<_ContactGroupMembers> {
-  List<Map<String, dynamic>> _members = [];
-  Map<String, Map<String, dynamic>> _contactById = {};
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _removeMember(BuildContext context, String contactId) async {
     try {
-      final list = await Api.getWalletContactGroupMembers(widget.walletId, widget.groupId);
-      final jsonStr = await Api.getContacts();
-      final List<dynamic> contacts = jsonDecode(jsonStr);
-      final Map<String, Map<String, dynamic>> byId = {};
-      for (final c in contacts) {
-        final map = c as Map<String, dynamic>;
-        final id = map['id'] as String?;
-        if (id != null) byId[id] = map;
-      }
-      if (mounted) setState(() {
-        _members = list;
-        _contactById = byId;
-        _loading = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _removeMember(String contactId) async {
-    try {
-      await Api.removeWalletContactGroupMember(widget.walletId, widget.groupId, contactId);
-      await _load();
-      widget.onReload();
+      await Api.removeWalletContactGroupMember(walletId, groupId, contactId);
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
-        if (mounted) {
+        if (context.mounted) {
           ToastService.showErrorFromContext(context, 'You don\'t have permission.');
         }
-      } else if (mounted) {
+      } else if (context.mounted) {
         ToastService.showErrorFromContext(
           context,
           e.toString().replaceFirst('Exception: ', ''),
@@ -245,15 +199,19 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
     }
   }
 
-  Future<void> _showAddMemberDialog() async {
-    final memberIds = _members.map((m) => m['contact_id'] as String).toSet();
-    final availableContacts = _contactById.entries
+  Future<void> _showAddMemberDialog(
+    BuildContext context,
+    List<Map<String, dynamic>> members,
+    Map<String, Map<String, dynamic>> contactById,
+  ) async {
+    final memberIds = members.map((m) => m['contact_id'] as String).toSet();
+    final availableContacts = contactById.entries
         .where((e) => !memberIds.contains(e.key))
         .map((e) => MapEntry(e.key, e.value))
         .toList();
 
     if (availableContacts.isEmpty) {
-      if (mounted) {
+      if (context.mounted) {
         ToastService.showInfoFromContext(context, 'All contacts are already in this group.');
       }
       return;
@@ -298,17 +256,15 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
       ),
     );
 
-    if (ok == true && selectedContactId != null && mounted) {
+    if (ok == true && selectedContactId != null && context.mounted) {
       try {
-        await Api.addWalletContactGroupMember(widget.walletId, widget.groupId, selectedContactId!);
-        await _load();
-        widget.onReload();
+        await Api.addWalletContactGroupMember(walletId, groupId, selectedContactId!);
       } catch (e) {
         if (Api.isPermissionDeniedError(e)) {
-          if (mounted) {
+          if (context.mounted) {
             ToastService.showErrorFromContext(context, 'You don\'t have permission.');
           }
-        } else if (mounted) {
+        } else if (context.mounted) {
           ToastService.showErrorFromContext(
             context,
             e.toString().replaceFirst('Exception: ', ''),
@@ -319,46 +275,64 @@ class _ContactGroupMembersState extends State<_ContactGroupMembers> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const Padding(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final membersAsync = ref.watch(contactGroupMembersProvider(WalletGroupKey(walletId, groupId)));
+    final contactsAsync = ref.watch(contactsProvider);
+    return membersAsync.when(
+      loading: () => const Padding(
         padding: EdgeInsets.all(16),
         child: Center(child: SizedBox(
           width: 24,
           height: 24,
           child: CircularProgressIndicator(strokeWidth: 2),
         )),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.add, size: 20),
-            title: const Text('Add contact'),
-            onTap: _showAddMemberDialog,
-          ),
-          ..._members.map((m) {
-            final contactId = m['contact_id'] as String? ?? '';
-            final contact = _contactById[contactId];
-            final name = contact?['name'] as String? ?? 'Unknown';
-            final username = contact?['username'] as String?;
-            final subtitle = username != null && username.isNotEmpty ? '@$username' : null;
-            return ListTile(
-              dense: true,
-              title: Text(name),
-              subtitle: subtitle != null ? Text(subtitle, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)) : null,
-              trailing: IconButton(
-                icon: const Icon(Icons.remove_circle_outline, size: 20),
-                onPressed: () => _removeMember(contactId),
-              ),
-            );
-          }),
-        ],
       ),
+      error: (err, _) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(err.toString()),
+      ),
+      data: (members) {
+        final contactById = <String, Map<String, dynamic>>{};
+        for (final c in contactsAsync.value ?? const []) {
+          contactById[c.id] = {
+            'id': c.id,
+            'name': c.name,
+            'username': c.username,
+          };
+        }
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.add, size: 20),
+                title: const Text('Add contact'),
+                onTap: () => _showAddMemberDialog(context, members, contactById),
+              ),
+              ...members.map((m) {
+                final contactId = m['contact_id'] as String? ?? '';
+                final contact = contactById[contactId];
+                final name = contact?['name'] as String? ?? 'Unknown';
+                final username = contact?['username'] as String?;
+                final subtitle = username != null && username.isNotEmpty ? '@$username' : null;
+                return ListTile(
+                  dense: true,
+                  title: Text(name),
+                  subtitle: subtitle != null
+                      ? Text(subtitle, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant))
+                      : null,
+                  trailing: IconButton(
+                    icon: const Icon(Icons.remove_circle_outline, size: 20),
+                    onPressed: () => _removeMember(context, contactId),
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
     );
   }
 }

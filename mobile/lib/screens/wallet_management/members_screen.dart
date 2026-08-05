@@ -1,42 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
+import '../../providers/wallet_management_provider.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/gradient_background.dart';
 
-class MembersScreen extends ConsumerStatefulWidget {
+class MembersScreen extends ConsumerWidget {
   final String walletId;
-  final List<Map<String, dynamic>> users;
-  final VoidCallback onReload;
+  final VoidCallback? onReload;
 
   const MembersScreen({
     super.key,
     required this.walletId,
-    required this.users,
-    required this.onReload,
+    this.onReload,
   });
 
-  @override
-  ConsumerState<MembersScreen> createState() => _MembersScreenState();
-}
-
-class _MembersScreenState extends ConsumerState<MembersScreen> {
-  late List<Map<String, dynamic>> _users;
-
-  @override
-  void initState() {
-    super.initState();
-    _users = List.from(widget.users);
-  }
-
-  @override
-  void didUpdateWidget(MembersScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _users = List.from(widget.users);
-  }
-
-  Future<void> _updateRole(Map<String, dynamic> user) async {
+  Future<void> _updateRole(BuildContext context, Map<String, dynamic> user) async {
     final currentRole = user['role'] as String? ?? 'member';
     String newRole = currentRole;
     final ok = await showDialog<bool>(
@@ -69,30 +49,25 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
         ),
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !context.mounted) return;
     final userId = user['user_id'] as String? ?? '';
-    final prev = List<Map<String, dynamic>>.from(_users);
     try {
-      await Api.updateWalletUserRole(widget.walletId, userId, newRole);
-      widget.onReload();
+      await Api.updateWalletUserRole(walletId, userId, newRole);
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
-        if (mounted) {
-          ToastService.showErrorFromContext(context, 'You don\'t have permission. Change was reverted.');
+        if (context.mounted) {
+          ToastService.showErrorFromContext(context, 'You don\'t have permission.');
         }
-        setState(() => _users = prev);
-      } else {
-        if (mounted) {
-          ToastService.showErrorFromContext(
-            context,
-            e.toString().replaceFirst('Exception: ', ''),
-          );
-        }
+      } else if (context.mounted) {
+        ToastService.showErrorFromContext(
+          context,
+          e.toString().replaceFirst('Exception: ', ''),
+        );
       }
     }
   }
 
-  Future<void> _removeUser(Map<String, dynamic> user) async {
+  Future<void> _removeUser(BuildContext context, Map<String, dynamic> user) async {
     final displayName = user['username'] as String? ?? user['user_id'] as String? ?? '';
     final confirm = await showDialog<bool>(
       context: context,
@@ -112,31 +87,27 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
         ],
       ),
     );
-    if (confirm != true || !mounted) return;
+    if (confirm != true || !context.mounted) return;
     final userId = user['user_id'] as String? ?? '';
-    final prev = List<Map<String, dynamic>>.from(_users);
     try {
-      await Api.removeWalletUser(widget.walletId, userId);
-      widget.onReload();
+      await Api.removeWalletUser(walletId, userId);
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
-        if (mounted) {
-          ToastService.showErrorFromContext(context, 'You don\'t have permission. Change was reverted.');
+        if (context.mounted) {
+          ToastService.showErrorFromContext(context, 'You don\'t have permission.');
         }
-        setState(() => _users = prev);
-      } else {
-        if (mounted) {
-          ToastService.showErrorFromContext(
-            context,
-            e.toString().replaceFirst('Exception: ', ''),
-          );
-        }
+      } else if (context.mounted) {
+        ToastService.showErrorFromContext(
+          context,
+          e.toString().replaceFirst('Exception: ', ''),
+        );
       }
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final usersAsync = ref.watch(walletUsersProvider(walletId));
     return GradientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -144,41 +115,48 @@ class _MembersScreenState extends ConsumerState<MembersScreen> {
           title: const Text('Members'),
           elevation: 0,
         ),
-        body: _users.isEmpty
-            ? Center(
+        body: usersAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (err, _) => Center(child: Text(err.toString())),
+          data: (users) {
+            if (users.isEmpty) {
+              return Center(
                 child: Text(
                   'No members yet',
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
-              )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                children: [
-                  ..._users.map((u) {
-                    final role = u['role'] as String? ?? '';
-                    final userId = u['user_id'] as String? ?? '';
-                    final displayName = u['username'] as String? ?? userId;
-                    return GradientCard(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      variationSeed: userId.hashCode,
-                      child: ListTile(
-                        title: Text(displayName),
-                        subtitle: Text('Role: $role'),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (v) {
-                            if (v == 'change_role') _updateRole(u);
-                            if (v == 'remove') _removeUser(u);
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(value: 'change_role', child: Text('Change role')),
-                            const PopupMenuItem(value: 'remove', child: Text('Remove')),
-                          ],
-                        ),
+              );
+            }
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              children: [
+                ...users.map((u) {
+                  final role = u['role'] as String? ?? '';
+                  final userId = u['user_id'] as String? ?? '';
+                  final displayName = u['username'] as String? ?? userId;
+                  return GradientCard(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    variationSeed: userId.hashCode,
+                    child: ListTile(
+                      title: Text(displayName),
+                      subtitle: Text('Role: $role'),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (v) {
+                          if (v == 'change_role') _updateRole(context, u);
+                          if (v == 'remove') _removeUser(context, u);
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(value: 'change_role', child: Text('Change role')),
+                          const PopupMenuItem(value: 'remove', child: Text('Remove')),
+                        ],
                       ),
-                    );
-                  }),
-                ],
-              ),
+                    ),
+                  );
+                }),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

@@ -3,7 +3,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../api.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/management_section_card.dart';
@@ -149,8 +148,6 @@ class ManageWalletScreen extends ConsumerWidget {
                             MaterialPageRoute(
                               builder: (context) => MembersScreen(
                                 walletId: walletId,
-                                users: const [],
-                                onReload: () => refreshWalletManagement(ref, walletId),
                               ),
                             ),
                           );
@@ -184,8 +181,6 @@ class ManageWalletScreen extends ConsumerWidget {
                             MaterialPageRoute(
                               builder: (context) => UserGroupsScreen(
                                 walletId: walletId,
-                                users: const [],
-                                onReload: () => refreshWalletManagement(ref, walletId),
                               ),
                             ),
                           );
@@ -201,7 +196,6 @@ class ManageWalletScreen extends ConsumerWidget {
                             MaterialPageRoute(
                               builder: (context) => ContactGroupsScreen(
                                 walletId: walletId,
-                                onReload: () => refreshWalletManagement(ref, walletId),
                               ),
                             ),
                           );

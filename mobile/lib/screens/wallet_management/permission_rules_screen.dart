@@ -1,13 +1,13 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
+import '../../providers/wallet_management_provider.dart';
 import '../../utils/toast_service.dart';
 import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
 import '../../widgets/gradient_background.dart';
 
-class PermissionRulesScreen extends ConsumerStatefulWidget {
+class PermissionRulesScreen extends ConsumerWidget {
   final String walletId;
 
   const PermissionRulesScreen({
@@ -15,56 +15,8 @@ class PermissionRulesScreen extends ConsumerStatefulWidget {
     required this.walletId,
   });
 
-  @override
-  ConsumerState<PermissionRulesScreen> createState() => _PermissionRulesScreenState();
-}
-
-class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
-  List<Map<String, dynamic>> _userGroups = [];
-  List<Map<String, dynamic>> _contactGroups = [];
-  List<Map<String, dynamic>> _permissionActions = [];
-  List<Map<String, dynamic>> _matrix = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final results = await Future.wait([
-        Api.getWalletUserGroups(widget.walletId),
-        Api.getWalletContactGroups(widget.walletId),
-        Api.getWalletPermissionActions(widget.walletId),
-        Api.getWalletPermissionMatrix(widget.walletId),
-      ]);
-
-      if (mounted) {
-        setState(() {
-          _userGroups = (results[0] as List<Map<String, dynamic>>)
-              .where((g) => g['name'] != '__owners__')
-              .toList();
-          _contactGroups = results[1] as List<Map<String, dynamic>>;
-          _permissionActions = results[2] as List<Map<String, dynamic>>;
-          _matrix = results[3] as List<Map<String, dynamic>>;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-        ToastService.showErrorFromContext(
-          context,
-          e.toString().replaceFirst('Exception: ', ''),
-        );
-      }
-    }
-  }
-
   Future<void> _savePermissions(
+    BuildContext context,
     String userGroupId,
     String contactGroupId,
     List<String> allowedActions,
@@ -79,17 +31,16 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
     };
 
     try {
-      await Api.putWalletPermissionMatrix(widget.walletId, [entry]);
-      await _load();
-      if (mounted) {
+      await Api.putWalletPermissionMatrix(walletId, [entry]);
+      if (context.mounted) {
         ToastService.showSuccessFromContext(context, 'Permissions saved');
       }
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
-        if (mounted) {
+        if (context.mounted) {
           ToastService.showErrorFromContext(context, 'You don\'t have permission.');
         }
-      } else if (mounted) {
+      } else if (context.mounted) {
         ToastService.showErrorFromContext(
           context,
           e.toString().replaceFirst('Exception: ', ''),
@@ -98,8 +49,8 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
     }
   }
 
-  Set<String> _getActions(String userGroupId, String contactGroupId) {
-    for (final e in _matrix) {
+  Set<String> _getActions(List<Map<String, dynamic>> matrix, String userGroupId, String contactGroupId) {
+    for (final e in matrix) {
       if (e['user_group_id'] == userGroupId && e['contact_group_id'] == contactGroupId) {
         final allowed = (e['allowed_actions'] as List<dynamic>?)?.cast<String>() ?? <String>[];
         return Set<String>.from(allowed);
@@ -108,8 +59,8 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
     return {};
   }
 
-  Set<String> _getDenied(String userGroupId, String contactGroupId) {
-    for (final e in _matrix) {
+  Set<String> _getDenied(List<Map<String, dynamic>> matrix, String userGroupId, String contactGroupId) {
+    for (final e in matrix) {
       if (e['user_group_id'] == userGroupId && e['contact_group_id'] == contactGroupId) {
         final denied = (e['denied_actions'] as List<dynamic>?)?.cast<String>() ?? <String>[];
         return Set<String>.from(denied);
@@ -118,16 +69,24 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
     return {};
   }
 
-  void _openEditor(String ugId, String ugName, String cgId, String cgName) {
+  void _openEditor(
+    BuildContext context,
+    List<Map<String, dynamic>> permissionActions,
+    List<Map<String, dynamic>> matrix,
+    String ugId,
+    String ugName,
+    String cgId,
+    String cgName,
+  ) {
     showDialog(
       context: context,
-      builder: (context) => _PermissionsDialog(
+      builder: (dialogContext) => _PermissionsDialog(
         userGroupName: ugName,
         contactGroupName: cgName,
-        availableActions: _permissionActions,
-        initialAllowed: _getActions(ugId, cgId).toList(),
-        initialDenied: _getDenied(ugId, cgId).toList(),
-        onSave: (allowed, denied) => _savePermissions(ugId, cgId, allowed, denied),
+        availableActions: permissionActions,
+        initialAllowed: _getActions(matrix, ugId, cgId).toList(),
+        initialDenied: _getDenied(matrix, ugId, cgId).toList(),
+        onSave: (allowed, denied) => _savePermissions(context, ugId, cgId, allowed, denied),
       ),
     );
   }
@@ -140,8 +99,17 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (_loading) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userGroupsAsync = ref.watch(userGroupsProvider(walletId));
+    final contactGroupsAsync = ref.watch(contactGroupsProvider(walletId));
+    final actionsAsync = ref.watch(walletPermissionActionsProvider(walletId));
+    final matrixAsync = ref.watch(walletPermissionMatrixProvider(walletId));
+
+    final anyLoading = userGroupsAsync.isLoading ||
+        contactGroupsAsync.isLoading ||
+        actionsAsync.isLoading ||
+        matrixAsync.isLoading;
+    if (anyLoading) {
       return GradientBackground(
         child: Scaffold(
           backgroundColor: Colors.transparent,
@@ -151,7 +119,30 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
       );
     }
 
-    if (_userGroups.isEmpty || _contactGroups.isEmpty) {
+    final anyError = userGroupsAsync.hasError ||
+        contactGroupsAsync.hasError ||
+        actionsAsync.hasError ||
+        matrixAsync.hasError;
+    if (anyError) {
+      final err = userGroupsAsync.error ??
+          contactGroupsAsync.error ??
+          actionsAsync.error ??
+          matrixAsync.error;
+      return GradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('Permission Rules')),
+          body: Center(child: Text(err.toString())),
+        ),
+      );
+    }
+
+    final userGroups = userGroupsAsync.value!.where((g) => g['name'] != '__owners__').toList();
+    final contactGroups = contactGroupsAsync.value!;
+    final permissionActions = actionsAsync.value!;
+    final matrix = matrixAsync.value!;
+
+    if (userGroups.isEmpty || contactGroups.isEmpty) {
       return GradientBackground(
         child: Scaffold(
           backgroundColor: Colors.transparent,
@@ -174,47 +165,47 @@ class _PermissionRulesScreenState extends ConsumerState<PermissionRulesScreen> {
         backgroundColor: Colors.transparent,
         appBar: AppBar(title: const Text('Permission Rules')),
         body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-        children: [
-          ...List.generate(_userGroups.length, (index) {
-            final ug = _userGroups[index];
-            final ugId = ug['id'] as String? ?? '';
-            final rawUgName = ug['name'] as String? ?? '';
-            final ugName = _formatGroupName(rawUgName);
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+          children: [
+            ...List.generate(userGroups.length, (index) {
+              final ug = userGroups[index];
+              final ugId = ug['id'] as String? ?? '';
+              final rawUgName = ug['name'] as String? ?? '';
+              final ugName = _formatGroupName(rawUgName);
 
-            return GradientCard(
-              margin: const EdgeInsets.only(bottom: 12),
-              variationSeed: ugId.hashCode,
-              child: CustomExpansionTile(
-                title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('User Group'),
-                initiallyExpanded: index == 0,
-                children: [
-                  const Divider(height: 1),
-                  ..._contactGroups.map((cg) {
-                    final cgId = cg['id'] as String? ?? '';
-                    final rawCgName = cg['name'] as String? ?? '';
-                    final cgName = _formatGroupName(rawCgName);
-                    final activeActions = _getActions(ugId, cgId);
-                    final deniedActions = _getDenied(ugId, cgId);
+              return GradientCard(
+                margin: const EdgeInsets.only(bottom: 12),
+                variationSeed: ugId.hashCode,
+                child: CustomExpansionTile(
+                  title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('User Group'),
+                  initiallyExpanded: index == 0,
+                  children: [
+                    const Divider(height: 1),
+                    ...contactGroups.map((cg) {
+                      final cgId = cg['id'] as String? ?? '';
+                      final rawCgName = cg['name'] as String? ?? '';
+                      final cgName = _formatGroupName(rawCgName);
+                      final activeActions = _getActions(matrix, ugId, cgId);
+                      final deniedActions = _getDenied(matrix, ugId, cgId);
 
-                    return ListTile(
-                      title: Text(cgName),
-                      subtitle: _PermissionGridDisplay(
-                        allowed: activeActions,
-                        denied: deniedActions,
-                      ),
-                      trailing: const Icon(Icons.edit, size: 20),
-                      onTap: () => _openEditor(ugId, ugName, cgId, cgName),
-                    );
-                  }).toList(),
-                  const SizedBox(height: 8),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
+                      return ListTile(
+                        title: Text(cgName),
+                        subtitle: _PermissionGridDisplay(
+                          allowed: activeActions,
+                          denied: deniedActions,
+                        ),
+                        trailing: const Icon(Icons.edit, size: 20),
+                        onTap: () => _openEditor(context, permissionActions, matrix, ugId, ugName, cgId, cgName),
+                      );
+                    }).toList(),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
