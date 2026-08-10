@@ -148,7 +148,12 @@ const List<MatrixRowSpec> memberGroupRows = [
 ];
 
 /// wallet:* actions for the Wallet Permissions screen.
-/// Grouped into five rows so a compact matrix fits on mobile.
+///
+/// Layer 1 permissions are a **single vector per user group** — the rows
+/// here are just visual categories, NOT a target axis. Render with
+/// `useTextRowLabels: true` on [PermissionMatrixGrid] so each row shows its
+/// category name (e.g. 'Wallet', 'Members') instead of a matrix-implying
+/// letter prefix.
 const List<MatrixRowSpec> walletPermissionRows = [
   MatrixRowSpec(
     prefix: 'W',
@@ -182,7 +187,7 @@ const List<MatrixRowSpec> walletPermissionRows = [
   ),
   MatrixRowSpec(
     prefix: 'M',
-    categoryHeader: 'Members (wallet-wide)',
+    categoryHeader: 'Members',
     columns: [
       MatrixColumn(
         letter: 'r',
@@ -206,7 +211,7 @@ const List<MatrixRowSpec> walletPermissionRows = [
   ),
   MatrixRowSpec(
     prefix: 'G',
-    categoryHeader: 'User groups',
+    categoryHeader: 'Member Groups',
     columns: [
       MatrixColumn(
         letter: 'c',
@@ -230,7 +235,7 @@ const List<MatrixRowSpec> walletPermissionRows = [
   ),
   MatrixRowSpec(
     prefix: 'C',
-    categoryHeader: 'Contact groups',
+    categoryHeader: 'Contact Groups',
     columns: [
       MatrixColumn(
         letter: 'c',
@@ -359,17 +364,17 @@ class GroupTypeHeader extends StatelessWidget {
 /// prefix is redundant with surrounding context, e.g. Member Permissions
 /// where every row is 'M:'). Default true to preserve the Rules layout.
 ///
-/// [flattenToVector] — when true, ignore the row layout and render every
-/// column across all rows as a single wrapping strip of letter cells (no
-/// row prefixes, no per-row alignment). Use this for permission sets that
-/// are conceptually a single vector per source (e.g. Layer 1 wallet:*
-/// permissions) rather than a source×target matrix.
+/// [useTextRowLabels] — replace the single-letter prefix cell with the row's
+/// full [MatrixRowSpec.categoryHeader] text (e.g. 'Wallet', 'Members',
+/// 'Groups'). Use for permission sets where the rows are just visual
+/// categories rather than a target dimension — this makes clear the row is
+/// a *label*, not a target-axis entry that would imply a matrix.
 class PermissionMatrixGrid extends StatelessWidget {
   final List<MatrixRowSpec> rows;
   final Set<String> allowed;
   final Set<String> denied;
   final bool showRowPrefix;
-  final bool flattenToVector;
+  final bool useTextRowLabels;
 
   const PermissionMatrixGrid({
     super.key,
@@ -377,7 +382,7 @@ class PermissionMatrixGrid extends StatelessWidget {
     required this.allowed,
     required this.denied,
     this.showRowPrefix = true,
-    this.flattenToVector = false,
+    this.useTextRowLabels = false,
   });
 
   @override
@@ -386,25 +391,46 @@ class PermissionMatrixGrid extends StatelessWidget {
     final redColor = Theme.of(context).colorScheme.error;
     final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
 
-    // Vector mode: flatten every column across all rows into one Wrap of
-    // letter cells. No row prefixes, no source×target implication.
-    if (flattenToVector) {
-      final allColumns = rows.expand((r) => r.columns).toList();
-      return Wrap(
-        spacing: 0,
-        runSpacing: 0,
-        children: allColumns
-            .map((c) => _cell(
-                  context,
-                  c.letter,
-                  c.action,
-                  c.label,
-                  c.description,
-                  greenColor,
-                  redColor,
-                  grayColor,
-                ))
-            .toList(),
+    // Text-label mode: each row starts with a plain-text category label
+    // (e.g. 'Wallet', 'Members') instead of a single-letter prefix cell.
+    // Makes it obvious the row is a label, not a target-axis entry.
+    if (useTextRowLabels) {
+      final labelWidth = _textLabelWidth(context);
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows.map((row) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: labelWidth,
+                  child: Text(
+                    row.categoryHeader ?? row.prefix,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ...row.columns.map((c) => _cell(
+                      context,
+                      c.letter,
+                      c.action,
+                      c.label,
+                      c.description,
+                      greenColor,
+                      redColor,
+                      grayColor,
+                    )),
+              ],
+            ),
+          );
+        }).toList(),
       );
     }
 
@@ -439,6 +465,22 @@ class PermissionMatrixGrid extends StatelessWidget {
         }).toList(),
       ),
     );
+  }
+
+  /// Width for the text label column: pick the widest label with a small pad
+  /// so all rows line up.
+  double _textLabelWidth(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodySmall;
+    double widest = 0;
+    for (final row in rows) {
+      final text = row.categoryHeader ?? row.prefix;
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      if (painter.width > widest) widest = painter.width;
+    }
+    return widest + 4;
   }
 
   Widget _cell(

@@ -208,7 +208,7 @@ class WalletPermissionsScreen extends ConsumerWidget {
                 rows: walletPermissionRows,
                 allowed: allowed,
                 denied: denied,
-                flattenToVector: true,
+                useTextRowLabels: true,
               ),
             ),
             trailing: const Icon(Icons.edit, size: 20),
