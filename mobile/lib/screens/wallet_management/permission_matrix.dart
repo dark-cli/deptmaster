@@ -551,6 +551,17 @@ class _PermissionActionsDialogState extends State<PermissionActionsDialog> {
         ),
       ),
       actions: [
+        // Clear-all: unchecks every action locally. User still has to Save to
+        // persist the reset — makes accidental clears one Cancel away.
+        TextButton(
+          onPressed: (_allowed.isEmpty && _denied.isEmpty)
+              ? null
+              : () => setState(() {
+                    _allowed.clear();
+                    _denied.clear();
+                  }),
+          child: const Text('Clear all'),
+        ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),

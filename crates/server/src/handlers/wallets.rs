@@ -3413,6 +3413,13 @@ pub struct MemberPermissionEntry {
 #[derive(Deserialize)]
 pub struct SetMemberPermissionsRequest {
     pub entries: Vec<MemberPermissionEntry>,
+    /// Extra target user_group ids to fully clear (delete all their rows without
+    /// re-inserting anything). Needed because full-replacement is per target and
+    /// there's otherwise no way to remove the LAST permission row for a target:
+    /// if nothing appears for that target in `entries`, the server never touches
+    /// it and stale rows remain.
+    #[serde(default)]
+    pub clear_target_group_ids: Vec<String>,
 }
 
 /// GET /api/wallets/:wallet_id/member-permissions
@@ -3513,6 +3520,44 @@ pub async fn set_member_permissions(
     // We do full-replacement per target_group so the frontend can unset an
     // entry by simply omitting it from the payload for that target.
     let mut targets_touched: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+
+    // Explicit clear-only targets: DELETE their rows even without an entry.
+    for id_str in &payload.clear_target_group_ids {
+        let id = Uuid::parse_str(id_str).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("Invalid clear_target_group_ids uuid: {}", e)})),
+            )
+        })?;
+        // Verify the group belongs to this wallet.
+        let wid = sqlx::query_scalar::<_, Uuid>(
+            "SELECT wallet_id FROM user_groups WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&*state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Error fetching clear target: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Clear target group not found"})),
+            )
+        })?;
+        if wid != wallet_uuid {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Clear target does not belong to this wallet"})),
+            ));
+        }
+        targets_touched.insert(id);
+    }
+
     for entry in &payload.entries {
         let source_group_id = Uuid::parse_str(&entry.source_group_id).map_err(|e| {
             (

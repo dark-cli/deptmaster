@@ -49,9 +49,12 @@ class MemberPermissionsScreen extends ConsumerWidget {
     return (allowed, denied);
   }
 
-  /// Persist the (source, target) row: server does full-replacement per touched
-  /// target, so we send all existing entries for `targetId` (minus the source
-  /// being changed) plus the new allowed/denied set for this source.
+  /// Persist the (source, target) row. Server does full-replacement per
+  /// touched target group (both those in `entries` AND those in
+  /// `clear_target_group_ids`). We always include our target in
+  /// `clear_target_group_ids` — that guarantees stale rows for (source, target)
+  /// get wiped even when the user unchecked everything and the payload has
+  /// zero entries for that target.
   Future<void> _save(
     BuildContext context,
     List<Map<String, dynamic>> allPerms,
@@ -61,11 +64,11 @@ class MemberPermissionsScreen extends ConsumerWidget {
     Set<String> denied,
   ) async {
     // Keep existing entries for this target from OTHER sources.
-    final updated = <Map<String, dynamic>>[];
+    final entries = <Map<String, dynamic>>[];
     for (final e in allPerms) {
       if (e['target_group_id'] != targetId) continue;
       if (e['source_group_id'] == sourceId) continue; // will be re-added below
-      updated.add({
+      entries.add({
         'source_group_id': e['source_group_id'],
         'target_group_id': e['target_group_id'],
         'action': e['action'],
@@ -73,7 +76,7 @@ class MemberPermissionsScreen extends ConsumerWidget {
       });
     }
     for (final action in allowed) {
-      updated.add({
+      entries.add({
         'source_group_id': sourceId,
         'target_group_id': targetId,
         'action': action,
@@ -81,7 +84,7 @@ class MemberPermissionsScreen extends ConsumerWidget {
       });
     }
     for (final action in denied) {
-      updated.add({
+      entries.add({
         'source_group_id': sourceId,
         'target_group_id': targetId,
         'action': action,
@@ -89,20 +92,15 @@ class MemberPermissionsScreen extends ConsumerWidget {
       });
     }
 
-    if (updated.isEmpty) {
-      // Server does full-replacement only for target_ids that appear in the
-      // payload. If we send an empty list, nothing gets cleared. Send a dummy
-      // no-op entry to force clearing? Not possible cleanly — instead let the
-      // user know and suggest editing another cell first.
-      if (context.mounted) {
-        ToastService.showInfoFromContext(
-            context, 'Nothing to save. Cannot clear the last permission row for a target group in one step.');
-      }
-      return;
-    }
+    final body = {
+      'entries': entries,
+      // Always mark our target for clearing so DELETE runs even if `entries`
+      // has nothing for this target (the "user unset the only row" case).
+      'clear_target_group_ids': [targetId],
+    };
 
     try {
-      await Api.setMemberPermissions(walletId, updated);
+      await Api.setMemberPermissions(walletId, body);
       if (context.mounted) {
         ToastService.showSuccessFromContext(context, 'Permissions saved');
       }

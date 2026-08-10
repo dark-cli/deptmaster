@@ -760,12 +760,15 @@ class Api {
     }
   }
 
-  /// Set member-level permissions: grant/revoke actions for source→target group pairs
-  static Future<void> setMemberPermissions(String walletId, List<Map<String, dynamic>> entries) async {
+  /// Set member-level permissions. Accepts either:
+  /// - `List<Map<String, dynamic>>` — flat entries (legacy); server wraps in `{entries}`.
+  /// - `Map<String, dynamic>` — full body, e.g. `{entries: [...], clear_target_group_ids: [...]}`.
+  ///   Use this form to unset the last permission row for a target group.
+  static Future<void> setMemberPermissions(String walletId, dynamic entriesOrBody) async {
     if (kIsWeb) return;
     try {
       await _ensureRustReady();
-      final entriesJson = jsonEncode(entries);
+      final entriesJson = jsonEncode(entriesOrBody);
       await rust.setMemberPermissions(walletId: walletId, entriesJson: entriesJson);
     } catch (e) {
       debugPrint('[member-permissions] setMemberPermissions failed: $e');

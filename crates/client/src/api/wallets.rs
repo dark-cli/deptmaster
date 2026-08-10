@@ -501,11 +501,20 @@ pub fn get_member_permissions_api(wallet_id: &str) -> Result<String, ClientError
     wallet_management_get(wallet_id, "/member-permissions")
 }
 
+/// `entries_json` is either:
+/// - a JSON array of entries (legacy), or
+/// - a JSON object with `entries` and optional `clear_target_group_ids`
+///   (the full body). Object form is needed to unset the last permission
+///   row for a target: the server only clears targets that appear in
+///   `entries` OR in `clear_target_group_ids`.
 pub fn set_member_permissions_api(wallet_id: &str, entries_json: &str) -> Result<(), ClientError> {
-    let entries: Vec<serde_json::Value> =
-        serde_json::from_str(entries_json)?;
-    let body = serde_json::json!({ "entries": entries });
-    wallet_management_put_json(wallet_id, "/member-permissions", &body).map(|_| ())
+    let body: serde_json::Value = serde_json::from_str(entries_json)?;
+    let wrapped = if body.is_array() {
+        serde_json::json!({ "entries": body })
+    } else {
+        body
+    };
+    wallet_management_put_json(wallet_id, "/member-permissions", &wrapped).map(|_| ())
 }
 
 // Contact group permissions (Layer 2.5)
