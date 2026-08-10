@@ -3489,6 +3489,10 @@ pub async fn set_member_permissions(
         return Err(insufficient_permission_response());
     }
 
+    // Validate all entries, and collect the distinct target groups touched.
+    // We do full-replacement per target_group so the frontend can unset an
+    // entry by simply omitting it from the payload for that target.
+    let mut targets_touched: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     for entry in &payload.entries {
         let source_group_id = Uuid::parse_str(&entry.source_group_id).map_err(|e| {
             (
@@ -3496,101 +3500,103 @@ pub async fn set_member_permissions(
                 Json(serde_json::json!({"error": format!("Invalid source_group_id: {}", e)})),
             )
         })?;
-
         let target_group_id = Uuid::parse_str(&entry.target_group_id).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": format!("Invalid target_group_id: {}", e)})),
             )
         })?;
-
-        // Prevent source == target
         if source_group_id == target_group_id {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": "Source and target groups cannot be the same"})),
             ));
         }
-
         // Verify both groups belong to this wallet
-        let source_wallet_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT wallet_id FROM user_groups WHERE id = $1"
-        )
-        .bind(source_group_id)
-        .fetch_optional(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching source group: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
+        for (label, gid) in [("Source", source_group_id), ("Target", target_group_id)] {
+            let wid = sqlx::query_scalar::<_, Uuid>(
+                "SELECT wallet_id FROM user_groups WHERE id = $1",
             )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Source group not found"})),
-            )
-        })?;
-
-        let target_wallet_id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT wallet_id FROM user_groups WHERE id = $1"
-        )
-        .bind(target_group_id)
-        .fetch_optional(&*state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error fetching target group: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"error": "Target group not found"})),
-            )
-        })?;
-
-        if source_wallet_id != wallet_uuid || target_wallet_id != wallet_uuid {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({"error": "Groups do not belong to this wallet"})),
-            ));
+            .bind(gid)
+            .fetch_optional(&*state.db_pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error fetching {} group: {:?}", label, e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Database error"})),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": format!("{} group not found", label)})),
+                )
+            })?;
+            if wid != wallet_uuid {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({"error": "Groups do not belong to this wallet"})),
+                ));
+            }
         }
-
-        // Verify action is valid
         if domain::Action::from_str(&entry.action).is_none() {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({"error": format!("Invalid action: {}", entry.action)})),
             ));
         }
+        targets_touched.insert(target_group_id);
+    }
 
-        // Set permission in database (insert or update)
+    // Full replacement per touched target group, inside a transaction.
+    let mut tx = state.db_pool.begin().await.map_err(|e| {
+        tracing::error!("tx begin failed: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
+    for target in &targets_touched {
+        sqlx::query("DELETE FROM wallet_member_permission_matrix WHERE target_group_id = $1")
+            .bind(target)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error clearing member permissions: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "Database error"})),
+                )
+            })?;
+    }
+    for entry in &payload.entries {
+        let source_group_id = Uuid::parse_str(&entry.source_group_id).unwrap();
+        let target_group_id = Uuid::parse_str(&entry.target_group_id).unwrap();
         sqlx::query(
-            r#"
-            INSERT INTO wallet_member_permission_matrix (source_group_id, target_group_id, action, is_deny)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (source_group_id, target_group_id, action) DO UPDATE
-            SET is_deny = $4
-            "#
+            "INSERT INTO wallet_member_permission_matrix (source_group_id, target_group_id, action, is_deny) VALUES ($1, $2, $3, $4)"
         )
         .bind(source_group_id)
         .bind(target_group_id)
         .bind(&entry.action)
         .bind(entry.is_deny)
-        .execute(&*state.db_pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
-            tracing::error!("Error setting member permission: {:?}", e);
+            tracing::error!("Error inserting member permission: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "Failed to set permission"})),
             )
         })?;
     }
+    tx.commit().await.map_err(|e| {
+        tracing::error!("tx commit failed: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Database error"})),
+        )
+    })?;
 
     // Emit GroupPermissionsSet events for event sourcing
     for entry in &payload.entries {
