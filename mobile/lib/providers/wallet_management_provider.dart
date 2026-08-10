@@ -2,6 +2,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import 'data_change_provider.dart';
 
+/// Actions that can be granted on a target user group (member management).
+/// Used by the Member Permissions screen.
+const memberGroupActions = <String>[
+  'member_group:members_read',
+  'member_group:members_add',
+  'member_group:members_remove',
+  'member_group:permissions_edit',
+];
+
+/// Actions that can be granted on a target contact group.
+/// Used by the Contact Permissions screen.
+const contactGroupActions = <String>[
+  'contact_group:contacts_read',
+  'contact_group:contacts_add',
+  'contact_group:contacts_remove',
+  'contact_group:permissions_edit',
+];
+
 /// Provides list of wallet members (users) for the given wallet.
 final walletUsersProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, walletId) async {
   invalidateOnDataChange(

@@ -3,7 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
 import '../../providers/wallet_management_provider.dart';
 import '../../utils/toast_service.dart';
+import '../../widgets/custom_expansion_tile.dart';
 import '../../widgets/gradient_background.dart';
+import '../../widgets/gradient_card.dart';
+
+/// Tri-state permission on a single (source, target, action) tuple.
+enum _PermState { unset, allow, deny }
 
 class MemberPermissionsScreen extends ConsumerWidget {
   final String walletId;
@@ -13,26 +18,59 @@ class MemberPermissionsScreen extends ConsumerWidget {
     required this.walletId,
   });
 
-  Future<void> _togglePermission(
+  String _formatGroupName(String name) {
+    if (name == '__owners__') return 'Owners (system)';
+    if (name == 'all_users') return 'All Users (system)';
+    return name;
+  }
+
+  String _formatAction(String action) {
+    final part = action.split(':').last;
+    return part.replaceAll('_', ' ');
+  }
+
+  _PermState _stateOf(
+    List<Map<String, dynamic>> entries,
+    String sourceGroupId,
+    String targetGroupId,
+    String action,
+  ) {
+    for (final e in entries) {
+      if (e['source_group_id'] == sourceGroupId &&
+          e['target_group_id'] == targetGroupId &&
+          e['action'] == action) {
+        return (e['is_deny'] as bool? ?? false) ? _PermState.deny : _PermState.allow;
+      }
+    }
+    return _PermState.unset;
+  }
+
+  Future<void> _setPermission(
     BuildContext context,
-    WidgetRef ref,
-    List<Map<String, dynamic>> allPermissions,
-    Map<String, dynamic> perm,
-    String sourceGroup,
-    String targetGroup,
-    String actionName,
+    List<Map<String, dynamic>> allEntries,
+    String sourceGroupId,
+    String targetGroupId,
+    String action,
+    _PermState newState,
   ) async {
-    final isDeny = perm['is_deny'] as bool? ?? false;
+    // Remove any existing entry for this tuple, then add new one if not unset.
+    final updated = allEntries
+        .where((e) =>
+            !(e['source_group_id'] == sourceGroupId &&
+                e['target_group_id'] == targetGroupId &&
+                e['action'] == action))
+        .toList();
+    if (newState != _PermState.unset) {
+      updated.add({
+        'source_group_id': sourceGroupId,
+        'target_group_id': targetGroupId,
+        'action': action,
+        'is_deny': newState == _PermState.deny,
+      });
+    }
 
     try {
-      final newEntries = allPermissions.map((p) {
-        if (p['source_group_id'] == sourceGroup && p['target_group_id'] == targetGroup && p['action'] == actionName) {
-          return {...p, 'is_deny': !isDeny};
-        }
-        return p;
-      }).toList();
-
-      await Api.setMemberPermissions(walletId, newEntries);
+      await Api.setMemberPermissions(walletId, updated);
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
         if (context.mounted) {
@@ -49,45 +87,103 @@ class MemberPermissionsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final permissionsAsync = ref.watch(memberPermissionsProvider(walletId));
+    final groupsAsync = ref.watch(userGroupsProvider(walletId));
+    final permsAsync = ref.watch(memberPermissionsProvider(walletId));
+
     return GradientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(title: const Text('Member Permissions')),
-        body: permissionsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (err, _) => Center(child: Text(err.toString())),
-          data: (permissions) {
-            if (permissions.isEmpty) {
-              return Center(
-                child: Text(
-                  'No member permissions configured',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              );
-            }
-            return ListView(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              children: permissions.map((perm) {
-                final sourceGroup = perm['source_group_id'] as String? ?? '';
-                final targetGroup = perm['target_group_id'] as String? ?? '';
-                final action = perm['action'] as String? ?? '';
-                final isDeny = perm['is_deny'] as bool? ?? false;
-
-                return ListTile(
-                  title: Text('$sourceGroup → $targetGroup'),
-                  subtitle: Text(action, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                  trailing: Chip(
-                    label: Text(isDeny ? 'Deny' : 'Allow'),
-                    backgroundColor: isDeny ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.primary,
-                  ),
-                  onTap: () => _togglePermission(context, ref, permissions, perm, sourceGroup, targetGroup, action),
-                );
-              }).toList(),
-            );
-          },
-        ),
+        body: (groupsAsync.isLoading || permsAsync.isLoading)
+            ? const Center(child: CircularProgressIndicator())
+            : (groupsAsync.hasError || permsAsync.hasError)
+                ? Center(child: Text((groupsAsync.error ?? permsAsync.error).toString()))
+                : _buildBody(context, groupsAsync.value!, permsAsync.value!),
       ),
+    );
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    List<Map<String, dynamic>> allGroups,
+    List<Map<String, dynamic>> perms,
+  ) {
+    // All groups can be a target. Exclude the special __owners__ group as source
+    // (owners bypass permissions anyway).
+    final targetGroups = allGroups.where((g) => g['name'] != '__owners__').toList();
+    final sourceGroups = allGroups.where((g) => g['name'] != '__owners__').toList();
+
+    if (targetGroups.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            'Create at least one user group first.',
+            style: Theme.of(context).textTheme.bodyLarge,
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+      children: targetGroups.map((target) {
+        final targetId = target['id'] as String? ?? '';
+        final targetName = _formatGroupName(target['name'] as String? ?? '');
+        return GradientCard(
+          margin: const EdgeInsets.only(bottom: 10),
+          variationSeed: targetId.hashCode,
+          child: CustomExpansionTile(
+            title: Text('Target: $targetName', style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('Who can manage this group\'s members'),
+            children: [
+              const Divider(height: 1),
+              ...sourceGroups.map((source) {
+                final sourceId = source['id'] as String? ?? '';
+                final sourceName = _formatGroupName(source['name'] as String? ?? '');
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('From: $sourceName', style: Theme.of(context).textTheme.titleSmall),
+                      const SizedBox(height: 8),
+                      ...memberGroupActions.map((action) {
+                        final state = _stateOf(perms, sourceId, targetId, action);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(child: Text(_formatAction(action))),
+                              SegmentedButton<_PermState>(
+                                style: const ButtonStyle(
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                showSelectedIcon: false,
+                                segments: const [
+                                  ButtonSegment(value: _PermState.unset, label: Text('—')),
+                                  ButtonSegment(value: _PermState.allow, label: Text('Allow')),
+                                  ButtonSegment(value: _PermState.deny, label: Text('Deny')),
+                                ],
+                                selected: {state},
+                                onSelectionChanged: (s) => _setPermission(
+                                  context, perms, sourceId, targetId, action, s.first),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 }
