@@ -131,7 +131,7 @@ class _UserGroupsScreenState extends ConsumerState<UserGroupsScreen> {
           error: (err, _) => Center(child: Text(err.toString())),
           data: (allGroups) {
             final userGroups = allGroups
-                .where((g) => g['name'] != '__owners__' && g['name'] != 'all_users')
+                .where((g) => g['is_hidden'] != true)
                 .toList();
             if (userGroups.isEmpty) {
               return Center(

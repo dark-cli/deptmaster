@@ -1443,6 +1443,10 @@ pub struct UserGroupResponse {
     pub wallet_id: String,
     pub name: String,
     pub is_system: bool,
+    /// Server-computed: true for groups the UI should hide from lists and
+    /// exclude from counts (system groups: __owners__, all_users). Kept
+    /// separate from is_system so future policies can diverge.
+    pub is_hidden: bool,
 }
 
 #[derive(Serialize)]
@@ -1453,6 +1457,10 @@ pub struct ContactGroupResponse {
     #[serde(rename = "type")]
     pub type_: String,
     pub is_system: bool,
+    /// Server-computed: true for the default 'all_contacts' bucket which the
+    /// UI hides from lists and excludes from counts. Screens that need to
+    /// display it (like Permission Rules) can still show it.
+    pub is_hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -1692,11 +1700,15 @@ pub async fn list_user_groups(
 
     let list: Vec<UserGroupResponse> = groups
         .into_iter()
-        .map(|(id, name, is_system)| UserGroupResponse {
-            id: id.to_string(),
-            wallet_id: wallet_uuid.to_string(),
-            name,
-            is_system,
+        .map(|(id, name, is_system)| {
+            let is_hidden = is_system; // covers __owners__ + all_users (both is_system=true)
+            UserGroupResponse {
+                id: id.to_string(),
+                wallet_id: wallet_uuid.to_string(),
+                name,
+                is_system,
+                is_hidden,
+            }
         })
         .collect();
     Ok(Json(list))
@@ -1783,6 +1795,7 @@ pub async fn create_user_group(
             wallet_id: wallet_id.clone(),
             name: name.to_string(),
             is_system: false,
+            is_hidden: false,
         }),
     ))
 }
@@ -1865,6 +1878,7 @@ pub async fn update_user_group(
         wallet_id: wallet_id.clone(),
         name: name.to_string(),
         is_system: false,
+        is_hidden: false,
     }))
 }
 
@@ -2270,12 +2284,16 @@ pub async fn list_contact_groups(
 
     let list: Vec<ContactGroupResponse> = groups
         .into_iter()
-        .map(|(id, name, type_, is_system)| ContactGroupResponse {
-            id: id.to_string(),
-            wallet_id: wallet_uuid.to_string(),
-            name,
-            type_,
-            is_system,
+        .map(|(id, name, type_, is_system)| {
+            let is_hidden = is_system; // covers 'all_contacts' (is_system=true)
+            ContactGroupResponse {
+                id: id.to_string(),
+                wallet_id: wallet_uuid.to_string(),
+                name,
+                type_,
+                is_system,
+                is_hidden,
+            }
         })
         .collect();
     Ok(Json(list))
@@ -2363,6 +2381,7 @@ pub async fn create_contact_group(
             name: name.to_string(),
             type_: "static".to_string(),
             is_system: false,
+            is_hidden: false,
         }),
     ))
 }
@@ -2446,6 +2465,7 @@ pub async fn update_contact_group(
         name: name.to_string(),
         type_: "static".to_string(),
         is_system: false,
+        is_hidden: false,
     }))
 }
 

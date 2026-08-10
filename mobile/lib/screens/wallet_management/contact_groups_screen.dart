@@ -131,7 +131,7 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (err, _) => Center(child: Text(err.toString())),
           data: (allGroups) {
-            final groups = allGroups.where((g) => g['name'] != 'all_contacts').toList();
+            final groups = allGroups.where((g) => g['is_hidden'] != true).toList();
             if (groups.isEmpty) {
               return Center(
                 child: Text(

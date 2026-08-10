@@ -3,9 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api.dart';
 import '../../providers/wallet_management_provider.dart';
 import '../../utils/toast_service.dart';
-import '../../widgets/gradient_card.dart';
 import '../../widgets/custom_expansion_tile.dart';
 import '../../widgets/gradient_background.dart';
+import '../../widgets/gradient_card.dart';
+import 'permission_matrix.dart';
 
 class PermissionRulesScreen extends ConsumerWidget {
   final String walletId;
@@ -15,21 +16,42 @@ class PermissionRulesScreen extends ConsumerWidget {
     required this.walletId,
   });
 
-  Future<void> _savePermissions(
-    BuildContext context,
+  String _formatGroupName(String name) {
+    if (name == '__owners__') return 'Owners (system)';
+    if (name == 'all_users') return 'All Users (system)';
+    if (name == 'all_contacts') return 'All Contacts (default)';
+    return name;
+  }
+
+  Set<String> _actionsOf(
+    List<Map<String, dynamic>> matrix,
     String userGroupId,
     String contactGroupId,
-    List<String> allowedActions,
-    List<String> deniedActions,
+    String key,
+  ) {
+    for (final e in matrix) {
+      if (e['user_group_id'] == userGroupId && e['contact_group_id'] == contactGroupId) {
+        final list = (e[key] as List<dynamic>?)?.cast<String>() ?? <String>[];
+        return Set<String>.from(list);
+      }
+    }
+    return {};
+  }
+
+  Future<void> _save(
+    BuildContext context,
+    String ugId,
+    String cgId,
+    Set<String> allowed,
+    Set<String> denied,
   ) async {
     final entry = {
-      'user_group_id': userGroupId,
-      'contact_group_id': contactGroupId,
-      'action_names': allowedActions,
-      'allowed_actions': allowedActions,
-      'denied_actions': deniedActions,
+      'user_group_id': ugId,
+      'contact_group_id': cgId,
+      'action_names': allowed.toList(),
+      'allowed_actions': allowed.toList(),
+      'denied_actions': denied.toList(),
     };
-
     try {
       await Api.putWalletPermissionMatrix(walletId, [entry]);
       if (context.mounted) {
@@ -49,542 +71,130 @@ class PermissionRulesScreen extends ConsumerWidget {
     }
   }
 
-  Set<String> _getActions(List<Map<String, dynamic>> matrix, String userGroupId, String contactGroupId) {
-    for (final e in matrix) {
-      if (e['user_group_id'] == userGroupId && e['contact_group_id'] == contactGroupId) {
-        final allowed = (e['allowed_actions'] as List<dynamic>?)?.cast<String>() ?? <String>[];
-        return Set<String>.from(allowed);
-      }
-    }
-    return {};
-  }
-
-  Set<String> _getDenied(List<Map<String, dynamic>> matrix, String userGroupId, String contactGroupId) {
-    for (final e in matrix) {
-      if (e['user_group_id'] == userGroupId && e['contact_group_id'] == contactGroupId) {
-        final denied = (e['denied_actions'] as List<dynamic>?)?.cast<String>() ?? <String>[];
-        return Set<String>.from(denied);
-      }
-    }
-    return {};
-  }
-
   void _openEditor(
     BuildContext context,
-    List<Map<String, dynamic>> permissionActions,
-    List<Map<String, dynamic>> matrix,
     String ugId,
     String ugName,
     String cgId,
     String cgName,
+    Set<String> allowed,
+    Set<String> denied,
   ) {
     showDialog(
       context: context,
-      builder: (dialogContext) => _PermissionsDialog(
-        userGroupName: ugName,
-        contactGroupName: cgName,
-        availableActions: permissionActions,
-        initialAllowed: _getActions(matrix, ugId, cgId).toList(),
-        initialDenied: _getDenied(matrix, ugId, cgId).toList(),
-        onSave: (allowed, denied) => _savePermissions(context, ugId, cgId, allowed, denied),
+      builder: (_) => PermissionActionsDialog(
+        title: 'Edit Permissions',
+        subtitle: '$ugName → $cgName',
+        rows: contactAndTransactionRows,
+        initialAllowed: allowed,
+        initialDenied: denied,
+        onSave: (a, d) => _save(context, ugId, cgId, a, d),
       ),
     );
-  }
-
-  String _formatGroupName(String name) {
-    if (name == '__owners__') return 'Owners (system)';
-    if (name == 'all_users') return 'All Users (system)';
-    if (name == 'all_contacts') return 'All Contacts (default)';
-    return name;
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final userGroupsAsync = ref.watch(userGroupsProvider(walletId));
     final contactGroupsAsync = ref.watch(contactGroupsProvider(walletId));
-    final actionsAsync = ref.watch(walletPermissionActionsProvider(walletId));
     final matrixAsync = ref.watch(walletPermissionMatrixProvider(walletId));
 
-    final anyLoading = userGroupsAsync.isLoading ||
-        contactGroupsAsync.isLoading ||
-        actionsAsync.isLoading ||
-        matrixAsync.isLoading;
-    if (anyLoading) {
-      return GradientBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(title: const Text('Permission Rules')),
-          body: const Center(child: CircularProgressIndicator()),
-        ),
-      );
+    // Keep showing the last-known data during refetch so open cards don't collapse.
+    final userGroups = userGroupsAsync.valueOrNull;
+    final contactGroups = contactGroupsAsync.valueOrNull;
+    final matrix = matrixAsync.valueOrNull;
+
+    if (userGroups == null || contactGroups == null || matrix == null) {
+      if (userGroupsAsync.hasError || contactGroupsAsync.hasError || matrixAsync.hasError) {
+        final err = userGroupsAsync.error ?? contactGroupsAsync.error ?? matrixAsync.error;
+        return _scaffold(context, Center(child: Text(err.toString())));
+      }
+      return _scaffold(context, const Center(child: CircularProgressIndicator()));
     }
 
-    final anyError = userGroupsAsync.hasError ||
-        contactGroupsAsync.hasError ||
-        actionsAsync.hasError ||
-        matrixAsync.hasError;
-    if (anyError) {
-      final err = userGroupsAsync.error ??
-          contactGroupsAsync.error ??
-          actionsAsync.error ??
-          matrixAsync.error;
-      return GradientBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(title: const Text('Permission Rules')),
-          body: Center(child: Text(err.toString())),
-        ),
-      );
-    }
-
-    final userGroups = userGroupsAsync.value!.where((g) => g['name'] != '__owners__').toList();
-    final contactGroups = contactGroupsAsync.value!;
-    final permissionActions = actionsAsync.value!;
-    final matrix = matrixAsync.value!;
-
-    if (userGroups.isEmpty || contactGroups.isEmpty) {
-      return GradientBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(title: const Text('Permission Rules')),
-          body: const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'Create at least one user group and one contact group to set rules.',
-                textAlign: TextAlign.center,
-              ),
+    final visibleUserGroups = userGroups.where((g) => g['is_hidden'] != true).toList();
+    if (visibleUserGroups.isEmpty || contactGroups.isEmpty) {
+      return _scaffold(
+        context,
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Create at least one user group and one contact group to set rules.',
+              textAlign: TextAlign.center,
             ),
           ),
         ),
       );
     }
 
+    return _scaffold(
+      context,
+      ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+        children: [
+          for (int index = 0; index < visibleUserGroups.length; index++)
+            _buildUserGroupCard(
+              context,
+              index,
+              visibleUserGroups[index],
+              contactGroups,
+              matrix,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _scaffold(BuildContext context, Widget body) {
     return GradientBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(title: const Text('Permission Rules')),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-          children: [
-            ...List.generate(userGroups.length, (index) {
-              final ug = userGroups[index];
-              final ugId = ug['id'] as String? ?? '';
-              final rawUgName = ug['name'] as String? ?? '';
-              final ugName = _formatGroupName(rawUgName);
-
-              return GradientCard(
-                margin: const EdgeInsets.only(bottom: 12),
-                variationSeed: ugId.hashCode,
-                child: CustomExpansionTile(
-                  title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: const Text('User Group'),
-                  initiallyExpanded: index == 0,
-                  children: [
-                    const Divider(height: 1),
-                    ...contactGroups.map((cg) {
-                      final cgId = cg['id'] as String? ?? '';
-                      final rawCgName = cg['name'] as String? ?? '';
-                      final cgName = _formatGroupName(rawCgName);
-                      final activeActions = _getActions(matrix, ugId, cgId);
-                      final deniedActions = _getDenied(matrix, ugId, cgId);
-
-                      return ListTile(
-                        title: Text(cgName),
-                        subtitle: _PermissionGridDisplay(
-                          allowed: activeActions,
-                          denied: deniedActions,
-                        ),
-                        trailing: const Icon(Icons.edit, size: 20),
-                        onTap: () => _openEditor(context, permissionActions, matrix, ugId, ugName, cgId, cgName),
-                      );
-                    }).toList(),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-enum _PermissionState { allow, deny, unset }
-
-/// Display permissions as colored letters using rwx-inspired format
-/// C: r:a c:- w:a d:-, T: r:a c:- w:- d:- x:-
-/// Green=allow, Red=deny, Gray=unset
-class _PermissionGridDisplay extends StatelessWidget {
-  final Set<String> allowed;
-  final Set<String> denied;
-
-  const _PermissionGridDisplay({
-    required this.allowed,
-    required this.denied,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const greenColor = Color(0xFF2E7D32);
-    final redColor = Theme.of(context).colorScheme.error;
-    final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Contact row
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildGridCell(context, 'C', '', '', greenColor, redColor, grayColor, true),
-              _buildGridCell(context, 'r', 'contact:read', 'read', greenColor, redColor, grayColor, false),
-              _buildGridCell(context, 'c', 'contact:create', 'create', greenColor, redColor, grayColor, false),
-              _buildGridCell(context, 'w', 'contact:update', 'write', greenColor, redColor, grayColor, false),
-              _buildGridCell(context, 'd', 'contact:delete', 'delete', greenColor, redColor, grayColor, false),
-              SizedBox(
-                width: 35,
-                height: 35,
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant, width: 1),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          // Transaction row
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildGridCell(context, 'T', '', '', greenColor, redColor, grayColor, true),
-              _buildGridCell(context, 'r', 'transaction:read', 'read', greenColor, redColor, grayColor, false),
-              _buildGridCell(context, 'c', 'transaction:create', 'create', greenColor, redColor, grayColor, false),
-              _buildGridCell(context, 'w', 'transaction:update', 'write', greenColor, redColor, grayColor, false),
-              _buildGridCell(context, 'd', 'transaction:delete', 'delete', greenColor, redColor, grayColor, false),
-              _buildGridCell(context, 'x', 'transaction:close', 'close', greenColor, redColor, grayColor, false),
-            ],
-          ),
-        ],
+        body: body,
       ),
     );
   }
 
-  Widget _buildGridCell(
+  Widget _buildUserGroupCard(
     BuildContext context,
-    String letter,
-    String permission,
-    String label,
-    Color allowColor,
-    Color denyColor,
-    Color unsetColor,
-    bool isFirstColumn,
+    int index,
+    Map<String, dynamic> ug,
+    List<Map<String, dynamic>> contactGroups,
+    List<Map<String, dynamic>> matrix,
   ) {
-    late final String displayLetter;
-    late final Color textColor;
-    late final String state;
-
-    // For C and T labels (permission is empty)
-    if (permission.isEmpty) {
-      displayLetter = letter;
-      textColor = Theme.of(context).colorScheme.onSurface;
-      state = '';
-    } else if (denied.contains(permission)) {
-      displayLetter = letter;
-      textColor = denyColor;
-      state = 'denied';
-    } else if (allowed.contains(permission)) {
-      displayLetter = letter;
-      textColor = allowColor;
-      state = 'allowed';
-    } else {
-      displayLetter = '-';
-      textColor = unsetColor;
-      state = 'unset';
-    }
-
-    final cell = SizedBox(
-      width: 35,
-      height: 35,
-      child: Center(
-        child: Text(
-          displayLetter,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: textColor,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.3,
-          ),
-        ),
-      ),
-    );
-
-    // Add border and optional tooltip
-    return Container(
-      width: 35,
-      height: 35,
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant,
-          width: 1,
-        ),
-      ),
-      child: permission.isEmpty
-          ? cell
-          : Tooltip(
-              message: '$label: $state',
-              child: cell,
-            ),
-    );
-  }
-}
-
-class _PermissionsDialog extends StatefulWidget {
-  final String userGroupName;
-  final String contactGroupName;
-  final List<Map<String, dynamic>> availableActions;
-  final List<String> initialAllowed;
-  final List<String> initialDenied;
-  final void Function(List<String> allowed, List<String> denied) onSave;
-
-  const _PermissionsDialog({
-    required this.userGroupName,
-    required this.contactGroupName,
-    required this.availableActions,
-    required this.initialAllowed,
-    required this.initialDenied,
-    required this.onSave,
-  });
-
-  @override
-  State<_PermissionsDialog> createState() => _PermissionsDialogState();
-}
-
-class _PermissionsDialogState extends State<_PermissionsDialog> {
-  late Set<String> _allowed;
-  late Set<String> _denied;
-  late Map<String, List<Map<String, dynamic>>> _groupedActions;
-
-  @override
-  void initState() {
-    super.initState();
-    _allowed = Set.from(widget.initialAllowed);
-    _denied = Set.from(widget.initialDenied);
-    _groupActions();
-  }
-
-  bool _isActive(String name) {
-    return _allowed.contains(name) || _denied.contains(name);
-  }
-
-  _PermissionState _getAllowDeny(String name) {
-    if (_denied.contains(name)) return _PermissionState.deny;
-    return _PermissionState.allow;
-  }
-
-  void _setState(String name, _PermissionState state) {
-    setState(() {
-      _allowed.remove(name);
-      _denied.remove(name);
-      if (state == _PermissionState.allow) {
-        _allowed.add(name);
-      } else if (state == _PermissionState.deny) {
-        _denied.add(name);
-      }
-    });
-  }
-
-  void _groupActions() {
-    _groupedActions = {};
-    final contactTransactionActions = widget.availableActions.where((a) {
-      final name = a['name'] as String? ?? '';
-      return name.startsWith('contact:') || name.startsWith('transaction:');
-    }).toList();
-
-    for (final action in contactTransactionActions) {
-      final name = action['name'] as String? ?? '';
-      final parts = name.split(':');
-      final category = parts.isNotEmpty ? parts[0] : 'other';
-
-      if (!_groupedActions.containsKey(category)) {
-        _groupedActions[category] = [];
-      }
-      _groupedActions[category]!.add(action);
-    }
-
-    for (final category in _groupedActions.keys) {
-      _groupedActions[category]!.sort((a, b) {
-        final aName = a['name'] as String? ?? '';
-        final bName = b['name'] as String? ?? '';
-        return _getPermissionSortOrder(aName).compareTo(_getPermissionSortOrder(bName));
-      });
-    }
-  }
-
-  int _getPermissionSortOrder(String actionName) {
-    if (actionName.contains(':read')) return 0;
-    if (actionName.contains(':create')) return 1;
-    if (actionName.contains(':update')) return 2;
-    if (actionName.contains(':delete')) return 3;
-    if (actionName.contains(':close')) return 4;
-    return 99;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.availableActions.isEmpty) {
-      return AlertDialog(
-        title: const Text('Edit Permissions'),
-        content: const Text(
-          'No permission actions loaded. Pull down to refresh the page.',
-          textAlign: TextAlign.center,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      );
-    }
-
-    final categories = _groupedActions.keys.toList()..sort();
-    final screenWidth = MediaQuery.sizeOf(context).width;
-
-    return AlertDialog(
-      insetPadding: EdgeInsets.symmetric(
-        horizontal: (screenWidth < 400) ? 8.0 : 40.0,
-        vertical: 24,
-      ),
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+    final ugId = ug['id'] as String? ?? '';
+    final ugName = _formatGroupName(ug['name'] as String? ?? '');
+    return GradientCard(
+      key: ValueKey('user-group-$ugId'),
+      margin: const EdgeInsets.only(bottom: 12),
+      variationSeed: ugId.hashCode,
+      child: CustomExpansionTile(
+        key: PageStorageKey('rules-ug-$ugId'),
+        title: Text(ugName, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: const Text('User Group'),
+        initiallyExpanded: index == 0,
         children: [
-          const Text('Edit Permissions'),
-          const SizedBox(height: 4),
-          Text(
-            '${widget.userGroupName} → ${widget.contactGroupName}',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+          const Divider(height: 1),
+          ...contactGroups.map((cg) {
+            final cgId = cg['id'] as String? ?? '';
+            final cgName = _formatGroupName(cg['name'] as String? ?? '');
+            final allowed = _actionsOf(matrix, ugId, cgId, 'allowed_actions');
+            final denied = _actionsOf(matrix, ugId, cgId, 'denied_actions');
+            return ListTile(
+              title: Text(cgName),
+              subtitle: PermissionMatrixGrid(
+                rows: contactAndTransactionRows,
+                allowed: allowed,
+                denied: denied,
+              ),
+              trailing: const Icon(Icons.edit, size: 20),
+              onTap: () => _openEditor(context, ugId, ugName, cgId, cgName, allowed, denied),
+            );
+          }),
+          const SizedBox(height: 8),
         ],
       ),
-      content: SingleChildScrollView(
-        child: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  'rwx format: r=read, c=create, w=write, d=delete, x=close',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ),
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: categories.length,
-                itemBuilder: (context, index) {
-                  final category = categories[index];
-                  final actions = _groupedActions[category]!;
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (index > 0) const Divider(height: 24),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Text(
-                          category == 'contact' ? 'Contacts' : 'Transactions',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      ...actions.map((action) {
-                        final name = action['name'] as String? ?? '';
-                        final displayName = name.split(':').last;
-                        final active = _isActive(name);
-                        final allowDeny = _getAllowDeny(name);
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                children: [
-                                  Checkbox(
-                                    value: active,
-                                    onChanged: (checked) {
-                                      if (checked == true) {
-                                        _setState(name, _PermissionState.allow);
-                                      } else {
-                                        _setState(name, _PermissionState.unset);
-                                      }
-                                    },
-                                  ),
-                                  Expanded(
-                                    child: Text(displayName),
-                                  ),
-                                ],
-                              ),
-                              if (active) ...[
-                                const SizedBox(height: 6),
-                                LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final narrow = constraints.maxWidth < 280;
-                                    return SegmentedButton<_PermissionState>(
-                                      style: narrow
-                                          ? const ButtonStyle(
-                                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                              padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 6)))
-                                          : null,
-                                      showSelectedIcon: false,
-                                      segments: const [
-                                        ButtonSegment(value: _PermissionState.allow, icon: Icon(Icons.check, size: 16), label: Text('Allow')),
-                                        ButtonSegment(value: _PermissionState.deny, icon: Icon(Icons.block, size: 16), label: Text('Deny')),
-                                      ],
-                                      selected: {allowDeny},
-                                      onSelectionChanged: (s) => _setState(name, s.first),
-                                    );
-                                  },
-                                ),
-                              ],
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ],
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () {
-            widget.onSave(_allowed.toList(), _denied.toList());
-            Navigator.pop(context);
-          },
-          child: const Text('Save'),
-        ),
-      ],
     );
   }
 }

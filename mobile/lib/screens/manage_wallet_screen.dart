@@ -128,7 +128,14 @@ class ManageWalletScreen extends ConsumerWidget {
           data: (userGroups) => contactGroupsAsync.when(
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (err, st) => Center(child: Text(err.toString())),
-            data: (contactGroups) => RefreshIndicator(
+            data: (contactGroups) {
+              // Server marks system groups (owners, all_users, all_contacts) with
+              // is_hidden. Use it for both the visible list and the counts here.
+              final visibleUserGroupCount =
+                  userGroups.where((g) => g['is_hidden'] != true).length;
+              final visibleContactGroupCount =
+                  contactGroups.where((g) => g['is_hidden'] != true).length;
+              return RefreshIndicator(
               onRefresh: () async => refreshWalletManagement(ref, walletId),
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -173,7 +180,7 @@ class ManageWalletScreen extends ConsumerWidget {
                     tiles: [
                       ManagementTile(
                         title: 'User Groups',
-                        subtitle: '${userGroups.length} group${userGroups.length == 1 ? '' : 's'}',
+                        subtitle: '$visibleUserGroupCount group${visibleUserGroupCount == 1 ? '' : 's'}',
                         leadingIcon: Icons.group,
                         onTap: () {
                           Navigator.push(
@@ -188,7 +195,7 @@ class ManageWalletScreen extends ConsumerWidget {
                       ),
                       ManagementTile(
                         title: 'Contact Groups',
-                        subtitle: '${contactGroups.length} group${contactGroups.length == 1 ? '' : 's'}',
+                        subtitle: '$visibleContactGroupCount group${visibleContactGroupCount == 1 ? '' : 's'}',
                         leadingIcon: Icons.contacts,
                         onTap: () {
                           Navigator.push(
@@ -302,7 +309,8 @@ class ManageWalletScreen extends ConsumerWidget {
                   const SizedBox(height: 16),
                 ],
               ),
-            ),
+            );
+            },
           ),
         ),
       ),

@@ -6,9 +6,11 @@ import '../../utils/toast_service.dart';
 import '../../widgets/custom_expansion_tile.dart';
 import '../../widgets/gradient_background.dart';
 import '../../widgets/gradient_card.dart';
+import 'permission_matrix.dart';
 
-enum _PermState { unset, allow, deny }
-
+/// Member Permissions: matrix of source user_group × target user_group.
+/// Each cell shows the compact "M: r a x e" grid; tapping opens the shared
+/// PermissionActionsDialog (same UX as Permission Rules).
 class MemberPermissionsScreen extends ConsumerWidget {
   final String walletId;
 
@@ -23,155 +25,87 @@ class MemberPermissionsScreen extends ConsumerWidget {
     return name;
   }
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final groupsAsync = ref.watch(userGroupsProvider(walletId));
-    final permsAsync = ref.watch(memberPermissionsProvider(walletId));
-
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Member Permissions')),
-        body: (groupsAsync.isLoading || permsAsync.isLoading)
-            ? const Center(child: CircularProgressIndicator())
-            : (groupsAsync.hasError || permsAsync.hasError)
-                ? Center(child: Text((groupsAsync.error ?? permsAsync.error).toString()))
-                : _buildBody(context, groupsAsync.value!, permsAsync.value!),
-      ),
-    );
-  }
-
-  Widget _buildBody(
-    BuildContext context,
-    List<Map<String, dynamic>> allGroups,
+  /// Get allowed/denied action sets for a (source, target) pair from the flat
+  /// [perms] list. Server returns entries with source_group_id, target_group_id,
+  /// action, is_deny.
+  (Set<String> allowed, Set<String> denied) _stateFor(
     List<Map<String, dynamic>> perms,
+    String sourceId,
+    String targetId,
   ) {
-    final userGroups = allGroups.where((g) => g['name'] != '__owners__').toList();
-
-    if (userGroups.length < 2) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'Create at least two user groups to configure who can manage whom.',
-            style: Theme.of(context).textTheme.bodyLarge,
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-      children: userGroups.map((source) {
-        final sourceId = source['id'] as String? ?? '';
-        final sourceName = _formatGroupName(source['name'] as String? ?? '');
-        return GradientCard(
-          margin: const EdgeInsets.only(bottom: 10),
-          variationSeed: sourceId.hashCode,
-          child: CustomExpansionTile(
-            title: Text('From: $sourceName', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('What this group can do to other groups\' members'),
-            children: [
-              const Divider(height: 1),
-              ...userGroups.where((t) => t['id'] != sourceId).map((target) {
-                final targetId = target['id'] as String? ?? '';
-                final targetName = _formatGroupName(target['name'] as String? ?? '');
-                return _SourceTargetEditor(
-                  walletId: walletId,
-                  sourceGroupId: sourceId,
-                  targetGroupId: targetId,
-                  targetGroupName: targetName,
-                  allPerms: perms,
-                );
-              }),
-              const SizedBox(height: 4),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-/// One row per (source, target) pair with checkbox + Allow/Deny SegmentedButton
-/// for each action. Uses same design as PermissionRulesScreen's dialog.
-class _SourceTargetEditor extends StatelessWidget {
-  final String walletId;
-  final String sourceGroupId;
-  final String targetGroupId;
-  final String targetGroupName;
-  final List<Map<String, dynamic>> allPerms;
-
-  const _SourceTargetEditor({
-    required this.walletId,
-    required this.sourceGroupId,
-    required this.targetGroupId,
-    required this.targetGroupName,
-    required this.allPerms,
-  });
-
-  String _shortAction(String action) => action.split(':').last.replaceAll('_', ' ');
-
-  _PermState _stateOf(String action) {
-    for (final e in allPerms) {
-      if (e['source_group_id'] == sourceGroupId &&
-          e['target_group_id'] == targetGroupId &&
-          e['action'] == action) {
-        return (e['is_deny'] as bool? ?? false) ? _PermState.deny : _PermState.allow;
+    final allowed = <String>{};
+    final denied = <String>{};
+    for (final e in perms) {
+      if (e['source_group_id'] == sourceId && e['target_group_id'] == targetId) {
+        final action = e['action'] as String? ?? '';
+        if (action.isEmpty) continue;
+        if (e['is_deny'] == true) {
+          denied.add(action);
+        } else {
+          allowed.add(action);
+        }
       }
     }
-    return _PermState.unset;
+    return (allowed, denied);
   }
 
-  /// Send the full state for this target group (all sources × actions),
-  /// with the requested change applied. Server does full replacement per target.
-  Future<void> _apply(BuildContext context, String changedAction, _PermState newState) async {
-    // Aggregate current state for THIS target across all sources.
-    // Keep only entries whose target matches ours; others go untouched by the server.
+  /// Persist the (source, target) row: server does full-replacement per touched
+  /// target, so we send all existing entries for `targetId` (minus the source
+  /// being changed) plus the new allowed/denied set for this source.
+  Future<void> _save(
+    BuildContext context,
+    List<Map<String, dynamic>> allPerms,
+    String sourceId,
+    String targetId,
+    Set<String> allowed,
+    Set<String> denied,
+  ) async {
+    // Keep existing entries for this target from OTHER sources.
     final updated = <Map<String, dynamic>>[];
-    // Add all existing rows for this target, excluding the one being changed.
     for (final e in allPerms) {
-      if (e['target_group_id'] != targetGroupId) continue;
-      final isChanged = e['source_group_id'] == sourceGroupId && e['action'] == changedAction;
-      if (isChanged) continue;
+      if (e['target_group_id'] != targetId) continue;
+      if (e['source_group_id'] == sourceId) continue; // will be re-added below
       updated.add({
         'source_group_id': e['source_group_id'],
         'target_group_id': e['target_group_id'],
         'action': e['action'],
-        'is_deny': e['is_deny'] as bool? ?? false,
+        'is_deny': e['is_deny'] == true,
       });
     }
-    // Add the changed row unless it's being unset.
-    if (newState != _PermState.unset) {
+    for (final action in allowed) {
       updated.add({
-        'source_group_id': sourceGroupId,
-        'target_group_id': targetGroupId,
-        'action': changedAction,
-        'is_deny': newState == _PermState.deny,
+        'source_group_id': sourceId,
+        'target_group_id': targetId,
+        'action': action,
+        'is_deny': false,
       });
-    } else if (updated.isEmpty) {
-      // Server does full-replacement per touched target. If we send zero entries,
-      // no target is "touched" and nothing is cleared. Send a placeholder entry
-      // that will be a no-op after replace: we need at least one entry with our
-      // target_group_id so the server clears it. Use a dummy? No — instead, we
-      // simply pick any source_group and re-add all its (existing minus removed)
-      // rows. Since we filtered above, if nothing exists we can't unset the last one
-      // without a dedicated DELETE endpoint. Workaround: send a temp row we
-      // immediately re-remove is not possible in one round-trip. So: for the
-      // "last-row-unset" case, we must send at least one dummy — but we don't have
-      // a valid one. Skip: server sees empty payload → no-op → row remains → BUG.
-      // Fix: server needs to also DELETE for empty target lists. For now, add
-      // an is_deny=false + is_deny=true toggle trick is dirty. Simpler: return
-      // early if no other rows exist and warn user. This edge case is rare.
+    }
+    for (final action in denied) {
+      updated.add({
+        'source_group_id': sourceId,
+        'target_group_id': targetId,
+        'action': action,
+        'is_deny': true,
+      });
+    }
+
+    if (updated.isEmpty) {
+      // Server does full-replacement only for target_ids that appear in the
+      // payload. If we send an empty list, nothing gets cleared. Send a dummy
+      // no-op entry to force clearing? Not possible cleanly — instead let the
+      // user know and suggest editing another cell first.
       if (context.mounted) {
-        ToastService.showInfoFromContext(context, 'Cannot unset the last permission for this target group yet.');
+        ToastService.showInfoFromContext(
+            context, 'Nothing to save. Cannot clear the last permission row for a target group in one step.');
       }
       return;
     }
 
     try {
       await Api.setMemberPermissions(walletId, updated);
+      if (context.mounted) {
+        ToastService.showSuccessFromContext(context, 'Permissions saved');
+      }
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
         if (context.mounted) {
@@ -186,62 +120,119 @@ class _SourceTargetEditor extends StatelessWidget {
     }
   }
 
+  void _openEditor(
+    BuildContext context,
+    List<Map<String, dynamic>> allPerms,
+    String sourceId,
+    String sourceName,
+    String targetId,
+    String targetName,
+  ) {
+    final (allowed, denied) = _stateFor(allPerms, sourceId, targetId);
+    showDialog(
+      context: context,
+      builder: (_) => PermissionActionsDialog(
+        title: 'Edit Member Permissions',
+        subtitle: '$sourceName → $targetName',
+        rows: memberGroupRows,
+        initialAllowed: allowed,
+        initialDenied: denied,
+        onSave: (a, d) => _save(context, allPerms, sourceId, targetId, a, d),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final groupsAsync = ref.watch(userGroupsProvider(walletId));
+    final permsAsync = ref.watch(memberPermissionsProvider(walletId));
+
+    // Preserve cached data across refetches so expanded cards don't collapse.
+    final groups = groupsAsync.valueOrNull;
+    final perms = permsAsync.valueOrNull;
+    if (groups == null || perms == null) {
+      if (groupsAsync.hasError || permsAsync.hasError) {
+        return _scaffold(context,
+            Center(child: Text((groupsAsync.error ?? permsAsync.error).toString())));
+      }
+      return _scaffold(context, const Center(child: CircularProgressIndicator()));
+    }
+
+    final visible = groups.where((g) => g['is_hidden'] != true).toList();
+    if (visible.length < 2) {
+      return _scaffold(
+        context,
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Create at least two user groups to configure who can manage whom.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _scaffold(
+      context,
+      ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
         children: [
-          Text('On: $targetGroupName', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 4),
-          ...memberGroupActions.map((action) {
-            final state = _stateOf(action);
-            final active = state != _PermState.unset;
-            final allowDeny = state == _PermState.deny ? _PermState.deny : _PermState.allow;
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: active,
-                        onChanged: (checked) {
-                          _apply(context, action, checked == true ? _PermState.allow : _PermState.unset);
-                        },
-                      ),
-                      Expanded(child: Text(_shortAction(action))),
-                    ],
-                  ),
-                  if (active) ...[
-                    const SizedBox(height: 4),
-                    LayoutBuilder(builder: (context, constraints) {
-                      final narrow = constraints.maxWidth < 280;
-                      return SegmentedButton<_PermState>(
-                        style: narrow
-                            ? const ButtonStyle(
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
-                              )
-                            : null,
-                        showSelectedIcon: false,
-                        segments: const [
-                          ButtonSegment(value: _PermState.allow, icon: Icon(Icons.check, size: 16), label: Text('Allow')),
-                          ButtonSegment(value: _PermState.deny, icon: Icon(Icons.block, size: 16), label: Text('Deny')),
-                        ],
-                        selected: {allowDeny},
-                        onSelectionChanged: (s) => _apply(context, action, s.first),
-                      );
-                    }),
-                    const SizedBox(height: 4),
-                  ],
-                ],
+          for (int i = 0; i < visible.length; i++)
+            _buildSourceCard(context, i, visible, perms),
+        ],
+      ),
+    );
+  }
+
+  Widget _scaffold(BuildContext context, Widget body) {
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(title: const Text('Member Permissions')),
+        body: body,
+      ),
+    );
+  }
+
+  Widget _buildSourceCard(
+    BuildContext context,
+    int index,
+    List<Map<String, dynamic>> visibleGroups,
+    List<Map<String, dynamic>> perms,
+  ) {
+    final source = visibleGroups[index];
+    final sourceId = source['id'] as String? ?? '';
+    final sourceName = _formatGroupName(source['name'] as String? ?? '');
+    return GradientCard(
+      key: ValueKey('member-source-$sourceId'),
+      margin: const EdgeInsets.only(bottom: 12),
+      variationSeed: sourceId.hashCode,
+      child: CustomExpansionTile(
+        key: PageStorageKey('member-source-$sourceId'),
+        title: Text('From: $sourceName', style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: const Text('What this group can do to other groups\' members'),
+        initiallyExpanded: index == 0,
+        children: [
+          const Divider(height: 1),
+          ...visibleGroups.where((t) => t['id'] != sourceId).map((target) {
+            final targetId = target['id'] as String? ?? '';
+            final targetName = _formatGroupName(target['name'] as String? ?? '');
+            final (allowed, denied) = _stateFor(perms, sourceId, targetId);
+            return ListTile(
+              title: Text('On: $targetName'),
+              subtitle: PermissionMatrixGrid(
+                rows: memberGroupRows,
+                allowed: allowed,
+                denied: denied,
               ),
+              trailing: const Icon(Icons.edit, size: 20),
+              onTap: () =>
+                  _openEditor(context, perms, sourceId, sourceName, targetId, targetName),
             );
           }),
-          const Divider(height: 16),
+          const SizedBox(height: 8),
         ],
       ),
     );

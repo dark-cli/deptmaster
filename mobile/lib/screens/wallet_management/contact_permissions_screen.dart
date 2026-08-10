@@ -6,9 +6,12 @@ import '../../utils/toast_service.dart';
 import '../../widgets/custom_expansion_tile.dart';
 import '../../widgets/gradient_background.dart';
 import '../../widgets/gradient_card.dart';
+import 'permission_matrix.dart';
 
-enum _PermState { unset, allow, deny }
-
+/// Contact Permissions: matrix of source user_group × target contact_group.
+/// Vector direction is user_group → contact_group ("this user group can do
+/// these actions on this contact group"). Outer expansion is user_group,
+/// inner rows are contact_groups.
 class ContactPermissionsScreen extends ConsumerWidget {
   final String walletId;
 
@@ -23,167 +26,211 @@ class ContactPermissionsScreen extends ConsumerWidget {
     return name;
   }
 
+  String _formatContactGroupName(String name) {
+    if (name == 'all_contacts') return 'All Contacts (default)';
+    return name;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final userGroupsAsync = ref.watch(userGroupsProvider(walletId));
     final contactGroupsAsync = ref.watch(contactGroupsProvider(walletId));
 
-    return GradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Contact Permissions')),
-        body: (userGroupsAsync.isLoading || contactGroupsAsync.isLoading)
-            ? const Center(child: CircularProgressIndicator())
-            : (userGroupsAsync.hasError || contactGroupsAsync.hasError)
-                ? Center(child: Text((userGroupsAsync.error ?? contactGroupsAsync.error).toString()))
-                : _buildBody(context, userGroupsAsync.value!, contactGroupsAsync.value!),
+    // Preserve cached data so open cards don't collapse when we refetch.
+    final userGroups = userGroupsAsync.valueOrNull;
+    final contactGroups = contactGroupsAsync.valueOrNull;
+    if (userGroups == null || contactGroups == null) {
+      if (userGroupsAsync.hasError || contactGroupsAsync.hasError) {
+        return _scaffold(context,
+            Center(child: Text((userGroupsAsync.error ?? contactGroupsAsync.error).toString())));
+      }
+      return _scaffold(context, const Center(child: CircularProgressIndicator()));
+    }
+
+    final visibleUsers = userGroups.where((g) => g['is_hidden'] != true).toList();
+    if (visibleUsers.isEmpty) {
+      return _scaffold(
+        context,
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Create at least one user group first.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+    if (contactGroups.isEmpty) {
+      return _scaffold(
+        context,
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('No contact groups available.', textAlign: TextAlign.center),
+          ),
+        ),
+      );
+    }
+
+    return _scaffold(
+      context,
+      ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+        children: [
+          for (int i = 0; i < visibleUsers.length; i++)
+            _buildSourceCard(context, ref, i, visibleUsers, contactGroups),
+        ],
       ),
     );
   }
 
-  Widget _buildBody(
+  Widget _scaffold(BuildContext context, Widget body) {
+    return GradientBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(title: const Text('Contact Permissions')),
+        body: body,
+      ),
+    );
+  }
+
+  Widget _buildSourceCard(
     BuildContext context,
-    List<Map<String, dynamic>> allUserGroups,
-    List<Map<String, dynamic>> allContactGroups,
+    WidgetRef ref,
+    int index,
+    List<Map<String, dynamic>> userGroups,
+    List<Map<String, dynamic>> contactGroups,
   ) {
-    final sourceGroups = allUserGroups.where((g) => g['name'] != '__owners__').toList();
-    final targetGroups = allContactGroups; // include 'all_contacts' — it's a real bucket
-
-    if (sourceGroups.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'Create at least one user group first.',
-            style: Theme.of(context).textTheme.bodyLarge,
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-    if (targetGroups.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'No contact groups available.',
-            style: Theme.of(context).textTheme.bodyLarge,
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-      children: sourceGroups.map((source) {
-        final sourceId = source['id'] as String? ?? '';
-        final sourceName = _formatUserGroupName(source['name'] as String? ?? '');
-        return GradientCard(
-          margin: const EdgeInsets.only(bottom: 10),
-          variationSeed: sourceId.hashCode,
-          child: CustomExpansionTile(
-            title: Text('From: $sourceName', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('What this group can do on each contact group'),
-            children: [
-              const Divider(height: 1),
-              ...targetGroups.map((target) {
-                final targetId = target['id'] as String? ?? '';
-                final targetName = target['name'] as String? ?? '';
-                return _SourceTargetEditor(
-                  walletId: walletId,
-                  sourceGroupId: sourceId,
-                  contactGroupId: targetId,
-                  contactGroupName: targetName,
-                );
-              }),
-              const SizedBox(height: 4),
-            ],
-          ),
-        );
-      }).toList(),
+    final source = userGroups[index];
+    final sourceId = source['id'] as String? ?? '';
+    final sourceName = _formatUserGroupName(source['name'] as String? ?? '');
+    return GradientCard(
+      key: ValueKey('contact-source-$sourceId'),
+      margin: const EdgeInsets.only(bottom: 12),
+      variationSeed: sourceId.hashCode,
+      child: CustomExpansionTile(
+        key: PageStorageKey('contact-source-$sourceId'),
+        title: Text('From: $sourceName', style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: const Text('What this group can do on each contact group'),
+        initiallyExpanded: index == 0,
+        children: [
+          const Divider(height: 1),
+          ...contactGroups.map((target) {
+            final targetId = target['id'] as String? ?? '';
+            final targetName = _formatContactGroupName(target['name'] as String? ?? '');
+            return _ContactGroupRow(
+              walletId: walletId,
+              sourceGroupId: sourceId,
+              sourceGroupName: sourceName,
+              contactGroupId: targetId,
+              contactGroupName: targetName,
+            );
+          }),
+          const SizedBox(height: 8),
+        ],
+      ),
     );
   }
 }
 
-/// One row for a single (source user_group, target contact_group) pair.
-/// Watches this contact_group's permission list, filters to just this source,
-/// and renders the checkbox + Allow/Deny SegmentedButton per action.
-class _SourceTargetEditor extends ConsumerWidget {
+/// One (source user_group, target contact_group) row. Watches the
+/// per-contact-group permission list so it updates in real-time.
+class _ContactGroupRow extends ConsumerWidget {
   final String walletId;
   final String sourceGroupId;
+  final String sourceGroupName;
   final String contactGroupId;
   final String contactGroupName;
 
-  const _SourceTargetEditor({
+  const _ContactGroupRow({
     required this.walletId,
     required this.sourceGroupId,
+    required this.sourceGroupName,
     required this.contactGroupId,
     required this.contactGroupName,
   });
 
-  String _shortAction(String action) => action.split(':').last.replaceAll('_', ' ');
-
-  _PermState _stateOf(List<Map<String, dynamic>> perms, String action) {
+  (Set<String> allowed, Set<String> denied) _stateFor(List<Map<String, dynamic>> perms) {
+    final allowed = <String>{};
+    final denied = <String>{};
     for (final e in perms) {
-      // Server returns `member_group_id` (NOT `source_group_id`)
+      // Server returns `member_group_id`; also tolerate `source_group_id`.
       final mg = e['member_group_id'] as String? ?? e['source_group_id'] as String? ?? '';
-      if (mg == sourceGroupId && e['action'] == action) {
-        return (e['is_deny'] as bool? ?? false) ? _PermState.deny : _PermState.allow;
+      if (mg != sourceGroupId) continue;
+      final action = e['action'] as String? ?? '';
+      if (action.isEmpty) continue;
+      if (e['is_deny'] == true) {
+        denied.add(action);
+      } else {
+        allowed.add(action);
       }
     }
-    return _PermState.unset;
+    return (allowed, denied);
   }
 
-  /// Build the full nested payload for the PUT: group ALL currently-set
-  /// permissions (across all source groups) by member_group_id, then override
-  /// the one cell that changed.
+  /// Build the payload the server expects: nested by member_group_id, listing
+  /// every action's tri-state. Server does full-replacement per contact_group,
+  /// so we must include ALL sources currently set + our updated source.
   List<Map<String, dynamic>> _buildPayload(
     List<Map<String, dynamic>> allPerms,
-    String changedAction,
-    _PermState newState,
+    Set<String> newAllowed,
+    Set<String> newDenied,
   ) {
-    // Aggregate current state: memberGroupId -> action -> state
-    final byGroup = <String, Map<String, _PermState>>{};
+    // Aggregate current state (memberGroupId -> action -> allow/deny),
+    // excluding entries for this source (they'll be replaced).
+    final byGroup = <String, Map<String, bool>>{}; // isDeny
     for (final e in allPerms) {
       final mg = e['member_group_id'] as String? ?? e['source_group_id'] as String? ?? '';
+      if (mg.isEmpty || mg == sourceGroupId) continue;
       final action = e['action'] as String? ?? '';
-      if (mg.isEmpty || action.isEmpty) continue;
-      final state = (e['is_deny'] as bool? ?? false) ? _PermState.deny : _PermState.allow;
-      byGroup.putIfAbsent(mg, () => {})[action] = state;
+      if (action.isEmpty) continue;
+      byGroup.putIfAbsent(mg, () => {})[action] = e['is_deny'] == true;
     }
-    // Apply the change
-    byGroup.putIfAbsent(sourceGroupId, () => {})[changedAction] = newState;
+    // Add our source's new state.
+    if (newAllowed.isNotEmpty || newDenied.isNotEmpty) {
+      final map = <String, bool>{};
+      for (final a in newAllowed) {
+        map[a] = false;
+      }
+      for (final a in newDenied) {
+        map[a] = true;
+      }
+      byGroup[sourceGroupId] = map;
+    }
 
-    // Convert to server's expected shape: [{member_group_id, permissions: [{action, state}]}]
     final entries = <Map<String, dynamic>>[];
-    byGroup.forEach((memberGroupId, actions) {
-      // Include an entry for every action — server treats missing as unchanged; safer to be explicit.
-      // Server does full replacement per contact_group, so we send everything.
+    byGroup.forEach((mg, actions) {
       final permissions = <Map<String, dynamic>>[];
-      for (final action in contactGroupActions) {
-        final s = actions[action] ?? _PermState.unset;
+      for (final entry in contactGroupRows.expand((r) => r.columns)) {
+        final action = entry.action;
+        final isDeny = actions[action];
         permissions.add({
           'action': action,
-          'state': switch (s) {
-            _PermState.allow => 'allow',
-            _PermState.deny => 'deny',
-            _PermState.unset => 'unset',
-          },
+          'state': isDeny == null ? 'unset' : (isDeny ? 'deny' : 'allow'),
         });
       }
       entries.add({
-        'member_group_id': memberGroupId,
+        'member_group_id': mg,
         'permissions': permissions,
       });
     });
     return entries;
   }
 
-  Future<void> _apply(BuildContext context, List<Map<String, dynamic>> allPerms, String action, _PermState newState) async {
-    final payload = _buildPayload(allPerms, action, newState);
+  Future<void> _save(
+    BuildContext context,
+    List<Map<String, dynamic>> allPerms,
+    Set<String> allowed,
+    Set<String> denied,
+  ) async {
+    final payload = _buildPayload(allPerms, allowed, denied);
     try {
       await Api.setContactGroupPermissions(walletId, contactGroupId, payload);
+      if (context.mounted) {
+        ToastService.showSuccessFromContext(context, 'Permissions saved');
+      }
     } catch (e) {
       if (Api.isPermissionDeniedError(e)) {
         if (context.mounted) {
@@ -198,76 +245,40 @@ class _SourceTargetEditor extends ConsumerWidget {
     }
   }
 
+  void _openEditor(
+    BuildContext context,
+    List<Map<String, dynamic>> allPerms,
+  ) {
+    final (allowed, denied) = _stateFor(allPerms);
+    showDialog(
+      context: context,
+      builder: (_) => PermissionActionsDialog(
+        title: 'Edit Contact Permissions',
+        subtitle: '$sourceGroupName → $contactGroupName',
+        rows: contactGroupRows,
+        initialAllowed: allowed,
+        initialDenied: denied,
+        onSave: (a, d) => _save(context, allPerms, a, d),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final permsAsync = ref.watch(
       contactGroupPermissionsProvider(WalletGroupKey(walletId, contactGroupId)),
     );
-    return permsAsync.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(16),
-        child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+    final perms = permsAsync.valueOrNull ?? const [];
+    final (allowed, denied) = _stateFor(perms);
+    return ListTile(
+      title: Text('On: $contactGroupName'),
+      subtitle: PermissionMatrixGrid(
+        rows: contactGroupRows,
+        allowed: allowed,
+        denied: denied,
       ),
-      error: (err, _) => Padding(padding: const EdgeInsets.all(16), child: Text(err.toString())),
-      data: (perms) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('On: $contactGroupName', style: Theme.of(context).textTheme.titleSmall),
-              const SizedBox(height: 4),
-              ...contactGroupActions.map((action) {
-                final state = _stateOf(perms, action);
-                final active = state != _PermState.unset;
-                final allowDeny = state == _PermState.deny ? _PermState.deny : _PermState.allow;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: active,
-                            onChanged: (checked) {
-                              _apply(context, perms, action, checked == true ? _PermState.allow : _PermState.unset);
-                            },
-                          ),
-                          Expanded(child: Text(_shortAction(action))),
-                        ],
-                      ),
-                      if (active) ...[
-                        const SizedBox(height: 4),
-                        LayoutBuilder(builder: (context, constraints) {
-                          final narrow = constraints.maxWidth < 280;
-                          return SegmentedButton<_PermState>(
-                            style: narrow
-                                ? const ButtonStyle(
-                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                    padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 6)),
-                                  )
-                                : null,
-                            showSelectedIcon: false,
-                            segments: const [
-                              ButtonSegment(value: _PermState.allow, icon: Icon(Icons.check, size: 16), label: Text('Allow')),
-                              ButtonSegment(value: _PermState.deny, icon: Icon(Icons.block, size: 16), label: Text('Deny')),
-                            ],
-                            selected: {allowDeny},
-                            onSelectionChanged: (s) => _apply(context, perms, action, s.first),
-                          );
-                        }),
-                        const SizedBox(height: 4),
-                      ],
-                    ],
-                  ),
-                );
-              }),
-              const Divider(height: 16),
-            ],
-          ),
-        );
-      },
+      trailing: const Icon(Icons.edit, size: 20),
+      onTap: () => _openEditor(context, perms),
     );
   }
 }
