@@ -112,14 +112,10 @@ class ContactPermissionsScreen extends ConsumerWidget {
       variationSeed: sourceId.hashCode,
       child: CustomExpansionTile(
         key: PageStorageKey('contact-source-$sourceId'),
-        title: Row(
-          children: [
-            const Icon(Icons.groups, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(sourceName, style: const TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
+        title: GroupTypeHeader(
+          icon: Icons.groups,
+          type: 'User group',
+          name: sourceName,
         ),
         subtitle: const Padding(
           padding: EdgeInsets.only(left: 26),
@@ -282,12 +278,12 @@ class _ContactGroupRow extends ConsumerWidget {
     final perms = permsAsync.valueOrNull ?? const [];
     final (allowed, denied) = _stateFor(perms);
     return ListTile(
-      title: Row(
-        children: [
-          const Icon(Icons.arrow_forward, size: 16),
-          const SizedBox(width: 6),
-          Expanded(child: Text(contactGroupName)),
-        ],
+      title: GroupTypeHeader(
+        icon: Icons.arrow_forward,
+        type: 'Contact group',
+        name: contactGroupName,
+        iconSize: 16,
+        bold: false,
       ),
       subtitle: Padding(
         padding: const EdgeInsets.only(left: 22, top: 4),

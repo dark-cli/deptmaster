@@ -183,6 +183,49 @@ const List<MatrixRowSpec> contactGroupRows = [
 
 // ─── Widgets ───────────────────────────────────────────────────────────────
 
+/// Compact label showing `[icon] TYPE  · Name`, used as ExpansionTile /
+/// ListTile titles so users can tell at a glance whether a group is a user
+/// group or a contact group.
+class GroupTypeHeader extends StatelessWidget {
+  final IconData icon;
+  final String type; // e.g. 'User group', 'Contact group'
+  final String name;
+  final double iconSize;
+  final bool bold;
+
+  const GroupTypeHeader({
+    super.key,
+    required this.icon,
+    required this.type,
+    required this.name,
+    this.iconSize = 18,
+    this.bold = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final labelColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Row(
+      children: [
+        Icon(icon, size: iconSize),
+        const SizedBox(width: 8),
+        Text(
+          '$type · ',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: labelColor),
+        ),
+        Expanded(
+          child: Text(
+            name,
+            style: bold ? const TextStyle(fontWeight: FontWeight.bold) : null,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+
 /// Compact matrix display: one Row per [MatrixRowSpec], with a prefix cell
 /// and one letter cell per column. Cells are green if action is in [allowed],
 /// red if in [denied], gray '-' if neither.
