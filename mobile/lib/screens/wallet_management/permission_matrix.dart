@@ -44,10 +44,14 @@ class MatrixRowSpec {
 // ─── Preset row specs ──────────────────────────────────────────────────────
 
 /// Contact + Transaction actions used by PermissionRulesScreen.
+///
+/// The two rows are just visual categories (contact-related vs transaction-
+/// related actions) — NOT a target axis. Render with `useTextRowLabels: true`
+/// so each row shows its full name instead of a matrix-implying letter.
 const List<MatrixRowSpec> contactAndTransactionRows = [
   MatrixRowSpec(
     prefix: 'C',
-    categoryHeader: 'Contacts',
+    categoryHeader: 'Contact',
     columns: [
       MatrixColumn(
         letter: 'r',
@@ -77,7 +81,7 @@ const List<MatrixRowSpec> contactAndTransactionRows = [
   ),
   MatrixRowSpec(
     prefix: 'T',
-    categoryHeader: 'Transactions',
+    categoryHeader: 'Transaction',
     columns: [
       MatrixColumn(
         letter: 'r',

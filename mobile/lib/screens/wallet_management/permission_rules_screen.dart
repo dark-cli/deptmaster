@@ -187,6 +187,7 @@ class PermissionRulesScreen extends ConsumerWidget {
                 rows: contactAndTransactionRows,
                 allowed: allowed,
                 denied: denied,
+                useTextRowLabels: true,
               ),
               trailing: const Icon(Icons.edit, size: 20),
               onTap: () => _openEditor(context, ugId, ugName, cgId, cgName, allowed, denied),
