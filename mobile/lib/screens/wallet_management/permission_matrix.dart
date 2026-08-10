@@ -147,6 +147,131 @@ const List<MatrixRowSpec> memberGroupRows = [
   ),
 ];
 
+/// wallet:* actions for the Wallet Permissions screen.
+/// Grouped into five rows so a compact matrix fits on mobile.
+const List<MatrixRowSpec> walletPermissionRows = [
+  MatrixRowSpec(
+    prefix: 'W',
+    categoryHeader: 'Wallet',
+    columns: [
+      MatrixColumn(
+        letter: 'r',
+        action: 'wallet:info_read',
+        label: 'info read',
+        description: 'See the wallet\'s name and settings.',
+      ),
+      MatrixColumn(
+        letter: 'w',
+        action: 'wallet:info_update',
+        label: 'info update',
+        description: 'Rename the wallet and edit its settings.',
+      ),
+      MatrixColumn(
+        letter: '!',
+        action: 'wallet:delete',
+        label: 'delete wallet',
+        description: 'Permanently delete the entire wallet.',
+      ),
+      MatrixColumn(
+        letter: 't',
+        action: 'wallet:owner_transfer',
+        label: 'transfer ownership',
+        description: 'Hand wallet ownership to another user.',
+      ),
+    ],
+  ),
+  MatrixRowSpec(
+    prefix: 'M',
+    categoryHeader: 'Members (wallet-wide)',
+    columns: [
+      MatrixColumn(
+        letter: 'r',
+        action: 'wallet:members_read',
+        label: 'read',
+        description: 'See who is a member of the wallet.',
+      ),
+      MatrixColumn(
+        letter: 'a',
+        action: 'wallet:members_add',
+        label: 'add',
+        description: 'Invite new users into the wallet.',
+      ),
+      MatrixColumn(
+        letter: 'x',
+        action: 'wallet:members_remove',
+        label: 'remove',
+        description: 'Kick users out of the wallet.',
+      ),
+    ],
+  ),
+  MatrixRowSpec(
+    prefix: 'G',
+    categoryHeader: 'User groups',
+    columns: [
+      MatrixColumn(
+        letter: 'c',
+        action: 'wallet:groups_create',
+        label: 'create',
+        description: 'Create new user groups.',
+      ),
+      MatrixColumn(
+        letter: 'u',
+        action: 'wallet:groups_update',
+        label: 'update',
+        description: 'Rename existing user groups.',
+      ),
+      MatrixColumn(
+        letter: 'd',
+        action: 'wallet:groups_delete',
+        label: 'delete',
+        description: 'Delete user groups.',
+      ),
+    ],
+  ),
+  MatrixRowSpec(
+    prefix: 'C',
+    categoryHeader: 'Contact groups',
+    columns: [
+      MatrixColumn(
+        letter: 'c',
+        action: 'wallet:contact_groups_create',
+        label: 'create',
+        description: 'Create new contact groups.',
+      ),
+      MatrixColumn(
+        letter: 'u',
+        action: 'wallet:contact_groups_update',
+        label: 'update',
+        description: 'Rename existing contact groups.',
+      ),
+      MatrixColumn(
+        letter: 'd',
+        action: 'wallet:contact_groups_delete',
+        label: 'delete',
+        description: 'Delete contact groups.',
+      ),
+    ],
+  ),
+  MatrixRowSpec(
+    prefix: 'P',
+    categoryHeader: 'Permissions',
+    columns: [
+      MatrixColumn(
+        letter: 'e',
+        action: 'wallet:permissions_edit',
+        label: 'edit',
+        description: 'Change wallet-level, member and contact-group permissions.',
+      ),
+      MatrixColumn(
+        letter: 'm',
+        action: 'wallet:permissions_matrix_edit',
+        label: 'matrix edit',
+        description: 'Change the Permission Rules matrix (contact/transaction rules).',
+      ),
+    ],
+  ),
+];
+
 /// contact_group:* actions for the Contact Permissions screen (single row).
 const List<MatrixRowSpec> contactGroupRows = [
   MatrixRowSpec(
