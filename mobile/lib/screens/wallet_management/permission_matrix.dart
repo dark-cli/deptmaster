@@ -358,11 +358,18 @@ class GroupTypeHeader extends StatelessWidget {
 /// [showRowPrefix] — pass false when the grid has just one row (or the row
 /// prefix is redundant with surrounding context, e.g. Member Permissions
 /// where every row is 'M:'). Default true to preserve the Rules layout.
+///
+/// [flattenToVector] — when true, ignore the row layout and render every
+/// column across all rows as a single wrapping strip of letter cells (no
+/// row prefixes, no per-row alignment). Use this for permission sets that
+/// are conceptually a single vector per source (e.g. Layer 1 wallet:*
+/// permissions) rather than a source×target matrix.
 class PermissionMatrixGrid extends StatelessWidget {
   final List<MatrixRowSpec> rows;
   final Set<String> allowed;
   final Set<String> denied;
   final bool showRowPrefix;
+  final bool flattenToVector;
 
   const PermissionMatrixGrid({
     super.key,
@@ -370,6 +377,7 @@ class PermissionMatrixGrid extends StatelessWidget {
     required this.allowed,
     required this.denied,
     this.showRowPrefix = true,
+    this.flattenToVector = false,
   });
 
   @override
@@ -377,6 +385,28 @@ class PermissionMatrixGrid extends StatelessWidget {
     const greenColor = Color(0xFF2E7D32);
     final redColor = Theme.of(context).colorScheme.error;
     final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    // Vector mode: flatten every column across all rows into one Wrap of
+    // letter cells. No row prefixes, no source×target implication.
+    if (flattenToVector) {
+      final allColumns = rows.expand((r) => r.columns).toList();
+      return Wrap(
+        spacing: 0,
+        runSpacing: 0,
+        children: allColumns
+            .map((c) => _cell(
+                  context,
+                  c.letter,
+                  c.action,
+                  c.label,
+                  c.description,
+                  greenColor,
+                  redColor,
+                  grayColor,
+                ))
+            .toList(),
+      );
+    }
 
     // Pad all rows to the same length for a uniform grid.
     final maxCols = rows.map((r) => r.columns.length).fold<int>(0, (a, b) => a > b ? a : b);

@@ -12,8 +12,10 @@ import 'permission_matrix.dart';
 /// wallet itself — read info, edit info, manage members, create/delete
 /// groups, edit permissions, delete the wallet, etc.
 ///
-/// One card per user group, expandable to reveal a compact matrix summary
-/// with a tap-to-edit dialog (same UX as Permission Rules).
+/// Layer 1 has no target dimension: each user group carries a single
+/// vector of wallet:* actions (allow / deny / unset per action). Unlike
+/// Layer 2, 2.5 or 3 (which are per-target matrices), the display here
+/// flattens all wallet actions into one wrapped strip of colored letters.
 class WalletPermissionsScreen extends ConsumerWidget {
   final String walletId;
 
@@ -194,7 +196,7 @@ class WalletPermissionsScreen extends ConsumerWidget {
         ),
         subtitle: const Padding(
           padding: EdgeInsets.only(left: 26),
-          child: Text('wallet-level permissions'),
+          child: Text('wallet-level actions (vector)'),
         ),
         initiallyExpanded: index == 0,
         children: [
@@ -206,6 +208,7 @@ class WalletPermissionsScreen extends ConsumerWidget {
                 rows: walletPermissionRows,
                 allowed: allowed,
                 denied: denied,
+                flattenToVector: true,
               ),
             ),
             trailing: const Icon(Icons.edit, size: 20),
