@@ -158,6 +158,12 @@ Future<String> getMemberPermissionsApi({required String walletId}) =>
     RustLib.instance.api
         .crateApiWalletsGetMemberPermissionsApi(walletId: walletId);
 
+/// `entries_json` is either:
+/// - a JSON array of entries (legacy), or
+/// - a JSON object with `entries` and optional `clear_target_group_ids`
+///   (the full body). Object form is needed to unset the last permission
+///   row for a target: the server only clears targets that appear in
+///   `entries` OR in `clear_target_group_ids`.
 Future<void> setMemberPermissionsApi(
         {required String walletId, required String entriesJson}) =>
     RustLib.instance.api.crateApiWalletsSetMemberPermissionsApi(

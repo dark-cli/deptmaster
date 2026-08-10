@@ -3442,14 +3442,18 @@ pub async fn get_member_permissions(
         require_wallet_admin(&state, wallet_uuid, &auth_user).await?;
     }
 
-    // Query wallet_member_permission_matrix for this wallet's groups
+    // Query wallet_member_permission_matrix for this wallet's groups.
+    // Previous query used `INNER JOIN user_groups ug ON ug.id IN (source, target)`
+    // which returned each matrix row TWICE (once per side of the pair) — the
+    // duplicates then made the client emit duplicate INSERTs on save and
+    // hit the unique constraint. Filter via subquery so each row appears once.
     let perms: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
         r#"
-        SELECT wmp.source_group_id, wmp.target_group_id, wmp.action, wmp.is_deny
-        FROM wallet_member_permission_matrix wmp
-        INNER JOIN user_groups ug ON ug.id IN (wmp.source_group_id, wmp.target_group_id)
-        WHERE ug.wallet_id = $1
-        ORDER BY wmp.source_group_id, wmp.target_group_id, wmp.action
+        SELECT source_group_id, target_group_id, action, is_deny
+        FROM wallet_member_permission_matrix
+        WHERE source_group_id IN (SELECT id FROM user_groups WHERE wallet_id = $1)
+          AND target_group_id IN (SELECT id FROM user_groups WHERE wallet_id = $1)
+        ORDER BY source_group_id, target_group_id, action
         "#
     )
     .bind(wallet_uuid)
@@ -3635,9 +3639,16 @@ pub async fn set_member_permissions(
                 )
             })?;
     }
+    // Dedup by (source, target, action) — a buggy client could send
+    // duplicates and we'd otherwise trip the unique constraint mid-tx.
+    let mut seen: std::collections::HashSet<(Uuid, Uuid, String)> =
+        std::collections::HashSet::new();
     for entry in &payload.entries {
         let source_group_id = Uuid::parse_str(&entry.source_group_id).unwrap();
         let target_group_id = Uuid::parse_str(&entry.target_group_id).unwrap();
+        if !seen.insert((source_group_id, target_group_id, entry.action.clone())) {
+            continue; // duplicate — already inserted this tuple this request
+        }
         sqlx::query(
             "INSERT INTO wallet_member_permission_matrix (source_group_id, target_group_id, action, is_deny) VALUES ($1, $2, $3, $4)"
         )
