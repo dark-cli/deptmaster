@@ -211,8 +211,19 @@ class MemberPermissionsScreen extends ConsumerWidget {
       variationSeed: sourceId.hashCode,
       child: CustomExpansionTile(
         key: PageStorageKey('member-source-$sourceId'),
-        title: Text('From: $sourceName', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: const Text('What this group can do to other groups\' members'),
+        title: Row(
+          children: [
+            const Icon(Icons.groups, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(sourceName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        subtitle: const Padding(
+          padding: EdgeInsets.only(left: 26),
+          child: Text('can manage members of…'),
+        ),
         initiallyExpanded: index == 0,
         children: [
           const Divider(height: 1),
@@ -221,11 +232,21 @@ class MemberPermissionsScreen extends ConsumerWidget {
             final targetName = _formatGroupName(target['name'] as String? ?? '');
             final (allowed, denied) = _stateFor(perms, sourceId, targetId);
             return ListTile(
-              title: Text('On: $targetName'),
-              subtitle: PermissionMatrixGrid(
-                rows: memberGroupRows,
-                allowed: allowed,
-                denied: denied,
+              title: Row(
+                children: [
+                  const Icon(Icons.arrow_forward, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(targetName)),
+                ],
+              ),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(left: 22, top: 4),
+                child: PermissionMatrixGrid(
+                  rows: memberGroupRows,
+                  allowed: allowed,
+                  denied: denied,
+                  showRowPrefix: false,
+                ),
               ),
               trailing: const Icon(Icons.edit, size: 20),
               onTap: () =>

@@ -186,16 +186,22 @@ const List<MatrixRowSpec> contactGroupRows = [
 /// Compact matrix display: one Row per [MatrixRowSpec], with a prefix cell
 /// and one letter cell per column. Cells are green if action is in [allowed],
 /// red if in [denied], gray '-' if neither.
+///
+/// [showRowPrefix] — pass false when the grid has just one row (or the row
+/// prefix is redundant with surrounding context, e.g. Member Permissions
+/// where every row is 'M:'). Default true to preserve the Rules layout.
 class PermissionMatrixGrid extends StatelessWidget {
   final List<MatrixRowSpec> rows;
   final Set<String> allowed;
   final Set<String> denied;
+  final bool showRowPrefix;
 
   const PermissionMatrixGrid({
     super.key,
     required this.rows,
     required this.allowed,
     required this.denied,
+    this.showRowPrefix = true,
   });
 
   @override
@@ -216,7 +222,8 @@ class PermissionMatrixGrid extends StatelessWidget {
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _cell(context, row.prefix, '', '', '', greenColor, redColor, grayColor),
+              if (showRowPrefix)
+                _cell(context, row.prefix, '', '', '', greenColor, redColor, grayColor),
               ...row.columns.map((c) => _cell(
                     context,
                     c.letter,

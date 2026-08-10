@@ -112,8 +112,19 @@ class ContactPermissionsScreen extends ConsumerWidget {
       variationSeed: sourceId.hashCode,
       child: CustomExpansionTile(
         key: PageStorageKey('contact-source-$sourceId'),
-        title: Text('From: $sourceName', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: const Text('What this group can do on each contact group'),
+        title: Row(
+          children: [
+            const Icon(Icons.groups, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(sourceName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        subtitle: const Padding(
+          padding: EdgeInsets.only(left: 26),
+          child: Text('can act on contacts in…'),
+        ),
         initiallyExpanded: index == 0,
         children: [
           const Divider(height: 1),
@@ -271,11 +282,21 @@ class _ContactGroupRow extends ConsumerWidget {
     final perms = permsAsync.valueOrNull ?? const [];
     final (allowed, denied) = _stateFor(perms);
     return ListTile(
-      title: Text('On: $contactGroupName'),
-      subtitle: PermissionMatrixGrid(
-        rows: contactGroupRows,
-        allowed: allowed,
-        denied: denied,
+      title: Row(
+        children: [
+          const Icon(Icons.arrow_forward, size: 16),
+          const SizedBox(width: 6),
+          Expanded(child: Text(contactGroupName)),
+        ],
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(left: 22, top: 4),
+        child: PermissionMatrixGrid(
+          rows: contactGroupRows,
+          allowed: allowed,
+          denied: denied,
+          showRowPrefix: false,
+        ),
       ),
       trailing: const Icon(Icons.edit, size: 20),
       onTap: () => _openEditor(context, perms),
