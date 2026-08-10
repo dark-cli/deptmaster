@@ -44,14 +44,10 @@ class MatrixRowSpec {
 // ─── Preset row specs ──────────────────────────────────────────────────────
 
 /// Contact + Transaction actions used by PermissionRulesScreen.
-///
-/// The two rows are just visual categories (contact-related vs transaction-
-/// related actions) — NOT a target axis. Render with `useTextRowLabels: true`
-/// so each row shows its full name instead of a matrix-implying letter.
 const List<MatrixRowSpec> contactAndTransactionRows = [
   MatrixRowSpec(
     prefix: 'C',
-    categoryHeader: 'Contact',
+    categoryHeader: 'Contacts',
     columns: [
       MatrixColumn(
         letter: 'r',
@@ -81,7 +77,7 @@ const List<MatrixRowSpec> contactAndTransactionRows = [
   ),
   MatrixRowSpec(
     prefix: 'T',
-    categoryHeader: 'Transaction',
+    categoryHeader: 'Transactions',
     columns: [
       MatrixColumn(
         letter: 'r',
@@ -154,10 +150,8 @@ const List<MatrixRowSpec> memberGroupRows = [
 /// wallet:* actions for the Wallet Permissions screen.
 ///
 /// Layer 1 permissions are a **single vector per user group** — the rows
-/// here are just visual categories, NOT a target axis. Render with
-/// `useTextRowLabels: true` on [PermissionMatrixGrid] so each row shows its
-/// category name (e.g. 'Wallet', 'Members') instead of a matrix-implying
-/// letter prefix.
+/// here are purely visual categories, NOT a target axis. Rendered with the
+/// standard letter-prefix layout for compactness.
 const List<MatrixRowSpec> walletPermissionRows = [
   MatrixRowSpec(
     prefix: 'W',
@@ -367,18 +361,11 @@ class GroupTypeHeader extends StatelessWidget {
 /// [showRowPrefix] — pass false when the grid has just one row (or the row
 /// prefix is redundant with surrounding context, e.g. Member Permissions
 /// where every row is 'M:'). Default true to preserve the Rules layout.
-///
-/// [useTextRowLabels] — replace the single-letter prefix cell with the row's
-/// full [MatrixRowSpec.categoryHeader] text (e.g. 'Wallet', 'Members',
-/// 'Groups'). Use for permission sets where the rows are just visual
-/// categories rather than a target dimension — this makes clear the row is
-/// a *label*, not a target-axis entry that would imply a matrix.
 class PermissionMatrixGrid extends StatelessWidget {
   final List<MatrixRowSpec> rows;
   final Set<String> allowed;
   final Set<String> denied;
   final bool showRowPrefix;
-  final bool useTextRowLabels;
 
   const PermissionMatrixGrid({
     super.key,
@@ -386,7 +373,6 @@ class PermissionMatrixGrid extends StatelessWidget {
     required this.allowed,
     required this.denied,
     this.showRowPrefix = true,
-    this.useTextRowLabels = false,
   });
 
   @override
@@ -394,49 +380,6 @@ class PermissionMatrixGrid extends StatelessWidget {
     const greenColor = Color(0xFF2E7D32);
     final redColor = Theme.of(context).colorScheme.error;
     final grayColor = Theme.of(context).colorScheme.onSurfaceVariant;
-
-    // Text-label mode: each row starts with a plain-text category label
-    // (e.g. 'Wallet', 'Members') instead of a single-letter prefix cell.
-    // Makes it obvious the row is a label, not a target-axis entry.
-    if (useTextRowLabels) {
-      final labelWidth = _textLabelWidth(context);
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: rows.map((row) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: labelWidth,
-                  child: Text(
-                    row.categoryHeader ?? row.prefix,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ...row.columns.map((c) => _cell(
-                      context,
-                      c.letter,
-                      c.action,
-                      c.label,
-                      c.description,
-                      greenColor,
-                      redColor,
-                      grayColor,
-                    )),
-              ],
-            ),
-          );
-        }).toList(),
-      );
-    }
 
     // Pad all rows to the same length for a uniform grid.
     final maxCols = rows.map((r) => r.columns.length).fold<int>(0, (a, b) => a > b ? a : b);
@@ -471,21 +414,6 @@ class PermissionMatrixGrid extends StatelessWidget {
     );
   }
 
-  /// Width for the text label column: pick the widest label with a small pad
-  /// so all rows line up.
-  double _textLabelWidth(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodySmall;
-    double widest = 0;
-    for (final row in rows) {
-      final text = row.categoryHeader ?? row.prefix;
-      final painter = TextPainter(
-        text: TextSpan(text: text, style: style),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      if (painter.width > widest) widest = painter.width;
-    }
-    return widest + 4;
-  }
 
   Widget _cell(
     BuildContext context,
