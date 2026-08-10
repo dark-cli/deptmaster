@@ -1728,7 +1728,7 @@ pub async fn create_user_group(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    // Check authorization: owner bypass OR the specific wallet-level action below
     let ctx = domain::PermissionContext {
         wallet_id: wallet_uuid,
         user_id: auth_user.user_id,
@@ -1820,7 +1820,7 @@ pub async fn update_user_group(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    // Check authorization: owner bypass OR the specific wallet-level action below
     let ctx = domain::PermissionContext {
         wallet_id: wallet_uuid,
         user_id: auth_user.user_id,
@@ -1901,7 +1901,7 @@ pub async fn delete_user_group(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    // Check authorization: owner bypass OR the specific wallet-level action below
     let ctx = domain::PermissionContext {
         wallet_id: wallet_uuid,
         user_id: auth_user.user_id,
@@ -2313,7 +2313,7 @@ pub async fn create_contact_group(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    // Check authorization: owner bypass OR the specific wallet-level action below
     let ctx = domain::PermissionContext {
         wallet_id: wallet_uuid,
         user_id: auth_user.user_id,
@@ -2406,7 +2406,7 @@ pub async fn update_contact_group(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    // Check authorization: owner bypass OR the specific wallet-level action below
     let ctx = domain::PermissionContext {
         wallet_id: wallet_uuid,
         user_id: auth_user.user_id,
@@ -2488,7 +2488,7 @@ pub async fn delete_contact_group(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission
+    // Check authorization: owner bypass OR the specific wallet-level action below
     let ctx = domain::PermissionContext {
         wallet_id: wallet_uuid,
         user_id: auth_user.user_id,
@@ -3240,28 +3240,10 @@ pub async fn set_wallet_permissions(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission
-    let ctx = domain::PermissionContext {
-        wallet_id: wallet_uuid,
-        user_id: auth_user.user_id,
-        user_role: domain::WalletRole::Member,
-    };
-
-    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
-        &state.db_pool,
-        &ctx,
-        domain::Action::WalletPermissionsEdit,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking wallet permissions: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Permission check failed"})),
-        )
-    })?;
-
-    if !can_edit {
+    // Layer 1 modifications are OWNER ONLY (vault: 11-permission-implementation-plan.md).
+    // The old wallet:permissions_edit "super permission" was removed —
+    // structural permission edits cannot be delegated.
+    if !is_wallet_owner(&state, wallet_uuid, auth_user.user_id).await? {
         return Err(insufficient_permission_response());
     }
 
@@ -3495,28 +3477,8 @@ pub async fn set_member_permissions(
         )
     })?;
 
-    // Check authorization: owner bypass OR wallet:permissions_edit permission (Layer 1 admin)
-    let ctx = domain::PermissionContext {
-        wallet_id: wallet_uuid,
-        user_id: auth_user.user_id,
-        user_role: domain::WalletRole::Member,
-    };
-
-    let can_edit = crate::permissions::resolver::can_edit_wallet_permissions(
-        &state.db_pool,
-        &ctx,
-        domain::Action::WalletPermissionsEdit,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking wallet permissions: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Permission check failed"})),
-        )
-    })?;
-
-    if !can_edit {
+    // Layer 2 modifications are OWNER ONLY (vault: 11-permission-implementation-plan.md).
+    if !is_wallet_owner(&state, wallet_uuid, auth_user.user_id).await? {
         return Err(insufficient_permission_response());
     }
 
@@ -3864,29 +3826,8 @@ pub async fn set_contact_group_permissions(
         ));
     }
 
-    // Check authorization: owner bypass OR contact_group:permissions_edit permission
-    let ctx = domain::PermissionContext {
-        wallet_id: wallet_uuid,
-        user_id: auth_user.user_id,
-        user_role: domain::WalletRole::Member,
-    };
-
-    let can_manage = crate::permissions::resolver::can_manage_contact_group(
-        &state.db_pool,
-        &ctx,
-        domain::Action::ContactGroupPermissionsEdit,
-        contact_group_uuid,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking contact-group management permission: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Permission check failed"})),
-        )
-    })?;
-
-    if !can_manage {
+    // Layer 2.5 modifications are OWNER ONLY (vault: 11-permission-implementation-plan.md).
+    if !is_wallet_owner(&state, wallet_uuid, auth_user.user_id).await? {
         return Err(insufficient_permission_response());
     }
 

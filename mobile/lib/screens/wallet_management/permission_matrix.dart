@@ -259,12 +259,9 @@ const List<MatrixRowSpec> walletPermissionRows = [
     prefix: 'P',
     categoryHeader: 'Permissions',
     columns: [
-      MatrixColumn(
-        letter: 'e',
-        action: 'wallet:permissions_edit',
-        label: 'edit',
-        description: 'Change wallet-level, member and contact-group permissions.',
-      ),
+      // wallet:permissions_edit was removed. Layer 1/2/2.5 permission
+      // modifications are owner-only (vault: 11-permission-implementation-plan.md).
+      // Only the Layer 3 (Rules matrix) admin is still delegable.
       MatrixColumn(
         letter: 'm',
         action: 'wallet:permissions_matrix_edit',
