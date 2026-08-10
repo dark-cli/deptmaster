@@ -10,16 +10,20 @@
 import 'package:flutter/material.dart';
 
 /// A single action within a matrix row: the short letter to display, the
-/// full permission name, and a human label for tooltips.
+/// full permission name, a human label, and a one-line description of what
+/// granting the permission actually lets the user do (shown as a hint in
+/// the editor dialog and inside the grid cell tooltip).
 class MatrixColumn {
   final String letter; // e.g. 'r', 'c', 'w', 'd', 'x', 'a', 'e'
   final String action; // e.g. 'contact:read', 'member_group:members_add'
   final String label; // e.g. 'read', 'create', 'add'
+  final String description; // e.g. 'See contacts in this wallet.'
 
   const MatrixColumn({
     required this.letter,
     required this.action,
     required this.label,
+    required this.description,
   });
 }
 
@@ -45,21 +49,66 @@ const List<MatrixRowSpec> contactAndTransactionRows = [
     prefix: 'C',
     categoryHeader: 'Contacts',
     columns: [
-      MatrixColumn(letter: 'r', action: 'contact:read', label: 'read'),
-      MatrixColumn(letter: 'c', action: 'contact:create', label: 'create'),
-      MatrixColumn(letter: 'w', action: 'contact:update', label: 'write'),
-      MatrixColumn(letter: 'd', action: 'contact:delete', label: 'delete'),
+      MatrixColumn(
+        letter: 'r',
+        action: 'contact:read',
+        label: 'read',
+        description: 'See contacts belonging to the selected contact group.',
+      ),
+      MatrixColumn(
+        letter: 'c',
+        action: 'contact:create',
+        label: 'create',
+        description: 'Add new contacts into the selected contact group.',
+      ),
+      MatrixColumn(
+        letter: 'w',
+        action: 'contact:update',
+        label: 'write',
+        description: 'Edit a contact\'s name, phone, notes, etc.',
+      ),
+      MatrixColumn(
+        letter: 'd',
+        action: 'contact:delete',
+        label: 'delete',
+        description: 'Permanently remove contacts (also deletes their history).',
+      ),
     ],
   ),
   MatrixRowSpec(
     prefix: 'T',
     categoryHeader: 'Transactions',
     columns: [
-      MatrixColumn(letter: 'r', action: 'transaction:read', label: 'read'),
-      MatrixColumn(letter: 'c', action: 'transaction:create', label: 'create'),
-      MatrixColumn(letter: 'w', action: 'transaction:update', label: 'write'),
-      MatrixColumn(letter: 'd', action: 'transaction:delete', label: 'delete'),
-      MatrixColumn(letter: 'x', action: 'transaction:close', label: 'close'),
+      MatrixColumn(
+        letter: 'r',
+        action: 'transaction:read',
+        label: 'read',
+        description: 'See transactions for these contacts and their balances.',
+      ),
+      MatrixColumn(
+        letter: 'c',
+        action: 'transaction:create',
+        label: 'create',
+        description: 'Add new debts, payments and other transactions.',
+      ),
+      MatrixColumn(
+        letter: 'w',
+        action: 'transaction:update',
+        label: 'write',
+        description: 'Edit existing transactions (amount, date, notes).',
+      ),
+      MatrixColumn(
+        letter: 'd',
+        action: 'transaction:delete',
+        label: 'delete',
+        description: 'Permanently remove transactions from history.',
+      ),
+      MatrixColumn(
+        letter: 'x',
+        action: 'transaction:close',
+        label: 'close',
+        description: 'Mark a transaction as settled / paid off.',
+      ),
     ],
   ),
 ];
@@ -70,10 +119,30 @@ const List<MatrixRowSpec> memberGroupRows = [
     prefix: 'M',
     categoryHeader: 'Member group management',
     columns: [
-      MatrixColumn(letter: 'r', action: 'member_group:members_read', label: 'read'),
-      MatrixColumn(letter: 'a', action: 'member_group:members_add', label: 'add'),
-      MatrixColumn(letter: 'x', action: 'member_group:members_remove', label: 'remove'),
-      MatrixColumn(letter: 'e', action: 'member_group:permissions_edit', label: 'edit permissions'),
+      MatrixColumn(
+        letter: 'r',
+        action: 'member_group:members_read',
+        label: 'read',
+        description: 'See who belongs to the target user group.',
+      ),
+      MatrixColumn(
+        letter: 'a',
+        action: 'member_group:members_add',
+        label: 'add',
+        description: 'Add wallet members to the target user group.',
+      ),
+      MatrixColumn(
+        letter: 'x',
+        action: 'member_group:members_remove',
+        label: 'remove',
+        description: 'Remove members from the target user group.',
+      ),
+      MatrixColumn(
+        letter: 'e',
+        action: 'member_group:permissions_edit',
+        label: 'edit permissions',
+        description: 'Change what the target user group is allowed to do.',
+      ),
     ],
   ),
 ];
@@ -84,10 +153,30 @@ const List<MatrixRowSpec> contactGroupRows = [
     prefix: 'C',
     categoryHeader: 'Contact group management',
     columns: [
-      MatrixColumn(letter: 'r', action: 'contact_group:contacts_read', label: 'read'),
-      MatrixColumn(letter: 'a', action: 'contact_group:contacts_add', label: 'add'),
-      MatrixColumn(letter: 'x', action: 'contact_group:contacts_remove', label: 'remove'),
-      MatrixColumn(letter: 'e', action: 'contact_group:permissions_edit', label: 'edit permissions'),
+      MatrixColumn(
+        letter: 'r',
+        action: 'contact_group:contacts_read',
+        label: 'read',
+        description: 'See which contacts are in the target contact group.',
+      ),
+      MatrixColumn(
+        letter: 'a',
+        action: 'contact_group:contacts_add',
+        label: 'add',
+        description: 'Put existing contacts into the target contact group.',
+      ),
+      MatrixColumn(
+        letter: 'x',
+        action: 'contact_group:contacts_remove',
+        label: 'remove',
+        description: 'Take contacts out of the target contact group.',
+      ),
+      MatrixColumn(
+        letter: 'e',
+        action: 'contact_group:permissions_edit',
+        label: 'edit permissions',
+        description: 'Change who can manage this contact group.',
+      ),
     ],
   ),
 ];
@@ -127,12 +216,13 @@ class PermissionMatrixGrid extends StatelessWidget {
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _cell(context, row.prefix, '', '', greenColor, redColor, grayColor),
+              _cell(context, row.prefix, '', '', '', greenColor, redColor, grayColor),
               ...row.columns.map((c) => _cell(
                     context,
                     c.letter,
                     c.action,
                     c.label,
+                    c.description,
                     greenColor,
                     redColor,
                     grayColor,
@@ -151,6 +241,7 @@ class PermissionMatrixGrid extends StatelessWidget {
     String letter,
     String permission,
     String label,
+    String description,
     Color allowColor,
     Color denyColor,
     Color unsetColor,
@@ -194,6 +285,7 @@ class PermissionMatrixGrid extends StatelessWidget {
       ),
     );
 
+    // Tooltip on hover; on mobile, long-press shows the same tooltip.
     return Container(
       width: 35,
       height: 35,
@@ -202,7 +294,13 @@ class PermissionMatrixGrid extends StatelessWidget {
       ),
       child: permission.isEmpty
           ? cell
-          : Tooltip(message: '$label: $state', child: cell),
+          : Tooltip(
+              message: '$label ($state)\n$description',
+              triggerMode: TooltipTriggerMode.longPress,
+              waitDuration: const Duration(milliseconds: 300),
+              showDuration: const Duration(seconds: 4),
+              child: cell,
+            ),
     );
   }
 
@@ -335,6 +433,7 @@ class _PermissionActionsDialogState extends State<PermissionActionsDialog> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Checkbox(
                               value: active,
@@ -342,7 +441,26 @@ class _PermissionActionsDialogState extends State<PermissionActionsDialog> {
                                 _set(col.action, checked == true ? _EditState.allow : null);
                               },
                             ),
-                            Expanded(child: Text(col.label)),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(col.label),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      col.description,
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                         if (active) ...[
