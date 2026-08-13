@@ -51,55 +51,6 @@ async fn is_wallet_owner(
     })
 }
 
-/// Check user is wallet owner (old role-based check, deprecated)
-/// Kept for backward compatibility during transition period
-#[deprecated(since = "0.2.0", note = "Use is_wallet_owner() and permission matrix instead")]
-async fn check_wallet_role(
-    state: &AppState,
-    wallet_id: Uuid,
-    auth_user: &AuthUser,
-    required_role: WalletRole,
-) -> Result<WalletRole, (StatusCode, Json<serde_json::Value>)> {
-    // Admin bypass removed: permission checks apply to all users equally.
-    // Admin role is separate from wallet permissions.
-
-    let db = Database::new((*state.db_pool).clone());
-    let role_str = db
-        .get_wallet_user_role(wallet_id, auth_user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error checking wallet role: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "Database error"})),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
-                    "message": "You do not have access to this wallet"
-                })),
-            )
-        })?;
-
-    let user_role = WalletRole::from_str(&role_str).unwrap_or(WalletRole::Member);
-
-    // Use type-safe comparison: user_role must meet or exceed required_role
-    if user_role.can_perform(required_role) {
-        Ok(user_role)
-    } else {
-        Err((
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({
-                "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
-                "message": "Insufficient wallet permissions"
-            })),
-        ))
-    }
-}
-
 /// Check if user can perform an operation by checking a synthetic event permission
 /// Uses the permission event system for consistent permission checking
 async fn check_event_permissions(
