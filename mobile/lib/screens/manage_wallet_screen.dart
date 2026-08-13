@@ -93,17 +93,12 @@ class ManageWalletScreen extends ConsumerWidget {
       ),
     );
     if (confirm != true || !context.mounted) return;
-    final myUserId = await Api.getUserId();
-    if (myUserId == null || myUserId.isEmpty) {
-      if (context.mounted) {
-        ToastService.showErrorFromContext(context, 'Not logged in.');
-      }
-      return;
-    }
     try {
-      // Leaving is 'remove me from this wallet'. Server allows the user to
-      // remove themselves regardless of admin permission.
-      await Api.removeWalletUser(walletId, myUserId);
+      // Server-side: removes the user from the wallet.
+      // Client-side: wipes local cache + clears current_wallet_id if this
+      // was the selected wallet, so the picker doesn't try to load stale
+      // data on the next open.
+      await Api.leaveWallet(walletId);
       ref.invalidate(walletsProvider);
       if (context.mounted) {
         ToastService.showSuccessFromContext(context, 'Left wallet');

@@ -541,11 +541,21 @@ class Api {
     );
   }
 
-  /// Owner-only. Soft-deletes the wallet on the server.
+  /// Owner-only. Soft-deletes the wallet on the server and wipes local
+  /// cache (events, projections, snapshots, config). If it was the
+  /// currently-selected wallet, current_wallet_id is cleared too.
   static Future<void> deleteWallet(String walletId) async {
     if (kIsWeb) return;
     await _ensureRustReady();
     await rust.deleteWallet(walletId: walletId);
+  }
+
+  /// Remove the current user from a wallet. No admin permission required —
+  /// anyone can leave. Also wipes local cache like [deleteWallet].
+  static Future<void> leaveWallet(String walletId) async {
+    if (kIsWeb) return;
+    await _ensureRustReady();
+    await rust.leaveWallet(walletId: walletId);
   }
 
   static Future<List<Map<String, dynamic>>> getWalletUsers(String walletId) async {

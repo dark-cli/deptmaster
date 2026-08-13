@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `current_user_id_or_nil`, `current_user_id`, `jwt_payload`, `parse_resource`
+// These functions are ignored because they are not marked as `pub`: `current_user_id_or_nil`, `current_user_id`, `jwt_payload`, `parse_resource`, `wipe_local_wallet`
 
 Future<void> login({required String username, required String password}) =>
     RustLib.instance.api.crateLogin(username: username, password: password);
@@ -42,9 +42,20 @@ Future<void> updateWallet(
     RustLib.instance.api.crateUpdateWallet(
         walletId: walletId, name: name, description: description);
 
-/// Owner-only. Soft-deletes the wallet on the server.
+/// Owner-only. Soft-deletes the wallet on the server, then wipes the
+/// local cache (events, projections, snapshots, per-wallet config) so
+/// stale rows don't leak into the next session. If the deleted wallet
+/// was the currently-selected one, `current_wallet_id` is cleared so
+/// the UI drops back to the wallet picker.
 Future<void> deleteWallet({required String walletId}) =>
     RustLib.instance.api.crateDeleteWallet(walletId: walletId);
+
+/// Remove the current user from a wallet (i.e. "leave"). Anyone can do
+/// this for themselves — no admin permission required. Wipes the local
+/// cache for the wallet and resets `current_wallet_id` if applicable so
+/// the UI can navigate away cleanly.
+Future<void> leaveWallet({required String walletId}) =>
+    RustLib.instance.api.crateLeaveWallet(walletId: walletId);
 
 Future<void> ensureCurrentWallet() =>
     RustLib.instance.api.crateEnsureCurrentWallet();

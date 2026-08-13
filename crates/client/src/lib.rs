@@ -96,11 +96,52 @@ pub fn update_wallet(
     Ok(())
 }
 
-/// Owner-only. Soft-deletes the wallet on the server.
+/// Owner-only. Soft-deletes the wallet on the server, then wipes the
+/// local cache (events, projections, snapshots, per-wallet config) so
+/// stale rows don't leak into the next session. If the deleted wallet
+/// was the currently-selected one, `current_wallet_id` is cleared so
+/// the UI drops back to the wallet picker.
 pub fn delete_wallet(wallet_id: String) -> Result<(), String> {
     api::delete_wallet_api(&wallet_id).map_err(|e| e.to_string())?;
+    wipe_local_wallet(&wallet_id);
     integration::data_bus::emit(integration::data_bus::DataChangeKind::Wallets, None);
     Ok(())
+}
+
+/// Remove the current user from a wallet (i.e. "leave"). Anyone can do
+/// this for themselves — no admin permission required. Wipes the local
+/// cache for the wallet and resets `current_wallet_id` if applicable so
+/// the UI can navigate away cleanly.
+pub fn leave_wallet(wallet_id: String) -> Result<(), String> {
+    // Ask the server who we are so this always uses the actual signed-in user
+    // (avoids relying on the caller to pass the correct user_id).
+    let my_user_id = database::storage::config_get("user_id")
+        .map_err(|e| format!("no user_id in local config: {}", e))?
+        .ok_or_else(|| "Not logged in".to_string())?;
+    api::remove_wallet_user_api(&wallet_id, &my_user_id).map_err(|e| e.to_string())?;
+    wipe_local_wallet(&wallet_id);
+    integration::data_bus::emit(integration::data_bus::DataChangeKind::Wallets, None);
+    Ok(())
+}
+
+/// Clear a wallet's local storage and unselect it if it was current.
+/// Errors are logged but not propagated — leaving/deleting has already
+/// succeeded on the server, and the wallet won't be reachable again
+/// anyway, so best-effort cleanup is fine.
+fn wipe_local_wallet(wallet_id: &str) {
+    if let Err(e) = database::storage::clear_wallet(wallet_id) {
+        rust_log!("[debitum_rs] wipe_local_wallet: clear_wallet failed: {}", e);
+    }
+    if let Ok(Some(current)) = database::storage::config_get("current_wallet_id") {
+        if current == wallet_id {
+            if let Err(e) = database::storage::config_remove("current_wallet_id") {
+                rust_log!(
+                    "[debitum_rs] wipe_local_wallet: config_remove current_wallet_id failed: {}",
+                    e
+                );
+            }
+        }
+    }
 }
 
 pub fn ensure_current_wallet() -> Result<(), String> {
