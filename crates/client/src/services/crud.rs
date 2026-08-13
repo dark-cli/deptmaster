@@ -520,6 +520,11 @@ pub fn bulk_delete_transactions(transaction_ids: Vec<String>) -> Result<(), Stri
 }
 
 pub fn logout() -> Result<(), String> {
+    // Stop the realtime worker first: it holds the token in its URL and
+    // would keep trying to reconnect on 401 loops if left running while
+    // we clear the config table underneath it.
+    let _ = crate::integration::ws::disconnect_realtime();
+
     // Best-effort: ask the server to revoke this device's refresh
     // token first, so a leaked copy stops working the moment the user
     // taps logout instead of living until its 30-day expiry. If the

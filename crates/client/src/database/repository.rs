@@ -225,6 +225,10 @@ pub fn config_remove(key: &str) -> Result<(), ClientError> {
 }
 
 pub fn clear_all() -> Result<(), ClientError> {
+    // Called on logout — must nuke every table the client writes to so
+    // the next user (or the next login of the same user) starts clean.
+    // Missing a table here leaks the previous session's data into the
+    // new one via Riverpod caches and cached projections.
     with_db(|conn| {
         conn.execute_batch(
             r#"
@@ -234,7 +238,10 @@ pub fn clear_all() -> Result<(), ClientError> {
             DELETE FROM wallet_users;
             DELETE FROM wallet_owners;
             DELETE FROM user_groups;
+            DELETE FROM user_group_members;
             DELETE FROM contact_groups;
+            DELETE FROM contact_group_members;
+            DELETE FROM group_permission_matrix;
             DELETE FROM projection_snapshots;
             DELETE FROM config;
             "#,
@@ -247,6 +254,25 @@ pub fn clear_wallet(wallet_id: &str) -> Result<(), ClientError> {
     let last_sync_key = format!("last_sync_timestamp_{}", wallet_id);
     let server_hash_key = format!("server_hash_{}", wallet_id);
     with_db(|conn| {
+        // Delete child tables first — they'd cascade via ON DELETE CASCADE on
+        // the parent groups, but PRAGMA foreign_keys=OFF anywhere in a
+        // transaction wrapper would silently leak them. Being explicit
+        // survives that and reads cleaner.
+        conn.execute(
+            "DELETE FROM user_group_members WHERE user_group_id IN
+                (SELECT id FROM user_groups WHERE wallet_id = ?1)",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM contact_group_members WHERE contact_group_id IN
+                (SELECT id FROM contact_groups WHERE wallet_id = ?1)",
+            params![wallet_id],
+        )?;
+        conn.execute(
+            "DELETE FROM group_permission_matrix WHERE user_group_id IN
+                (SELECT id FROM user_groups WHERE wallet_id = ?1)",
+            params![wallet_id],
+        )?;
         conn.execute(
             "DELETE FROM events WHERE wallet_id = ?1",
             params![wallet_id],
