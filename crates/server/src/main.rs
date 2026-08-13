@@ -157,12 +157,14 @@ async fn main() -> anyhow::Result<()> {
     // middleware extracts it from the path segment after `wallets/` and does NOT
     // fall back to headers or query strings (see middleware/wallet_context.rs).
     let wallet_protected_routes = Router::new()
-        // Rename / delete the wallet from the user-facing manage screen.
-        // update_wallet gates on wallet:info_update (owners bypass, non-owners
-        // need the grant); delete_wallet is hardcoded owner-only.
+        // Wallet root: GET (read info), PUT (rename via wallet:info_update),
+        // DELETE (owner-only). The GET used to live on a separate `:id`
+        // route in protected_api_routes; consolidated here so axum doesn't
+        // trip over two conflicting param names on the same path.
         .route(
             "/api/wallets/:wallet_id",
-            axum::routing::put(handlers::update_wallet)
+            get(handlers::get_wallet)
+                .put(handlers::update_wallet)
                 .delete(handlers::delete_wallet),
         )
         .route(
@@ -283,7 +285,8 @@ async fn main() -> anyhow::Result<()> {
             "/api/wallets/join",
             axum::routing::post(handlers::join_wallet_by_code),
         )
-        .route("/api/wallets/:id", get(handlers::get_wallet))
+        // GET /api/wallets/:wallet_id moved into wallet_protected_routes
+        // (kept with PUT/DELETE so all three verbs live on one route entry).
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             auth_middleware,
