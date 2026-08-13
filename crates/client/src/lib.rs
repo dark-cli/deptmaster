@@ -84,6 +84,25 @@ pub fn create_wallet(name: String, description: String) -> Result<String, String
     serde_json::to_string(&w).map_err(|e| e.to_string())
 }
 
+/// Rename / edit the wallet. Server gates on wallet:info_update; owners bypass.
+/// Fields are optional so the caller can send only the ones they mean to update.
+pub fn update_wallet(
+    wallet_id: String,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<(), String> {
+    api::update_wallet_api(&wallet_id, name, description).map_err(|e| e.to_string())?;
+    integration::data_bus::emit(integration::data_bus::DataChangeKind::Wallets, None);
+    Ok(())
+}
+
+/// Owner-only. Soft-deletes the wallet on the server.
+pub fn delete_wallet(wallet_id: String) -> Result<(), String> {
+    api::delete_wallet_api(&wallet_id).map_err(|e| e.to_string())?;
+    integration::data_bus::emit(integration::data_bus::DataChangeKind::Wallets, None);
+    Ok(())
+}
+
 pub fn ensure_current_wallet() -> Result<(), String> {
     if get_current_wallet_id().is_ok() {
         return Ok(());

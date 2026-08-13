@@ -11,6 +11,21 @@ pub fn create_wallet_api(name: String, description: String) -> Result<Wallet, St
     api::create_wallet_api(name, description).map_err(|e| e.to_string())
 }
 
+/// Rename / edit the wallet. Empty strings clear the field only if the
+/// server treats them so; both fields are Option to allow partial updates.
+pub fn update_wallet_api(
+    wallet_id: &str,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<(), String> {
+    api::update_wallet_api(wallet_id, name, description).map_err(|e| e.to_string())
+}
+
+/// Owner-only. Soft-deletes the wallet on the server.
+pub fn delete_wallet_api(wallet_id: &str) -> Result<(), String> {
+    api::delete_wallet_api(wallet_id).map_err(|e| e.to_string())
+}
+
 pub fn list_wallet_users_api(wallet_id: &str) -> Result<String, String> {
     api::list_wallet_users_api(wallet_id).map_err(|e| e.to_string())
 }

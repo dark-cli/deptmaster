@@ -203,6 +203,30 @@ fn wallet_management_delete(wallet_id: &str, path: &str) -> Result<String, Clien
     })
 }
 
+// Wallet: rename / delete.
+//
+// FRB can't generate bindings for `Option<&str>`, so the top-level pub
+// signature takes owned Options (this matches the handlers/wallets.rs
+// wrapper signature).
+pub fn update_wallet_api(
+    wallet_id: &str,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<(), ClientError> {
+    let mut body = serde_json::Map::new();
+    if let Some(n) = name {
+        body.insert("name".into(), serde_json::Value::String(n));
+    }
+    if let Some(d) = description {
+        body.insert("description".into(), serde_json::Value::String(d));
+    }
+    wallet_management_put_json(wallet_id, "", &serde_json::Value::Object(body)).map(|_| ())
+}
+
+pub fn delete_wallet_api(wallet_id: &str) -> Result<(), ClientError> {
+    wallet_management_delete(wallet_id, "").map(|_| ())
+}
+
 // User management
 pub fn list_wallet_users_api(wallet_id: &str) -> Result<String, ClientError> {
     let url = wallet_management_url(wallet_id, "/users")?;

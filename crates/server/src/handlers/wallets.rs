@@ -504,32 +504,14 @@ pub async fn delete_wallet(
         )
     })?;
 
-    // Check wallet:delete permission (owners bypass via hardcoded check)
-    let can_delete = crate::permissions::resolver::can_perform(
-        &state.db_pool,
-        &PermissionContext {
-            wallet_id: wallet_uuid,
-            user_id: auth_user.user_id,
-            user_role: WalletRole::Member,
-        },
-        domain::Action::WalletDelete,
-        &Resource::Wallet(wallet_uuid),
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Error checking wallet:delete permission: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "Failed to check permissions"})),
-        )
-    })?;
-
-    if !can_delete {
+    // Delete is OWNER ONLY (vault 04-permissions-and-undo/10-unified-permission-system.md
+    // marks wallet:delete as hardcoded owner-only, non-delegable).
+    if !is_wallet_owner(&state, wallet_uuid, auth_user.user_id).await? {
         return Err((
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({
                 "code": "DEBITUM_INSUFFICIENT_WALLET_PERMISSION",
-                "message": "You do not have permission to delete this wallet"
+                "message": "Only the wallet owner can delete this wallet"
             })),
         ));
     }

@@ -524,6 +524,30 @@ class Api {
   }
 
   // ---------- Wallet management (manage wallet screen) ----------
+
+  /// Rename / edit the wallet. Non-null fields are sent to the server;
+  /// server gates on wallet:info_update (owners bypass).
+  static Future<void> updateWallet(
+    String walletId, {
+    String? name,
+    String? description,
+  }) async {
+    if (kIsWeb) return;
+    await _ensureRustReady();
+    await rust.updateWallet(
+      walletId: walletId,
+      name: name,
+      description: description,
+    );
+  }
+
+  /// Owner-only. Soft-deletes the wallet on the server.
+  static Future<void> deleteWallet(String walletId) async {
+    if (kIsWeb) return;
+    await _ensureRustReady();
+    await rust.deleteWallet(walletId: walletId);
+  }
+
   static Future<List<Map<String, dynamic>>> getWalletUsers(String walletId) async {
     if (kIsWeb) return [];
     await _ensureRustReady();

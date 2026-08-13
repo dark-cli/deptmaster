@@ -157,6 +157,14 @@ async fn main() -> anyhow::Result<()> {
     // middleware extracts it from the path segment after `wallets/` and does NOT
     // fall back to headers or query strings (see middleware/wallet_context.rs).
     let wallet_protected_routes = Router::new()
+        // Rename / delete the wallet from the user-facing manage screen.
+        // update_wallet gates on wallet:info_update (owners bypass, non-owners
+        // need the grant); delete_wallet is hardcoded owner-only.
+        .route(
+            "/api/wallets/:wallet_id",
+            axum::routing::put(handlers::update_wallet)
+                .delete(handlers::delete_wallet),
+        )
         .route(
             "/api/wallets/:wallet_id/sync/hash",
             get(handlers::get_sync_hash),

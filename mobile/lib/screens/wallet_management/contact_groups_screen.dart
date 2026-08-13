@@ -68,6 +68,53 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
     }
   }
 
+  Future<void> _renameGroup(Map<String, dynamic> group) async {
+    final groupId = group['id'] as String? ?? '';
+    final currentName = group['name'] as String? ?? '';
+    final nameController = TextEditingController(text: currentName);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename group'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(labelText: 'Name'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (nameController.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final newName = nameController.text.trim();
+    if (newName == currentName) return;
+    try {
+      await Api.updateWalletContactGroup(widget.walletId, groupId, newName);
+    } catch (e) {
+      if (Api.isPermissionDeniedError(e)) {
+        if (mounted) {
+          ToastService.showErrorFromContext(context, 'You don\'t have permission.');
+        }
+      } else if (mounted) {
+        ToastService.showErrorFromContext(
+          context,
+          e.toString().replaceFirst('Exception: ', ''),
+        );
+      }
+    }
+  }
+
   Future<void> _deleteGroup(Map<String, dynamic> group) async {
     final isSystem = group['is_system'] == true;
     if (isSystem) {
@@ -151,9 +198,16 @@ class _ContactGroupsScreenState extends ConsumerState<ContactGroupsScreen> {
                     child: CustomExpansionTile(
                       title: Text(g['name'] as String? ?? ''),
                       subtitle: const Text('Static'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _deleteGroup(g),
+                      trailing: PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (v) {
+                          if (v == 'rename') _renameGroup(g);
+                          if (v == 'delete') _deleteGroup(g);
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'rename', child: Text('Rename')),
+                          PopupMenuItem(value: 'delete', child: Text('Delete')),
+                        ],
                       ),
                       children: [
                         _ContactGroupMembers(

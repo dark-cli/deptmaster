@@ -15,6 +15,17 @@ Future<Wallet> createWalletApi(
     RustLib.instance.api.crateHandlersWalletsCreateWalletApi(
         name: name, description: description);
 
+/// Rename / edit the wallet. Empty strings clear the field only if the
+/// server treats them so; both fields are Option to allow partial updates.
+Future<void> updateWalletApi(
+        {required String walletId, String? name, String? description}) =>
+    RustLib.instance.api.crateHandlersWalletsUpdateWalletApi(
+        walletId: walletId, name: name, description: description);
+
+/// Owner-only. Soft-deletes the wallet on the server.
+Future<void> deleteWalletApi({required String walletId}) => RustLib.instance.api
+    .crateHandlersWalletsDeleteWalletApi(walletId: walletId);
+
 Future<String> listWalletUsersApi({required String walletId}) =>
     RustLib.instance.api
         .crateHandlersWalletsListWalletUsersApi(walletId: walletId);

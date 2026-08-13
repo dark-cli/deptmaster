@@ -3,6 +3,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api.dart';
+import '../providers/wallets_provider.dart';
 import '../utils/toast_service.dart';
 import '../widgets/gradient_background.dart';
 import '../widgets/management_section_card.dart';
@@ -26,9 +28,9 @@ class ManageWalletScreen extends ConsumerWidget {
     required this.walletName,
   });
 
-  void _showRenameWalletDialog(BuildContext context) {
+  Future<void> _showRenameWalletDialog(BuildContext context, WidgetRef ref) async {
     final nameController = TextEditingController(text: walletName);
-    showDialog<bool>(
+    final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Rename wallet'),
@@ -49,15 +51,34 @@ class ManageWalletScreen extends ConsumerWidget {
         ],
       ),
     );
-    ToastService.showInfoFromContext(context, 'Rename wallet (coming soon - API not yet available)');
+    if (ok != true || !context.mounted) return;
+    final newName = nameController.text.trim();
+    if (newName.isEmpty || newName == walletName) return;
+    try {
+      await Api.updateWallet(walletId, name: newName);
+      ref.invalidate(walletsProvider);
+      if (context.mounted) {
+        ToastService.showSuccessFromContext(context, 'Wallet renamed');
+        // Pop back to the wallet list so the new name is picked up on the AppBar too.
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        if (Api.isPermissionDeniedError(e)) {
+          ToastService.showErrorFromContext(context, 'You don\'t have permission to rename this wallet.');
+        } else {
+          ToastService.showErrorFromContext(context, e.toString().replaceFirst('Exception: ', ''));
+        }
+      }
+    }
   }
 
-  void _showLeaveWalletDialog(BuildContext context) {
-    showDialog<bool>(
+  Future<void> _showLeaveWalletDialog(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Leave wallet'),
-        content: const Text('You will no longer have access to this wallet. This action cannot be undone.'),
+        content: const Text('You will no longer have access to this wallet.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -71,11 +92,32 @@ class ManageWalletScreen extends ConsumerWidget {
         ],
       ),
     );
-    ToastService.showInfoFromContext(context, 'Leave wallet (coming soon - API not yet available)');
+    if (confirm != true || !context.mounted) return;
+    final myUserId = await Api.getUserId();
+    if (myUserId == null || myUserId.isEmpty) {
+      if (context.mounted) {
+        ToastService.showErrorFromContext(context, 'Not logged in.');
+      }
+      return;
+    }
+    try {
+      // Leaving is 'remove me from this wallet'. Server allows the user to
+      // remove themselves regardless of admin permission.
+      await Api.removeWalletUser(walletId, myUserId);
+      ref.invalidate(walletsProvider);
+      if (context.mounted) {
+        ToastService.showSuccessFromContext(context, 'Left wallet');
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ToastService.showErrorFromContext(context, e.toString().replaceFirst('Exception: ', ''));
+      }
+    }
   }
 
-  void _showDeleteWalletDialog(BuildContext context) {
-    showDialog<bool>(
+  Future<void> _showDeleteWalletDialog(BuildContext context, WidgetRef ref) async {
+    final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete wallet'),
@@ -93,7 +135,23 @@ class ManageWalletScreen extends ConsumerWidget {
         ],
       ),
     );
-    ToastService.showInfoFromContext(context, 'Delete wallet (coming soon - API not yet available)');
+    if (confirm != true || !context.mounted) return;
+    try {
+      await Api.deleteWallet(walletId);
+      ref.invalidate(walletsProvider);
+      if (context.mounted) {
+        ToastService.showSuccessFromContext(context, 'Wallet deleted');
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        if (Api.isPermissionDeniedError(e)) {
+          ToastService.showErrorFromContext(context, 'Only the wallet owner can delete this wallet.');
+        } else {
+          ToastService.showErrorFromContext(context, e.toString().replaceFirst('Exception: ', ''));
+        }
+      }
+    }
   }
 
   @override
@@ -286,23 +344,17 @@ class ManageWalletScreen extends ConsumerWidget {
                       ManagementTile(
                         title: 'Rename Wallet',
                         leadingIcon: Icons.edit,
-                        onTap: () {
-                          _showRenameWalletDialog(context);
-                        },
+                        onTap: () => _showRenameWalletDialog(context, ref),
                       ),
                       ManagementTile(
                         title: 'Leave Wallet',
                         leadingIcon: Icons.exit_to_app,
-                        onTap: () {
-                          _showLeaveWalletDialog(context);
-                        },
+                        onTap: () => _showLeaveWalletDialog(context, ref),
                       ),
                       ManagementTile(
                         title: 'Delete Wallet',
                         leadingIcon: Icons.delete,
-                        onTap: () {
-                          _showDeleteWalletDialog(context);
-                        },
+                        onTap: () => _showDeleteWalletDialog(context, ref),
                       ),
                     ],
                   ),

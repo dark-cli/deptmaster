@@ -35,6 +35,17 @@ Future<String> createWallet(
     RustLib.instance.api
         .crateCreateWallet(name: name, description: description);
 
+/// Rename / edit the wallet. Server gates on wallet:info_update; owners bypass.
+/// Fields are optional so the caller can send only the ones they mean to update.
+Future<void> updateWallet(
+        {required String walletId, String? name, String? description}) =>
+    RustLib.instance.api.crateUpdateWallet(
+        walletId: walletId, name: name, description: description);
+
+/// Owner-only. Soft-deletes the wallet on the server.
+Future<void> deleteWallet({required String walletId}) =>
+    RustLib.instance.api.crateDeleteWallet(walletId: walletId);
+
 Future<void> ensureCurrentWallet() =>
     RustLib.instance.api.crateEnsureCurrentWallet();
 

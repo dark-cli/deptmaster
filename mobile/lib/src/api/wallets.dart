@@ -18,6 +18,14 @@ Future<Wallet> createWalletApi(
     RustLib.instance.api
         .crateApiWalletsCreateWalletApi(name: name, description: description);
 
+Future<void> updateWalletApi(
+        {required String walletId, String? name, String? description}) =>
+    RustLib.instance.api.crateApiWalletsUpdateWalletApi(
+        walletId: walletId, name: name, description: description);
+
+Future<void> deleteWalletApi({required String walletId}) =>
+    RustLib.instance.api.crateApiWalletsDeleteWalletApi(walletId: walletId);
+
 Future<String> listWalletUsersApi({required String walletId}) =>
     RustLib.instance.api.crateApiWalletsListWalletUsersApi(walletId: walletId);
 
