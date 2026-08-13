@@ -207,6 +207,15 @@ async fn ws_loop(token: String, wallet_id: String, ws_url: String, cancel: Arc<N
                                         rust_log!("[debitum_rs] wallet_ui_update: no data field");
                                     }
                                 }
+                                // Wallet renamed / soft-deleted (broadcast by server's
+                                // update_wallet / delete_wallet handlers). Tell Dart
+                                // providers that the wallet list changed so the
+                                // picker refetches and shows the new name — or drops
+                                // the deleted wallet — in real time.
+                                "wallet_updated" | "wallet_deleted" => {
+                                    rust_log!("[debitum_rs] ws got {}", kind);
+                                    data_bus::emit(data_bus::DataChangeKind::Wallets, None);
+                                }
                                 _ => {
                                     // Other broadcast types (heartbeats etc) are ignored.
                                 }

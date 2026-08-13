@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../models/wallet.dart';
+import '../providers/data_change_provider.dart';
+import '../providers/wallets_provider.dart';
 import '../utils/toast_service.dart';
 import '../utils/theme_colors.dart';
 import '../widgets/empty_state.dart';
@@ -170,6 +172,20 @@ class _WalletSelectionSheetState extends ConsumerState<_WalletSelectionSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // Refetch on any wallets/membership event (local rename/delete/leave,
+    // remote push via WS). walletsProvider itself already invalidates on
+    // these — invalidate our screen too so the local _wallets list follows.
+    ref.listen(dataChangeStreamProvider, (_, asyncEv) {
+      final ev = asyncEv.valueOrNull;
+      if (ev == null) return;
+      if (ev.kind == DataChangeKind.wallets ||
+          ev.kind == DataChangeKind.walletMembership ||
+          ev.kind == DataChangeKind.session) {
+        ref.invalidate(walletsProvider);
+        _loadWallets();
+      }
+    });
+
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
