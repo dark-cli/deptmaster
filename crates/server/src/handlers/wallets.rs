@@ -1806,6 +1806,13 @@ pub async fn update_user_group(
         )
     })?;
 
+    // Tell clients that any user_groups-based UI must refetch (name changed).
+    crate::websocket::broadcast_wallet_ui_update(
+        &state.broadcast_tx,
+        wallet_uuid,
+        "user_groups_changed",
+    );
+
     Ok(Json(UserGroupResponse {
         id: group_id,
         wallet_id: wallet_id.clone(),
@@ -2391,6 +2398,13 @@ pub async fn update_contact_group(
             Json(serde_json::json!({"error": "Failed to update contact group"})),
         )
     })?;
+
+    // Notify clients to refetch — name changed.
+    crate::websocket::broadcast_wallet_ui_update(
+        &state.broadcast_tx,
+        wallet_uuid,
+        "contact_groups_changed",
+    );
 
     Ok(Json(ContactGroupResponse {
         id: group_id,

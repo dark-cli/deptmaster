@@ -558,7 +558,7 @@ impl<'a> Projection for ServerProjection<'a> {
         wallet_id: Uuid,
         name: &str,
     ) -> Result<(), Self::Error> {
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE user_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false",
         )
         .bind(name)
@@ -566,6 +566,13 @@ impl<'a> Projection for ServerProjection<'a> {
         .bind(wallet_id)
         .execute(self.pool)
         .await?;
+        tracing::info!(
+            "rename_user_group id={} wallet_id={} new_name={:?} rows_affected={}",
+            id,
+            wallet_id,
+            name,
+            result.rows_affected()
+        );
         Ok(())
     }
 
@@ -641,7 +648,7 @@ impl<'a> Projection for ServerProjection<'a> {
         wallet_id: Uuid,
         name: &str,
     ) -> Result<(), Self::Error> {
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE contact_groups SET name = $1 WHERE id = $2 AND wallet_id = $3 AND is_system = false",
         )
         .bind(name)
@@ -649,6 +656,13 @@ impl<'a> Projection for ServerProjection<'a> {
         .bind(wallet_id)
         .execute(self.pool)
         .await?;
+        tracing::info!(
+            "rename_contact_group id={} wallet_id={} new_name={:?} rows_affected={}",
+            id,
+            wallet_id,
+            name,
+            result.rows_affected()
+        );
         Ok(())
     }
 
