@@ -1,5 +1,7 @@
 name: debt_tracker_mobile
 description: Debt Tracker Mobile App
+# Licensed under PolyForm Noncommercial 1.0.0. Commercial use requires a
+# separate license from the copyright holder. See /LICENSE at repo root.
 publish_to: 'none'
 version: 1.0.0+1
 
