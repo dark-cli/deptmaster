@@ -9,6 +9,10 @@ members = [
     "crates/core/snapshots",
 ]
 
+[workspace.package]
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+# Commercial use requires a separate license from the copyright holder. See LICENSE.
+
 [profile.dev]
 incremental = true
 opt-level = 0

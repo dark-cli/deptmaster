@@ -2,7 +2,9 @@
 
 A self-hosted debt tracker. You run the server, your devices sync to it. Built in Rust with a Flutter mobile UI.
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-lightgrey.svg)](LICENSE)
+
+> **License in brief:** personal, hobby, educational, and other non-commercial use (including modification and forking) is permitted. **Commercial use** — running this as part of a paid product/service, offering it to paying customers, or using it inside a for-profit organization's operations — requires a separate commercial license from the copyright holder. Contact: `ali.musa.omran@gmail.com`.
 
 ---
 
