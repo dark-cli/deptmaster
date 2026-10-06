@@ -105,4 +105,4 @@ Pre-1.0. Server and client sync engine are stable. The Flutter UI runs on Androi
 
 ## License
 
-[GPLv3](LICENSE). Free to use, modify, and distribute under the same license.
+[PolyForm Noncommercial 1.0.0](LICENSE). Personal, hobby, educational, and other non-commercial use (including modification and forking) is permitted. Commercial / revenue-producing use requires a separate written license from the copyright holder — contact `alimussa@kaleem.dev`.
