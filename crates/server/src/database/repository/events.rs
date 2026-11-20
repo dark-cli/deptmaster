@@ -275,11 +275,12 @@ impl Database {
         wallet_id: Uuid,
         user_id: Uuid,
         version: i32,
+        created_at: DateTime<Utc>,
     ) -> Result<i64, DbError> {
         let result = sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO events (event_id, aggregate_id, aggregate_type, event_type, event_data, wallet_id, user_id, event_version, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (wallet_id, event_id) DO NOTHING
             RETURNING id
             "#
@@ -292,6 +293,7 @@ impl Database {
         .bind(wallet_id)
         .bind(user_id)
         .bind(version)
+        .bind(created_at.naive_utc())
         .fetch_optional(&self.pool)
         .await?;
 

@@ -552,6 +552,7 @@ impl DatabaseRepository for Database {
             wallet_id,
             user_id,
             version,
+            chrono::Utc::now(),
         )
         .await
     }

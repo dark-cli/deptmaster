@@ -69,6 +69,56 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
   Map<String, String> _contactNameCache = {}; // Cache for contact names
   Map<String, Event> _undoneEventsCache = {}; // Cache for undone events
   bool _isDisposed = false; // Flag to prevent operations after disposal
+  Map<String, double> _runningTotals = {}; // event_id -> computed total_debt
+
+  /// Resolve total_debt for an event: baked-in value wins, else progressively
+  /// computed one from `_runningTotals` (populated in the events listener).
+  double? _debtOf(Event e) {
+    final raw = e.eventData['total_debt'];
+    if (raw is num) return raw.toDouble();
+    return _runningTotals[e.id];
+  }
+
+  /// Replay every transaction event chronologically to produce a running
+  /// `total_debt` keyed by event id (same algorithm as DebtChartWidget).
+  Map<String, double> _computeRunningTotals(List<Event> events) {
+    final sorted = [...events]..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    final undone = <String>{};
+    for (final e in sorted) {
+      if (e.eventType == 'UNDO') {
+        final id = e.eventData['undone_event_id'] as String?;
+        if (id != null) undone.add(id);
+      }
+    }
+    final balancePerContact = <String, double>{};
+    final out = <String, double>{};
+    void applyAmount(String? contactId, dynamic amount, String? direction) {
+      if (contactId == null || amount is! num) return;
+      final signed = direction == 'lent' ? amount.toDouble() : -amount.toDouble();
+      balancePerContact[contactId] = (balancePerContact[contactId] ?? 0) + signed;
+    }
+    for (final e in sorted) {
+      if (undone.contains(e.id)) continue;
+      final d = e.eventData;
+      final isCreate = e.eventType == 'CREATED' || e.eventType.contains('CREATE');
+      final isDelete = e.eventType == 'DELETED' || e.eventType.contains('DELETE');
+      if (e.aggregateType == 'transaction' && isCreate) {
+        applyAmount(d['contact_id'] as String?, d['amount'], d['direction'] as String?);
+      } else if (e.aggregateType == 'transaction' && isDelete) {
+        final dt = d['deleted_transaction'];
+        if (dt is Map) {
+          final dir = dt['direction'] as String?;
+          applyAmount(dt['contact_id'] as String?, dt['amount'], dir == 'lent' ? 'owed' : 'lent');
+        }
+      }
+      double running = 0;
+      for (final v in balancePerContact.values) {
+        running += v;
+      }
+      out[e.id] = running;
+    }
+    return out;
+  }
   ProviderSubscription<AsyncValue<List<Event>>>? _eventsSub;
   
   // Filters (same as events log but without search)
@@ -100,9 +150,11 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
       final base = next.valueOrNull;
       if (base == null) return;
 
+      _runningTotals = _computeRunningTotals(base);
       final eventsWithDebt = base.where((e) {
         final totalDebt = e.eventData['total_debt'];
-        return totalDebt != null && totalDebt is num;
+        if (totalDebt is num) return true;
+        return _runningTotals.containsKey(e.id);
       }).toList()
         ..sort((a, b) => a.timestamp.compareTo(b.timestamp)); // oldest first for chart building
 
@@ -401,24 +453,26 @@ class _DebtChartDetailScreenState extends ConsumerState<DebtChartDetailScreen> {
       bool hasTransactions = false;
       
       if (eventsInInterval.isNotEmpty) {
-        final sum = eventsInInterval.map((e) => 
-          (e.eventData['total_debt'] as num).toDouble()
-        ).reduce((a, b) => a + b);
-        avgDebt = sum / eventsInInterval.length;
-        hasTransactions = true;
+        final debts = eventsInInterval.map(_debtOf).whereType<double>().toList();
+        if (debts.isNotEmpty) {
+          avgDebt = debts.reduce((a, b) => a + b) / debts.length;
+          hasTransactions = true;
+        } else {
+          continue; // can't place this interval
+        }
       } else {
         // Find closest event before this interval
-        final beforeEvents = eventsInPeriod.where((e) => 
+        final beforeEvents = eventsInPeriod.where((e) =>
           e.timestamp.millisecondsSinceEpoch < intervalStart
         ).toList();
+        double? resolved;
         if (beforeEvents.isNotEmpty) {
-          final closestBefore = beforeEvents.last;
-          avgDebt = (closestBefore.eventData['total_debt'] as num).toDouble();
+          resolved = _debtOf(beforeEvents.last);
         } else if (eventsInPeriod.isNotEmpty) {
-          avgDebt = (eventsInPeriod.first.eventData['total_debt'] as num).toDouble();
-        } else {
-          continue; // Skip this interval if no data
+          resolved = _debtOf(eventsInPeriod.first);
         }
+        if (resolved == null) continue; // Skip this interval if no data
+        avgDebt = resolved;
       }
       
       chartData.add(ChartDataPoint(

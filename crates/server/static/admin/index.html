@@ -2376,7 +2376,8 @@
         async function loadStats() {
             try {
                 const walletSuffix = walletQuerySuffix();
-                const [totalDebtResponse, walletsResponse] = await Promise.all([
+                const walletQueryJoin = walletSuffix ? `${walletSuffix}&` : '?';
+                const [totalDebtResponse, walletsResponse, contactEventsResp, txEventsResp] = await Promise.all([
                     authenticatedFetch(`${API_URL}/admin/total-debt${walletSuffix}`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
@@ -2384,7 +2385,9 @@
                     authenticatedFetch(`${API_URL}/admin/wallets`).then(r => {
                         if (!r.ok) throw new Error(`HTTP ${r.status}`);
                         return r.json();
-                    })
+                    }),
+                    authenticatedFetch(`${API_URL}/admin/events${walletQueryJoin}limit=10000&aggregate_type=contact`).then(r => r.ok ? r.json() : []),
+                    authenticatedFetch(`${API_URL}/admin/events${walletQueryJoin}limit=10000&aggregate_type=transaction`).then(r => r.ok ? r.json() : [])
                 ]);
 
                 // Use total_debt from latest event (more efficient and solid)
@@ -2395,12 +2398,34 @@
                     return amt.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
                 };
 
-                // Get contact and transaction counts from events list (build from events tab)
-                const contactCount = new Set();
-                const transactionCount = new Set();
+                // Count active contacts / transactions from events: unique aggregates that are
+                // created-but-not-deleted (and not undone).
+                const countActive = (events) => {
+                    // Replay chronologically (API returns DESC) so delete after create wins.
+                    const sorted = [...events].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                    const alive = new Set();
+                    const undone = new Set();
+                    sorted.forEach(evt => {
+                        if (evt.event_type === 'UNDO' && evt.event_data?.undone_event_id) {
+                            undone.add(evt.event_data.undone_event_id);
+                        }
+                    });
+                    sorted.forEach(evt => {
+                        if (undone.has(evt.event_id)) return;
+                        const t = evt.event_type || '';
+                        if (t === 'CREATED' || t.endsWith('_CREATED') || t.includes('CREATE')) {
+                            alive.add(evt.aggregate_id);
+                        } else if (t === 'DELETED' || t.endsWith('_DELETED') || t.includes('DELETE')) {
+                            alive.delete(evt.aggregate_id);
+                        }
+                    });
+                    return alive.size;
+                };
+                const contactsActive = countActive(contactEventsResp || []);
+                const transactionsActive = countActive(txEventsResp || []);
 
-                document.getElementById('totalContacts').textContent = '-';
-                document.getElementById('totalTransactions').textContent = '-';
+                document.getElementById('totalContacts').textContent = formatAmount(contactsActive);
+                document.getElementById('totalTransactions').textContent = formatAmount(transactionsActive);
                 const totalDebtText = `${formatAmount(totalDebt)} IQD`;
                 document.getElementById('totalDebt').textContent = totalDebtText;
                 document.getElementById('totalWallets').textContent = wallets.length;
@@ -2726,11 +2751,82 @@
                     }
                 }
 
+                // Always pre-fetch contact CREATED events for the current wallet so transactions
+                // on this page can resolve their contact_id → name even when the contact CREATED
+                // event isn't on this page (common when paging through transactions ordered DESC).
+                try {
+                    const walletId = getWalletFilterId();
+                    const walletParam = walletId ? `&wallet_id=${encodeURIComponent(walletId)}` : '';
+                    const resp = await authenticatedFetch(`${API_URL}/admin/events?limit=10000&aggregate_type=contact${walletParam}`);
+                    if (resp.ok) {
+                        const contactEvents = await resp.json();
+                        contactEvents.forEach(evt => {
+                            const d = evt.event_data || {};
+                            if (evt.aggregate_id && d.name) {
+                                contactCache[evt.aggregate_id] = { name: d.name, username: d.username || null };
+                            } else if (evt.aggregate_id && d.deleted_contact && typeof d.deleted_contact === 'object' && d.deleted_contact.name) {
+                                contactCache[evt.aggregate_id] = { name: d.deleted_contact.name, username: d.deleted_contact.username || null };
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Failed to pre-fetch contact cache:', e);
+                }
+
+                // Progressive total_debt: when transaction events don't carry total_debt
+                // (e.g. imported from an older backup), compute it by replaying every
+                // transaction event for this wallet in chronological order. The result is a
+                // Map keyed by event_id -> running total_debt, used as a fallback by renderEvents.
+                try {
+                    const walletId = getWalletFilterId();
+                    const walletParam = walletId ? `&wallet_id=${encodeURIComponent(walletId)}` : '';
+                    const allTxResp = await authenticatedFetch(`${API_URL}/admin/events?limit=10000&aggregate_type=transaction${walletParam}`);
+                    if (allTxResp.ok) {
+                        const allTx = await allTxResp.json();
+                        const sortedAsc = [...allTx].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                        const balancePerContact = {}; // contact_id -> signed balance
+                        const totalDebtByEvent = new Map();
+                        const undoneTxIds = new Set();
+                        // Mark undone events so their contribution is removed from the running total.
+                        sortedAsc.forEach(evt => {
+                            if (evt.event_type === 'UNDO' && evt.event_data?.undone_event_id) {
+                                undoneTxIds.add(evt.event_data.undone_event_id);
+                            }
+                        });
+                        const applyAmount = (contactId, amount, direction) => {
+                            if (!contactId || amount == null) return;
+                            const signed = direction === 'lent' ? Number(amount) : -Number(amount);
+                            if (!isFinite(signed)) return;
+                            balancePerContact[contactId] = (balancePerContact[contactId] || 0) + signed;
+                        };
+                        sortedAsc.forEach(evt => {
+                            if (undoneTxIds.has(evt.event_id)) return;
+                            const d = evt.event_data || {};
+                            const t = evt.event_type || '';
+                            if (t === 'CREATED' || t === 'TRANSACTION_CREATED' || t.includes('CREATE')) {
+                                applyAmount(d.contact_id, d.amount, d.direction);
+                            } else if (t === 'DELETED' || t === 'TRANSACTION_DELETED' || t.includes('DELETE')) {
+                                const dt = d.deleted_transaction;
+                                if (dt && typeof dt === 'object') {
+                                    // deletion reverses the effect
+                                    applyAmount(dt.contact_id, dt.amount, dt.direction === 'lent' ? 'owed' : 'lent');
+                                }
+                            }
+                            let runningTotal = 0;
+                            for (const v of Object.values(balancePerContact)) runningTotal += (v || 0);
+                            totalDebtByEvent.set(evt.event_id, runningTotal);
+                        });
+                        progressiveTotalDebt = totalDebtByEvent;
+                    }
+                } catch (e) {
+                    console.warn('Failed to compute progressive total_debt:', e);
+                }
+
                 if (!silent) {
                 loading.style.display = 'none';
                 }
                 table.style.display = 'table';
-                
+
                 // Update count
                 countSpan.textContent = `Showing ${events.length} event(s)`;
                 
@@ -2775,6 +2871,8 @@
         let contactCache = {}; // { contactId: { name: string, username: string|null } }
         // Cache for undone events (to show what was undone)
         let undoneEventsCache = {};
+        // Per-event running total_debt computed by loadEvents when events don't carry it.
+        let progressiveTotalDebt = new Map();
         
         async function getContactName(contactId) {
             if (!contactId) return null;
@@ -2935,6 +3033,11 @@
                         else if (eventData.hasOwnProperty('totalDebt')) {
                             totalDebt = eventData.totalDebt;
                         }
+                    }
+                    // Fallback: progressive total_debt computed in loadEvents
+                    // (used when the event itself doesn't carry total_debt, e.g. imported data).
+                    if ((totalDebt === null || totalDebt === undefined) && progressiveTotalDebt && progressiveTotalDebt.has(event.event_id)) {
+                        totalDebt = progressiveTotalDebt.get(event.event_id);
                     }
                     
                     // Convert to number if needed (handle string, number, or other types)

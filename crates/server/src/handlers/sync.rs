@@ -446,6 +446,7 @@ async fn insert_event(
             wallet_id,
             user_id,
             domain_event.version,
+            domain_event.created_at,
         )
         .await?;
 
@@ -533,6 +534,7 @@ pub async fn insert_permission_event_and_apply(
             wallet_id,
             user_id,
             1,
+            chrono::Utc::now(),
         )
         .await
         .map_err(|_| sqlx::Error::RowNotFound)?;

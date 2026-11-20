@@ -82,12 +82,57 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     return DateTime(date.year, 1, 1);
   }
 
-  List<ChartDataPoint> _buildChartData(List<Event> events, String period, bool invertY) {
+  /// Replay every transaction event chronologically to produce a running
+  /// `total_debt` keyed by event id. This is the fallback when events don't
+  /// carry `total_debt` in their `event_data` (which is now always the case —
+  /// server-side event payloads were simplified to raw amount/direction).
+  /// UNDO events are honoured: the undone event's contribution is skipped.
+  Map<String, double> _computeRunningTotals(List<Event> events) {
+    final sorted = [...events]..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    final undone = <String>{};
+    for (final e in sorted) {
+      if (e.eventType == 'UNDO') {
+        final undoneId = e.eventData['undone_event_id'] as String?;
+        if (undoneId != null) undone.add(undoneId);
+      }
+    }
+    final balancePerContact = <String, double>{};
+    final out = <String, double>{};
+    void applyAmount(String? contactId, dynamic amount, String? direction) {
+      if (contactId == null || amount is! num) return;
+      final signed = direction == 'lent' ? amount.toDouble() : -amount.toDouble();
+      balancePerContact[contactId] = (balancePerContact[contactId] ?? 0) + signed;
+    }
+    for (final e in sorted) {
+      if (undone.contains(e.id)) continue;
+      final d = e.eventData;
+      final isCreate = e.eventType == 'CREATED' || e.eventType.contains('CREATE');
+      final isDelete = e.eventType == 'DELETED' || e.eventType.contains('DELETE');
+      if (e.aggregateType == 'transaction' && isCreate) {
+        applyAmount(d['contact_id'] as String?, d['amount'], d['direction'] as String?);
+      } else if (e.aggregateType == 'transaction' && isDelete) {
+        final dt = d['deleted_transaction'];
+        if (dt is Map) {
+          // deletion reverses the effect
+          final dir = dt['direction'] as String?;
+          applyAmount(dt['contact_id'] as String?, dt['amount'], dir == 'lent' ? 'owed' : 'lent');
+        }
+      }
+      double running = 0;
+      for (final v in balancePerContact.values) {
+        running += v;
+      }
+      out[e.id] = running;
+    }
+    return out;
+  }
+
+  List<ChartDataPoint> _buildChartData(List<Event> events, String period, bool invertY, Map<String, double> runningTotals) {
     if (events.isEmpty) {
       // print('⚠️ No events available for chart');
       return [];
     }
-    
+
     if (!mounted) {
       return [];
     }
@@ -172,17 +217,25 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
     
     final chartData = <ChartDataPoint>[];
     
+    // Resolve total_debt for an event: prefer the value baked into event_data
+    // (older imports), fall back to the progressively computed value.
+    double? debtOf(Event e) {
+      final raw = e.eventData['total_debt'];
+      if (raw is num) return raw.toDouble();
+      return runningTotals[e.id];
+    }
+
     // Get the most recent total_debt before period start for fallback
     double? fallbackDebt;
-    final beforePeriodEvents = allEvents.where((e) => 
+    final beforePeriodEvents = allEvents.where((e) =>
       e.timestamp.isBefore(periodStart)
     ).toList();
     if (beforePeriodEvents.isNotEmpty) {
       final lastBeforePeriod = beforePeriodEvents.last;
-      fallbackDebt = (lastBeforePeriod.eventData['total_debt'] as num).toDouble();
+      fallbackDebt = debtOf(lastBeforePeriod);
       // print('📊 Using fallback debt: $fallbackDebt from event at ${lastBeforePeriod.timestamp}');
     } else if (allEvents.isNotEmpty) {
-      fallbackDebt = (allEvents.first.eventData['total_debt'] as num).toDouble();
+      fallbackDebt = debtOf(allEvents.first);
       // print('📊 Using first event debt as fallback: $fallbackDebt');
     }
     
@@ -230,19 +283,21 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       bool hasTransactions = false;
       
       if (eventsInInterval.isNotEmpty) {
-        final sum = eventsInInterval.map((e) => 
-          (e.eventData['total_debt'] as num).toDouble()
-        ).reduce((a, b) => a + b);
-        avgDebt = sum / eventsInInterval.length;
-        hasTransactions = true;
+        final debts = eventsInInterval.map(debtOf).whereType<double>().toList();
+        if (debts.isNotEmpty) {
+          avgDebt = debts.reduce((a, b) => a + b) / debts.length;
+          hasTransactions = true;
+        } else {
+          avgDebt = fallbackDebt;
+        }
       } else {
         // Find closest event before this interval (within period)
-        final beforeEvents = eventsInPeriod.where((e) => 
+        final beforeEvents = eventsInPeriod.where((e) =>
           e.timestamp.millisecondsSinceEpoch < intervalStart
         ).toList();
         if (beforeEvents.isNotEmpty) {
           final closestBefore = beforeEvents.last;
-          avgDebt = (closestBefore.eventData['total_debt'] as num).toDouble();
+          avgDebt = debtOf(closestBefore) ?? fallbackDebt;
         } else {
           // Use fallback debt (from before period or first event)
           avgDebt = fallbackDebt;
@@ -287,14 +342,19 @@ class _DebtChartWidgetState extends ConsumerState<DebtChartWidget> {
       );
     }
 
-    // Filter events that have total_debt in eventData and sort by timestamp (oldest first for chart).
+    // Compute a running total_debt per event (fallback when the event payload
+    // doesn't carry one — which is the normal case now). Then keep every event
+    // that we can place on the timeline: either it has total_debt baked in,
+    // or we derived one from the replay.
+    final runningTotals = _computeRunningTotals(baseEvents);
     final eventsWithDebt = baseEvents.where((e) {
       final totalDebt = e.eventData['total_debt'];
-      return totalDebt != null && totalDebt is num;
+      if (totalDebt is num) return true;
+      return runningTotals.containsKey(e.id);
     }).toList()
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-    final chartData = _buildChartData(eventsWithDebt, period, invertY);
+    final chartData = _buildChartData(eventsWithDebt, period, invertY, runningTotals);
     
     if (chartData.isEmpty) {
       final message = hasCurrentWallet
